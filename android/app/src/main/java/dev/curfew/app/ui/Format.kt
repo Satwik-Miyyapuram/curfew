@@ -106,3 +106,19 @@ fun describeDowntime(downtime: Downtime): String = if (downtime.backwards) {
     "Nothing was blocked between ${dateTime(downtime.from)} and ${dateTime(downtime.to)} — " +
         "${duration(downtime.seconds.toInt())}. Curfew was stopped, by a restart or by the system."
 }
+
+/**
+ * A refused clock change, in plain words.
+ *
+ * The number matters: it says exactly how much time the device claimed and did not get, which is
+ * what tells an honest user their clock is genuinely wrong rather than merely disbelieved.
+ */
+fun describeClockTamper(tamper: dev.curfew.app.data.ClockTamper): String = if (tamper.forward) {
+    "The device's clock jumped forward ${duration(tamper.seconds.toInt())}, which is more time than " +
+        "has actually passed. Curfew is still counting from ${dateTime(tamper.at)}, so locks are " +
+        "unchanged. If the clock is genuinely wrong, fixing it will not shorten a running lock."
+} else {
+    "The device's clock jumped back ${duration(tamper.seconds.toInt())}. Curfew ignored it and is " +
+        "still counting from ${dateTime(tamper.at)}: a lock cannot be made longer or shorter by " +
+        "moving the clock."
+}

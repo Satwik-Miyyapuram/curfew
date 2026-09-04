@@ -113,6 +113,6 @@ private fun describeAudit(kind: String, detail: String): String = when (kind) {
     "release.requested" -> "You asked for a delayed release."
     "config.replaced" -> "The rules were changed."
     "enforcement.gap" -> "Curfew was not running for a while, so nothing was blocked."
-    "enforcement.clock" -> "The device's clock moved backwards."
+    "enforcement.clock" -> "The device's clock was changed, and the change was refused."
     else -> "$kind $detail".trim()
 }

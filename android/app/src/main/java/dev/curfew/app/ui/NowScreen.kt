@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.data.ClockTamper
 import dev.curfew.app.data.Downtime
 import dev.curfew.policy.Lock
 import dev.curfew.policy.Refusal
@@ -91,6 +92,10 @@ fun NowScreen(model: CurfewViewModel) {
 
         state.downtime?.let { downtime ->
             DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
+        }
+
+        state.clockTamper?.let { tamper ->
+            ClockTamperBanner(tamper = tamper, onDismiss = model::dismissClockTamper)
         }
 
         LazyColumn(
@@ -159,6 +164,42 @@ private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
             )
             Text(
                 describeDowntime(downtime),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Got it")
+            }
+        }
+    }
+}
+
+/**
+ * The banner that says a clock change was refused.
+ *
+ * Moving the system clock is the cheapest bypass there is, so it is refused silently by the core —
+ * but not invisibly. Someone whose clock really was wrong deserves to know why the app disagrees
+ * with the time on their lock screen, and someone who just tried it deserves to be told it failed.
+ */
+@Composable
+private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .semantics { contentDescription = describeClockTamper(tamper) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                if (tamper.forward) "The clock jumped forward" else "The clock jumped backwards",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                describeClockTamper(tamper),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 4.dp),
             )

@@ -79,6 +79,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     .getOrDefault(emptyList()),
                 grants = grantStates(getApplication()),
                 downtime = runtime.downtime.value,
+                clockTamper = runtime.clockTamper.value,
                 loading = false,
             )
         }
@@ -127,6 +128,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissDowntime() {
         viewModelScope.launch {
             runtime.acknowledgeDowntime()
+            refresh()
+        }
+    }
+
+    /** Dismiss the refused-clock-change banner. Same rule as downtime: only the user clears it. */
+    fun dismissClockTamper() {
+        viewModelScope.launch {
+            runtime.acknowledgeClockTamper()
             refresh()
         }
     }
@@ -215,6 +224,8 @@ data class UiState(
     val grants: List<GrantState> = emptyList(),
     /** A stretch Curfew could not account for, until the user has seen it. */
     val downtime: Downtime? = null,
+    /** A clock change that was refused, until the user has seen it. */
+    val clockTamper: dev.curfew.app.data.ClockTamper? = null,
     val message: String? = null,
     val refusal: dev.curfew.policy.Refusal? = null,
     val refusedSession: String? = null,
