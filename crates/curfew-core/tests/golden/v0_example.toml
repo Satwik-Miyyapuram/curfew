@@ -1,0 +1,19 @@
+# A config written by the very first Curfew. Kept forever: `curfew migrate` must keep understanding
+# it, and the migration must not change what it means (GAPS E3).
+schema_version = 0
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.instagram.android" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "window_title_contains", text = "- YouTube" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 1200 }

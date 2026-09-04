@@ -1,16 +1,19 @@
-//! Curfew core: the platform-independent half of the app.
+//! Curfew's policy core: pure, platform-free, and the single source of truth about what a config
+//! means. Android, Windows and the CLI all call into this, which is what makes them agree.
 //!
-//! Everything here is pure. No I/O, no clock reads, no platform calls — the caller passes `now`
-//! and the observed foreground target in, and gets a [`Decision`] out. That is what lets Android
-//! and Windows agree on what a config file means (ARCHITECTURE.md §3).
+//! Nothing here reads a clock, a file or a device. `now` is always a parameter.
 
+pub mod budget;
 pub mod config;
 pub mod engine;
 pub mod lock;
+pub mod target;
 
-pub use config::{Action, Config, Profile, Rule, Target, CONFIG_SCHEMA_VERSION};
-pub use engine::{decide, Decision, Foreground, State};
-pub use lock::{Lock, LockSet};
+pub use budget::{Consumption, Launches, Refill, Rollup};
+pub use config::{Action, Config, ConfigError, Platform, Profile, Rule, CONFIG_SCHEMA_VERSION};
+pub use engine::{decide, BlockReason, Decision, State};
+pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
+pub use target::{domain_matches, glob_match, Observation, Target, Url};
 
 /// Seconds since the Unix epoch. Wall-clock, signed so arithmetic never wraps.
 pub type Timestamp = i64;

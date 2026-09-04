@@ -13,3 +13,5 @@ repository = "https://github.com/satwikpandu/curfew"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "2"
+chrono = { version = "0.4", default-features = false, features = ["alloc", "serde"] }
+chrono-tz = { version = "0.10", default-features = false, features = ["std"] }

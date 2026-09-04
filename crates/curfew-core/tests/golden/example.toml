@@ -1,9 +1,12 @@
-schema_version = 0
+# The golden config. Every target kind and every action appears at least once, so a change to the
+# document shape has to touch this file and CI notices.
+schema_version = 1
+timezone = "Europe/London"
 
 [[profiles]]
 id = "deep-work"
 name = "Deep work"
-description = "What a calendar event tagged #focus turns on."
+description = "Weekday mornings. Everything social is gone; reference material stays."
 
 [[profiles.rules]]
 target = { kind = "app_package", package = "com.instagram.android" }
@@ -11,7 +14,11 @@ action = { kind = "block" }
 
 [[profiles.rules]]
 target = { kind = "domain", domain = "reddit.com" }
-action = { kind = "budget", seconds = 1200 }
+action = { kind = "budget", seconds = 1200, refill = { kind = "daily", at_minute = 240 } }
+
+[[profiles.rules]]
+target = { kind = "url", pattern = "*youtube.com/shorts*" }
+action = { kind = "block" }
 
 [[profiles.rules]]
 target = { kind = "windows_exe", exe = "steam.exe" }
@@ -19,5 +26,40 @@ action = { kind = "block" }
 platforms = ["windows"]
 
 [[profiles.rules]]
+target = { kind = "window_title", pattern = "*- YouTube*" }
+action = { kind = "block" }
+platforms = ["windows"]
+
+[[profiles.rules]]
 target = { kind = "app_package", package = "com.slack" }
 action = { kind = "delay", seconds = 15 }
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.twitter.android" }
+action = { kind = "launch_limit", count = 3, refill = { kind = "daily", at_minute = 240 } }
+
+[[profiles.rules]]
+target = { kind = "notification_source", package = "com.whatsapp" }
+action = { kind = "mute_notifications" }
+
+[[profiles.rules]]
+target = { kind = "keyword", text = "black friday" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "file_path", pattern = 'c:/games/*' }
+action = { kind = "block" }
+platforms = ["windows"]
+
+[[profiles]]
+id = "writing"
+name = "Writing"
+description = "Allow-only: the editor, the dictionary, nothing else."
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.example.editor" }
+action = { kind = "allow_only" }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "dictionary.example" }
+action = { kind = "allow_only" }

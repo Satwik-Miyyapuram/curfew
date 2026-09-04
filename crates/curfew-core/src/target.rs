@@ -80,18 +80,26 @@ impl Target {
             (Target::Domain { domain }, Observation::Web { url }) => {
                 domain_matches(domain, &url.host)
             }
-            (Target::Url { pattern }, Observation::Web { url }) => glob_match(pattern, &url.raw),
+            // Globs match the normalized form, not the raw string: a rule saying
+            // `*youtube.com/shorts*` must still fire when the browser hands us a port, credentials
+            // or a scheme, none of which the person writing the rule was thinking about.
+            (Target::Url { pattern }, Observation::Web { url }) => {
+                glob_match(pattern, &url.normalized())
+            }
+            // Path separators are noise: a rule written `C:\Games\*` must match a path reported
+            // as `C:/Games/x`, and TOML makes backslashes awkward to write in the first place.
             (Target::FilePath { pattern }, Observation::FileOpen { path }) => {
-                glob_match(pattern, path)
+                glob_match(&pattern.replace('\\', "/"), &path.replace('\\', "/"))
             }
-            (Target::NotificationSource { package }, Observation::Notification { package: p, .. }) => {
-                package.eq_ignore_ascii_case(p)
-            }
+            (
+                Target::NotificationSource { package },
+                Observation::Notification { package: p, .. },
+            ) => package.eq_ignore_ascii_case(p),
 
             // A keyword is about text, wherever the text came from.
-            (Target::Keyword { text }, obs) => obs.searchable_text().is_some_and(|haystack| {
-                haystack.to_lowercase().contains(&text.to_lowercase())
-            }),
+            (Target::Keyword { text }, obs) => obs
+                .searchable_text()
+                .is_some_and(|haystack| haystack.to_lowercase().contains(&text.to_lowercase())),
 
             _ => false,
         }
@@ -119,7 +127,7 @@ impl Observation {
     /// The text a [`Target::Keyword`] rule searches.
     pub fn searchable_text(&self) -> Option<String> {
         match self {
-            Observation::Web { url } => Some(url.raw.clone()),
+            Observation::Web { url } => Some(url.normalized()),
             Observation::Window { title, .. } => Some(title.clone()),
             Observation::Notification { title, .. } => Some(title.clone()),
             Observation::App { screen, .. } => screen.clone(),
@@ -166,6 +174,20 @@ impl Url {
         };
 
         Self { raw: trimmed.to_lowercase(), host, path, query }
+    }
+
+    /// `host/path?query`: the URL with everything that never participates in matching (scheme,
+    /// credentials, port, fragment) already removed.
+    pub fn normalized(&self) -> String {
+        let mut out =
+            String::with_capacity(self.host.len() + self.path.len() + self.query.len() + 1);
+        out.push_str(&self.host);
+        out.push_str(&self.path);
+        if !self.query.is_empty() {
+            out.push('?');
+            out.push_str(&self.query);
+        }
+        out
     }
 }
 

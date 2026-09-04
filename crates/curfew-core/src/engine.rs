@@ -1,29 +1,24 @@
 //! The rule engine: one pure function both platforms call (ARCHITECTURE.md §3).
 
-use crate::config::{Action, BudgetLedger, Config, Platform, Rule, Target};
+use crate::budget::{Consumption, Launches};
+use crate::config::{Action, Config, Platform, Rule};
 use crate::lock::LockSet;
+use crate::target::Observation;
 use crate::Timestamp;
-
-/// What the user is looking at right now, as reported by the platform enforcer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Foreground {
-    /// Android package name.
-    App { package: String },
-    /// Windows process, plus its window title when the platform could read one.
-    Window { exe: String, title: String },
-    /// A page in a browser, already reduced to its host.
-    Web { domain: String },
-}
+use chrono_tz::Tz;
+use std::collections::BTreeMap;
 
 /// The live session state the caller materialized from storage and the op-log.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct State {
     /// Profiles whose sessions are currently running.
     pub active_profiles: Vec<String>,
     /// The merged lock guarding those sessions.
     pub lock: LockSet,
-    /// Budget seconds already consumed, keyed by [`target_key`].
-    pub budgets: BudgetLedger,
+    /// Time spent, keyed by [`crate::target::Target::key`].
+    pub usage: BTreeMap<String, Consumption>,
+    /// Opens, keyed the same way.
+    pub launches: BTreeMap<String, Launches>,
     pub platform: Platform,
 }
 
@@ -37,6 +32,8 @@ pub enum Decision {
     Delay {
         seconds: u32,
     },
+    /// Deliver nothing: the notification is suppressed. Only ever produced for notifications.
+    Mute,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,66 +44,102 @@ pub enum BlockReason {
     NotAllowlisted { profile: String },
     /// The shared budget for this target is spent.
     BudgetExhausted { profile: String, seconds: u32 },
+    /// It has been opened as many times as the rule allows in this window.
+    LaunchLimitReached { profile: String, count: u32 },
 }
 
-/// Decide what to do about `fg` at `now`.
+/// Decide what to do about `obs` at `now`.
 ///
-/// Order matters and is deliberately strictest-first: an explicit block beats an allow-only
-/// allowance, an exhausted budget beats a delay, and anything unmatched is allowed. `now` is
-/// threaded through for budget windows and locks rather than read from the system, which is what
-/// keeps this testable and identical across platforms.
-pub fn decide(now: Timestamp, state: &State, fg: &Foreground, config: &Config) -> Decision {
-    let _ = now;
-    let mut delay: Option<u32> = None;
-    let mut allow_only_profile: Option<&str> = None;
+/// Every active profile is evaluated in full and the results are then resolved strictest-first, so
+/// the answer does not depend on the order profiles or rules happen to appear in — two devices
+/// with the same config and the same op-log must decide identically, and rule order is exactly the
+/// kind of thing that drifts between them.
+///
+/// `now` is a parameter rather than a clock read: that is what makes the engine testable, and what
+/// lets Android and Windows agree about what a config means.
+pub fn decide(now: Timestamp, state: &State, obs: &Observation, config: &Config) -> Decision {
+    // An unparseable timezone was already rejected at load; fall back rather than panic here,
+    // because the enforcer must always produce an answer.
+    let tz: Tz = config.timezone.parse().unwrap_or(chrono_tz::UTC);
+
+    // Nothing in the foreground is not something to block. Without this an allow-only profile
+    // would "block" the lock screen and the launcher, and the overlay would fight the home button.
+    if matches!(obs, Observation::Idle) {
+        return Decision::Allow;
+    }
+
+    let mut blocked: Option<BlockReason> = None;
+    let mut budget_spent: Option<BlockReason> = None;
+    let mut launches_spent: Option<BlockReason> = None;
+    let mut allow_only: Option<String> = None;
     let mut allowlisted = false;
+    let mut delay: Option<u32> = None;
+    let mut mute = false;
 
     for profile_id in &state.active_profiles {
-        let Some(profile) = config.profile(profile_id) else {
-            continue;
-        };
+        let Some(profile) = config.profile(profile_id) else { continue };
         for rule in &profile.rules {
             if !applies_to(rule, state.platform) {
                 continue;
             }
-            let hit = matches(&rule.target, fg);
-            match (&rule.action, hit) {
-                (Action::Block, true) => {
-                    return Decision::Block {
-                        reason: BlockReason::Blocked { profile: profile.id.clone() },
-                    }
+            let hit = rule.target.matches(obs);
+            let key = rule.target.key();
+
+            match &rule.action {
+                Action::Block if hit => {
+                    blocked.get_or_insert(BlockReason::Blocked { profile: profile.id.clone() });
                 }
-                (Action::AllowOnly, _) => {
-                    allow_only_profile = Some(&profile.id);
+                Action::AllowOnly => {
+                    // An allow-only rule turns the whole profile into an allowlist, whether or not
+                    // this particular observation matches it.
+                    allow_only.get_or_insert_with(|| profile.id.clone());
                     allowlisted |= hit;
                 }
-                (Action::Budget { seconds }, true) => {
-                    let used = state.budgets.get(&target_key(&rule.target)).copied().unwrap_or(0);
+                Action::Budget { seconds, refill } if hit => {
+                    let from = refill.window_start(now, tz);
+                    let used = state.usage.get(&key).map(|c| c.used_since(from)).unwrap_or(0);
                     if used >= *seconds {
-                        return Decision::Block {
-                            reason: BlockReason::BudgetExhausted {
-                                profile: profile.id.clone(),
-                                seconds: *seconds,
-                            },
-                        };
+                        budget_spent.get_or_insert(BlockReason::BudgetExhausted {
+                            profile: profile.id.clone(),
+                            seconds: *seconds,
+                        });
                     }
                 }
-                (Action::Delay { seconds }, true) => {
+                Action::LaunchLimit { count, refill } if hit => {
+                    let from = refill.window_start(now, tz);
+                    let opens = state.launches.get(&key).map(|l| l.count_since(from)).unwrap_or(0);
+                    if opens >= *count {
+                        launches_spent.get_or_insert(BlockReason::LaunchLimitReached {
+                            profile: profile.id.clone(),
+                            count: *count,
+                        });
+                    }
+                }
+                Action::Delay { seconds } if hit => {
                     delay = Some(delay.map_or(*seconds, |d: u32| d.max(*seconds)));
                 }
+                Action::MuteNotifications if hit => mute = true,
                 _ => {}
             }
         }
     }
 
-    if let Some(profile) = allow_only_profile {
-        if !allowlisted {
-            return Decision::Block {
-                reason: BlockReason::NotAllowlisted { profile: profile.to_string() },
-            };
-        }
+    // Notifications are a different question: nothing about them can be "blocked" or "delayed",
+    // only delivered or not. A target that is blocked outright has its notifications suppressed
+    // too — being told about the thing you are avoiding is the distraction.
+    if obs.is_notification() {
+        return if mute || blocked.is_some() { Decision::Mute } else { Decision::Allow };
     }
 
+    // Strictest first, and independent of rule order.
+    if let Some(reason) = blocked.or(budget_spent).or(launches_spent) {
+        return Decision::Block { reason };
+    }
+    if let Some(profile) = allow_only {
+        if !allowlisted {
+            return Decision::Block { reason: BlockReason::NotAllowlisted { profile } };
+        }
+    }
     match delay {
         Some(seconds) => Decision::Delay { seconds },
         None => Decision::Allow,
@@ -115,39 +148,4 @@ pub fn decide(now: Timestamp, state: &State, fg: &Foreground, config: &Config) -
 
 fn applies_to(rule: &Rule, platform: Platform) -> bool {
     rule.platforms.is_empty() || rule.platforms.contains(&platform)
-}
-
-/// Stable identity of a target, used as the budget ledger key so the same rule accumulates one
-/// shared budget across every device.
-pub fn target_key(target: &Target) -> String {
-    match target {
-        Target::AppPackage { package } => format!("app:{}", package.to_lowercase()),
-        Target::WindowsExe { exe } => format!("exe:{}", exe.to_lowercase()),
-        Target::Domain { domain } => format!("domain:{}", domain.to_lowercase()),
-        Target::WindowTitleContains { text } => format!("title:{}", text.to_lowercase()),
-    }
-}
-
-fn matches(target: &Target, fg: &Foreground) -> bool {
-    match (target, fg) {
-        (Target::AppPackage { package }, Foreground::App { package: p }) => {
-            package.eq_ignore_ascii_case(p)
-        }
-        (Target::WindowsExe { exe }, Foreground::Window { exe: e, .. }) => {
-            exe.eq_ignore_ascii_case(e)
-        }
-        (Target::WindowTitleContains { text }, Foreground::Window { title, .. }) => {
-            title.to_lowercase().contains(&text.to_lowercase())
-        }
-        (Target::Domain { domain }, Foreground::Web { domain: d }) => domain_matches(domain, d),
-        _ => false,
-    }
-}
-
-/// A domain rule covers the domain itself and every subdomain, but never a domain that merely ends
-/// with the same characters (`notreddit.com` is not `reddit.com`).
-fn domain_matches(rule: &str, observed: &str) -> bool {
-    let rule = rule.trim_start_matches('.').to_lowercase();
-    let observed = observed.to_lowercase();
-    observed == rule || observed.ends_with(&format!(".{rule}"))
 }

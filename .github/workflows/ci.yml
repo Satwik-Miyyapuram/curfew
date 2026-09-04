@@ -35,7 +35,34 @@ jobs:
         shell: bash
         run: |
           cfg=crates/curfew-core/tests/golden/example.toml
-          run() { cargo run --quiet -p curfew-cli -- decide "$cfg" deep-work "$1"; }
-          test "$(run app:com.instagram.android)" != "allow"
-          test "$(run app:com.example.notes)" = "allow"
-          test "$(run app:com.slack)" = "delay 15s"
+          # A fixed instant: the answers must not depend on when CI happened to run.
+          at=1788609600 # 2026-09-04T12:00:00Z, a Friday
+          run() { cargo run --quiet -p curfew-cli -- decide "$cfg" "$1" "$2" --at "$at" "${@:3}"; }
+          expect() {
+            got=$(run "$1" "$2" "${@:4}")
+            if [ "$got" != "$3" ]; then
+              echo "decide $1 $2 ${*:4} -> '$got', expected '$3'" >&2
+              exit 1
+            fi
+          }
+
+          cargo run --quiet -p curfew-cli -- check "$cfg"
+
+          expect deep-work app:com.example.notes            "allow"
+          expect deep-work app:com.slack                    "delay 15s"
+          expect deep-work "url:https://www.youtube.com/shorts/x" "block (Blocked { profile: \"deep-work\" })"
+          expect deep-work domain:reddit.com                "allow"
+          expect deep-work domain:reddit.com                "block (BudgetExhausted { profile: \"deep-work\", seconds: 1200 })" --used 1200
+          expect deep-work app:com.twitter.android          "allow" --opens 2
+          expect deep-work app:com.twitter.android          "block (LaunchLimitReached { profile: \"deep-work\", count: 3 })" --opens 3
+          expect deep-work notif:com.whatsapp               "mute"
+          expect deep-work exe:steam.exe                    "block (Blocked { profile: \"deep-work\" })" --platform windows
+          expect deep-work exe:steam.exe                    "allow"                                      --platform android
+          expect writing   app:com.example.editor           "allow"
+          expect writing   app:com.instagram.android        "block (NotAllowlisted { profile: \"writing\" })"
+
+          # Migration is lossless in the sense that matters: the migrated v0 document decides the
+          # same way the v1 one does about the rules they share.
+          v0=crates/curfew-core/tests/golden/v0_example.toml
+          cargo run --quiet -p curfew-cli -- migrate "$v0" > /tmp/migrated.toml
+          cargo run --quiet -p curfew-cli -- check /tmp/migrated.toml

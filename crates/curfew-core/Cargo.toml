@@ -11,6 +11,8 @@ repository.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
 
 [dev-dependencies]
 proptest = "1"

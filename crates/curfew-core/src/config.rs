@@ -1,22 +1,35 @@
 //! The `curfew.toml` document. Everything the UI can express lives here, so a config is a
 //! complete, diffable description of a user's setup (design invariant 4).
 
+use crate::budget::Refill;
+use crate::target::Target;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Bumped whenever the document shape changes. Migrations are forward-only (GAPS E3).
-pub const CONFIG_SCHEMA_VERSION: u32 = 0;
+pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub schema_version: u32,
+    /// IANA name. Budgets reset and schedules fire in *this* zone, not the device's, so a phone
+    /// carried across a timezone does not silently hand back an allowance (or take one away).
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
     #[serde(default)]
     pub profiles: Vec<Profile>,
 }
 
+fn default_timezone() -> String {
+    "UTC".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
-        Self { schema_version: CONFIG_SCHEMA_VERSION, profiles: Vec::new() }
+        Self {
+            schema_version: CONFIG_SCHEMA_VERSION,
+            timezone: default_timezone(),
+            profiles: Vec::new(),
+        }
     }
 }
 
@@ -30,17 +43,25 @@ pub enum ConfigError {
     /// round-trip — the user's file is preserved untouched (GAPS E3).
     #[error("config schema version {found} is newer than supported version {supported}")]
     FromTheFuture { found: u32, supported: u32 },
+    #[error("unknown timezone {0:?}")]
+    UnknownTimezone(String),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 impl Config {
+    /// Parse, migrating older schema versions forward on the way in.
     pub fn from_toml(s: &str) -> Result<Self, ConfigError> {
-        let cfg: Config = toml::from_str(s)?;
-        if cfg.schema_version > CONFIG_SCHEMA_VERSION {
-            return Err(ConfigError::FromTheFuture {
-                found: cfg.schema_version,
-                supported: CONFIG_SCHEMA_VERSION,
-            });
+        let raw: toml::Value = toml::from_str(s)?;
+        let found =
+            raw.get("schema_version").and_then(|v| v.as_integer()).unwrap_or(0).max(0) as u32;
+        if found > CONFIG_SCHEMA_VERSION {
+            return Err(ConfigError::FromTheFuture { found, supported: CONFIG_SCHEMA_VERSION });
         }
+
+        let migrated = migrate::forward(raw, found)?;
+        let cfg: Config = migrated.try_into().map_err(ConfigError::Parse)?;
+        cfg.validate()?;
         Ok(cfg)
     }
 
@@ -50,6 +71,42 @@ impl Config {
 
     pub fn profile(&self, id: &str) -> Option<&Profile> {
         self.profiles.iter().find(|p| p.id == id)
+    }
+
+    /// The timezone budgets and schedules are evaluated in.
+    pub fn tz(&self) -> Result<chrono_tz::Tz, ConfigError> {
+        self.timezone.parse().map_err(|_| ConfigError::UnknownTimezone(self.timezone.clone()))
+    }
+
+    /// Structural checks that serde cannot express. A config that would behave surprisingly is
+    /// rejected at load, where the user can still see why, rather than at 4am inside a lock.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.tz()?;
+        let mut seen = std::collections::BTreeSet::new();
+        for p in &self.profiles {
+            if p.id.trim().is_empty() {
+                return Err(ConfigError::Invalid("a profile has an empty id".into()));
+            }
+            if !seen.insert(&p.id) {
+                return Err(ConfigError::Invalid(format!("duplicate profile id {:?}", p.id)));
+            }
+            for r in &p.rules {
+                if let Action::Budget { seconds: 0, .. } = r.action {
+                    // A zero budget is a block wearing a costume, and it reads as a mistake.
+                    return Err(ConfigError::Invalid(format!(
+                        "profile {:?} has a zero-second budget; use a block rule instead",
+                        p.id
+                    )));
+                }
+                if let Action::LaunchLimit { count: 0, .. } = r.action {
+                    return Err(ConfigError::Invalid(format!(
+                        "profile {:?} has a zero launch limit; use a block rule instead",
+                        p.id
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -72,26 +129,13 @@ pub struct Rule {
     pub platforms: Vec<Platform>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
+    #[default]
     Android,
     Windows,
     Browser,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Target {
-    /// Android package name, exact match.
-    AppPackage { package: String },
-    /// Windows executable name, case-insensitive, no path.
-    WindowsExe { exe: String },
-    /// Domain, matching the domain itself and any subdomain.
-    Domain { domain: String },
-    /// Substring of a window title. Cheap and predictable; regex is deliberately deferred until
-    /// there is a rule the substring form cannot express.
-    WindowTitleContains { text: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,12 +148,77 @@ pub enum Action {
     /// is global rather than per-device (ARCHITECTURE.md §3).
     Budget {
         seconds: u32,
+        #[serde(default)]
+        refill: Refill,
+    },
+    /// A cap on how many times a thing may be opened in the window, regardless of time spent.
+    /// Catches the compulsive-checking pattern that a time budget misses entirely.
+    LaunchLimit {
+        count: u32,
+        #[serde(default)]
+        refill: Refill,
     },
     /// Friction rather than a wall: hold the user for N seconds before allowing through.
     Delay {
         seconds: u32,
     },
+    /// Silence notifications from the target without blocking it.
+    MuteNotifications,
 }
 
-/// Consumed budget per target key, seconds. Materialized from the op-log by the caller.
-pub type BudgetLedger = BTreeMap<String, u32>;
+mod migrate {
+    use super::{ConfigError, CONFIG_SCHEMA_VERSION};
+    use toml::Value;
+
+    /// Apply migrations in order until the document is current. Forward-only, one step per version
+    /// bump, each step total: a document that reaches here has already been version-checked.
+    pub fn forward(mut doc: Value, from: u32) -> Result<Value, ConfigError> {
+        let mut version = from;
+        while version < CONFIG_SCHEMA_VERSION {
+            doc = match version {
+                0 => v0_to_v1(doc),
+                v => {
+                    return Err(ConfigError::Invalid(format!("no migration from version {v}")));
+                }
+            };
+            version += 1;
+        }
+        if let Some(t) = doc.as_table_mut() {
+            t.insert("schema_version".into(), Value::Integer(CONFIG_SCHEMA_VERSION as i64));
+        }
+        Ok(doc)
+    }
+
+    /// v0 -> v1.
+    ///
+    /// - `window_title_contains { text }` became a glob target (DECISIONS D8). A substring match is
+    ///   exactly `*text*`, so the migration is lossless.
+    /// - budgets gained a refill policy. v0 budgets had no window at all, which in practice meant
+    ///   "until someone clears the ledger"; the honest reading of user intent is a daily reset, and
+    ///   that is also what the UI offered, so v0 budgets migrate to the default daily refill.
+    /// - `timezone` did not exist; UTC is filled in by serde's default.
+    fn v0_to_v1(mut doc: Value) -> Value {
+        let Some(profiles) = doc.get_mut("profiles").and_then(|p| p.as_array_mut()) else {
+            return doc;
+        };
+        for profile in profiles {
+            let Some(rules) = profile.get_mut("rules").and_then(|r| r.as_array_mut()) else {
+                continue;
+            };
+            for rule in rules {
+                if let Some(target) = rule.get_mut("target").and_then(|t| t.as_table_mut()) {
+                    if target.get("kind").and_then(|k| k.as_str()) == Some("window_title_contains")
+                    {
+                        let text = target
+                            .remove("text")
+                            .and_then(|t| t.as_str().map(str::to_string))
+                            .unwrap_or_default();
+                        target.insert("kind".into(), Value::String("window_title".into()));
+                        target.insert("pattern".into(), Value::String(format!("*{text}*")));
+                    }
+                }
+            }
+        }
+        doc
+    }
+}
