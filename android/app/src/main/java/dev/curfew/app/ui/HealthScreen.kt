@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +64,38 @@ fun HealthScreen(model: CurfewViewModel) {
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+        }
+
+        if (state.restrictedSettings) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "Android is blocking the accessibility switch",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            RestrictedSettings.INSTRUCTIONS,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        TextButton(onClick = {
+                            context.startActivity(
+                                RestrictedSettings.appInfoIntent(context)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }) {
+                            Text("Open App info")
+                        }
+                    }
+                }
             }
         }
 

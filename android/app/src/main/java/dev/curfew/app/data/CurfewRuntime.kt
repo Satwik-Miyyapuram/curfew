@@ -2,6 +2,7 @@ package dev.curfew.app.data
 
 import android.content.Context
 import androidx.room.Room
+import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.Consumption
 import dev.curfew.policy.Decision
@@ -255,6 +256,11 @@ class CurfewRuntime internal constructor(
     private fun refresh(now: Long) {
         _lock.value = policy.mergedLock(now)
         _profiles.value = policy.activeProfiles(now)
+        // The device-admin receiver has to answer the deactivation prompt synchronously, so what it
+        // needs to know is written down here rather than looked up there.
+        runCatching {
+            CurfewDeviceAdmin.setLockHeld(context, policy.sessions().running.isNotEmpty())
+        }
     }
 
     private suspend fun audit(at: Long, kind: String, detail: String) {

@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
 import dev.curfew.app.enforce.CurfewAccessibilityService
+import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.CurfewNotificationListener
 import dev.curfew.app.enforce.UsageStatsPoller
 
@@ -80,6 +81,17 @@ enum class Grant(
         cost = "Curfew may be stopped by the system and stop enforcing without warning.",
         required = false,
     ),
+
+    /**
+     * Last on purpose. This is the scariest dialog in the whole wizard, and it is the one grant
+     * Curfew can honestly do without, so it is asked for after the user has seen the app work.
+     */
+    UninstallProtection(
+        title = "Uninstall protection",
+        because = "Uninstalling Curfew is the last easy way out of a running lock. Android will not uninstall an app that is an active device admin.",
+        cost = "Nothing else changes: every block, schedule and lock works the same. Curfew can simply be uninstalled mid-lock. Curfew asks for no admin powers beyond this — it cannot erase, lock or unlock the device, or touch any password — and you can turn it off whenever no lock is running.",
+        required = false,
+    ),
     ;
 
     fun isGranted(context: Context): Boolean = when (this) {
@@ -100,6 +112,7 @@ enum class Grant(
         BatteryUnrestricted ->
             context.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(context.packageName)
+        UninstallProtection -> CurfewDeviceAdmin.isActive(context)
     }
 
     /**
@@ -124,6 +137,9 @@ enum class Grant(
         // is the honest route either way: the user should see the list they are changing.
         NotificationAccess -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         BatteryUnrestricted -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        // Android's own add-admin dialog, not a Settings screen: it is the only place the
+        // explanation is shown at the moment the user decides.
+        UninstallProtection -> CurfewDeviceAdmin.requestIntent(context)
         Notifications, Calendar -> null
     }
 
@@ -170,3 +186,58 @@ data class GrantState(val grant: Grant, val granted: Boolean)
 
 fun grantStates(context: Context): List<GrantState> =
     Grant.entries.map { GrantState(it, runCatching { it.isGranted(context) }.getOrDefault(false)) }
+
+/**
+ * Android 13's "Restricted setting", which is the wall every sideloaded install hits.
+ *
+ * An app installed outside a store session cannot be given Accessibility or notification-listener
+ * access from the usual screens: the toggle is there but greyed out, and the way through is not in
+ * that screen at all — it is App info → ⋮ → Allow restricted settings. Since Curfew is distributed
+ * as an APK and through F-Droid, this is the ordinary case, not an edge case, and an unexplained
+ * greyed-out toggle is exactly where a person gives up on a blocker.
+ *
+ * The restricted-settings dialog cannot be launched by an app, so the best that can be done is to
+ * recognise the situation, say the menu path in words, and open App info at the right place.
+ */
+object RestrictedSettings {
+
+    /**
+     * Whether the user is probably looking at a greyed-out toggle right now.
+     *
+     * There is no API that answers this, so it is inferred: recent enough Android, installed with no
+     * installing package (a plain sideload), and the accessibility service still not enabled. It can
+     * be wrong in the harmless direction — showing the instructions to someone who did not need them
+     * — and it stops showing the moment the service is on.
+     */
+    fun isLikelyBlocking(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        if (Grant.isAccessibilityEnabled(context)) return false
+        return installedOutsideAStore(context)
+    }
+
+    private fun installedOutsideAStore(context: Context): Boolean = runCatching {
+        // The version check is repeated here rather than relied on from the caller, because that is
+        // what lint can see, and a silently wrong API level on an old device is worse than a
+        // duplicated condition.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.packageManager
+                .getInstallSourceInfo(context.packageName)
+                .installingPackageName == null
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getInstallerPackageName(context.packageName) == null
+        }
+    }.getOrDefault(false)
+
+    /** App info for Curfew, which is where the ⋮ menu with "Allow restricted settings" lives. */
+    fun appInfoIntent(context: Context): Intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null),
+    )
+
+    const val INSTRUCTIONS: String =
+        "Android blocks accessibility access for apps installed outside an app store, and shows " +
+            "the switch greyed out without saying why. To allow it: open App info, tap the three " +
+            "dots in the top corner, choose \"Allow restricted settings\", then come back and turn " +
+            "the accessibility service on."
+}

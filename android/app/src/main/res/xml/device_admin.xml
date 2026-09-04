@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Deliberately empty of policies.
+
+  Being an active device admin is by itself what stops the app being uninstalled from Settings, and
+  that is the only reason Curfew asks for it. It claims no password policy, no wipe, no lock, and no
+  camera control: an admin that can erase the device is not something a focus app should hold, and a
+  user reading this file should be able to see that in one screen.
+-->
+<device-admin>
+    <uses-policies />
+</device-admin>

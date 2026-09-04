@@ -78,6 +78,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                     .getOrDefault(emptyList()),
                 grants = grantStates(getApplication()),
+                restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                 downtime = runtime.downtime.value,
                 clockTamper = runtime.clockTamper.value,
                 loading = false,
@@ -222,6 +223,8 @@ data class UiState(
     val profiles: List<ProfileName> = emptyList(),
     val audit: List<AuditRow> = emptyList(),
     val grants: List<GrantState> = emptyList(),
+    /** True while Android is refusing accessibility access because Curfew was sideloaded. */
+    val restrictedSettings: Boolean = false,
     /** A stretch Curfew could not account for, until the user has seen it. */
     val downtime: Downtime? = null,
     /** A clock change that was refused, until the user has seen it. */
