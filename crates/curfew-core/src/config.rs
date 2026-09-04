@@ -82,6 +82,64 @@ impl Config {
         self.profiles.iter().find(|p| p.id == id)
     }
 
+    /// Replace a profile's blocked-app list with exactly `packages`.
+    ///
+    /// This is what an app picker means: the checked boxes are the whole answer, so unchecking one
+    /// has to remove its rule. Only plain `app_package` + `block` rules are touched — a budget on
+    /// an app, or a rule written by hand with a delay or a platform filter, is the user saying
+    /// something more specific than the picker can express, and is left exactly as it was.
+    ///
+    /// Round-tripping through the parsed document loses comments and reorders keys, which is why
+    /// the UI that calls this says so before it writes.
+    pub fn set_blocked_apps(
+        &mut self,
+        profile: &str,
+        packages: &[String],
+    ) -> Result<(), ConfigError> {
+        let Some(p) = self.profiles.iter_mut().find(|p| p.id == profile) else {
+            return Err(ConfigError::Invalid(format!("no profile {profile:?}")));
+        };
+        p.rules.retain(|r| {
+            !matches!(
+                (&r.target, &r.action),
+                (Target::AppPackage { .. }, Action::Block) if r.platforms.is_empty()
+            )
+        });
+        // Deduplicated and ordered, so the written file does not churn when the picker returns the
+        // same set in a different order.
+        let mut wanted: Vec<String> = packages.to_vec();
+        wanted.sort();
+        wanted.dedup();
+        for package in wanted {
+            if package.trim().is_empty() {
+                return Err(ConfigError::Invalid("an app rule has an empty package".into()));
+            }
+            p.rules.push(Rule {
+                target: Target::AppPackage { package },
+                action: Action::Block,
+                platforms: Vec::new(),
+            });
+        }
+        self.validate()
+    }
+
+    /// The packages a picker should show as checked: the ones [`Config::set_blocked_apps`] owns.
+    pub fn blocked_apps(&self, profile: &str) -> Vec<String> {
+        self.profile(profile)
+            .map(|p| {
+                p.rules
+                    .iter()
+                    .filter_map(|r| match (&r.target, &r.action) {
+                        (Target::AppPackage { package }, Action::Block) if r.platforms.is_empty() => {
+                            Some(package.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// The timezone budgets and schedules are evaluated in.
     pub fn tz(&self) -> Result<chrono_tz::Tz, ConfigError> {
         self.timezone.parse().map_err(|_| ConfigError::UnknownTimezone(self.timezone.clone()))

@@ -17,17 +17,17 @@ means the criteria hold, not that the code exists. Open problems per phase live 
 identically from a config file on Linux and Windows; property suite proves lock-monotonicity.
 
 ## Phase 1 — Android MVP (usable alone)
-- [ ] Foreground-app detection: AccessibilityService, with UsageStats poller as fallback
-- [ ] Block overlay screen (reason, time remaining, allowed exits)
-- [ ] Profiles + app picker, manual sessions, timer sessions, recurring schedules
-- [ ] Local encrypted SQLite store (D4 of GAPS), config import/export
-- [ ] Strictness: none / confirm / device-credential / timer-lock, plus the 24h delayed release
+- [x] Foreground-app detection: AccessibilityService, with UsageStats poller as fallback
+- [x] Block overlay screen (reason, time remaining, allowed exits)
+- [x] Profiles + app picker, manual sessions, timer sessions, recurring schedules
+- [x] Local encrypted SQLite store (D4 of GAPS), config import/export
+- [x] Strictness: none / confirm / device-credential / timer-lock, plus the 24h delayed release
       (D7, GAPS D1). Credential checks go through `BiometricPrompt` restricted to
       `DEVICE_CREDENTIAL`; Curfew stores no password
-- [ ] Usage stats screen
-- [ ] Staged permission wizard + protection-health screen (GAPS A6)
-- [ ] Boot/force-stop/OEM-killer resilience + downtime banner (GAPS A1)
-- [ ] Own-UI accessibility pass (GAPS E5)
+- [x] Usage stats screen
+- [x] Staged permission wizard + protection-health screen (GAPS A6)
+- [x] Boot/force-stop/OEM-killer resilience + downtime banner (GAPS A1)
+- [x] Own-UI accessibility pass (GAPS E5)
 
 **Exit criteria:** blocks survive reboot and force-stop; a locked session cannot be ended early by
 any in-app path, by clearing data, or by changing the system clock; added battery drain <3%/day

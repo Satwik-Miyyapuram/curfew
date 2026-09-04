@@ -279,3 +279,47 @@ pub fn check_config(config_toml: String) -> Result<String, CurfewError> {
         config.calendars.len()
     ))
 }
+
+/// Set a profile's blocked apps from a picker, returning the rewritten config.
+///
+/// The editing lives in the core rather than in each platform's UI: a config is the user's own
+/// document, and two implementations of "add a rule" would eventually disagree about what a rule
+/// looks like. The caller writes the result back through the usual `set_config` path, so the same
+/// validation applies as to a hand-edited file.
+#[uniffi::export]
+pub fn set_blocked_apps(
+    config_toml: String,
+    profile: String,
+    packages: Vec<String>,
+) -> Result<String, CurfewError> {
+    let mut config = Config::from_toml(&config_toml)
+        .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+    config
+        .set_blocked_apps(&profile, &packages)
+        .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+    config.to_toml().map_err(|e| CurfewError::Config { detail: e.to_string() })
+}
+
+/// The packages `set_blocked_apps` owns, so a picker can open with the right boxes ticked.
+#[uniffi::export]
+pub fn blocked_apps(config_toml: String, profile: String) -> Result<Vec<String>, CurfewError> {
+    let config = Config::from_toml(&config_toml)
+        .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+    Ok(config.blocked_apps(&profile))
+}
+
+/// The profiles a config defines, in file order, as `(id, name)` pairs flattened to a JSON array.
+///
+/// JSON rather than a UniFFI record because every other structured value crosses this boundary as
+/// JSON, and one exception is how a boundary starts growing two conventions.
+#[uniffi::export]
+pub fn profiles_json(config_toml: String) -> Result<String, CurfewError> {
+    let config = Config::from_toml(&config_toml)
+        .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+    let named: Vec<_> = config
+        .profiles
+        .iter()
+        .map(|p| serde_json::json!({ "id": p.id, "name": p.name }))
+        .collect();
+    serde_json::to_string(&named).map_err(|e| CurfewError::Config { detail: e.to_string() })
+}

@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
@@ -76,6 +77,7 @@ fun NowScreen(model: CurfewViewModel) {
         Text(
             if (state.isEnforcing) "Curfew is enforcing" else "Nothing is running",
             style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.semantics { heading() },
         )
         Text(
             if (state.isEnforcing) {
@@ -176,7 +178,11 @@ private fun SessionCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(session.profile, style = MaterialTheme.typography.titleMedium)
+            Text(
+                session.profile,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() },
+            )
             Text(describeSource(session.source), style = MaterialTheme.typography.bodySmall)
 
             session.lock.endsAt?.let { endsAt ->
@@ -214,11 +220,23 @@ private fun SessionCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Button(onClick = onEnd) { Text("End now") }
+                // Several sessions can be on screen, so each button says which one it ends: a
+                // list of identical "End now" buttons is unusable with a screen reader.
+                Button(
+                    onClick = onEnd,
+                    modifier = Modifier.semantics {
+                        contentDescription = "End ${session.profile} now"
+                    },
+                ) { Text("End now") }
                 // Only offered when there is no release already pending: asking twice must never
                 // become a way to move the landing time closer.
                 if (session.lock.isLocked && session.lock.delayedReleaseAt == null) {
-                    TextButton(onClick = onRelease) { Text("Ask to end in 24 hours") }
+                    TextButton(
+                        onClick = onRelease,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Ask to end ${session.profile} in 24 hours"
+                        },
+                    ) { Text("Ask to end in 24 hours") }
                 }
             }
         }

@@ -143,3 +143,91 @@ fn an_empty_config_is_valid_and_blocks_nothing() {
     let cfg = Config::from_toml("schema_version = 1").unwrap();
     assert!(cfg.profiles.is_empty());
 }
+
+/// The app picker's edits, which are the only writes to a config that do not come from a person
+/// typing. The rules are: what the picker owns it may replace, and what it does not own it must
+/// not touch — a hand-written budget is the user saying something more specific.
+mod picker {
+    use curfew_core::config::{Action, Config};
+    use curfew_core::target::Target;
+
+    const CONFIG: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.instagram.android" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.reddit.frontpage" }
+action = { kind = "budget", seconds = 600 }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "news.example" }
+action = { kind = "block" }
+"#;
+
+    #[test]
+    fn the_picker_sees_only_the_rules_it_owns() {
+        let config = Config::from_toml(CONFIG).unwrap();
+        assert_eq!(config.blocked_apps("deep-work"), vec!["com.instagram.android".to_string()]);
+    }
+
+    #[test]
+    fn checking_a_box_adds_a_rule_and_unchecking_removes_it() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        config
+            .set_blocked_apps("deep-work", &["com.twitter.android".to_string()])
+            .unwrap();
+
+        assert_eq!(config.blocked_apps("deep-work"), vec!["com.twitter.android".to_string()]);
+    }
+
+    #[test]
+    fn a_budget_on_an_app_survives_the_picker() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        config.set_blocked_apps("deep-work", &[]).unwrap();
+
+        let profile = config.profile("deep-work").unwrap();
+        assert!(profile.rules.iter().any(|r| matches!(r.action, Action::Budget { .. })));
+        assert!(profile
+            .rules
+            .iter()
+            .any(|r| matches!(&r.target, Target::Domain { .. })));
+    }
+
+    #[test]
+    fn the_written_file_does_not_churn_when_the_same_set_comes_back_in_another_order() {
+        let mut a = Config::from_toml(CONFIG).unwrap();
+        let mut b = Config::from_toml(CONFIG).unwrap();
+        a.set_blocked_apps("deep-work", &["b.app".into(), "a.app".into()]).unwrap();
+        b.set_blocked_apps("deep-work", &["a.app".into(), "b.app".into(), "a.app".into()])
+            .unwrap();
+        assert_eq!(a.to_toml().unwrap(), b.to_toml().unwrap());
+    }
+
+    #[test]
+    fn the_result_is_a_config_that_still_loads() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        config.set_blocked_apps("deep-work", &["com.twitter.android".into()]).unwrap();
+        let round_tripped = Config::from_toml(&config.to_toml().unwrap()).unwrap();
+        assert_eq!(round_tripped.blocked_apps("deep-work"), vec!["com.twitter.android".to_string()]);
+    }
+
+    #[test]
+    fn a_profile_that_does_not_exist_is_an_error_rather_than_a_silent_no_op() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        assert!(config.set_blocked_apps("nope", &["a.app".into()]).is_err());
+    }
+
+    #[test]
+    fn an_empty_package_is_refused() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        assert!(config.set_blocked_apps("deep-work", &["  ".into()]).is_err());
+    }
+}

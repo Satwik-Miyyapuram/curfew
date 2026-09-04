@@ -9,6 +9,8 @@ import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
 import dev.curfew.policy.Activation
 import dev.curfew.policy.Lock
+import dev.curfew.policy.Policy
+import dev.curfew.policy.ProfileName
 import dev.curfew.policy.LockSet
 import dev.curfew.policy.Refused
 import dev.curfew.policy.Session
@@ -71,6 +73,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 spentSeconds = spent,
                 launchCounts = opens,
                 configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
+                profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
+                    .getOrDefault(emptyList()),
                 audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                     .getOrDefault(emptyList()),
                 grants = grantStates(getApplication()),
@@ -137,6 +141,39 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Save the app picker's answer for one profile.
+     *
+     * The edit itself is the core's — see [Policy.setBlockedApps] — and the result goes back
+     * through the same `setConfig` path as a hand-typed file, so a picker cannot write a config a
+     * person could not have written, and cannot end a running session either.
+     */
+    fun setBlockedApps(profile: String, packages: List<String>) {
+        viewModelScope.launch {
+            Policy.setBlockedApps(runtime.policy.configToml(), profile, packages)
+                .onSuccess { toml ->
+                    runtime.setConfig(toml)
+                        .onSuccess { say("Saved.") }
+                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                }
+                .onFailure { say(it.message ?: "That change could not be saved.") }
+            refresh()
+        }
+    }
+
+    /** The packages the picker should open with ticked, for [profile]. */
+    fun blockedApps(profile: String): List<String> =
+        Policy.blockedApps(runCatching { runtime.policy.configToml() }.getOrDefault(""), profile)
+
+    /**
+     * Import a config from a file the user chose.
+     *
+     * It goes through the same validation as any other config: an invalid file is refused with the
+     * core's own message, and the working config is left untouched. Importing does not end a
+     * running session, for the same reason editing does not.
+     */
+    fun importConfig(toml: String) = saveConfig(toml)
+
     /** Bring sessions into line with the schedules right now, rather than at the next alarm. */
     fun reconcileNow() {
         viewModelScope.launch {
@@ -147,7 +184,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun say(message: String) = _state.update { it.copy(message = message) }
+    /** Put one sentence in front of the user. Public so a screen can report a failed file read. */
+    fun say(message: String) = _state.update { it.copy(message = message) }
 
     companion object {
         private const val AUDIT_SHOWN = 200
@@ -172,6 +210,7 @@ data class UiState(
     val spentSeconds: List<Pair<String, Int>> = emptyList(),
     val launchCounts: Map<String, Int> = emptyMap(),
     val configToml: String = "",
+    val profiles: List<ProfileName> = emptyList(),
     val audit: List<AuditRow> = emptyList(),
     val grants: List<GrantState> = emptyList(),
     /** A stretch Curfew could not account for, until the user has seen it. */

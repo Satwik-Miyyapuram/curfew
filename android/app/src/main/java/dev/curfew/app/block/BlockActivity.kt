@@ -23,6 +23,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.curfew.app.ui.CurfewTheme
 import kotlinx.coroutines.delay
@@ -175,7 +179,18 @@ private fun DelayScreen(
         Text(
             if (remaining > 0) "$remaining seconds" else "You can go ahead now.",
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier
+                .padding(top = 12.dp)
+                // A screen reader is told when the wait is over, and not once a second on the way
+                // there: `Polite` waits for a pause, and the description only changes at the end.
+                .semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = if (remaining > 0) {
+                        "Waiting $remaining seconds before $target opens."
+                    } else {
+                        "The wait is over. You can open $target."
+                    }
+                },
         )
         Button(
             onClick = onProceed,

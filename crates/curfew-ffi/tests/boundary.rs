@@ -459,3 +459,33 @@ fn platform_scoping_applies_to_charging_as_well_as_to_blocking() {
         .expect("keys");
     assert!(android.is_empty(), "{android:?}");
 }
+
+// --- the app picker -----------------------------------------------------------------------------
+
+#[test]
+fn the_picker_edits_a_config_the_core_can_still_load() {
+    let profiles: Value =
+        serde_json::from_str(&curfew_ffi::profiles_json(config()).expect("profiles"))
+            .expect("JSON");
+    let first = profiles[0]["id"].as_str().expect("a profile id").to_string();
+
+    let edited = curfew_ffi::set_blocked_apps(
+        config(),
+        first.clone(),
+        vec!["com.example.one".into(), "com.example.two".into()],
+    )
+    .expect("the picker's edit is accepted");
+
+    Curfew::new(edited.clone()).expect("and the result is a loadable config");
+    assert_eq!(
+        curfew_ffi::blocked_apps(edited, first).expect("read back"),
+        vec!["com.example.one".to_string(), "com.example.two".to_string()],
+    );
+}
+
+#[test]
+fn the_picker_cannot_invent_a_profile() {
+    let err = curfew_ffi::set_blocked_apps(config(), "not-a-profile".into(), vec![])
+        .expect_err("a profile that does not exist is an error");
+    assert!(matches!(err, CurfewError::Config { .. }));
+}

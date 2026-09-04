@@ -324,4 +324,47 @@ class PolicyTest {
         assertNotNull(next)
         assertTrue("$next", next!! > friday0930)
     }
+
+    // --- the app picker ---------------------------------------------------------------------------
+
+    @Test
+    fun `the picker reads back the app blocks it owns`() {
+        assertEquals(listOf("com.instagram.android"), Policy.blockedApps(configToml, "deep-work"))
+    }
+
+    @Test
+    fun `the picker's edit crosses the boundary and still loads`() {
+        val edited = Policy
+            .setBlockedApps(configToml, "deep-work", listOf("com.twitter.android", "com.tiktok"))
+            .getOrThrow()
+
+        val policy = Policy.load(edited)
+        assertEquals(
+            listOf("com.tiktok", "com.twitter.android"),
+            Policy.blockedApps(policy.configToml(), "deep-work"),
+        )
+
+        // The rules the picker does not own are still there: a delay and a budget written by hand
+        // must survive a visit to a checkbox list.
+        val session = Session(
+            id = "s1",
+            profile = "deep-work",
+            source = SessionSource.Manual,
+            startedAt = friday0930,
+            lock = LockSet(),
+        )
+        policy.startSession(session)
+        assertTrue(policy.decide(friday0930, Observation.App("com.slack")) is Decision.Delay)
+    }
+
+    @Test
+    fun `the picker refuses a profile that does not exist rather than writing nothing`() {
+        assertTrue(Policy.setBlockedApps(configToml, "nope", listOf("com.x")).isFailure)
+    }
+
+    @Test
+    fun `the profile chooser sees every profile, with the names a person reads`() {
+        val profiles = Policy.profiles(configToml)
+        assertEquals(listOf(ProfileName("deep-work", "Deep work")), profiles)
+    }
 }

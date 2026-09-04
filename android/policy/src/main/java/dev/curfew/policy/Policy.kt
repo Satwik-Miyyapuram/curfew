@@ -6,10 +6,14 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.builtins.ListSerializer
 import uniffi.curfew_ffi.Curfew
 import uniffi.curfew_ffi.CurfewException
 import uniffi.curfew_ffi.PlatformName
+import uniffi.curfew_ffi.blockedApps as ffiBlockedApps
 import uniffi.curfew_ffi.checkConfig
+import uniffi.curfew_ffi.profilesJson as ffiProfilesJson
+import uniffi.curfew_ffi.setBlockedApps as ffiSetBlockedApps
 
 /**
  * The Kotlin face of the shared policy core.
@@ -40,6 +44,26 @@ class Policy private constructor(private val inner: Curfew) {
          * or null with the error in [onError].
          */
         fun check(configToml: String): Result<String> = runCatching { checkConfig(configToml) }
+
+        /**
+         * Rewrite a config so [profile] blocks exactly [packages].
+         *
+         * The editing is the core's, not the UI's: a config is one document with one meaning, and
+         * two platforms each writing rules their own way is how that stops being true. Rules the
+         * picker does not own — a budget on an app, anything platform-specific — are left alone.
+         */
+        fun setBlockedApps(configToml: String, profile: String, packages: List<String>): Result<String> =
+            runCatching { ffiSetBlockedApps(configToml, profile, packages) }
+
+        /** The profiles a config defines, for a picker's profile chooser. */
+        fun profiles(configToml: String): List<ProfileName> =
+            runCatching {
+                json.decodeFromString(ListSerializer(ProfileName.serializer()), ffiProfilesJson(configToml))
+            }.getOrDefault(emptyList())
+
+        /** The packages a picker should open with ticked. */
+        fun blockedApps(configToml: String, profile: String): List<String> =
+            runCatching { ffiBlockedApps(configToml, profile) }.getOrDefault(emptyList())
     }
 
     /** The config as the core would write it back: canonical, and safe to diff. */
@@ -347,3 +371,7 @@ data class Launches(
     /** The core calls this field `at`; `opens` is what it means on this side of the boundary. */
     @SerialName("at") val opens: List<Long> = emptyList(),
 )
+
+/** A profile as a chooser needs it: the id rules refer to, and the name a person reads. */
+@Serializable
+data class ProfileName(val id: String, val name: String)

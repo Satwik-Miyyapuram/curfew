@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -60,6 +61,7 @@ class MainActivity : FragmentActivity() {
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Now("now", "Now", Icons.Filled.CheckCircle),
     Schedule("schedule", "Schedule", Icons.Filled.DateRange),
+    Apps("apps", "Apps", Icons.Filled.Lock),
     Usage("usage", "Usage", Icons.Filled.List),
     Health("health", "Health", Icons.Filled.Settings),
 }
@@ -85,6 +87,8 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                                 restoreState = true
                             }
                         },
+                        // Null on purpose: the label beside it carries the name, and a described
+                        // icon would make a screen reader say every tab twice.
                         icon = { Icon(tab.icon, contentDescription = null) },
                         label = { Text(tab.label) },
                     )
@@ -99,6 +103,7 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
         ) {
             composable(Tab.Now.route) { NowScreen(model) }
             composable(Tab.Schedule.route) { ScheduleScreen(model) }
+            composable(Tab.Apps.route) { AppPickerScreen(model) }
             composable(Tab.Usage.route) { UsageScreen(model) }
             composable(Tab.Health.route) { HealthScreen(model) }
         }

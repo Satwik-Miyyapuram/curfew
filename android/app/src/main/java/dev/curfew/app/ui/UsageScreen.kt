@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,7 +38,13 @@ fun UsageScreen(model: CurfewViewModel) {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item { Text("Today", style = MaterialTheme.typography.headlineSmall) }
+        item {
+            Text(
+                "Today",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
 
         if (state.spentSeconds.isEmpty()) {
             item {
@@ -51,7 +58,7 @@ fun UsageScreen(model: CurfewViewModel) {
 
         items(state.spentSeconds, key = { it.first }) { (key, seconds) ->
             val opens = state.launchCounts[key] ?: 0
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                 Text(describeTarget(key), style = MaterialTheme.typography.titleSmall)
                 LinearProgressIndicator(
                     progress = { if (busiest > 0) seconds.toFloat() / busiest else 0f },
@@ -75,7 +82,7 @@ fun UsageScreen(model: CurfewViewModel) {
             Text(
                 "What Curfew did",
                 style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(top = 16.dp),
+                modifier = Modifier.padding(top = 16.dp).semantics { heading() },
             )
         }
         item {
@@ -85,7 +92,13 @@ fun UsageScreen(model: CurfewViewModel) {
             )
         }
         items(state.audit, key = { it.id }) { row ->
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            // One entry, one thing to hear: the sentence and the time it happened.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .semantics(mergeDescendants = true) {},
+            ) {
                 Text(describeAudit(row.kind, row.detail), style = MaterialTheme.typography.bodyMedium)
                 Text(dateTime(row.at), style = MaterialTheme.typography.bodySmall)
             }
@@ -99,5 +112,7 @@ private fun describeAudit(kind: String, detail: String): String = when (kind) {
     "session.ended" -> "A session ended."
     "release.requested" -> "You asked for a delayed release."
     "config.replaced" -> "The rules were changed."
+    "enforcement.gap" -> "Curfew was not running for a while, so nothing was blocked."
+    "enforcement.clock" -> "The device's clock moved backwards."
     else -> "$kind $detail".trim()
 }

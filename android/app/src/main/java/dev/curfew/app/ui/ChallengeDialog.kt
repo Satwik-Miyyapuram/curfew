@@ -14,6 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -50,6 +52,12 @@ fun ChallengeDialog(
                     is Challenge.Math -> Text(
                         "${challenge.question} = ?",
                         style = MaterialTheme.typography.headlineSmall,
+                        // "×" is read out as "x" or skipped entirely by some screen readers, which
+                        // turns an arithmetic problem into a guess.
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                "What is ${challenge.question.replace("×", "times")}?"
+                        },
                     )
                 }
                 OutlinedTextField(
@@ -64,7 +72,15 @@ fun ChallengeDialog(
                         },
                         imeAction = ImeAction.Done,
                     ),
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .semantics {
+                            contentDescription = when (challenge) {
+                                is Challenge.Typing -> "Type the passage here."
+                                is Challenge.Math -> "Type the answer here."
+                            }
+                        },
                 )
             }
         },

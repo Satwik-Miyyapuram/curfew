@@ -18,6 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -48,6 +51,7 @@ fun HealthScreen(model: CurfewViewModel) {
                 Text(
                     if (missingRequired.isEmpty()) "Curfew can enforce" else "Curfew cannot enforce",
                     style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
                 )
                 Text(
                     if (missingRequired.isEmpty()) {
@@ -63,7 +67,10 @@ fun HealthScreen(model: CurfewViewModel) {
         }
 
         items(state.grants, key = { it.grant.name }) { entry ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+            // The whole card is read as one thing: a screen reader user should hear the
+            // permission, whether it is held, and what is lost without it as a single sentence,
+            // rather than swiping through four fragments to assemble it.
+            Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(entry.grant.title, style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -91,6 +98,8 @@ fun HealthScreen(model: CurfewViewModel) {
                                         settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                                     )
                             }
+                        }, modifier = Modifier.semantics {
+                            contentDescription = "Grant ${entry.grant.title}"
                         }) {
                             Text("Grant")
                         }

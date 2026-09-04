@@ -20,7 +20,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,11 +54,40 @@ fun ScheduleScreen(model: CurfewViewModel) {
         if (!editing) draft = state.configToml
     }
 
+    val context = LocalContext.current
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+            }.getOrNull()
+            // An unreadable or invalid file changes nothing: the core validates before the working
+            // config is touched, and says why in the user's own words when it refuses.
+            if (text == null) model.say("That file could not be read.") else model.importConfig(text)
+        }
+    }
+    val exportFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(state.configToml.toByteArray())
+                }
+            }.onFailure { model.say("That file could not be written.") }
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Coming up", style = MaterialTheme.typography.headlineSmall)
+        // Marked as headings so a screen reader can jump between the timeline and the rules
+        // instead of swiping through every card in between.
+        Text(
+            "Coming up",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.semantics { heading() },
+        )
 
         if (state.activations.isEmpty()) {
             Text(
@@ -62,7 +96,7 @@ fun ScheduleScreen(model: CurfewViewModel) {
             )
         }
         state.activations.forEach { activation ->
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(activation.profile, style = MaterialTheme.typography.titleMedium)
                     Text(
@@ -94,7 +128,7 @@ fun ScheduleScreen(model: CurfewViewModel) {
         Text(
             "Rules",
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
         )
         OutlinedTextField(
             value = draft,
@@ -120,6 +154,11 @@ fun ScheduleScreen(model: CurfewViewModel) {
             ) {
                 Text("Discard")
             }
+            // Import and export are how a config moves between devices before sync exists — and
+            // how it stays the user's own document afterwards. Both go through the system file
+            // picker, so Curfew needs no storage permission to do it.
+            TextButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import") }
+            TextButton(onClick = { exportFile.launch("curfew.toml") }) { Text("Export") }
         }
         Text(
             "Saving does not end a session that is already running. A lock you asked for is not " +
