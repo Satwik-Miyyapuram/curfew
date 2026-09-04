@@ -179,3 +179,49 @@ service ACLs) is the top rung.
 
 Rejected: Kotlin Multiplatform (JVM daemon on Windows is a weaker tamper and memory story) and
 Flutter (core logic in Dart, weakest service story).
+
+## 10. Reliability and degradation
+
+Enforcement is a stack of layers, each of which can be revoked, killed or unsupported. The app must
+always know which layers are live and say so.
+
+- **Health model**: every layer reports a heartbeat. A `ProtectionHealth` view aggregates them into
+  live / degraded / down, with the specific missing permission named.
+- **Honest downtime**: if enforcement was down (reboot, force-stop, revoked permission, OEM killer),
+  the next launch reports the exact window it was down. No silent failure.
+- **Persistence**: locked sessions live in storage, not memory. `BOOT_COMPLETED` and
+  `LOCKED_BOOT_COMPLETED` on Android, service auto-start on Windows, both re-entering the lock
+  rather than resetting it.
+- **Adaptive cost**: pollers run at 1s while a session is active, 15s idle, and stop entirely when
+  no rule can fire. The VPN filter runs only while a session with domain rules is active.
+
+## 11. Safety and recovery
+
+The user is the adversary *by their own consent*, which puts a hard limit on what we are allowed to
+do to them.
+
+- **Last-resort exit**: every lock, at every strictness level, can be released by starting a
+  **24-hour delayed release**. It cannot be shortened, and it is visible from the moment the lock
+  starts. This is what separates a commitment device from a trap. Tools without one produce users
+  reinstalling their operating system.
+- **Never unrecoverable**: no device-owner enrollment, no kiosk lock-task, no boot-loop risk, no
+  encryption of user data we could fail to decrypt.
+- **Frozen mode** always warns with a cancellable countdown, and a remote (synced) session can never
+  freeze a machine without local confirmation.
+- **Not a surveillance tool**: no parent/admin role, no remote monitoring of another person, no
+  covert operation. Usage data never leaves the device group. This is a design constraint, not an
+  unimplemented feature.
+- **Sensitive data**: the usage timeline is encrypted at rest, excluded from cloud backup by
+  default, and exported only on explicit action.
+
+## 12. Distribution
+
+- **Android**: GitHub Releases (APK) and F-Droid as reference channels; Play Store only if the
+  AccessibilityService declaration survives review. The sideloaded build is the reference build.
+- **Windows**: GitHub Releases with checksums, plus winget and scoop manifests. Binaries are
+  unsigned (no recurring cost, D6), so SmartScreen friction and antivirus heuristics are expected
+  and documented; vendor allowlisting is requested after first release.
+- **Builds**: x86_64 and aarch64 for Windows; reproducible-build instructions published so a third
+  party can verify a release matches the source.
+
+See [GAPS.md](GAPS.md) for the open problems behind each of these sections.

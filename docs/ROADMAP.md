@@ -1,67 +1,97 @@
 # Roadmap
 
-Each phase ends with something usable. No phase depends on a server at any point.
+Each phase ends with something usable, and with **exit criteria** that must actually pass. "Done"
+means the criteria hold, not that the code exists. Open problems per phase live in
+[GAPS.md](GAPS.md).
 
-## Phase 0 — Foundations (repo is here now)
-- [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap, decisions)
-- [ ] Cargo workspace (`core`, `cli`), Android Gradle project, CI (build + test on push)
-- [ ] `curfew.toml` schema v0 + golden-file tests
-- [ ] Core rule engine: `decide()` with block / allow-only / budget / delay, plus a property test
-      suite. No I/O, no platform code.
+## Phase 0 — Foundations
+- [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap, decisions, gaps)
+- [ ] Cargo workspace: `curfew-core` (lib) + `curfew-cli` (bin)
+- [ ] `curfew.toml` schema v0 with `schema_version`, serde model, golden-file tests
+- [ ] Core rule engine `decide()`: block / allow-only / budget / delay. Pure, no I/O
+- [ ] Property tests: a lock can never be shortened by any sequence of operations
+- [ ] CI: fmt + clippy + test on push (Linux + Windows runners)
+- [ ] Repo hygiene: CONTRIBUTING, SECURITY.md, CoC, issue/PR templates, versioning policy (E4)
+
+**Exit criteria:** `cargo test` green on both CI runners; the engine decides a worked example
+identically from a config file on Linux and Windows; property suite proves lock-monotonicity.
 
 ## Phase 1 — Android MVP (usable alone)
 - [ ] Foreground-app detection: AccessibilityService, with UsageStats poller as fallback
 - [ ] Block overlay screen (reason, time remaining, allowed exits)
-- [ ] Profiles + app picker, manual sessions, timer sessions
-- [ ] Recurring schedules
-- [ ] Local SQLite store, config import/export
-- [ ] Strictness: none / confirm / password / timer-lock
+- [ ] Profiles + app picker, manual sessions, timer sessions, recurring schedules
+- [ ] Local encrypted SQLite store (D4 of GAPS), config import/export
+- [ ] Strictness: none / confirm / password / timer-lock, plus the 24h delayed release (GAPS D1)
 - [ ] Usage stats screen
+- [ ] Staged permission wizard + protection-health screen (GAPS A6)
+- [ ] Boot/force-stop/OEM-killer resilience + downtime banner (GAPS A1)
+- [ ] Own-UI accessibility pass (GAPS E5)
+
+**Exit criteria:** blocks survive reboot and force-stop; a locked session cannot be ended early by
+any in-app path, by clearing data, or by changing the system clock; added battery drain <3%/day
+measured over 24h; instrumented tests green on an emulator in CI.
 
 ## Phase 2 — Windows MVP (usable alone)
-- [ ] Service + watchdog, tray UI, installer (admin)
+- [ ] Service + watchdog, tray UI, installer requiring admin
 - [ ] Process + window-title blocking, block overlay
 - [ ] Website blocking v1: hosts file + local DNS proxy
 - [ ] Same profiles/sessions/schedules/strictness as Android, same `curfew.toml`
-- [ ] Frozen-mode (lock the machine for a period)
+- [ ] Frozen mode with a cancellable countdown (GAPS B4)
+- [ ] x64 + ARM64 builds; winget/scoop manifests; checksums; AV false-positive notes (GAPS B1, B5)
 
-## Phase 3 — Sync (the differentiator, part 1)
-- [ ] Device identity, QR pairing, group key
-- [ ] Signed encrypted op-log + merge rules (strictest-lock-wins, G-counter budgets)
+**Exit criteria:** the same config file produces identical decisions on Android and Windows;
+service survives kill, reboot and clock rollback; uninstaller refuses during a locked block while
+the 24h delayed release still works.
+
+## Phase 3 — Sync (differentiator, part 1)
+- [ ] Lock lattice defined and property-tested *before* any merge code (GAPS C1)
+- [ ] Concrete pairing protocol, per-device keys, revocation path (GAPS C2, C3)
+- [ ] Signed encrypted op-log, rollups + checkpoint compaction (GAPS C4)
 - [ ] LAN transport (mDNS + QUIC)
-- [ ] Session mirroring: start on PC, phone blocks; shared budgets across devices
-- [ ] Conflict UI, unpair gated by active locks
-- [ ] Shared-folder transport (the cross-network path: segments, compaction, concurrent writers)
+- [ ] Shared-folder transport: immutable segments, concurrent writers, honest latency UI (GAPS C5)
 - [ ] Bluetooth / QR beam fallback
+- [ ] Session mirroring: start on PC, phone blocks; budgets shared across devices
+- [ ] Conflict UI
 
-## Phase 4 — Calendar (the differentiator, part 2)
+**Exit criteria:** merging any two lock states never produces a weaker lock (property test); a
+session started on the PC blocks the phone within 5s on LAN; killing either device mid-sync leaves
+both in a valid state; op-log stays under 5 MB/year/device.
+
+## Phase 4 — Calendar (differentiator, part 2)
 - [ ] Android `CalendarContract` reader
 - [ ] Windows ICS URL / CalDAV / local `.ics` reader
-- [ ] Matcher rules (calendar, title regex, busy status, category, duration) -> profile + lock
-- [ ] Lead-in/lead-out padding, per-matcher profiles
+- [ ] Matchers (calendar, title regex, busy status, category, duration) -> profile + lock
+- [ ] Lead-in/lead-out padding, per-matcher profiles, timezone + DST + RRULE correctness
 - [ ] `calendar.snapshot` events so one device's calendar drives another device's blocks
 - [ ] Preview timeline: "here is what tomorrow will block"
 
-## Phase 5 — Depth (feature parity + beyond)
-- [ ] Allowances/budgets with refill policies, launch limits, friction delays
-- [ ] Challenge locks (typing, math), restart-required, NFC/QR token, **peer-release lock**
-- [ ] Emergency passes with quota + cooldown
-- [ ] Allow-only mode
-- [ ] Notification muting, keyword blocking
-- [ ] Browser extension (Chrome + Firefox) for URL/path/in-page rules
-- [ ] Android VpnService DNS filter; Windows WFP filtering
-- [ ] Hardening: Android Device Admin uninstall gate, Windows service ACLs + watchdog, clock-tamper
-      detection, re-lock on boot (no device-owner / factory-reset-class setup — see D4)
+**Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
+and all-day events handled correctly in a dated test suite; a deleted event releases its block.
 
-## Phase 6 — Polish + release
-- [ ] Widgets, quick tiles, CLI, webhooks/scripts on session start-end
+## Phase 5 — Depth
+- [ ] Allowances/budgets with refill policies, launch limits, friction delays
+- [ ] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
+- [ ] Emergency passes with quota + cooldown
+- [ ] Allow-only mode; notification muting; keyword blocking
+- [ ] Browser extension (Chrome + Firefox), paired to the service, removal detected
+- [ ] Android VpnService DNS filter incl. DoH endpoint blocking (GAPS A2)
+- [ ] Windows WFP filtering — spike first, it is the largest unknown (GAPS B2)
+- [ ] Hardening: Device Admin uninstall gate, service ACLs, clock-tamper detection, re-lock on boot
+
+**Exit criteria:** domain rules hold with Chrome DoH enabled; disabling the browser extension during
+a locked session is detected and reported; no hardening step can make a device unrecoverable.
+
+## Phase 6 — Release
+- [ ] Widgets, quick tiles, CLI, webhooks on session start/end
 - [ ] Stats: streaks, trends, CSV/JSON export
-- [ ] Themes, localization scaffolding
-- [ ] F-Droid + GitHub releases; Play Store listing only if the accessibility declaration survives
-      review (sideloaded build stays the reference build)
-- [ ] Docs site, threat-model page, contributor guide
+- [ ] Themes, externalized strings
+- [ ] GitHub Pages site; GitHub Releases; F-Droid; winget/scoop
+- [ ] Threat-model page and an explicit "this is not parental-control software" statement (GAPS D3)
+
+**Exit criteria:** a new user can install on both platforms, pair them, and run a synced calendar
+block without reading the docs.
 
 ## Later / optional
-- Linux and macOS desktop enforcers (core and sync are already portable)
-- iOS (Screen Time API only; heavily restricted — separate design)
-- Community blocklists, importable rule packs
+- Linux and macOS enforcers (core and sync are already portable)
+- iOS (Screen Time API only — separate design, after 1.0)
+- Community rule packs / importable blocklists
