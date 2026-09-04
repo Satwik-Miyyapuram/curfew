@@ -21,7 +21,9 @@ identically from a config file on Linux and Windows; property suite proves lock-
 - [ ] Block overlay screen (reason, time remaining, allowed exits)
 - [ ] Profiles + app picker, manual sessions, timer sessions, recurring schedules
 - [ ] Local encrypted SQLite store (D4 of GAPS), config import/export
-- [ ] Strictness: none / confirm / password / timer-lock, plus the 24h delayed release (GAPS D1)
+- [ ] Strictness: none / confirm / device-credential / timer-lock, plus the 24h delayed release
+      (D7, GAPS D1). Credential checks go through `BiometricPrompt` restricted to
+      `DEVICE_CREDENTIAL`; Curfew stores no password
 - [ ] Usage stats screen
 - [ ] Staged permission wizard + protection-health screen (GAPS A6)
 - [ ] Boot/force-stop/OEM-killer resilience + downtime banner (GAPS A1)
@@ -41,7 +43,8 @@ measured over 24h; instrumented tests green on an emulator in CI.
 
 **Exit criteria:** the same config file produces identical decisions on Android and Windows;
 service survives kill, reboot and clock rollback; uninstaller refuses during a locked block while
-the 24h delayed release still works.
+the 24h delayed release still works; credential release is verified by `LogonUser` against the
+Windows account, with no Curfew-held password anywhere.
 
 ## Phase 3 — Sync (differentiator, part 1)
 - [ ] Lock lattice defined and property-tested *before* any merge code (GAPS C1)
@@ -71,6 +74,8 @@ and all-day events handled correctly in a dated test suite; a deleted event rele
 ## Phase 5 — Depth
 - [ ] Allowances/budgets with refill policies, launch limits, friction delays
 - [ ] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
+- [ ] Biometric keyguard suppression while a session runs — spike on real hardware first (GAPS A7),
+      with guaranteed restore on end / crash / boot / uninstall (GAPS D5)
 - [ ] Emergency passes with quota + cooldown
 - [ ] Allow-only mode; notification muting; keyword blocking
 - [ ] Browser extension (Chrome + Firefox), paired to the service, removal detected
@@ -79,7 +84,9 @@ and all-day events handled correctly in a dated test suite; a deleted event rele
 - [ ] Hardening: Device Admin uninstall gate, service ACLs, clock-tamper detection, re-lock on boot
 
 **Exit criteria:** domain rules hold with Chrome DoH enabled; disabling the browser extension during
-a locked session is detected and reported; no hardening step can make a device unrecoverable.
+a locked session is detected and reported; no hardening step can make a device unrecoverable;
+biometric unlock is provably restored after force-stop, reboot and uninstall on every device the
+spike covered.
 
 ## Phase 6 — Release
 - [ ] Widgets, quick tiles, CLI, webhooks on session start/end

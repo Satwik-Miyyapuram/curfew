@@ -16,7 +16,7 @@ fn any_lock() -> impl Strategy<Value = Lock> {
         Just(Lock::RestartRequired),
         Just(Lock::Challenge { challenge: ChallengeKind::Typing }),
         Just(Lock::Challenge { challenge: ChallengeKind::Math }),
-        "[a-f0-9]{4}".prop_map(|h| Lock::Password { hash: h }),
+        Just(Lock::DeviceCredential),
         "[a-z]{1,4}".prop_map(|d| Lock::PeerRelease { device_id: d }),
         "[a-z]{1,4}".prop_map(|i| Lock::Token { id: i }),
     ]
@@ -27,13 +27,15 @@ fn any_lockset() -> impl Strategy<Value = LockSet> {
         prop::collection::vec(any_lock(), 0..4),
         prop::option::of(0i64..1_000_000),
         prop::option::of(0i64..1_000_000),
+        any::<bool>(),
     )
-        .prop_map(|(conds, ends_at, delayed)| {
+        .prop_map(|(conds, ends_at, delayed, no_biometrics)| {
             let conditions: BTreeSet<Lock> = conds.into_iter().collect();
             LockSet {
                 // A delayed release only means anything while something is locked; an unlocked
                 // set can be ended at will, so the generator never invents that state.
                 delayed_release_at: delayed.filter(|_| !conditions.is_empty()),
+                disable_biometric_unlock: no_biometrics && !conditions.is_empty(),
                 conditions,
                 ends_at,
             }
@@ -48,13 +50,14 @@ fn is_at_least_as_strict(merged: &LockSet, original: &LockSet) -> bool {
         return true;
     }
     let keeps_conditions = original.conditions.is_subset(&merged.conditions);
+    let keeps_keyguard = merged.disable_biometric_unlock >= original.disable_biometric_unlock;
     let ends_no_sooner = match (merged.ends_at, original.ends_at) {
         // "until released" is longer than any concrete end time.
         (None, _) => true,
         (Some(_), None) => false,
         (Some(m), Some(o)) => m >= o,
     };
-    keeps_conditions && ends_no_sooner
+    keeps_conditions && keeps_keyguard && ends_no_sooner
 }
 
 proptest! {
@@ -127,16 +130,40 @@ fn an_unlocked_session_releases_freely() {
 
 #[test]
 fn release_requires_every_merged_condition() {
-    let a = LockSet::new([Lock::Password { hash: "x".into() }], Some(1_000));
+    let a = LockSet::new([Lock::DeviceCredential], Some(1_000));
     let b = LockSet::new([Lock::RestartRequired], Some(2_000));
     let merged = a.merge(&b);
 
     assert_eq!(merged.ends_at, Some(2_000), "merge takes the later end time");
 
-    let only_password: BTreeSet<_> = [Lock::Password { hash: "x".into() }].into();
-    assert!(!merged.can_release(0, &only_password), "one of two conditions is not enough");
+    let only_credential: BTreeSet<_> = [Lock::DeviceCredential].into();
+    assert!(!merged.can_release(0, &only_credential), "one of two conditions is not enough");
 
-    let both: BTreeSet<_> = [Lock::Password { hash: "x".into() }, Lock::RestartRequired].into();
+    let both: BTreeSet<_> = [Lock::DeviceCredential, Lock::RestartRequired].into();
     assert!(merged.can_release(0, &both));
     assert!(merged.can_release(2_000, &BTreeSet::new()), "expiry releases on its own");
+}
+
+/// Suppressing biometrics is a restriction on the device, so it must end exactly when the lock
+/// does. A session that expired, or one released through the 24h delay, can never leave the phone
+/// demanding a PIN forever (GAPS D5).
+#[test]
+fn biometric_suppression_ends_with_the_lock() {
+    let lock = LockSet::new([Lock::DeviceCredential], Some(1_000)).without_biometric_unlock();
+    assert!(lock.suppresses_biometrics(999));
+    assert!(!lock.suppresses_biometrics(1_000), "expiry lifts the keyguard restriction");
+
+    let mut delayed = LockSet::new([Lock::DeviceCredential], None).without_biometric_unlock();
+    let at = delayed.request_release(0);
+    assert!(delayed.suppresses_biometrics(at - 1));
+    assert!(!delayed.suppresses_biometrics(at), "the last-resort exit restores biometrics too");
+}
+
+#[test]
+fn merging_can_switch_biometric_suppression_on_but_never_off() {
+    let plain = LockSet::new([Lock::Timer], Some(10));
+    let strict = LockSet::new([Lock::DeviceCredential], Some(10)).without_biometric_unlock();
+
+    assert!(plain.merge(&strict).disable_biometric_unlock);
+    assert!(strict.merge(&plain).disable_biometric_unlock);
 }

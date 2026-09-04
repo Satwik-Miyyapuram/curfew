@@ -1,7 +1,7 @@
 //! The lock lattice.
 //!
 //! Design invariant 2 is "a lock is a promise": no code path may shorten an active lock. Locks are
-//! only *partially* ordered — a password lock is not obviously stricter or weaker than a two-hour
+//! only *partially* ordered — a credential lock is not obviously stricter or weaker than a two-hour
 //! timer — so "strictest wins" is not a definition on its own (GAPS C1).
 //!
 //! The definition we use instead: a merged lock is the **conjunction** of every lock merged into
@@ -9,6 +9,9 @@
 //! *all* of the conditions. Conjunction is total, associative, commutative, idempotent, and
 //! monotone — merging can only ever add conditions or push the end time later, never the reverse.
 //! That is exactly the invariant, so it holds by construction rather than by care.
+//!
+//! Note what is *not* here: a password of our own. Credential checks are delegated to the
+//! operating system's screen lock (DECISIONS D7), so Curfew never stores, hashes or sees a secret.
 
 use crate::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -27,8 +30,13 @@ pub enum Lock {
     Timer,
     /// A confirmation dialog. Friction, not a barrier.
     Confirm,
-    /// Argon2id hash of the user's password. The hash never leaves the device.
-    Password { hash: String },
+    /// The device's own screen-lock credential — the PIN, pattern or password the user already
+    /// has. Verified by the OS (`BiometricPrompt` restricted to `DEVICE_CREDENTIAL` on Android,
+    /// `LogonUser` on Windows), never by us, so there is no secret for Curfew to store or leak.
+    ///
+    /// Biometrics are deliberately not accepted: a fingerprint is a reflex, and typing a PIN is
+    /// the friction we are buying (DECISIONS D7).
+    DeviceCredential,
     /// Retype a passage / solve a problem.
     Challenge { challenge: ChallengeKind },
     /// Only a specific paired device can release. Only possible because we sync.
@@ -46,7 +54,7 @@ pub enum ChallengeKind {
     Math,
 }
 
-/// The set of conditions guarding one session, plus when the timer component expires.
+/// The set of conditions guarding one session, plus when it ends.
 ///
 /// A `LockSet` with no conditions is an unlocked session: it ends when its time is up and the user
 /// may end it early.
@@ -60,6 +68,12 @@ pub struct LockSet {
     /// Set when the user starts the 24h delayed release; the lock lifts at this time no matter
     /// what. Once set it can never be moved later or cleared (see [`LockSet::request_release`]).
     pub delayed_release_at: Option<Timestamp>,
+    /// While this session runs, biometric unlock of the *device* is suppressed, so every glance at
+    /// the phone costs a full PIN entry. Not a release condition — a property of the session — but
+    /// it lives here because it must obey the same monotonicity rule: merging can switch it on and
+    /// never off, and it is lifted only when the lock itself ends (DECISIONS D7).
+    #[serde(default)]
+    pub disable_biometric_unlock: bool,
 }
 
 impl LockSet {
@@ -68,7 +82,18 @@ impl LockSet {
     }
 
     pub fn new(conditions: impl IntoIterator<Item = Lock>, ends_at: Option<Timestamp>) -> Self {
-        Self { conditions: conditions.into_iter().collect(), ends_at, delayed_release_at: None }
+        Self {
+            conditions: conditions.into_iter().collect(),
+            ends_at,
+            delayed_release_at: None,
+            disable_biometric_unlock: false,
+        }
+    }
+
+    /// Suppress biometric device unlock for the life of this lock.
+    pub fn without_biometric_unlock(mut self) -> Self {
+        self.disable_biometric_unlock = true;
+        self
     }
 
     pub fn is_locked(&self) -> bool {
@@ -76,9 +101,12 @@ impl LockSet {
     }
 
     /// True when this set constrains nothing at all: no conditions, no end time, no pending
-    /// release. This is the identity element of [`LockSet::merge`].
+    /// release, no keyguard change. This is the identity element of [`LockSet::merge`].
     pub fn is_empty(&self) -> bool {
-        self.conditions.is_empty() && self.ends_at.is_none() && self.delayed_release_at.is_none()
+        self.conditions.is_empty()
+            && self.ends_at.is_none()
+            && self.delayed_release_at.is_none()
+            && !self.disable_biometric_unlock
     }
 
     /// The lattice join. Conjunction of conditions, latest of the end times.
@@ -104,6 +132,9 @@ impl LockSet {
             // The earlier promised release wins: a delayed release already visible to the user is
             // a commitment we made, and merging must not push it back.
             delayed_release_at: min_opt(self.delayed_release_at, other.delayed_release_at),
+            // Boolean OR: the join on {false, true}. Merging can only ever add the restriction.
+            disable_biometric_unlock: self.disable_biometric_unlock
+                || other.disable_biometric_unlock,
         }
     }
 
@@ -129,6 +160,14 @@ impl LockSet {
             return true;
         }
         self.conditions.is_subset(satisfied)
+    }
+
+    /// Whether the platform should be suppressing biometric unlock right now.
+    ///
+    /// Always false once the lock has expired: the restriction is tied to the lock's life, so an
+    /// expired or released session can never leave a device stuck asking for a PIN (GAPS D5).
+    pub fn suppresses_biometrics(&self, now: Timestamp) -> bool {
+        self.disable_biometric_unlock && !self.is_expired(now)
     }
 }
 

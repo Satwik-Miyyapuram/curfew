@@ -29,13 +29,18 @@ without a subscription, without a cloud account, and with your data never leavin
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — design invariants, domain model, rule engine, sync
   protocol, enforcement layers, threat model
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased build plan
+- [docs/DECISIONS.md](docs/DECISIONS.md) — the ADR log, and what was rejected
+- [docs/GAPS.md](docs/GAPS.md) — open problems, honestly listed
 
 ## Principles
 
 1. No server. No account. No telemetry.
 2. A lock is a promise — nothing shortens it except the conditions you chose.
-3. Every enforcement mechanism has a fallback; losing a permission weakens blocking, never kills it.
-4. Everything the UI can do is expressible in an exportable config file.
+3. The OS screen lock is the lock. Curfew never holds a password of its own, and biometrics are
+   refused while a block is running, so getting back in costs a real PIN entry.
+4. Every enforcement mechanism has a fallback; losing a permission weakens blocking, never kills it.
+5. Everything the UI can do is expressible in an exportable config file.
+6. There is always a way out: a 24-hour delayed release, on every lock, visible from the start.
 
 ## License
 

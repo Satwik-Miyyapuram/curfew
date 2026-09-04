@@ -63,9 +63,10 @@ Trigger        Manual | Timer{duration} | Schedule{rrule, tz} |
                Calendar{source, matcher} | DeviceEvent{signin|wake|unlock_count} |
                Network{ssid} | Token{nfc|qr id}
 Session        profileId, trigger, startedAt, endsAt, lock, originDeviceId, state
-Lock           None | Confirm | Password{hash} | Challenge{typing|math} |
-               Timer | RestartRequired | Token{id} | PeerRelease{deviceId} |
-               EmergencyPasses{remaining, cooldown}
+Lock           None | Confirm | DeviceCredential (OS screen lock, biometrics refused) |
+               Challenge{typing|math} | Timer | RestartRequired | Token{id} |
+               PeerRelease{deviceId} | EmergencyPasses{remaining, cooldown}
+               + disableBiometricUnlock: suppress device biometric unlock while locked (D7)
 Event(op-log)  signed, ordered, encrypted: session.start/end, profile.edit, budget.consume,
                device.pair, calendar.snapshot, stat.rollup
 ```
@@ -140,7 +141,7 @@ session is itself gated by the lock.
 | UsageStats poller | `PACKAGE_USAGE_STATS` | apps (1–2 s lag) | always |
 | Local VpnService DNS filter | VPN consent | domains, per-app net | always |
 | NotificationListener | notification access | notifications | always |
-| Device Admin (not device owner) | admin activation | requires deactivation before uninstall, gated by the active lock | strongest we ship |
+| Device Admin (not device owner) | admin activation | requires deactivation before uninstall, gated by the active lock; suppresses biometric keyguard unlock while a session runs (D7) | strongest we ship |
 
 Device-owner / `dpm set-device-owner` is explicitly **out of scope** (D4): no factory-reset-class
 setup, nothing that can make a device unrecoverable.
@@ -200,6 +201,15 @@ always know which layers are live and say so.
 The user is the adversary *by their own consent*, which puts a hard limit on what we are allowed to
 do to them.
 
+- **One gate, and it is the OS one** (D7): credential locks delegate to the device screen lock —
+  `BiometricPrompt` restricted to `DEVICE_CREDENTIAL` on Android, `LogonUser` on Windows. Curfew
+  stores no password of its own, so there is no secret to leak and no reset flow to abuse.
+  Biometrics are never accepted for a release, and while a session runs biometric *device* unlock
+  can be suppressed so every check of the phone costs a full PIN. Once locked, Curfew adds no
+  second lock on top of that one.
+- **Keyguard changes are tied to the lock's life**: biometric suppression is lifted the moment the
+  lock ends or the delayed release fires, is restored after a crash, reboot or uninstall, and is
+  never applied by a remote session without local confirmation.
 - **Last-resort exit**: every lock, at every strictness level, can be released by starting a
   **24-hour delayed release**. It cannot be shortened, and it is visible from the moment the lock
   starts. This is what separates a commitment device from a trap. Tools without one produce users

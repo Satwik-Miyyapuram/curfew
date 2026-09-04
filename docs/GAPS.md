@@ -34,9 +34,13 @@ independently of the app. Never advertised as guaranteed.
 15s idle, stopped when no rules can fire); VPN filter enabled only while a session with domain
 rules is active. Measured in Phase 1 exit criteria, not assumed.
 
-**A5. Multi-user, work profiles, secondary users.** **OPEN** — blocking applies per user profile;
-a work profile or second user is an obvious bypass.
-*Owed before Phase 5:* detect other profiles and warn, or document as out of scope.
+**A5. Multi-user, work profiles, secondary users.** Blocking applies per user profile; a work
+profile or second user is an obvious bypass.
+*Decision:* **detect and disclose, do not chase.** Enforcing across users requires device-owner
+mode, which is out (D4), so we detect that other users or a work profile exist and say so on the
+health screen — "apps are not blocked in your work profile" — rather than implying a guarantee we
+cannot keep. The threat model already says a determined user gets out; the failure we refuse to
+ship is a *silent* one.
 
 **A6. Permission onboarding is the actual product.** Five permissions with scary system dialogs
 (accessibility, usage access, overlay, notification access, VPN consent, battery exemption, and
@@ -44,6 +48,16 @@ optionally device admin) is where users abandon these apps.
 *Decision:* a staged wizard — the app must be useful after granting *one* permission, with each
 further permission framed as "this adds X". Explicit "what breaks without this" per item, and a
 health screen showing which layers are live.
+
+**A7. Suppressing biometric device unlock (D7).** The strong form needs Device Admin plus
+`DevicePolicyManager.setKeyguardDisabledFeatures(KEYGUARD_DISABLE_BIOMETRICS)`. Whether a plain
+device admin — not a device owner, which is out under D4 — may set that varies by Android version
+and OEM, and recent releases have narrowed what legacy admins can do.
+*Decision:* treat it as unproven until measured. **Spike on real hardware before Phase 5 promises
+it**, across at least one Pixel and one heavily-skinned OEM device, and record the API level where
+it stops working. The always-available layer beneath it is our own release prompt refusing
+biometrics, which needs no permission at all; if the strong form is unavailable the health screen
+says device unlock is unaffected rather than letting the user assume otherwise.
 
 ## B. Windows
 
@@ -55,7 +69,11 @@ like malware to heuristic AV. Code-signing certificates cost €200-400/year, wh
 scoop** (which users trust as a channel) and via GitHub Releases with published checksums and
 reproducible-build instructions; document AV false-positive workarounds and submit the binaries to
 Microsoft and major vendors for allowlisting once there is a release. Revisit signing only if
-donations cover it. **OPEN:** whether to also apply for the free-for-OSS certificate programs.
+donations cover it.
+*Also decided:* **no free-for-OSS certificate programs.** They require re-application, attach the
+identity of one maintainer to the binaries, and can be revoked on a vendor's judgement — a
+dependency on someone else's goodwill for a project whose whole premise is depending on nobody.
+Reproducible builds are the substitute: verifiability instead of vouching.
 
 **B2. DoH and alternative DNS defeat hosts-file blocking.** Already noted; the phased answer is
 hosts (v1) then WFP (Phase 5). WFP work is the largest single unknown in the Windows track and
@@ -129,6 +147,20 @@ mode. Refusing that use case is a design constraint, and it should be stated in 
 on a device.
 *Decision:* SQLite encrypted at rest (SQLCipher or platform keystore-wrapped key), no cloud backup
 of the stats DB by default (`allowBackup=false`), export requires explicit action.
+
+**D5. Biometric suppression must never outlive the lock.** Turning off fingerprint unlock is a
+change the user feels on every unlock, everywhere — not just inside Curfew. If our process dies
+with the policy still set, we have degraded someone's device without being around to undo it.
+*Decision:* the restriction is a property of the lock, not a setting. It is lifted when the lock
+expires, when the 24-hour delayed release fires, when the session is released, on Device Admin
+deactivation, and on uninstall; it is re-evaluated (and cleared if no session is live) on every
+boot and every service start; and a synced remote session can never apply it without local
+confirmation, exactly like Frozen mode (B4). `LockSet::suppresses_biometrics` returns false for any
+expired lock, so the core cannot express "suppressed forever" even by mistake.
+
+**D6. One gate, not two (D7).** Curfew does not put a password on its own settings, app entry or
+uninstall path. A second secret is a second thing to forget and a second thing to leak, and it
+buys nothing: edits that would weaken an active session are refused outright until the lock ends.
 
 ## E. Process and delivery
 
