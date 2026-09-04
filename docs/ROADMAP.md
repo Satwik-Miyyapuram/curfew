@@ -30,9 +30,9 @@ identically from a config file on Linux and Windows; property suite proves lock-
 - [x] Own-UI accessibility pass (GAPS E5)
 - [x] Trusted clock: a wall clock that outruns monotonic uptime is refused, so winding the clock
       forward cannot shorten a timer lock (GAPS C6)
-- [ ] Optional Device Admin for uninstall protection, last in the wizard, released with the last
+- [x] Optional Device Admin for uninstall protection, last in the wizard, released with the last
       lock (GAPS G2)
-- [ ] Restricted Settings walkthrough for sideloaded installs (GAPS G4)
+- [x] Restricted Settings walkthrough for sideloaded installs (GAPS G4)
 
 **Exit criteria:** blocks survive reboot and force-stop; a locked session cannot be ended early by
 any in-app path, by clearing data, or by changing the system clock; added battery drain <3%/day
