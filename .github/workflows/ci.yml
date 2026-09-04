@@ -66,3 +66,33 @@ jobs:
           v0=crates/curfew-core/tests/golden/v0_example.toml
           cargo run --quiet -p curfew-cli -- migrate "$v0" > /tmp/migrated.toml
           cargo run --quiet -p curfew-cli -- check /tmp/migrated.toml
+
+  android:
+    name: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # The unit tests load the real core through JNA, so the host needs a matching library as
+          # well as the four Android targets the APK packages.
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        working-directory: android
+        run: ./gradlew --no-daemon :policy:testDebugUnitTest :app:testDebugUnitTest
+      # The release build is where the shrinker gets a vote: a keep rule that is missing here is a
+      # crash on a user's device and nowhere else.
+      - name: Release build
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: curfew-release-apk
+          path: android/**/outputs/apk/release/*.apk
+          if-no-files-found: error
