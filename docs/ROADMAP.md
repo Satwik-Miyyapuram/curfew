@@ -28,6 +28,11 @@ identically from a config file on Linux and Windows; property suite proves lock-
 - [x] Staged permission wizard + protection-health screen (GAPS A6)
 - [x] Boot/force-stop/OEM-killer resilience + downtime banner (GAPS A1)
 - [x] Own-UI accessibility pass (GAPS E5)
+- [x] Trusted clock: a wall clock that outruns monotonic uptime is refused, so winding the clock
+      forward cannot shorten a timer lock (GAPS C6)
+- [ ] Optional Device Admin for uninstall protection, last in the wizard, released with the last
+      lock (GAPS G2)
+- [ ] Restricted Settings walkthrough for sideloaded installs (GAPS G4)
 
 **Exit criteria:** blocks survive reboot and force-stop; a locked session cannot be ended early by
 any in-app path, by clearing data, or by changing the system clock; added battery drain <3%/day
@@ -40,6 +45,9 @@ measured over 24h; instrumented tests green on an emulator in CI.
 - [ ] Same profiles/sessions/schedules/strictness as Android, same `curfew.toml`
 - [ ] Frozen mode with a cancellable countdown (GAPS B4)
 - [ ] x64 + ARM64 builds; winget/scoop manifests; checksums; AV false-positive notes (GAPS B1, B5)
+- [ ] Browser extension as a granularity layer only — URL-path rules a service cannot see, joined to
+      the service by a native-messaging heartbeat so a removed extension blocks the browser outright
+      (GAPS G1). It is never the enforcement floor.
 
 **Exit criteria:** the same config file produces identical decisions on Android and Windows;
 service survives kill, reboot and clock rollback; uninstaller refuses during a locked block while

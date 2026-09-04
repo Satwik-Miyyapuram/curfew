@@ -217,16 +217,19 @@ The two are joined so the weak layer cannot be quietly removed — during a lock
 requires a native-messaging heartbeat from the extension, and a missing extension blocks the browser
 process outright. The granularity is then gained without spending any enforcement.
 
-**G2. Device Admin was dropped for the wrong reason — OPEN.** A7 removed Device Admin because it
+**G2. Device Admin was dropped for the wrong reason — CLOSED, adopted (2026-09-05).** A7 removed Device Admin because it
 cannot suppress biometric unlock, which is true. Curbox uses it for something else: `AdminReceiver`
 plus `AntiUninstallBlocker` keeps the admin active so the app cannot be uninstalled from Settings,
 and bounces the user off the deactivation screen while a lock is held. Device *admin* is not device
 *owner*: it needs no factory-reset provisioning and is deactivated by the user at will once a lock
 ends, so it stays inside both D2 (never unrecoverable) and the standing constraint that anything
 requiring a factory reset is out. It is a real strengthening that A7 discarded as a side effect.
-*Decision needed:* re-evaluate Device Admin for uninstall protection only, weighed against A6 — it
-is the scariest dialog in onboarding, so it must be optional, last in the wizard, and clearly
-described as "makes uninstalling harder while a lock is running", never as a requirement.
+*Decision (user, 2026-09-05):* adopt it, the way Curbox does. Device Admin is requested for
+uninstall protection only. It stays optional and last in the permission wizard, described as "makes
+uninstalling harder while a lock is running" and never as a requirement, and the deactivation screen
+is bounced only while a lock is actually held — once every lock has ended, deactivation and
+uninstall are ordinary again, which is what keeps D2 intact. No device *owner*, no provisioning, no
+factory reset: that line is unchanged and permanent.
 
 **G3. Their sync design is unusable here; their envelope is not — CLOSED.** Curbox syncs through a
 hosted Supabase project with accounts (`src/lib/supabase.ts`), which is a server and a recurring
@@ -237,3 +240,22 @@ bound to `user|namespace|record_key` so a ciphertext cannot be replayed into ano
 payload carries the DEK to a new device without retyping the passphrase.
 *Decision:* keep D10's pairing as designed and reuse this AAD-binding discipline for the op-log
 records, over Curfew's own transports. No dependency on their code is taken.
+
+**G4. Restricted Settings is a wall in onboarding, and it must be walked through — OPEN.**
+Android 13+ refuses Accessibility and notification-listener access to any app installed outside a
+store session ("Restricted setting" greyed out), and the way through is not in the Accessibility
+screen at all: App info → ⋮ → *Allow restricted settings*. A sideloaded APK — which is how every
+F-Droid and GitHub-release install of Curfew arrives — hits this before it can enforce anything, and
+an unexplained greyed-out toggle is where users give up.
+*Decision:* the permission wizard detects the condition rather than guessing at it (the service is
+not enabled and `Settings.Secure` shows it cannot be), and shows the App-info route as its own step
+with the exact menu path, deep-linking to `ACTION_APPLICATION_DETAILS_SETTINGS` since the restricted
+dialog itself cannot be launched. It is a documented install step on the site and in the release
+notes, not a footnote.
+
+**G5. Curbox is a reference implementation, not a dependency — CLOSED.** It is GPL-3 and Curfew is
+AGPL-3, so its code could be reused compatibly, but nothing is copied: the two differ on the point
+that matters (a server versus none), and a copied file drags its design with it. What Curbox is
+worth is its *answers* — which Android APIs it used for uninstall protection, how it handles
+Restricted Settings, what its extension can and cannot reach — and those are read when this project
+is stuck on the same question. Findings get recorded here, in this section, with the mechanism named.
