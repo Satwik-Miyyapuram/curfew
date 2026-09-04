@@ -489,3 +489,94 @@ fn the_picker_cannot_invent_a_profile() {
         .expect_err("a profile that does not exist is an error");
     assert!(matches!(err, CurfewError::Config { .. }));
 }
+
+// --- trusted time -------------------------------------------------------------------------------
+
+fn observe(c: &Curfew, wall: i64, uptime: i64, boot_id: u64) -> Value {
+    let out = c.observe_clock(wall, uptime, boot_id).expect("a reading is judged");
+    serde_json::from_str(&out).expect("the verdict is JSON")
+}
+
+#[test]
+fn the_first_reading_is_taken_at_face_value_and_becomes_the_baseline() {
+    let c = curfew();
+    let verdict = observe(&c, NOW, 1_000, 3);
+
+    assert_eq!(verdict["now"], NOW);
+    assert_eq!(verdict["tampered"], false);
+    assert_eq!(c.trusted_now(), Some(NOW));
+}
+
+#[test]
+fn there_is_no_trusted_time_before_anything_has_been_observed() {
+    assert_eq!(curfew().trusted_now(), None);
+}
+
+#[test]
+fn a_clock_wound_forward_cannot_end_a_locked_session_through_the_boundary() {
+    // The attack, whole: a two-hour timer lock, and a user who sets the device clock four hours
+    // forward a minute after it starts.
+    let c = curfew();
+    observe(&c, NOW, 1_000, 3);
+    start(&c, "s1", "deep-work", json!([{"kind": "timer"}]), Some(NOW + 2 * 3_600));
+
+    let verdict = observe(&c, NOW + 4 * 3_600, 1_060, 3);
+
+    assert_eq!(verdict["now"], NOW + 60, "the boundary credited stolen time");
+    assert_eq!(verdict["refused_forward"], 4 * 3_600 - 60);
+    assert_eq!(verdict["tampered"], true);
+
+    // And the session is still running at the time the verdict actually licenses.
+    let reaped: Value =
+        serde_json::from_str(&c.reap(verdict["now"].as_i64().unwrap()).expect("reap")).unwrap();
+    assert_eq!(reaped.as_array().expect("an array").len(), 0, "the lock ended early");
+
+    let sessions: Value = serde_json::from_str(&c.sessions_json().expect("sessions")).unwrap();
+    assert_eq!(sessions["running"].as_array().expect("an array").len(), 1);
+}
+
+#[test]
+fn honest_downtime_across_a_reboot_is_credited_and_reported_as_unverified() {
+    let c = curfew();
+    observe(&c, NOW, 1_000, 3);
+
+    let verdict = observe(&c, NOW + 8 * 3_600, 40, 4);
+
+    assert_eq!(verdict["now"], NOW + 8 * 3_600);
+    assert_eq!(verdict["unverified"], 8 * 3_600);
+    assert_eq!(verdict["tampered"], false, "being switched off is not tampering");
+}
+
+#[test]
+fn the_witness_survives_the_process_dying() {
+    let c = curfew();
+    observe(&c, NOW, 1_000, 3);
+    observe(&c, NOW + 600, 1_600, 3);
+    let saved = c.clock_witness_json().expect("serializes").expect("there is a witness");
+
+    // A new object is what a restart looks like from here.
+    let restarted = curfew();
+    assert_eq!(restarted.trusted_now(), None);
+    restarted.restore_clock(saved).expect("the witness loads");
+    assert_eq!(restarted.trusted_now(), Some(NOW + 600));
+
+    // And it refuses what it would have refused had it never died.
+    let verdict = observe(&restarted, NOW + 90_000, 1_660, 3);
+    assert_eq!(verdict["now"], NOW + 660);
+    assert_eq!(verdict["refused_forward"], 90_000 - 660);
+}
+
+#[test]
+fn there_is_no_witness_to_save_before_the_first_reading() {
+    assert_eq!(curfew().clock_witness_json().expect("no error"), None);
+}
+
+#[test]
+fn a_corrupt_witness_is_a_payload_error_rather_than_a_reset_baseline() {
+    // Silently starting over would be the bug worth having: an attacker who can corrupt the stored
+    // witness would get a fresh baseline, which is the whole prize.
+    match curfew().restore_clock("{\"trusted\": ".into()).unwrap_err() {
+        CurfewError::Payload { detail } => assert!(!detail.is_empty()),
+        other => panic!("expected a payload error, got {other:?}"),
+    }
+}

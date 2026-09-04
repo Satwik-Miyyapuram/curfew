@@ -52,7 +52,9 @@ class EnforcementService : Service() {
      */
     private suspend fun tick() {
         while (runtime.scope.isActive) {
-            val now = runtime.clock.now()
+            // Trusted time, not the wall clock: a device whose clock was moved forward must not
+            // be able to reconcile a lock away, and this loop is the thing that would do it.
+            val now = runtime.trustedNow()
             val events = runtime.calendarEvents(now)
             runtime.reconcile(now, events)
             // Written after reconciling, so the recorded time is one Curfew was demonstrably

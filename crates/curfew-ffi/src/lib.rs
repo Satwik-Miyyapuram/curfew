@@ -15,7 +15,7 @@ use curfew_core::engine::{charged_keys, State};
 use curfew_core::schedule::{active_at, next_change_after, CalendarEvent};
 use curfew_core::session::{reconcile, Session, Sessions};
 use curfew_core::target::Observation;
-use curfew_core::{decide, Config, Lock, Timestamp};
+use curfew_core::{decide, ClockWitness, Config, Lock, Reading, Timestamp, Verdict};
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
@@ -50,6 +50,10 @@ fn payload<E: std::fmt::Display>(e: E) -> CurfewError {
 pub struct Curfew {
     config: RwLock<Config>,
     sessions: RwLock<Sessions>,
+    /// `None` until the first reading. Held here rather than on the platform side for the same
+    /// reason sessions are: the guarantee that a clock change cannot shorten a lock is only worth
+    /// anything if there is exactly one place that decides what time it is.
+    clock: RwLock<Option<ClockWitness>>,
 }
 
 #[uniffi::export]
@@ -63,6 +67,7 @@ impl Curfew {
         Ok(Arc::new(Self {
             config: RwLock::new(config),
             sessions: RwLock::new(Sessions::default()),
+            clock: RwLock::new(None),
         }))
     }
 
@@ -201,6 +206,66 @@ impl Curfew {
     pub fn restore_sessions(&self, sessions_json: String) -> Result<(), CurfewError> {
         let sessions: Sessions = serde_json::from_str(&sessions_json).map_err(payload)?;
         *self.sessions.write().expect("sessions lock") = sessions;
+        Ok(())
+    }
+
+
+    // --- trusted time -----------------------------------------------------------------------
+
+    /// Take a reading of the device's wall clock and its monotonic uptime, and return the
+    /// [`curfew_core::Verdict`] as JSON: the time locks should be judged against, plus how much
+    /// the reading tried to claim and was refused.
+    ///
+    /// The platform must pass the two clocks read at the same moment, and a `boot_id` that changes
+    /// on every restart. Everything the caller does with time afterwards should use the `now` this
+    /// returns, not the wall clock it passed in.
+    pub fn observe_clock(
+        &self,
+        wall: Timestamp,
+        uptime: i64,
+        boot_id: u64,
+    ) -> Result<String, CurfewError> {
+        let reading = Reading { wall, uptime, boot_id };
+        let mut guard = self.clock.write().expect("clock lock");
+        let verdict = match guard.as_mut() {
+            Some(witness) => witness.observe(reading),
+            None => {
+                // Nothing to check a first reading against, so it is taken at face value and
+                // recorded as the baseline every later reading is measured from.
+                let witness = ClockWitness::new(reading);
+                let now = witness.now();
+                *guard = Some(witness);
+                Verdict { now, refused_forward: 0, refused_backward: 0, unverified: 0 }
+            }
+        };
+        serde_json::to_string(&serde_json::json!({
+            "now": verdict.now,
+            "refused_forward": verdict.refused_forward,
+            "refused_backward": verdict.refused_backward,
+            "unverified": verdict.unverified,
+            "tampered": verdict.tampered(),
+        }))
+        .map_err(payload)
+    }
+
+    /// The current trusted time, without taking a reading. `None` before the first observation.
+    pub fn trusted_now(&self) -> Option<Timestamp> {
+        self.clock.read().expect("clock lock").as_ref().map(ClockWitness::now)
+    }
+
+    /// The witness as JSON, for the platform to write down. Without persistence a restart would
+    /// reset the baseline, and resetting the baseline is exactly what an attacker wants.
+    pub fn clock_witness_json(&self) -> Result<Option<String>, CurfewError> {
+        match self.clock.read().expect("clock lock").as_ref() {
+            Some(witness) => serde_json::to_string(witness).map(Some).map_err(payload),
+            None => Ok(None),
+        }
+    }
+
+    /// Restore a witness written by [`Curfew::clock_witness_json`].
+    pub fn restore_clock(&self, witness_json: String) -> Result<(), CurfewError> {
+        let witness: ClockWitness = serde_json::from_str(&witness_json).map_err(payload)?;
+        *self.clock.write().expect("clock lock") = Some(witness);
         Ok(())
     }
 

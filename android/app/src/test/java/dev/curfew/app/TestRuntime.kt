@@ -64,6 +64,7 @@ locks = [{ kind = "timer" }]
         now: Long = FRIDAY_0930,
         configToml: String = CONFIG,
         context: Context = ApplicationProvider.getApplicationContext(),
+        clock: MovableClock = MovableClock(now),
     ): CurfewRuntime {
         val db = Room.inMemoryDatabaseBuilder(context, CurfewDatabase::class.java)
             .allowMainThreadQueries()
@@ -76,7 +77,7 @@ locks = [{ kind = "timer" }]
             policy = Policy.load(configToml),
             config = store,
             db = db,
-            clock = MovableClock(now),
+            clock = clock,
         )
     }
 }
@@ -87,24 +88,55 @@ locks = [{ kind = "timer" }]
  * written down.
  */
 object CurfewRuntimeFactory {
-    fun reopen(from: CurfewRuntime, now: Long): CurfewRuntime = CurfewRuntime(
+    fun reopen(
+        from: CurfewRuntime,
+        now: Long,
+        clock: MovableClock = MovableClock(now),
+    ): CurfewRuntime = CurfewRuntime(
         context = ApplicationProvider.getApplicationContext(),
         policy = Policy.load(from.config.read()),
         config = from.config,
         db = from.db,
-        clock = MovableClock(now),
+        clock = clock,
     )
 }
 
-/** A clock a test can move, so a budget can run out without anyone waiting twenty minutes. */
+/**
+ * A clock a test can move, so a budget can run out without anyone waiting twenty minutes.
+ *
+ * The wall clock and the monotonic clock move together under [advance], which is what an honest
+ * device does. [wind] moves only the wall clock, which is what a user trying to end a lock early
+ * does, and [reboot] restarts uptime the way a real restart does.
+ */
 class MovableClock(private var seconds: Long) : Clock {
+    private var uptimeSeconds: Long = 1_000
+    private var boot: Long = 1
+
     override fun now(): Long = seconds
 
+    override fun uptime(): Long = uptimeSeconds
+
+    override fun bootId(): Long = boot
+
+    /** Real time passing: both clocks agree, because nothing has been tampered with. */
     fun advance(by: Long) {
         seconds += by
+        uptimeSeconds += by
     }
 
     fun set(to: Long) {
         seconds = to
+    }
+
+    /** Move the wall clock and nothing else. The monotonic clock is what gives this away. */
+    fun wind(by: Long) {
+        seconds += by
+    }
+
+    /** Switch the device off for [downtime] seconds and back on. */
+    fun reboot(downtime: Long) {
+        seconds += downtime
+        uptimeSeconds = 0
+        boot += 1
     }
 }

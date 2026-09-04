@@ -269,6 +269,7 @@ dependencies = [
  "chrono-tz",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "toml 0.8.23",
 ]

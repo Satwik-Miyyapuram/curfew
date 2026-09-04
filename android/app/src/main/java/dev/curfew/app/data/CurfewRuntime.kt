@@ -144,8 +144,52 @@ class CurfewRuntime internal constructor(
     /** Read sessions back after a reboot, a force-stop or an update. */
     suspend fun restore(now: Long = clock.now()) = gate.withLock {
         db.state().get(KEY_SESSIONS)?.let { policy.restoreSessions(Policy.json.decodeFromString(it)) }
+        // The clock witness is restored before anything is judged: a restart that reset the
+        // baseline would hand an attacker exactly what moving the clock was meant to buy.
+        db.state().get(KEY_CLOCK)?.let { runCatching { policy.restoreClock(it) } }
         detectDowntime(now)
         refresh(now)
+    }
+
+    // --- trusted time ------------------------------------------------------------------------------
+
+    private val _clockTamper = MutableStateFlow<ClockTamper?>(null)
+
+    /**
+     * The last attempt to move the clock while Curfew was running, if there was one.
+     *
+     * Distinct from [downtime]: a gap means nothing was enforced, whereas this means enforcement
+     * was working and refused what it was told. It is worth saying out loud, because the honest
+     * answer to "why is my lock still on?" is that the device was asked to lie about the time.
+     */
+    val clockTamper: StateFlow<ClockTamper?> = _clockTamper.asStateFlow()
+
+    suspend fun acknowledgeClockTamper() {
+        _clockTamper.value = null
+    }
+
+    /**
+     * Read both device clocks, decide what the reading is worth, and return the time everything
+     * else should use.
+     *
+     * Every caller that would otherwise reach for the wall clock goes through here. The wall clock
+     * is a code path like any other, and invariant 2 says no code path may shorten a lock.
+     */
+    suspend fun trustedNow(): Long {
+        val verdict = policy.observeClock(clock.now(), clock.uptime(), clock.bootId())
+        policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
+        if (verdict.tampered) {
+            _clockTamper.value = ClockTamper(
+                at = verdict.now,
+                forwardSeconds = verdict.refusedForward,
+                backwardSeconds = verdict.refusedBackward,
+            )
+            val direction =
+                if (verdict.refusedForward > 0) "forward ${verdict.refusedForward}s"
+                else "back ${verdict.refusedBackward}s"
+            audit(verdict.now, "enforcement.clock", "refused $direction")
+        }
+        return verdict.now
     }
 
     // --- downtime ----------------------------------------------------------------------------------
@@ -227,6 +271,7 @@ class CurfewRuntime internal constructor(
     companion object {
         private const val KEY_SESSIONS = "sessions"
         private const val KEY_HEARTBEAT = "heartbeat"
+        private const val KEY_CLOCK = "clock_witness"
 
         /**
          * How long a silence has to be before it is worth reporting. The service ticks every
@@ -269,7 +314,25 @@ class CurfewRuntime internal constructor(
 fun interface Clock {
     fun now(): Long
 
+    /**
+     * Seconds since boot, from a source the user cannot set.
+     *
+     * This is what makes a timer lock hold: a wall clock that runs ahead of uptime within one boot
+     * is demonstrably wrong by the difference, and the difference is refused. The default tracks
+     * [now] exactly, which is the honest device a test means when it says nothing about uptime.
+     */
+    fun uptime(): Long = now()
+
+    /**
+     * A value that changes on every restart, so a reboot is never read as uptime running backwards
+     * and a restart never looks like tampering. Zero is a fine default: a device whose uptime went
+     * down has plainly rebooted whatever its boot id says.
+     */
+    fun bootId(): Long = 0
+
     object System : Clock {
         override fun now(): Long = java.lang.System.currentTimeMillis() / 1000
+
+        override fun uptime(): Long = android.os.SystemClock.elapsedRealtime() / 1000
     }
 }

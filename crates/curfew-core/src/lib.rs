@@ -4,6 +4,7 @@
 //! Nothing here reads a clock, a file or a device. `now` is always a parameter.
 
 pub mod budget;
+pub mod clock;
 pub mod config;
 pub mod engine;
 pub mod lock;
@@ -11,6 +12,7 @@ pub mod schedule;
 pub mod session;
 pub mod target;
 
+pub use clock::{ClockWitness, Reading, Verdict};
 pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use config::{Action, Config, ConfigError, Platform, Profile, Rule, CONFIG_SCHEMA_VERSION};
 pub use engine::{decide, BlockReason, Decision, State};

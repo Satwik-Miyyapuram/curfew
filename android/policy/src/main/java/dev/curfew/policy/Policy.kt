@@ -133,6 +133,26 @@ class Policy private constructor(private val inner: Curfew) {
     fun restoreSessions(sessions: Sessions) =
         inner.restoreSessions(json.encodeToString(sessions))
 
+
+    // --- trusted time ---------------------------------------------------------------------------
+
+    /**
+     * Judge a reading of the device's two clocks. The returned [ClockVerdict.now] is the time every
+     * later decision should use: a wall clock moved forward while the device was running buys no
+     * time, because uptime cannot be set and is what the verdict is measured against.
+     */
+    fun observeClock(wall: Long, uptime: Long, bootId: Long): ClockVerdict =
+        json.decodeFromString(inner.observeClock(wall, uptime, bootId.toULong()))
+
+    /** The current trusted time, or null before the first reading. */
+    fun trustedNow(): Long? = inner.trustedNow()
+
+    /** The witness as JSON, to be written down: a restart must not reset the baseline. */
+    fun clockWitness(): String? = inner.clockWitnessJson()
+
+    /** Restore a witness written by [clockWitness]. */
+    fun restoreClock(witnessJson: String) = inner.restoreClock(witnessJson)
+
     fun activeProfiles(now: Long): List<String> = inner.activeProfiles(now)
 
     fun mergedLock(now: Long): LockSet = json.decodeFromString(inner.mergedLockJson(now))
@@ -375,3 +395,20 @@ data class Launches(
 /** A profile as a chooser needs it: the id rules refer to, and the name a person reads. */
 @Serializable
 data class ProfileName(val id: String, val name: String)
+
+/**
+ * What one reading of the device's clocks turned out to mean.
+ *
+ * [refusedForward] and [refusedBackward] are seconds the wall clock claimed, or lost, that the
+ * monotonic clock did not support within a single boot — always tampering, and never credited.
+ * [unverified] is time across a reboot, which honest downtime and a clock change look identical
+ * from here, so it is credited and reported rather than refused.
+ */
+@Serializable
+data class ClockVerdict(
+    val now: Long,
+    @SerialName("refused_forward") val refusedForward: Long,
+    @SerialName("refused_backward") val refusedBackward: Long,
+    val unverified: Long,
+    val tampered: Boolean,
+)
