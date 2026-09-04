@@ -74,19 +74,18 @@ and all-day events handled correctly in a dated test suite; a deleted event rele
 ## Phase 5 — Depth
 - [ ] Allowances/budgets with refill policies, launch limits, friction delays
 - [ ] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
-- [ ] Biometric keyguard suppression while a session runs — spike on real hardware first (GAPS A7),
-      with guaranteed restore on end / crash / boot / uninstall (GAPS D5)
+- [x] ~~Biometric keyguard suppression~~ — researched and dropped: it requires device owner or
+      profile owner, both out under D4 (DECISIONS D9, GAPS A7). Device Admin drops with it.
 - [ ] Emergency passes with quota + cooldown
 - [ ] Allow-only mode; notification muting; keyword blocking
 - [ ] Browser extension (Chrome + Firefox), paired to the service, removal detected
 - [ ] Android VpnService DNS filter incl. DoH endpoint blocking (GAPS A2)
 - [ ] Windows WFP filtering — spike first, it is the largest unknown (GAPS B2)
-- [ ] Hardening: Device Admin uninstall gate, service ACLs, clock-tamper detection, re-lock on boot
+- [ ] Hardening: service ACLs, clock-tamper detection, re-lock on boot
 
 **Exit criteria:** domain rules hold with Chrome DoH enabled; disabling the browser extension during
 a locked session is detected and reported; no hardening step can make a device unrecoverable;
-biometric unlock is provably restored after force-stop, reboot and uninstall on every device the
-spike covered.
+killing the Curfew service mid-session leaves no WFP filter behind (D11).
 
 ## Phase 6 — Release
 - [ ] Widgets, quick tiles, CLI, webhooks on session start/end

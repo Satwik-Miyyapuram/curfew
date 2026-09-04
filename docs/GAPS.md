@@ -22,7 +22,9 @@ inspection differs across Chrome, Firefox, Samsung Internet, Brave, and breaks o
 robust), accessibility URL reading only as an enhancement for path-level rules, with a per-browser
 adapter table and graceful "domain-level only" fallback when a browser is unrecognized. Note DoH:
 Chrome/Firefox with DNS-over-HTTPS bypass DNS filtering entirely, so the VPN layer must also block
-known DoH endpoints, or the user must be told the rule is best-effort for that browser.
+known DoH endpoints, or the user must be told the rule is best-effort for that browser. Concretely (D11): serve
+NXDOMAIN for `use-application-dns.net` so Firefox disables DoH itself, block the known DoH endpoint
+list, and label any browser that still resolves privately as best-effort on the health screen.
 
 **A3. In-app targets (Shorts, Reels, explore tabs).** Requires accessibility node matching per app,
 and it breaks with app updates.
@@ -49,17 +51,16 @@ optionally device admin) is where users abandon these apps.
 further permission framed as "this adds X". Explicit "what breaks without this" per item, and a
 health screen showing which layers are live.
 
-**A7. Suppressing biometric device unlock (D7).** The strong form needs Device Admin plus
-`DevicePolicyManager.setKeyguardDisabledFeatures(KEYGUARD_DISABLE_BIOMETRICS)`. Whether a plain
-device admin — not a device owner, which is out under D4 — may set that varies by Android version
-and OEM, and recent releases have narrowed what legacy admins can do.
-*Decision:* treat it as unproven until measured. **Spike on real hardware before Phase 5 promises
-it**, across at least one Pixel and one heavily-skinned OEM device, and record the API level where
-it stops working. The always-available layer beneath it is our own release prompt refusing
-biometrics, which needs no permission at all; if the strong form is unavailable the health screen
-says device unlock is unaffected rather than letting the user assume otherwise.
-
-## B. Windows
+**A7. Suppressing biometric device unlock — CLOSED: we cannot, and we say so (D9).**
+Researched rather than spiked: `setKeyguardDisabledFeatures(KEYGUARD_DISABLE_BIOMETRICS)` requires
+the caller to be a **device owner or profile owner**. Device owner needs factory-reset provisioning
+(out under D4, by explicit user constraint); profile owner needs a managed work profile and would
+not touch the personal keyguard anyway. No third-party API exists.
+*Decision:* the feature is removed from the plan, not deferred — `LockSet` no longer carries it, so
+the core cannot express a policy nothing can enforce. **Device Admin is dropped entirely**, which
+also removes the scariest permission from onboarding (A6). What remains, and is the part that
+matters: Curfew never accepts a biometric for a release, so ending a session early always costs a
+typed PIN. The health screen states that phone unlock itself is unaffected.
 
 **B1. Unsigned binaries = SmartScreen warnings and antivirus false positives.** A service that
 blocks uninstallation, kills processes, rewrites hosts and filters network traffic looks exactly
@@ -75,9 +76,13 @@ identity of one maintainer to the binaries, and can be revoked on a vendor's jud
 dependency on someone else's goodwill for a project whose whole premise is depending on nobody.
 Reproducible builds are the substitute: verifiability instead of vouching.
 
-**B2. DoH and alternative DNS defeat hosts-file blocking.** Already noted; the phased answer is
-hosts (v1) then WFP (Phase 5). WFP work is the largest single unknown in the Windows track and
-should get a spike before Phase 5 is scheduled.
+**B2. DoH and alternative DNS defeat hosts-file blocking — CLOSED (D11).** Ladder is hosts
+(Phase 2) then a local DNS proxy then **user-mode WFP** (Phase 5). Researched: WFP block filters by
+`FWPM_CONDITION_ALE_APP_ID` need no kernel driver — only callouts do — so the Windows track needs no
+driver signing and carries no boot-time risk. Filters are added on a dynamic session, so they die
+with the process and a crash cannot strand the machine offline. DoH itself: NXDOMAIN for the
+`use-application-dns.net` canary so Firefox stands down, a blocked DoH endpoint list, and honest
+"best effort for this browser" labelling where a browser still resolves privately.
 
 **B3. Non-admin and multi-session Windows.** Standard users cannot install the service; a second
 Windows account is an obvious bypass.
@@ -94,17 +99,19 @@ x86_64 Windows toolchain runs under emulation locally — slower, acceptable.
 
 ## C. Sync and crypto
 
-**C1. "Strictest lock wins" is not yet a definition.** Locks form a partial order, not a total one
-(is a password lock stricter than a 2-hour timer?).
-*Decision owed in Phase 3, before any merge code:* define a lattice — merge produces a lock whose
-release requires satisfying *every* merged lock's condition (conjunction), with the end time being
-the maximum. Conjunction is total, monotone, and impossible to weaken by merging, which is exactly
-the invariant. Write it as property tests first.
+**C1. "Strictest lock wins" is not yet a definition — CLOSED and implemented.** Locks form a
+partial order, not a total one (is a credential lock stricter than a 2-hour timer?).
+*Decision, now shipped in `crates/curfew-core/src/lock.rs`:* merge is a lattice join — conjunction
+of every merged lock's conditions, maximum of the end times, minimum of any promised delayed
+release, with the empty set as the identity element. Monotonicity holds by construction rather than
+by care. Six property tests hold it down, and they caught a real non-commutativity bug on the first
+run, which is the whole argument for writing them first.
 
-**C2. Pairing protocol unspecified.** "QR + PAKE" is a hand-wave.
-*Decision owed in Phase 3:* concrete choice (SPAKE2 or a QR-transferred high-entropy key with no
-PAKE at all — simpler and sufficient when the secret never crosses a network), plus replay
-protection, per-device keys, and a documented revocation path.
+**C2. Pairing protocol — CLOSED (D10).** A 256-bit group key carried by QR code, HKDF-SHA256
+to the group key, Ed25519 per-device identities, `device.join` / `device.admit` / `device.revoke`
+ops, 120-second pairing window, 52-character base32 fallback for a device with no camera. No PAKE:
+a PAKE exists to rescue a low-entropy secret, and an optical channel does not carry one. Replay is
+the op-log's job (hash chain + per-device sequence numbers), not pairing's.
 
 **C3. Device revocation during an active lock.** Removing a device must not be an escape hatch, but
 a lost or stolen phone must be removable.
@@ -148,15 +155,14 @@ on a device.
 *Decision:* SQLite encrypted at rest (SQLCipher or platform keystore-wrapped key), no cloud backup
 of the stats DB by default (`allowBackup=false`), export requires explicit action.
 
-**D5. Biometric suppression must never outlive the lock.** Turning off fingerprint unlock is a
-change the user feels on every unlock, everywhere — not just inside Curfew. If our process dies
-with the policy still set, we have degraded someone's device without being around to undo it.
-*Decision:* the restriction is a property of the lock, not a setting. It is lifted when the lock
-expires, when the 24-hour delayed release fires, when the session is released, on Device Admin
-deactivation, and on uninstall; it is re-evaluated (and cleared if no session is live) on every
-boot and every service start; and a synced remote session can never apply it without local
-confirmation, exactly like Frozen mode (B4). `LockSet::suppresses_biometrics` returns false for any
-expired lock, so the core cannot express "suppressed forever" even by mistake.
+**D5. A policy we cannot lift must never be set — CLOSED (D9).** Originally about biometric
+suppression, which is now impossible for us to set at all. The general rule it produced survives and
+binds every future feature that changes state outside Curfew: **any system-wide change is a property
+of the lock, not a setting.** It must be lifted when the lock expires, when the delayed release
+fires, when the session is released, and on uninstall; it must be re-evaluated and cleared on every
+boot and service start; and a synced remote session may never apply it without local confirmation
+(B4). The Windows WFP work is the next feature this binds — hence the dynamic filter session in D11,
+which makes the OS itself undo our changes if we die.
 
 **D6. One gate, not two (D7).** Curfew does not put a password on its own settings, app entry or
 uninstall path. A second secret is a second thing to forget and a second thing to leak, and it

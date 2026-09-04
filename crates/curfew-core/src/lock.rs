@@ -10,8 +10,12 @@
 //! monotone — merging can only ever add conditions or push the end time later, never the reverse.
 //! That is exactly the invariant, so it holds by construction rather than by care.
 //!
-//! Note what is *not* here: a password of our own. Credential checks are delegated to the
+//! Note what is *not* here. There is no password of our own: credential checks are delegated to the
 //! operating system's screen lock (DECISIONS D7), so Curfew never stores, hashes or sees a secret.
+//! And there is no device-wide biometric suppression: no third-party app can set that on Android
+//! without device-owner provisioning, which is permanently out (DECISIONS D9). What we *can*
+//! promise is that a release never accepts a fingerprint — [`Lock::DeviceCredential`] asks for the
+//! PIN and only the PIN — so a policy we cannot enforce is not expressible here at all.
 
 use crate::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -68,12 +72,6 @@ pub struct LockSet {
     /// Set when the user starts the 24h delayed release; the lock lifts at this time no matter
     /// what. Once set it can never be moved later or cleared (see [`LockSet::request_release`]).
     pub delayed_release_at: Option<Timestamp>,
-    /// While this session runs, biometric unlock of the *device* is suppressed, so every glance at
-    /// the phone costs a full PIN entry. Not a release condition — a property of the session — but
-    /// it lives here because it must obey the same monotonicity rule: merging can switch it on and
-    /// never off, and it is lifted only when the lock itself ends (DECISIONS D7).
-    #[serde(default)]
-    pub disable_biometric_unlock: bool,
 }
 
 impl LockSet {
@@ -82,18 +80,7 @@ impl LockSet {
     }
 
     pub fn new(conditions: impl IntoIterator<Item = Lock>, ends_at: Option<Timestamp>) -> Self {
-        Self {
-            conditions: conditions.into_iter().collect(),
-            ends_at,
-            delayed_release_at: None,
-            disable_biometric_unlock: false,
-        }
-    }
-
-    /// Suppress biometric device unlock for the life of this lock.
-    pub fn without_biometric_unlock(mut self) -> Self {
-        self.disable_biometric_unlock = true;
-        self
+        Self { conditions: conditions.into_iter().collect(), ends_at, delayed_release_at: None }
     }
 
     pub fn is_locked(&self) -> bool {
@@ -101,12 +88,9 @@ impl LockSet {
     }
 
     /// True when this set constrains nothing at all: no conditions, no end time, no pending
-    /// release, no keyguard change. This is the identity element of [`LockSet::merge`].
+    /// release. This is the identity element of [`LockSet::merge`].
     pub fn is_empty(&self) -> bool {
-        self.conditions.is_empty()
-            && self.ends_at.is_none()
-            && self.delayed_release_at.is_none()
-            && !self.disable_biometric_unlock
+        self.conditions.is_empty() && self.ends_at.is_none() && self.delayed_release_at.is_none()
     }
 
     /// The lattice join. Conjunction of conditions, latest of the end times.
@@ -132,9 +116,6 @@ impl LockSet {
             // The earlier promised release wins: a delayed release already visible to the user is
             // a commitment we made, and merging must not push it back.
             delayed_release_at: min_opt(self.delayed_release_at, other.delayed_release_at),
-            // Boolean OR: the join on {false, true}. Merging can only ever add the restriction.
-            disable_biometric_unlock: self.disable_biometric_unlock
-                || other.disable_biometric_unlock,
         }
     }
 
@@ -160,14 +141,6 @@ impl LockSet {
             return true;
         }
         self.conditions.is_subset(satisfied)
-    }
-
-    /// Whether the platform should be suppressing biometric unlock right now.
-    ///
-    /// Always false once the lock has expired: the restriction is tied to the lock's life, so an
-    /// expired or released session can never leave a device stuck asking for a PIN (GAPS D5).
-    pub fn suppresses_biometrics(&self, now: Timestamp) -> bool {
-        self.disable_biometric_unlock && !self.is_expired(now)
     }
 }
 

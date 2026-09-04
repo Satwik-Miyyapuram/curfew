@@ -36,8 +36,9 @@ without a subscription, without a cloud account, and with your data never leavin
 
 1. No server. No account. No telemetry.
 2. A lock is a promise — nothing shortens it except the conditions you chose.
-3. The OS screen lock is the lock. Curfew never holds a password of its own, and biometrics are
-   refused while a block is running, so getting back in costs a real PIN entry.
+3. The OS screen lock is the lock. Curfew never holds a password of its own, and never accepts a
+   fingerprint to end a session, so getting out early always costs a real PIN entry. Unlocking your
+   phone is unaffected — no app can change that without a factory reset, and we will not go there.
 4. Every enforcement mechanism has a fallback; losing a permission weakens blocking, never kills it.
 5. Everything the UI can do is expressible in an exportable config file.
 6. There is always a way out: a 24-hour delayed release, on every lock, visible from the start.

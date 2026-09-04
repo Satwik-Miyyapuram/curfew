@@ -27,15 +27,13 @@ fn any_lockset() -> impl Strategy<Value = LockSet> {
         prop::collection::vec(any_lock(), 0..4),
         prop::option::of(0i64..1_000_000),
         prop::option::of(0i64..1_000_000),
-        any::<bool>(),
     )
-        .prop_map(|(conds, ends_at, delayed, no_biometrics)| {
+        .prop_map(|(conds, ends_at, delayed)| {
             let conditions: BTreeSet<Lock> = conds.into_iter().collect();
             LockSet {
                 // A delayed release only means anything while something is locked; an unlocked
                 // set can be ended at will, so the generator never invents that state.
                 delayed_release_at: delayed.filter(|_| !conditions.is_empty()),
-                disable_biometric_unlock: no_biometrics && !conditions.is_empty(),
                 conditions,
                 ends_at,
             }
@@ -50,14 +48,13 @@ fn is_at_least_as_strict(merged: &LockSet, original: &LockSet) -> bool {
         return true;
     }
     let keeps_conditions = original.conditions.is_subset(&merged.conditions);
-    let keeps_keyguard = merged.disable_biometric_unlock >= original.disable_biometric_unlock;
     let ends_no_sooner = match (merged.ends_at, original.ends_at) {
         // "until released" is longer than any concrete end time.
         (None, _) => true,
         (Some(_), None) => false,
         (Some(m), Some(o)) => m >= o,
     };
-    keeps_conditions && keeps_keyguard && ends_no_sooner
+    keeps_conditions && ends_no_sooner
 }
 
 proptest! {
@@ -144,26 +141,13 @@ fn release_requires_every_merged_condition() {
     assert!(merged.can_release(2_000, &BTreeSet::new()), "expiry releases on its own");
 }
 
-/// Suppressing biometrics is a restriction on the device, so it must end exactly when the lock
-/// does. A session that expired, or one released through the 24h delay, can never leave the phone
-/// demanding a PIN forever (GAPS D5).
+/// A release is never satisfied by a fingerprint: `DeviceCredential` is the PIN and only the PIN.
+/// Device-wide biometric suppression is not something any third-party app can do (DECISIONS D9), so
+/// the promise we keep is the one about *our* gate, and the core cannot express the other one.
 #[test]
-fn biometric_suppression_ends_with_the_lock() {
-    let lock = LockSet::new([Lock::DeviceCredential], Some(1_000)).without_biometric_unlock();
-    assert!(lock.suppresses_biometrics(999));
-    assert!(!lock.suppresses_biometrics(1_000), "expiry lifts the keyguard restriction");
-
-    let mut delayed = LockSet::new([Lock::DeviceCredential], None).without_biometric_unlock();
-    let at = delayed.request_release(0);
-    assert!(delayed.suppresses_biometrics(at - 1));
-    assert!(!delayed.suppresses_biometrics(at), "the last-resort exit restores biometrics too");
-}
-
-#[test]
-fn merging_can_switch_biometric_suppression_on_but_never_off() {
-    let plain = LockSet::new([Lock::Timer], Some(10));
-    let strict = LockSet::new([Lock::DeviceCredential], Some(10)).without_biometric_unlock();
-
-    assert!(plain.merge(&strict).disable_biometric_unlock);
-    assert!(strict.merge(&plain).disable_biometric_unlock);
+fn a_credential_lock_is_satisfied_only_by_the_device_credential() {
+    let lock = LockSet::new([Lock::DeviceCredential], None);
+    assert!(!lock.can_release(0, &BTreeSet::new()));
+    assert!(!lock.can_release(0, &[Lock::Confirm].into()), "confirming is not proving");
+    assert!(lock.can_release(0, &[Lock::DeviceCredential].into()));
 }
