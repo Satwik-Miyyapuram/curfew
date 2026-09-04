@@ -16,6 +16,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -38,6 +41,34 @@ import dev.curfew.policy.Session
 fun NowScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? FragmentActivity
+
+    // The conditions this screen can satisfy are gathered one at a time, in a fixed order, and
+    // handed to the core together. The core is still the judge: it refuses if the set is short,
+    // and the refusal dialog is what the user sees when it does.
+    var pending by remember { mutableStateOf<PendingEnd?>(null) }
+
+    fun finish(session: Session, satisfied: List<Lock>) {
+        pending = null
+        val credential = session.lock.conditions.filterIsInstance<Lock.DeviceCredential>()
+        if (credential.isNotEmpty() && activity != null) {
+            Auth.prove(
+                activity,
+                title = "End ${session.profile}",
+                subtitle = "Confirm it is you.",
+            ) { proven -> model.endSession(session, satisfied + proven) }
+        } else {
+            model.endSession(session, satisfied)
+        }
+    }
+
+    fun end(session: Session) {
+        val challenge = session.lock.conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
+        if (challenge == null) {
+            finish(session, emptyList())
+        } else {
+            pending = PendingEnd(session, challenge, Challenge.generate(challenge.challenge))
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
@@ -62,18 +93,7 @@ fun NowScreen(model: CurfewViewModel) {
                 SessionCard(
                     session = session,
                     now = state.now,
-                    onEnd = {
-                        val wantsCredential = session.lock.conditions.contains(Lock.DeviceCredential)
-                        if (wantsCredential && activity != null) {
-                            Auth.prove(
-                                activity,
-                                title = "End ${session.profile}",
-                                subtitle = "Confirm it is you.",
-                            ) { proven -> model.endSession(session, proven) }
-                        } else {
-                            model.endSession(session)
-                        }
-                    },
+                    onEnd = { end(session) },
                     onRelease = { model.requestRelease(session) },
                 )
             }
@@ -83,6 +103,14 @@ fun NowScreen(model: CurfewViewModel) {
                 }
             }
         }
+    }
+
+    pending?.let { p ->
+        ChallengeDialog(
+            challenge = p.challenge,
+            onDismiss = { pending = null },
+            onSatisfied = { finish(p.session, listOf(p.lock)) },
+        )
     }
 
     state.refusal?.let { refusal ->
@@ -182,3 +210,10 @@ private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
         text = { Text(text) },
     )
 }
+
+/** An end that is waiting on the user to work through a challenge. */
+private data class PendingEnd(
+    val session: Session,
+    val lock: Lock.Challenge,
+    val challenge: Challenge,
+)
