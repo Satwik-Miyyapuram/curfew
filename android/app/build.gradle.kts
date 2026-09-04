@@ -18,6 +18,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The four ABIs Android still ships. Without this, JNA drags in `mips`, `mips64` and
+        // `armeabi` copies of jnidispatch for devices that have not existed for a decade.
+        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64") }
     }
 
     buildTypes {

@@ -35,3 +35,8 @@
 
 # Room's generated implementations are found reflectively by class name.
 -keep class dev.curfew.app.data.CurfewDatabase_Impl { *; }
+
+# JNA's desktop AWT helpers reference java.awt, which does not exist on Android. Nothing on this
+# path can be reached from an Android process, so the references are simply absent rather than
+# broken, and R8 only needs to be told not to treat that as an error.
+-dontwarn java.awt.**
