@@ -1,5 +1,8 @@
 # R8 rules for the Curfew app.
 #
+# The :policy library ships its own rules for the FFI and serialization surface, in
+# policy/consumer-rules.pro. What is left here is what only the app itself has.
+#
 # Three things here are reachable only from outside the app's own code, so R8 cannot see that they
 # are used. Each of them, if stripped, produces an app that installs and launches and silently
 # enforces nothing — the worst failure this project has.
@@ -13,30 +16,9 @@
 -keep class dev.curfew.app.block.BlockActivity { *; }
 -keep class dev.curfew.app.ui.MainActivity { *; }
 
-# The kotlinx.serialization shapes are the FFI wire format. A renamed field is a decode failure at
-# the boundary, which means no policy at all.
--keepclassmembers class dev.curfew.policy.** {
-    *** Companion;
-    kotlinx.serialization.KSerializer serializer(...);
-}
--keep,includedescriptorclasses class dev.curfew.policy.**$$serializer { *; }
--keep class dev.curfew.policy.** { *; }
-
-# UniFFI's generated bindings are called from Rust through JNA callbacks.
--keep class uniffi.curfew_ffi.** { *; }
--keep class com.sun.jna.** { *; }
--keepclassmembers class * extends com.sun.jna.** { public *; }
--keep class * implements com.sun.jna.Callback { *; }
--keep class * implements com.sun.jna.Structure { *; }
-
 # SQLCipher loads its native library by name.
 -keep class net.zetetic.database.** { *; }
 -dontwarn net.zetetic.**
 
 # Room's generated implementations are found reflectively by class name.
 -keep class dev.curfew.app.data.CurfewDatabase_Impl { *; }
-
-# JNA's desktop AWT helpers reference java.awt, which does not exist on Android. Nothing on this
-# path can be reached from an Android process, so the references are simply absent rather than
-# broken, and R8 only needs to be told not to treat that as an error.
--dontwarn java.awt.**

@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -62,7 +62,7 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
     Now("now", "Now", Icons.Filled.CheckCircle),
     Schedule("schedule", "Schedule", Icons.Filled.DateRange),
     Apps("apps", "Apps", Icons.Filled.Lock),
-    Usage("usage", "Usage", Icons.Filled.List),
+    Usage("usage", "Usage", Icons.AutoMirrored.Filled.List),
     Health("health", "Health", Icons.Filled.Settings),
 }
 
