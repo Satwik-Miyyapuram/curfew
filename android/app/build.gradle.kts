@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -85,9 +86,37 @@ dependencies {
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
+    testImplementation(libs.androidx.test.junit)
+    // The desktop JNA jar: :policy exports the Android `.aar`, which carries no jnidispatch for the
+    // host JVM, so a unit test that touches the Rust core would fail to link without this.
+    testImplementation(libs.jna)
 
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+}
+
+/**
+ * The unit tests exercise the real policy core, so they need the host library the `:policy` module
+ * builds — and JNA needs it to match the JVM's own architecture, not the compiler's default host.
+ * See `policy/build.gradle.kts` for why those are not always the same machine.
+ */
+tasks.withType<Test>().configureEach {
+    dependsOn(":policy:cargoBuildHost")
+    val cargoTargetDir =
+        System.getenv("CARGO_TARGET_DIR")?.let(::File)
+            ?: File(System.getProperty("user.home"), ".cache/curfew-target")
+    val arch = when (val a = System.getProperty("os.arch").lowercase()) {
+        "amd64", "x86_64" -> "x86_64"
+        "aarch64", "arm64" -> "aarch64"
+        else -> error("no Rust triple known for os.arch=$a")
+    }
+    val os = org.gradle.internal.os.OperatingSystem.current()
+    val triple = when {
+        os.isWindows -> "$arch-pc-windows-msvc"
+        os.isMacOsX -> "$arch-apple-darwin"
+        else -> "$arch-unknown-linux-gnu"
+    }
+    systemProperty("jna.library.path", File(cargoTargetDir, "$triple/release").absolutePath)
 }

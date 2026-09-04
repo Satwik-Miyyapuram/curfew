@@ -12,6 +12,7 @@ import dev.curfew.policy.Observation
 import dev.curfew.policy.Policy
 import dev.curfew.policy.Rollup
 import dev.curfew.policy.Session
+import dev.curfew.policy.Sessions
 import dev.curfew.policy.UsageState
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -32,7 +33,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
  * writer. The policy answers *what*; this class answers *when it is written down*, and the two are
  * kept apart on purpose.
  */
-class CurfewRuntime private constructor(
+class CurfewRuntime internal constructor(
     private val context: Context,
     val policy: Policy,
     val config: ConfigStore,
@@ -147,7 +148,7 @@ class CurfewRuntime private constructor(
     }
 
     private suspend fun persist(now: Long) {
-        db.state().put(StateRow(KEY_SESSIONS, Policy.json.encodeToString(policy.sessions())))
+        db.state().put(StateRow(KEY_SESSIONS, Policy.json.encodeToString(Sessions.serializer(), policy.sessions())))
         refresh(now)
     }
 
@@ -176,6 +177,13 @@ class CurfewRuntime private constructor(
         /** Thirty days of history is enough to answer "what did it do to me?" and no more. */
         const val AUDIT_RETENTION_SECONDS = 30L * 24 * 60 * 60
 
+        /**
+         * The real runtime, with the encrypted database.
+         *
+         * Tests construct the class directly with an in-memory database instead: SQLCipher is a
+         * native library that is not present on a JVM test run, and there is nothing about
+         * encryption-at-rest for the policy logic to get wrong.
+         */
         fun create(context: Context, clock: Clock = Clock.System): CurfewRuntime {
             val config = ConfigStore(File(context.filesDir, "curfew.toml"))
             val db = Room.databaseBuilder(context, CurfewDatabase::class.java, "curfew.db")

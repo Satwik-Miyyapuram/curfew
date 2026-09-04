@@ -1,0 +1,184 @@
+package dev.curfew.app.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.policy.Lock
+import dev.curfew.policy.Refusal
+import dev.curfew.policy.Session
+
+/**
+ * What is running right now, and the only place a session can be ended.
+ *
+ * Ending is deliberately not one tap: the button asks the core, the core refuses if the lock is not
+ * satisfied, and this screen then says exactly what is missing and offers the one thing that would
+ * satisfy it. Nothing here decides on the core's behalf.
+ */
+@Composable
+fun NowScreen(model: CurfewViewModel) {
+    val state by model.state.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as? FragmentActivity
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(
+            if (state.isEnforcing) "Curfew is enforcing" else "Nothing is running",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Text(
+            if (state.isEnforcing) {
+                "${state.sessions.size} session${if (state.sessions.size == 1) "" else "s"} active."
+            } else {
+                "No profile is active. Schedules will start one when their time comes."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(state.sessions, key = { it.id }) { session ->
+                SessionCard(
+                    session = session,
+                    now = state.now,
+                    onEnd = {
+                        val wantsCredential = session.lock.conditions.contains(Lock.DeviceCredential)
+                        if (wantsCredential && activity != null) {
+                            Auth.prove(
+                                activity,
+                                title = "End ${session.profile}",
+                                subtitle = "Confirm it is you.",
+                            ) { proven -> model.endSession(session, proven) }
+                        } else {
+                            model.endSession(session)
+                        }
+                    },
+                    onRelease = { model.requestRelease(session) },
+                )
+            }
+            if (state.sessions.isEmpty()) {
+                item {
+                    TextButton(onClick = model::reconcileNow) { Text("Check the schedules now") }
+                }
+            }
+        }
+    }
+
+    state.refusal?.let { refusal ->
+        RefusalDialog(refusal = refusal, now = state.now, onDismiss = model::dismissRefusal)
+    }
+    state.message?.let { message ->
+        AlertDialog(
+            onDismissRequest = model::dismissMessage,
+            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
+            text = { Text(message) },
+        )
+    }
+}
+
+@Composable
+private fun SessionCard(
+    session: Session,
+    now: Long,
+    onEnd: () -> Unit,
+    onRelease: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(session.profile, style = MaterialTheme.typography.titleMedium)
+            Text(describeSource(session.source), style = MaterialTheme.typography.bodySmall)
+
+            session.lock.endsAt?.let { endsAt ->
+                Text(
+                    "Ends ${relative(endsAt, now)} (${clockTime(endsAt)})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        // Screen readers should hear the whole sentence, not a bare clock time.
+                        .semantics {
+                            contentDescription =
+                                "${session.profile} ends ${relative(endsAt, now)}"
+                        },
+                )
+            }
+
+            if (session.lock.isLocked) {
+                Text(
+                    "Locked: needs " +
+                        session.lock.conditions.joinToString(", ") { describeLock(it) } + ".",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
+            session.lock.delayedReleaseAt?.let { at ->
+                Text(
+                    "A release you asked for lands ${relative(at, now)}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = onEnd) { Text("End now") }
+                // Only offered when there is no release already pending: asking twice must never
+                // become a way to move the landing time closer.
+                if (session.lock.isLocked && session.lock.delayedReleaseAt == null) {
+                    TextButton(onClick = onRelease) { Text("Ask to end in 24 hours") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The core's refusal, said plainly.
+ *
+ * This dialog exists because "no" without a reason is what makes people fight a blocker. It names
+ * what is missing and when the wait ends, and it does not offer a way around either.
+ */
+@Composable
+private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
+    val text = when (refusal) {
+        is Refusal.NotRunning -> "That session is not running any more."
+        is Refusal.Locked -> buildString {
+            append("Still locked. It needs ")
+            append(refusal.missing.joinToString(", ") { describeLock(it) })
+            append(".")
+            refusal.endsAt?.let { append("\n\nIt ends on its own ${relative(it, now)}.") }
+            refusal.delayedReleaseAt?.let {
+                append("\n\nThe release you asked for lands ${relative(it, now)}.")
+            }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+        title = { Text("Not yet") },
+        text = { Text(text) },
+    )
+}

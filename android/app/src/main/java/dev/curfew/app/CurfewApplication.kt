@@ -15,12 +15,19 @@ import dev.curfew.app.data.CurfewRuntime
  */
 class CurfewApplication : Application() {
 
-    lateinit var runtime: CurfewRuntime
-        private set
+    /**
+     * Built on first use rather than in [onCreate].
+     *
+     * Opening the runtime means unwrapping the database key from the keystore and opening an
+     * encrypted database, and a process woken only to handle a broadcast should not pay that price
+     * before it knows it needs to. It also keeps the graph out of the way of unit tests, which
+     * build their own runtime over an in-memory database because SQLCipher has no native library on
+     * a host JVM.
+     */
+    val runtime: CurfewRuntime by lazy { CurfewRuntime.create(this) }
 
     override fun onCreate() {
         super.onCreate()
-        runtime = CurfewRuntime.create(this)
         createNotificationChannel()
     }
 

@@ -4,6 +4,8 @@
     <string name="accessibility_service_label">Curfew enforcement</string>
     <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can close the ones you have chosen to block. It does not read the contents of your screen, and nothing it sees leaves your device.</string>
 
+    <string name="notification_listener_label">Curfew notification muting</string>
+
     <string name="notification_channel_enforcement">Focus sessions</string>
     <string name="notification_channel_enforcement_description">Shows while a session is running, so you always know when Curfew is enforcing something.</string>
     <string name="notification_running">Session running</string>

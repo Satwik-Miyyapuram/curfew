@@ -226,7 +226,9 @@ fn the_delayed_release_lands_24_hours_out_and_is_never_moved_later() {
 fn replacing_the_config_does_not_release_a_running_session() {
     let c = curfew();
     start(&c, "s1", "deep-work", json!([{"kind": "device_credential"}]), Some(NOW + 3600));
-    c.set_config(config().replace("id = \"deep-work\"", "id = \"renamed\"")).expect("loads");
+    // Rename the profile everywhere it is named, so the replacement config is itself valid: what
+    // is under test is the running session, not the config checker.
+    c.set_config(config().replace("\"deep-work\"", "\"renamed\"")).expect("loads");
     assert_eq!(c.active_profiles(NOW), vec!["deep-work".to_string()]);
     assert!(c.end_session("s1".into(), NOW, String::new()).is_err());
 }

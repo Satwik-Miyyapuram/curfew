@@ -216,7 +216,9 @@ class PolicyTest {
     fun `replacing the config does not release a running session`() {
         val p = policy()
         p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), friday0930 + 3600))
-        p.setConfig(configToml.replace("id = \"deep-work\"", "id = \"renamed\""))
+        // Rename the profile everywhere it is named, so the replacement is itself a valid config:
+        // what is under test is the running session, not the config checker.
+        p.setConfig(configToml.replace("\"deep-work\"", "\"renamed\""))
         assertEquals(listOf("deep-work"), p.activeProfiles(friday0930))
     }
 

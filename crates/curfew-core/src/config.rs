@@ -115,6 +115,21 @@ impl Config {
                 }
             }
         }
+        // A schedule naming a profile that does not exist would start a session that enforces
+        // nothing: a lock with no rules behind it, which is worse than an error because it looks
+        // like it is working. Catch the typo at load, where it can still be corrected.
+        for (kind, id, profile) in self
+            .weekly
+            .iter()
+            .map(|w| ("weekly schedule", &w.id, &w.profile))
+            .chain(self.calendars.iter().map(|c| ("calendar rule", &c.id, &c.profile)))
+        {
+            if self.profile(profile).is_none() {
+                return Err(ConfigError::Invalid(format!(
+                    "{kind} {id:?} names profile {profile:?}, which is not defined"
+                )));
+            }
+        }
         Ok(())
     }
 }

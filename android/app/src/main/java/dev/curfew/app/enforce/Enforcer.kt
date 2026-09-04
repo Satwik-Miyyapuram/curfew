@@ -43,6 +43,14 @@ class Enforcer(
      * charge an hour of screen-off time against a budget.
      */
     suspend fun onObservation(observation: Observation, now: Long) {
+        // A notification is not a foreground change: it must neither end the current target's slice
+        // nor start one of its own, so it is decided on its own and nothing else moves.
+        if (observation is Observation.Notification) {
+            if (runtime.decide(observation, now) == Decision.Mute) {
+                actions.muteNotification(observation.`package`)
+            }
+            return
+        }
         val target = identity(observation)
         if (target == null) {
             flush(now)

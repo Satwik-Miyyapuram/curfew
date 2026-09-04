@@ -1,7 +1,6 @@
 package dev.curfew.app.ui
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
@@ -19,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -35,7 +35,12 @@ import dev.curfew.app.enforce.EnforcementService
  * should run when, where is my time going, and is Curfew actually working. Anything that does not
  * answer one of those does not get a tab.
  */
-class MainActivity : ComponentActivity() {
+/**
+ * A [FragmentActivity] rather than a plain ComponentActivity because [Auth] shows a
+ * `BiometricPrompt`, which needs a fragment host. Ending a locked session is the one action here
+ * that has to prove who is asking.
+ */
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

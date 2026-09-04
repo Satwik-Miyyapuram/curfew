@@ -343,4 +343,7 @@ data class Consumption(val rollups: List<Rollup> = emptyList())
 data class Rollup(val at: Long, val seconds: Int)
 
 @Serializable
-data class Launches(val opens: List<Long> = emptyList())
+data class Launches(
+    /** The core calls this field `at`; `opens` is what it means on this side of the boundary. */
+    @SerialName("at") val opens: List<Long> = emptyList(),
+)
