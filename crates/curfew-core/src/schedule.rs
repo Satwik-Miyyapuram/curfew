@@ -121,7 +121,7 @@ impl EventMatcher {
 }
 
 /// One profile that should be running over one span, and the lock it comes with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Activation {
     pub profile: String,
     /// Which schedule produced this, for the UI ("running because: Work calendar / Focus block").
@@ -131,7 +131,8 @@ pub struct Activation {
     pub locks: Vec<Lock>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivationSource {
     Weekly { schedule: String },
     Calendar { schedule: String, event: String },

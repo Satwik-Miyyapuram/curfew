@@ -107,7 +107,8 @@ impl Target {
 }
 
 /// What the platform enforcer reports. One of these per foreground change.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Observation {
     /// Android foreground app, with the in-app screen when the accessibility layer could name one.
     App { package: String, screen: Option<String> },
@@ -144,7 +145,7 @@ impl Observation {
 
 /// Just enough URL for rule matching. Deliberately not a full parser: we take what the browser or
 /// the accessibility layer hands us, lowercase the host, and keep the rest verbatim.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Url {
     pub raw: String,
     pub host: String,

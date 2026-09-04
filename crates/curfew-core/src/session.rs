@@ -60,7 +60,8 @@ impl Session {
 
 /// Why a request to end a session was refused. Every variant is something the UI must be able to
 /// explain, because "no" without a reason is what makes people uninstall a blocker.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "refusal", rename_all = "snake_case")]
 pub enum Refusal {
     /// No session by that id is running.
     NotRunning,

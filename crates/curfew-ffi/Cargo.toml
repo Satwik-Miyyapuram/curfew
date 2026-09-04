@@ -1,0 +1,31 @@
+[package]
+name = "curfew-ffi"
+description = "UniFFI bindings exposing curfew-core to Kotlin on Android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib is what Android loads; the rlib keeps the crate testable from Rust.
+crate-type = ["cdylib", "rlib"]
+name = "curfew_ffi"
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uniffi = { workspace = true, features = ["cli"] }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+
+[[bin]]
+# The bindgen entry point: `cargo run -p curfew-ffi --bin uniffi-bindgen generate ...`
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dev-dependencies]
+serde_json.workspace = true

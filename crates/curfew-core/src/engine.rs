@@ -6,10 +6,12 @@ use crate::lock::LockSet;
 use crate::target::Observation;
 use crate::Timestamp;
 use chrono_tz::Tz;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The live session state the caller materialized from storage and the op-log.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct State {
     /// Profiles whose sessions are currently running.
     pub active_profiles: Vec<String>,
@@ -22,7 +24,8 @@ pub struct State {
     pub platform: Platform,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
 pub enum Decision {
     Allow,
     Block {
@@ -36,7 +39,8 @@ pub enum Decision {
     Mute,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
 pub enum BlockReason {
     /// A rule names this target directly.
     Blocked { profile: String },
