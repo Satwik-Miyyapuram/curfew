@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Curfew</string>
+    <string name="accessibility_service_label">Curfew enforcement</string>
+    <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can close the ones you have chosen to block. It does not read the contents of your screen, and nothing it sees leaves your device.</string>
+
+    <string name="notification_channel_enforcement">Focus sessions</string>
+    <string name="notification_channel_enforcement_description">Shows while a session is running, so you always know when Curfew is enforcing something.</string>
+    <string name="notification_running">Session running</string>
+    <string name="notification_idle">Curfew is standing by</string>
+
+    <string name="block_title">Blocked by Curfew</string>
+    <string name="block_close">Close</string>
+    <string name="block_open_curfew">Open Curfew</string>
+</resources>

@@ -31,3 +31,11 @@ Thumbs.db
 # Local scratch
 scratch/
 *.log
+
+# OneDrive litter
+desktop.ini
+.kotlin/
+
+# OneDrive litter
+desktop.ini
+.kotlin/

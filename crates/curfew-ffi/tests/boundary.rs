@@ -49,7 +49,7 @@ fn the_golden_config_crosses_the_boundary_intact() {
 #[test]
 fn a_broken_config_is_a_config_error_carrying_the_message_the_user_needs() {
     match Curfew::new("schema_version = ".into()).unwrap_err() {
-        CurfewError::Config { message } => assert!(!message.is_empty()),
+        CurfewError::Config { detail } => assert!(!detail.is_empty()),
         other => panic!("expected a config error, got {other:?}"),
     }
 }
@@ -373,4 +373,87 @@ fn the_object_is_safe_to_use_from_several_threads_at_once() {
         }
     });
     assert_eq!(c.active_profiles(NOW), vec!["deep-work".to_string()]);
+}
+
+// --- what to charge -----------------------------------------------------------------------------
+
+/// The platform records seconds; only the core knows which budget they belong to. A subdomain has
+/// to land on the rule's key, or the budget quietly never fills.
+#[test]
+fn a_subdomain_is_charged_against_the_rule_that_covers_it() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([]), Some(NOW + 3600));
+    let keys = c
+        .charged_keys(
+            NOW,
+            json!({"kind": "web", "url": {
+                "raw": "https://old.reddit.com/r/all",
+                "host": "old.reddit.com",
+                "path": "/r/all",
+                "query": ""
+            }})
+            .to_string(),
+            PlatformName::Android,
+        )
+        .expect("keys");
+    assert_eq!(keys, vec!["domain:reddit.com".to_string()]);
+}
+
+#[test]
+fn a_launch_limited_app_reports_its_key_too() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([]), Some(NOW + 3600));
+    let keys = c
+        .charged_keys(
+            NOW,
+            json!({"kind": "app", "package": "com.twitter.android"}).to_string(),
+            PlatformName::Android,
+        )
+        .expect("keys");
+    assert_eq!(keys, vec!["app:com.twitter.android".to_string()]);
+}
+
+/// A plain block meters nothing, so there is nothing to record against it.
+#[test]
+fn a_blocked_app_has_nothing_to_charge() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([]), Some(NOW + 3600));
+    let keys = c
+        .charged_keys(
+            NOW,
+            json!({"kind": "app", "package": "com.instagram.android"}).to_string(),
+            PlatformName::Android,
+        )
+        .expect("keys");
+    assert!(keys.is_empty(), "{keys:?}");
+}
+
+/// Nothing is metered when no profile is running: an idle device must not consume a budget.
+#[test]
+fn nothing_is_charged_outside_a_session() {
+    let c = curfew();
+    let keys = c
+        .charged_keys(
+            NOW,
+            json!({"kind": "app", "package": "com.twitter.android"}).to_string(),
+            PlatformName::Android,
+        )
+        .expect("keys");
+    assert!(keys.is_empty(), "{keys:?}");
+}
+
+/// A Windows-only rule must not charge an Android observation, or the two platforms would disagree
+/// about how much of a shared budget is left.
+#[test]
+fn platform_scoping_applies_to_charging_as_well_as_to_blocking() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([]), Some(NOW + 3600));
+    let android = c
+        .charged_keys(
+            NOW,
+            json!({"kind": "window", "exe": "steam.exe", "title": "Steam"}).to_string(),
+            PlatformName::Android,
+        )
+        .expect("keys");
+    assert!(android.is_empty(), "{android:?}");
 }

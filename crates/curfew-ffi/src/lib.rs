@@ -11,7 +11,7 @@
 //! Nothing here reads a clock. `now` comes from the caller, exactly as it does in the core.
 
 use curfew_core::config::Platform;
-use curfew_core::engine::State;
+use curfew_core::engine::{charged_keys, State};
 use curfew_core::schedule::{active_at, next_change_after, CalendarEvent};
 use curfew_core::session::{reconcile, Session, Sessions};
 use curfew_core::target::Observation;
@@ -25,12 +25,12 @@ uniffi::setup_scaffolding!();
 pub enum CurfewError {
     /// The config file could not be loaded. The message is the one the core produced, which is
     /// written for the person who wrote the file.
-    #[error("{message}")]
-    Config { message: String },
+    #[error("{detail}")]
+    Config { detail: String },
     /// A JSON payload from the platform side was malformed. Always a bug in the app, never
     /// something a user can cause, so it is loud rather than silent.
-    #[error("bad payload: {message}")]
-    Payload { message: String },
+    #[error("bad payload: {detail}")]
+    Payload { detail: String },
     /// A session could not be ended. `refusal` is the serialized `Refusal` from the core, so the
     /// UI can say exactly which conditions are still missing.
     #[error("refused: {refusal}")]
@@ -38,7 +38,7 @@ pub enum CurfewError {
 }
 
 fn payload<E: std::fmt::Display>(e: E) -> CurfewError {
-    CurfewError::Payload { message: e.to_string() }
+    CurfewError::Payload { detail: e.to_string() }
 }
 
 /// The whole policy surface, as one object the Android service holds for its lifetime.
@@ -59,7 +59,7 @@ impl Curfew {
     #[uniffi::constructor]
     pub fn new(config_toml: String) -> Result<Arc<Self>, CurfewError> {
         let config = Config::from_toml(&config_toml)
-            .map_err(|e| CurfewError::Config { message: e.to_string() })?;
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         Ok(Arc::new(Self {
             config: RwLock::new(config),
             sessions: RwLock::new(Sessions::default()),
@@ -70,7 +70,7 @@ impl Curfew {
     /// lock, and the session already holds its own copy of what it promised.
     pub fn set_config(&self, config_toml: String) -> Result<(), CurfewError> {
         let config = Config::from_toml(&config_toml)
-            .map_err(|e| CurfewError::Config { message: e.to_string() })?;
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         *self.config.write().expect("config lock") = config;
         Ok(())
     }
@@ -80,7 +80,7 @@ impl Curfew {
             .read()
             .expect("config lock")
             .to_toml()
-            .map_err(|e| CurfewError::Config { message: e.to_string() })
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
     /// The decision for one observation. `observation_json` is a serialized `Observation`; the
@@ -106,6 +106,25 @@ impl Curfew {
 
         let decision = decide(now, &state, &obs, &self.config.read().expect("config lock"));
         serde_json::to_string(&decision).map_err(payload)
+    }
+
+    /// The usage keys this observation should be charged against, given the profiles running now.
+    ///
+    /// The platform records time and launches; only the core knows which rule target a given
+    /// observation falls under, so it says so here rather than having Kotlin guess (which is how a
+    /// budget silently stops counting).
+    pub fn charged_keys(
+        &self,
+        now: Timestamp,
+        observation_json: String,
+        platform: PlatformName,
+    ) -> Result<Vec<String>, CurfewError> {
+        let obs: Observation = serde_json::from_str(&observation_json).map_err(payload)?;
+        let mut state = State::default();
+        let sessions = self.sessions.read().expect("sessions lock");
+        state.active_profiles = sessions.active_profiles(now);
+        state.platform = platform.into();
+        Ok(charged_keys(&state, &obs, &self.config.read().expect("config lock")))
     }
 
     /// Start a session by hand. Idempotent per profile: starting one that is already running
@@ -155,7 +174,7 @@ impl Curfew {
             serde_json::from_str(if events_json.is_empty() { "[]" } else { &events_json })
                 .map_err(payload)?;
         let config = self.config.read().expect("config lock");
-        let tz = config.tz().map_err(|e| CurfewError::Config { message: e.to_string() })?;
+        let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         let activations = active_at(now, tz, &config.weekly, &config.calendars, &events);
 
         let mut counter = 0usize;
@@ -205,7 +224,7 @@ impl Curfew {
             serde_json::from_str(if events_json.is_empty() { "[]" } else { &events_json })
                 .map_err(payload)?;
         let config = self.config.read().expect("config lock");
-        let tz = config.tz().map_err(|e| CurfewError::Config { message: e.to_string() })?;
+        let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         serde_json::to_string(&active_at(now, tz, &config.weekly, &config.calendars, &events))
             .map_err(payload)
     }
@@ -221,7 +240,7 @@ impl Curfew {
             serde_json::from_str(if events_json.is_empty() { "[]" } else { &events_json })
                 .map_err(payload)?;
         let config = self.config.read().expect("config lock");
-        let tz = config.tz().map_err(|e| CurfewError::Config { message: e.to_string() })?;
+        let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         Ok(next_change_after(now, tz, &config.weekly, &config.calendars, &events))
     }
 }
@@ -250,7 +269,7 @@ impl From<PlatformName> for Platform {
 #[uniffi::export]
 pub fn check_config(config_toml: String) -> Result<String, CurfewError> {
     let config = Config::from_toml(&config_toml)
-        .map_err(|e| CurfewError::Config { message: e.to_string() })?;
+        .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
     Ok(format!(
         "schema v{}, timezone {}, {} profile(s), {} weekly window(s), {} calendar rule(s)",
         config.schema_version,

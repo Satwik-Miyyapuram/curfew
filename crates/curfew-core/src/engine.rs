@@ -153,3 +153,28 @@ pub fn decide(now: Timestamp, state: &State, obs: &Observation, config: &Config)
 fn applies_to(rule: &Rule, platform: Platform) -> bool {
     rule.platforms.is_empty() || rule.platforms.contains(&platform)
 }
+
+/// The usage keys an observation should be charged against.
+///
+/// Budgets and launch limits are counted per *rule target*, not per observation: a rule on
+/// `reddit.com` and a visit to `old.reddit.com` share one budget, and the platform has no way to
+/// work out which key that is without re-implementing target matching. So it asks. Only rules that
+/// actually meter something are returned -- there is nothing to record for a plain block.
+pub fn charged_keys(state: &State, obs: &Observation, config: &Config) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    for profile_id in &state.active_profiles {
+        let Some(profile) = config.profile(profile_id) else { continue };
+        for rule in &profile.rules {
+            if !applies_to(rule, state.platform) || !rule.target.matches(obs) {
+                continue;
+            }
+            if matches!(rule.action, Action::Budget { .. } | Action::LaunchLimit { .. }) {
+                let key = rule.target.key();
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys
+}
