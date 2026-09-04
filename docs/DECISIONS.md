@@ -3,7 +3,7 @@
 Short ADR log. Newest last.
 
 ## D1 — Stack: Rust core, Kotlin Android, Tauri desktop (2026-09-04)
-Core (`nodis-core`): policy model, rule engine, scheduler, calendar evaluation, op-log + merge,
+Core (`curfew-core`): policy model, rule engine, scheduler, calendar evaluation, op-log + merge,
 crypto, sync transports. Exposed to Android through UniFFI; linked directly by the Windows service;
 also compiled as a CLI.
 Android app: Kotlin + Compose; all enforcement native.
@@ -41,3 +41,18 @@ the device to enroll, anything that cannot be undone by uninstalling with effort
   emergency passes with quota + cooldown.
 Honest framing in the docs: a determined user with admin rights and time can always get out. We
 raise the cost, we do not make it impossible, and we never make the device unrecoverable.
+
+## D5 — Name: Curfew (2026-09-04)
+**Curfew** — *Calendar-Unified Rules For Every Window*. Repo `curfew`, crate `curfew-core`, config
+`curfew.toml`, Android application id `com.curfew.app`.
+Chosen because the name states the differentiator (calendar-scheduled blocking windows mirrored
+across devices) and reads naturally in the product itself ("curfew active until 17:00").
+**Rejected:**
+- *DEADBOLT* — collides with the DeadBolt ransomware family (mass NAS attacks), plus a well-known
+  Play-framework authorization module. Bad association for software that locks a machine and
+  resists uninstall.
+- *FOCI* — crowded scientific namespace (robotics planner, interferometry toolkit, microscopy foci
+  counting) and most readers parse it as a typo of "focus".
+- *YAFA / YAWP* ("Yet Another Focus App") — 5+ and 6+ existing GitHub projects respectively.
+Namespace notes: `github.com/curfew` is an empty squatted account, which does not matter since the
+repo lives under the owner's account. `usecurfew.com` was verified unregistered on 2026-09-04.

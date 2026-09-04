@@ -5,7 +5,7 @@ Each phase ends with something usable. No phase depends on a server at any point
 ## Phase 0 — Foundations (repo is here now)
 - [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap, decisions)
 - [ ] Cargo workspace (`core`, `cli`), Android Gradle project, CI (build + test on push)
-- [ ] `nodis.toml` schema v0 + golden-file tests
+- [ ] `curfew.toml` schema v0 + golden-file tests
 - [ ] Core rule engine: `decide()` with block / allow-only / budget / delay, plus a property test
       suite. No I/O, no platform code.
 
@@ -22,7 +22,7 @@ Each phase ends with something usable. No phase depends on a server at any point
 - [ ] Service + watchdog, tray UI, installer (admin)
 - [ ] Process + window-title blocking, block overlay
 - [ ] Website blocking v1: hosts file + local DNS proxy
-- [ ] Same profiles/sessions/schedules/strictness as Android, same `nodis.toml`
+- [ ] Same profiles/sessions/schedules/strictness as Android, same `curfew.toml`
 - [ ] Frozen-mode (lock the machine for a period)
 
 ## Phase 3 — Sync (the differentiator, part 1)

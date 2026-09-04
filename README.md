@@ -1,4 +1,6 @@
-# nodis — no distractions
+# Curfew
+
+*Calendar-Unified Rules For Every Window.*
 
 Open-source, account-free distraction blocker for **Android + PC** that **syncs peer-to-peer with no
 server**, and that can drive its blocks from **your calendar**.
@@ -10,7 +12,7 @@ without a subscription, without a cloud account, and with your data never leavin
 
 ## Why
 
-| | Freedom | Cold Turkey | StayFocusd | nodis |
+| | Freedom | Cold Turkey | StayFocusd | Curfew |
 |---|---|---|---|---|
 | Android + PC | yes | PC only | browser only | yes |
 | Cross-device session sync | yes (their cloud) | no | no | **yes, P2P, no account** |

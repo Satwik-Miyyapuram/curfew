@@ -1,6 +1,7 @@
 # Architecture
 
-Working name: **nodis** (no-distractions). License: AGPL-3.0. No accounts, no servers, no telemetry.
+**Curfew** — Calendar-Unified Rules For Every Window. License: AGPL-3.0.
+No accounts, no servers, no telemetry.
 
 ## 0. Design invariants
 
@@ -9,7 +10,7 @@ Working name: **nodis** (no-distractions). License: AGPL-3.0. No accounts, no se
 2. **A lock is a promise.** Once a session is locked, no code path — UI, sync, uninstall, clock
    change, peer device — may shorten it except the unlock conditions the user chose.
 3. **Degrade, never die.** Every enforcement mechanism has a fallback (accessibility revoked ->
-   usage-stats polling -> VPN filter -> device owner). Losing one permission weakens blocking; it
+   usage-stats polling -> VPN filter -> Device Admin). Losing one permission weakens blocking; it
    never disables the app.
 4. **The config is a file.** Everything the UI can do is expressible in a versioned, exportable
    document. That is what makes "full customization" real rather than a settings screen.
@@ -25,7 +26,7 @@ Working name: **nodis** (no-distractions). License: AGPL-3.0. No accounts, no se
                        |  - calendar rule evaluation          |
                        |  - op-log store + CRDT merge         |
                        |  - crypto: identity, pairing, E2EE   |
-                       |  - sync transports (LAN/iroh/folder) |
+                       |  - sync: LAN / folder / BT beam      |
                        +------------------+-------------------+
                         UniFFI bindings   |   direct link
               +---------------------------+------------------------+
@@ -37,7 +38,7 @@ Working name: **nodis** (no-distractions). License: AGPL-3.0. No accounts, no se
    |  - UsageStats poller  |                         |  - lock screen / Frozen mode |
    |  - local VpnService   |                         |  - tamper watchdog           |
    |  - NotificationListener|                        +--------------+---------------+
-   |  - DevicePolicy (opt) |                                        | IPC (named pipe)
+   |  - DeviceAdmin (opt)  |                                        | IPC (named pipe)
    |  - CalendarContract   |                         +--------------v---------------+
    |  - WorkManager sync   |                         |  Desktop UI (tray + window)  |
    +-----------------------+                         +--------------+---------------+
@@ -69,7 +70,7 @@ Event(op-log)  signed, ordered, encrypted: session.start/end, profile.edit, budg
                device.pair, calendar.snapshot, stat.rollup
 ```
 
-Everything above serializes to a single TOML/JSON document (`nodis.toml`) that can be diffed,
+Everything above serializes to a single TOML/JSON document (`curfew.toml`) that can be diffed,
 version-controlled, and shared. The UI is a view over that document.
 
 ## 3. Rule engine
