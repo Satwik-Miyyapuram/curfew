@@ -197,3 +197,43 @@ screen-reader labels, contrast, font scaling, no timing-only interactions. Phase
 - Rooted-device or admin-level bypass prevention (documented ceiling, see D4)
 - NAT-hole-punched P2P until the shared-folder path proves insufficient (D3)
 - Custom domain and any paid infrastructure (D6)
+
+## G. Prior-art review: Curbox (2026-09-05)
+
+Read in full: [curbox-android](https://github.com/curbox-app/curbox-android) and
+[curbox-extension](https://github.com/curbox-app/curbox-extension), the closest existing project to
+this one — GPL-3, no telemetry, Android plus a browser extension, no PC app.
+
+**G1. A browser extension cannot be a lock, so it cannot replace the Windows app — OPEN, decided.**
+Curbox's extension blocks by injecting an overlay from a content script. It requests no
+`declarativeNetRequest` permission, so nothing is stopped before a page loads, and an extension can
+be disabled from `chrome://extensions` in two clicks — a page extensions are forbidden to act on, so
+no watchdog is possible there. Their own framing concedes this: warning screens, a `canProceed`
+flag, a Proceed button. That is intervention, not enforcement, and it would collapse Invariant 2.
+*Decision:* the Windows service stays the enforcement floor and Phase 2 is unchanged. The extension
+is a **granularity layer, not a substitute**: a service sees processes and hostnames and can never
+see URL paths, so `/shorts`, `/reels` and an in-page feed are only reachable from a content script.
+The two are joined so the weak layer cannot be quietly removed — during a locked session the service
+requires a native-messaging heartbeat from the extension, and a missing extension blocks the browser
+process outright. The granularity is then gained without spending any enforcement.
+
+**G2. Device Admin was dropped for the wrong reason — OPEN.** A7 removed Device Admin because it
+cannot suppress biometric unlock, which is true. Curbox uses it for something else: `AdminReceiver`
+plus `AntiUninstallBlocker` keeps the admin active so the app cannot be uninstalled from Settings,
+and bounces the user off the deactivation screen while a lock is held. Device *admin* is not device
+*owner*: it needs no factory-reset provisioning and is deactivated by the user at will once a lock
+ends, so it stays inside both D2 (never unrecoverable) and the standing constraint that anything
+requiring a factory reset is out. It is a real strengthening that A7 discarded as a side effect.
+*Decision needed:* re-evaluate Device Admin for uninstall protection only, weighed against A6 — it
+is the scariest dialog in onboarding, so it must be optional, last in the wizard, and clearly
+described as "makes uninstalling harder while a lock is running", never as a requirement.
+
+**G3. Their sync design is unusable here; their envelope is not — CLOSED.** Curbox syncs through a
+hosted Supabase project with accounts (`src/lib/supabase.ts`), which is a server and a recurring
+cost, both ruled out by D6 and the no-server premise. The cryptographic envelope, however, is sound
+and transport-independent, and matches what D10 already describes: PBKDF2-HMAC-SHA256 at 600k
+iterations derives a KEK, the KEK wraps a random 32-byte DEK, records are AES-256-GCM with the AAD
+bound to `user|namespace|record_key` so a ciphertext cannot be replayed into another slot, and a QR
+payload carries the DEK to a new device without retyping the passphrase.
+*Decision:* keep D10's pairing as designed and reuse this AAD-binding discipline for the op-log
+records, over Curfew's own transports. No dependency on their code is taken.
