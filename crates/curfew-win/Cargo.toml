@@ -1,0 +1,18 @@
+[package]
+name = "curfew-win"
+description = "Windows enforcement for Curfew: process blocking, hosts-file blocking, and the service loop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+toml.workspace = true

@@ -209,7 +209,6 @@ impl Curfew {
         Ok(())
     }
 
-
     // --- trusted time -----------------------------------------------------------------------
 
     /// Take a reading of the device's wall clock and its monotonic uptime, and return the
@@ -381,10 +380,7 @@ pub fn blocked_apps(config_toml: String, profile: String) -> Result<Vec<String>,
 pub fn profiles_json(config_toml: String) -> Result<String, CurfewError> {
     let config = Config::from_toml(&config_toml)
         .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
-    let named: Vec<_> = config
-        .profiles
-        .iter()
-        .map(|p| serde_json::json!({ "id": p.id, "name": p.name }))
-        .collect();
+    let named: Vec<_> =
+        config.profiles.iter().map(|p| serde_json::json!({ "id": p.id, "name": p.name })).collect();
     serde_json::to_string(&named).map_err(|e| CurfewError::Config { detail: e.to_string() })
 }

@@ -94,7 +94,8 @@ impl ClockWitness {
         let rebooted = reading.boot_id != self.last_boot_id || reading.uptime < self.last_uptime;
         let wall_delta = reading.wall - self.last_wall;
 
-        let mut verdict = Verdict { now: self.trusted, refused_forward: 0, refused_backward: 0, unverified: 0 };
+        let mut verdict =
+            Verdict { now: self.trusted, refused_forward: 0, refused_backward: 0, unverified: 0 };
 
         if rebooted {
             // Uptime restarted, so it can vouch for nothing. Forward time is credited and recorded

@@ -181,9 +181,7 @@ action = { kind = "block" }
     #[test]
     fn checking_a_box_adds_a_rule_and_unchecking_removes_it() {
         let mut config = Config::from_toml(CONFIG).unwrap();
-        config
-            .set_blocked_apps("deep-work", &["com.twitter.android".to_string()])
-            .unwrap();
+        config.set_blocked_apps("deep-work", &["com.twitter.android".to_string()]).unwrap();
 
         assert_eq!(config.blocked_apps("deep-work"), vec!["com.twitter.android".to_string()]);
     }
@@ -195,10 +193,7 @@ action = { kind = "block" }
 
         let profile = config.profile("deep-work").unwrap();
         assert!(profile.rules.iter().any(|r| matches!(r.action, Action::Budget { .. })));
-        assert!(profile
-            .rules
-            .iter()
-            .any(|r| matches!(&r.target, Target::Domain { .. })));
+        assert!(profile.rules.iter().any(|r| matches!(&r.target, Target::Domain { .. })));
     }
 
     #[test]
@@ -206,8 +201,7 @@ action = { kind = "block" }
         let mut a = Config::from_toml(CONFIG).unwrap();
         let mut b = Config::from_toml(CONFIG).unwrap();
         a.set_blocked_apps("deep-work", &["b.app".into(), "a.app".into()]).unwrap();
-        b.set_blocked_apps("deep-work", &["a.app".into(), "b.app".into(), "a.app".into()])
-            .unwrap();
+        b.set_blocked_apps("deep-work", &["a.app".into(), "b.app".into(), "a.app".into()]).unwrap();
         assert_eq!(a.to_toml().unwrap(), b.to_toml().unwrap());
     }
 
@@ -216,7 +210,10 @@ action = { kind = "block" }
         let mut config = Config::from_toml(CONFIG).unwrap();
         config.set_blocked_apps("deep-work", &["com.twitter.android".into()]).unwrap();
         let round_tripped = Config::from_toml(&config.to_toml().unwrap()).unwrap();
-        assert_eq!(round_tripped.blocked_apps("deep-work"), vec!["com.twitter.android".to_string()]);
+        assert_eq!(
+            round_tripped.blocked_apps("deep-work"),
+            vec!["com.twitter.android".to_string()]
+        );
     }
 
     #[test]

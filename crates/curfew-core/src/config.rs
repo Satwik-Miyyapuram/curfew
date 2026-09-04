@@ -130,7 +130,9 @@ impl Config {
                 p.rules
                     .iter()
                     .filter_map(|r| match (&r.target, &r.action) {
-                        (Target::AppPackage { package }, Action::Block) if r.platforms.is_empty() => {
+                        (Target::AppPackage { package }, Action::Block)
+                            if r.platforms.is_empty() =>
+                        {
                             Some(package.clone())
                         }
                         _ => None,
