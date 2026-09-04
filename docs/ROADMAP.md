@@ -6,12 +6,12 @@ means the criteria hold, not that the code exists. Open problems per phase live 
 
 ## Phase 0 — Foundations
 - [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap, decisions, gaps)
-- [ ] Cargo workspace: `curfew-core` (lib) + `curfew-cli` (bin)
-- [ ] `curfew.toml` schema v0 with `schema_version`, serde model, golden-file tests
-- [ ] Core rule engine `decide()`: block / allow-only / budget / delay. Pure, no I/O
-- [ ] Property tests: a lock can never be shortened by any sequence of operations
-- [ ] CI: fmt + clippy + test on push (Linux + Windows runners)
-- [ ] Repo hygiene: CONTRIBUTING, SECURITY.md, CoC, issue/PR templates, versioning policy (E4)
+- [x] Cargo workspace: `curfew-core` (lib) + `curfew-cli` (bin)
+- [x] `curfew.toml` schema v0 with `schema_version`, serde model, golden-file tests
+- [x] Core rule engine `decide()`: block / allow-only / budget / delay. Pure, no I/O
+- [x] Property tests: a lock can never be shortened by any sequence of operations
+- [x] CI: fmt + clippy + test on push (Linux + Windows runners)
+- [x] Repo hygiene: CONTRIBUTING, SECURITY.md, CoC, issue/PR templates, versioning policy (E4)
 
 **Exit criteria:** `cargo test` green on both CI runners; the engine decides a worked example
 identically from a config file on Linux and Windows; property suite proves lock-monotonicity.
