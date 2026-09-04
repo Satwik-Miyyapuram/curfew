@@ -55,6 +55,9 @@ class EnforcementService : Service() {
             val now = runtime.clock.now()
             val events = runtime.calendarEvents(now)
             runtime.reconcile(now, events)
+            // Written after reconciling, so the recorded time is one Curfew was demonstrably
+            // enforcing at, rather than one it merely woke up at.
+            runtime.heartbeat(now)
             ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
             updateNotification()
             // If the fallback detector is in use, this is also when the foreground app is sampled.

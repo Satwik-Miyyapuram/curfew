@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.curfew.app.data.AuditRow
 import dev.curfew.app.data.CurfewRuntime
+import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
 import dev.curfew.policy.Activation
 import dev.curfew.policy.Lock
@@ -73,6 +74,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                     .getOrDefault(emptyList()),
                 grants = grantStates(getApplication()),
+                downtime = runtime.downtime.value,
                 loading = false,
             )
         }
@@ -111,6 +113,19 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissRefusal() = _state.update { it.copy(refusal = null, refusedSession = null) }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
+
+    /**
+     * Dismiss the downtime banner.
+     *
+     * Only the user can clear it. Curfew clearing its own "I was not running" notice would make the
+     * notice worthless, which is the whole reason it exists.
+     */
+    fun dismissDowntime() {
+        viewModelScope.launch {
+            runtime.acknowledgeDowntime()
+            refresh()
+        }
+    }
 
     /** Replace the config, rejecting an invalid one before the working config is touched. */
     fun saveConfig(toml: String) {
@@ -159,6 +174,8 @@ data class UiState(
     val configToml: String = "",
     val audit: List<AuditRow> = emptyList(),
     val grants: List<GrantState> = emptyList(),
+    /** A stretch Curfew could not account for, until the user has seen it. */
+    val downtime: Downtime? = null,
     val message: String? = null,
     val refusal: dev.curfew.policy.Refusal? = null,
     val refusedSession: String? = null,

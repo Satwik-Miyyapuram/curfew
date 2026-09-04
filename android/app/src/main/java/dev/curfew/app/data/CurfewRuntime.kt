@@ -144,7 +144,63 @@ class CurfewRuntime internal constructor(
     /** Read sessions back after a reboot, a force-stop or an update. */
     suspend fun restore(now: Long = clock.now()) = gate.withLock {
         db.state().get(KEY_SESSIONS)?.let { policy.restoreSessions(Policy.json.decodeFromString(it)) }
+        detectDowntime(now)
         refresh(now)
+    }
+
+    // --- downtime ----------------------------------------------------------------------------------
+
+    private val _downtime = MutableStateFlow<Downtime?>(null)
+
+    /**
+     * A stretch during which Curfew was not running, or the clock jumped, if there was one.
+     *
+     * Curfew cannot stop an OEM battery manager from killing it, and it will not pretend the gap
+     * did not happen: a blocker that silently stops enforcing is worse than one that says so. The
+     * banner is the honest version of "it was off between these times", and it is the user's to
+     * dismiss with [acknowledgeDowntime].
+     */
+    val downtime: StateFlow<Downtime?> = _downtime.asStateFlow()
+
+    /**
+     * Note that enforcement is alive at [now].
+     *
+     * Called from the service loop, so the recorded time is never more than one tick behind. The
+     * write is deliberately cheap — one row, one number — because it happens forever.
+     */
+    suspend fun heartbeat(now: Long = clock.now()) {
+        db.state().put(StateRow(KEY_HEARTBEAT, now.toString()))
+    }
+
+    suspend fun acknowledgeDowntime() {
+        _downtime.value = null
+        db.state().put(StateRow(KEY_HEARTBEAT, clock.now().toString()))
+    }
+
+    /**
+     * Compare the last heartbeat with the current time.
+     *
+     * Two different things show up here. A last heartbeat well in the past means the process was
+     * not running — killed, force-stopped, or the device was off. A last heartbeat in the *future*
+     * means the clock moved backwards, which is the oldest way to try to cheat a timed lock; the
+     * core is not fooled by it, because a session's end is stored as an instant, but the user is
+     * still owed the information.
+     */
+    private suspend fun detectDowntime(now: Long) {
+        val last = db.state().get(KEY_HEARTBEAT)?.toLongOrNull()
+        db.state().put(StateRow(KEY_HEARTBEAT, now.toString()))
+        if (last == null) return
+        val gap = now - last
+        when {
+            gap < -CLOCK_SKEW_SECONDS -> {
+                _downtime.value = Downtime(from = last, to = now, backwards = true)
+                audit(now, "enforcement.clock", "moved back ${-gap}s")
+            }
+            gap > DOWNTIME_SECONDS -> {
+                _downtime.value = Downtime(from = last, to = now, backwards = false)
+                audit(now, "enforcement.gap", "${gap}s")
+            }
+        }
     }
 
     private suspend fun persist(now: Long) {
@@ -170,6 +226,17 @@ class CurfewRuntime internal constructor(
 
     companion object {
         private const val KEY_SESSIONS = "sessions"
+        private const val KEY_HEARTBEAT = "heartbeat"
+
+        /**
+         * How long a silence has to be before it is worth reporting. The service ticks every
+         * thirty seconds, so anything under a few minutes is a slow device or a doze window, not
+         * a killed process, and saying so would only teach the user to ignore the banner.
+         */
+        const val DOWNTIME_SECONDS = 5L * 60
+
+        /** A minute of backwards drift is NTP correcting itself, not someone winding the clock back. */
+        const val CLOCK_SKEW_SECONDS = 60L
 
         /** A day plus an hour of slack, so a daily refill boundary is never read from an empty table. */
         const val LOOKBACK_SECONDS = 25L * 60 * 60

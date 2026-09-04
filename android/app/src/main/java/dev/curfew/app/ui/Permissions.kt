@@ -2,7 +2,6 @@ package dev.curfew.app.ui
 
 import android.Manifest
 import android.app.AlarmManager
-import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -14,6 +13,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import dev.curfew.app.enforce.CurfewAccessibilityService
 import dev.curfew.app.enforce.CurfewNotificationListener
+import dev.curfew.app.enforce.UsageStatsPoller
 
 /**
  * What Curfew is allowed to do, and what it cannot do without.
@@ -160,15 +160,8 @@ enum class Grant(
             }
         }
 
-        fun hasUsageAccess(context: Context): Boolean {
-            val ops = context.getSystemService(AppOpsManager::class.java) ?: return false
-            val mode = ops.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName,
-            )
-            return mode == AppOpsManager.MODE_ALLOWED
-        }
+        /** Asked in one place, in [UsageStatsPoller], so the API-level branch exists only once. */
+        fun hasUsageAccess(context: Context): Boolean = UsageStatsPoller.hasPermission(context)
     }
 }
 

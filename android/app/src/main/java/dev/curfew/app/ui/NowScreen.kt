@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.data.Downtime
 import dev.curfew.policy.Lock
 import dev.curfew.policy.Refusal
 import dev.curfew.policy.Session
@@ -85,6 +87,10 @@ fun NowScreen(model: CurfewViewModel) {
             modifier = Modifier.padding(top = 4.dp),
         )
 
+        state.downtime?.let { downtime ->
+            DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -122,6 +128,42 @@ fun NowScreen(model: CurfewViewModel) {
             confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
             text = { Text(message) },
         )
+    }
+}
+
+/**
+ * The banner that admits Curfew was not watching.
+ *
+ * Android lets an OEM battery manager kill a foreground service, and no app can stop it. What an
+ * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
+ * leave it on screen until the person has read it.
+ */
+@Composable
+private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .semantics { contentDescription = describeDowntime(downtime) },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                if (downtime.backwards) "The clock moved backwards" else "Curfew was not running",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                describeDowntime(downtime),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Got it")
+            }
+        }
     }
 }
 

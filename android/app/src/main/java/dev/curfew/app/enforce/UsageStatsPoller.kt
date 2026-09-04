@@ -42,11 +42,22 @@ class UsageStatsPoller(private val context: Context) {
 
         fun hasPermission(context: Context): Boolean {
             val ops = context.getSystemService(AppOpsManager::class.java) ?: return false
-            val mode = ops.unsafeCheckOpNoThrow(
-                AppOpsManager.OPSTR_GET_USAGE_STATS,
-                Process.myUid(),
-                context.packageName,
-            )
+            // `unsafeCheckOpNoThrow` only exists from API 29; below that the same question is asked
+            // through the deprecated `checkOpNoThrow`, which is the only spelling those releases have.
+            val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                ops.unsafeCheckOpNoThrow(
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(),
+                    context.packageName,
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                ops.checkOpNoThrow(
+                    AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(),
+                    context.packageName,
+                )
+            }
             return mode == AppOpsManager.MODE_ALLOWED
         }
 

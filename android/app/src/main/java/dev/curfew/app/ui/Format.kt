@@ -1,5 +1,6 @@
 package dev.curfew.app.ui
 
+import dev.curfew.app.data.Downtime
 import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
@@ -89,4 +90,19 @@ fun describeSource(source: SessionSource): String = when (source) {
 fun describeSource(source: ActivationSource): String = when (source) {
     is ActivationSource.Weekly -> source.schedule
     is ActivationSource.Calendar -> source.event
+}
+
+/**
+ * A gap, said plainly enough that a user can decide whether it mattered.
+ *
+ * Rules were still in force for the whole period as far as the core is concerned — a session's end
+ * is an instant, not a countdown that pauses — but nothing was watching the screen, so this says
+ * what was not happening rather than implying the session was void.
+ */
+fun describeDowntime(downtime: Downtime): String = if (downtime.backwards) {
+    "The device's clock jumped back ${duration(downtime.seconds.toInt())}, to ${dateTime(downtime.to)}. " +
+        "Sessions still end at the times they were given, so nothing was shortened."
+} else {
+    "Nothing was blocked between ${dateTime(downtime.from)} and ${dateTime(downtime.to)} — " +
+        "${duration(downtime.seconds.toInt())}. Curfew was stopped, by a restart or by the system."
 }
