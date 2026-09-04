@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Android / Gradle
+.gradle/
+/build/
+**/build/
+local.properties
+*.apk
+*.aab
+*.keystore
+captures/
+
+# Node / browser extension
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Tauri
+src-tauri/target/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local scratch
+scratch/
+*.log
