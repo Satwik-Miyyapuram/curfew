@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Android, Windows, Browser extension, CLI / core]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Curfew version
+    validations: { required: true }
+  - type: input
+    id: os
+    attributes:
+      label: OS version and device
+      placeholder: "Android 15, Pixel 8 / Windows 11 26200 ARM64"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations: { required: true }
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant part of your curfew.toml
+      render: toml
+  - type: checkboxes
+    id: enforcement
+    attributes:
+      label: If blocking failed, which layers did the health screen show as live?
+      options:
+        - label: Accessibility service
+        - label: Usage access
+        - label: VPN filter
+        - label: Notification access
+        - label: Windows service

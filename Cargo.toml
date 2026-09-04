@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/curfew-core", "crates/curfew-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.82"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/satwikpandu/curfew"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"

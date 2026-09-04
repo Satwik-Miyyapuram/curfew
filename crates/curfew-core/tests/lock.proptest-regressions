@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7a4a5f67b6e21ca9f1a960d339253610e7c6f026514ebe3e470845d3f0c663e8 # shrinks to start = LockSet { conditions: {}, ends_at: None, delayed_release_at: None }, rest = [LockSet { conditions: {}, ends_at: Some(0), delayed_release_at: None }]
+cc bdf125cf5c622ea8e04cbef446fa2c3f2196163049fdcae951d30822e8069f07 # shrinks to a = LockSet { conditions: {}, ends_at: Some(0), delayed_release_at: None }, b = LockSet { conditions: {}, ends_at: None, delayed_release_at: None }
+cc d19fe7d9cc8ba58f525b25d94ee95d8ed89e04e37abd7097354564caff9e95d3 # shrinks to a = LockSet { conditions: {Timer}, ends_at: Some(0), delayed_release_at: None }, b = LockSet { conditions: {}, ends_at: Some(0), delayed_release_at: None }, c = LockSet { conditions: {}, ends_at: None, delayed_release_at: None }

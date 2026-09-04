@@ -1,0 +1,23 @@
+schema_version = 0
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+description = "What a calendar event tagged #focus turns on."
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.instagram.android" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 1200 }
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "steam.exe" }
+action = { kind = "block" }
+platforms = ["windows"]
+
+[[profiles.rules]]
+target = { kind = "app_package", package = "com.slack" }
+action = { kind = "delay", seconds = 15 }

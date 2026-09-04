@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  core:
+    name: core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features
+      - name: Test
+        run: cargo test --all-features
+      # The engine must decide identically on every platform, which is the whole point of putting
+      # it in a shared core. Same config, same answer, Linux and Windows.
+      - name: Cross-platform agreement on the golden config
+        shell: bash
+        run: |
+          cfg=crates/curfew-core/tests/golden/example.toml
+          run() { cargo run --quiet -p curfew-cli -- decide "$cfg" deep-work "$1"; }
+          test "$(run app:com.instagram.android)" != "allow"
+          test "$(run app:com.example.notes)" = "allow"
+          test "$(run app:com.slack)" = "delay 15s"

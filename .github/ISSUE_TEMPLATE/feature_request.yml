@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest something Curfew should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that Curfew makes hard?
+      description: Describe the situation, not the solution.
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Please confirm
+      options:
+        - label: This does not require a server, an account, or any paid infrastructure.
+          required: true
+        - label: This is not a way to monitor or restrict another person (see docs/GAPS.md D3).
+          required: true

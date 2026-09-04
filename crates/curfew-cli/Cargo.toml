@@ -1,0 +1,15 @@
+[package]
+name = "curfew-cli"
+description = "Command-line interface to the Curfew core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "curfew"
+path = "src/main.rs"
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
