@@ -63,3 +63,29 @@ action = { kind = "allow_only" }
 [[profiles.rules]]
 target = { kind = "domain", domain = "dictionary.example" }
 action = { kind = "allow_only" }
+
+# Weekday mornings run deep work on a timer; nights run a credential-locked sleep window that
+# crosses midnight.
+[[weekly]]
+id = "weekday-mornings"
+profile = "deep-work"
+days = [0, 1, 2, 3, 4]
+start_minute = 540
+end_minute = 720
+locks = [{ kind = "timer" }]
+
+[[weekly]]
+id = "overnight"
+profile = "writing"
+start_minute = 1380
+end_minute = 420
+locks = [{ kind = "device_credential" }]
+
+# The feature the project is named for: a calendar event starts a session, five minutes early.
+[[calendars]]
+id = "work-focus"
+profile = "deep-work"
+pad_before_seconds = 300
+pad_after_seconds = 0
+locks = [{ kind = "confirm" }]
+matcher = { title = "*focus*", calendar = "Work", busy_only = true }

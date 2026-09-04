@@ -16,6 +16,24 @@ fn the_golden_config_parses() {
 }
 
 #[test]
+fn the_golden_config_carries_its_schedules() {
+    let cfg = Config::from_toml(GOLDEN).unwrap();
+    assert_eq!(cfg.weekly.len(), 2);
+    assert_eq!(cfg.calendars.len(), 1);
+    // The overnight window is the crossing-midnight shape, which the schedule layer has to notice.
+    let overnight = cfg.weekly.iter().find(|w| w.id == "overnight").expect("overnight window");
+    assert!(overnight.end_minute < overnight.start_minute);
+    assert_eq!(cfg.calendars[0].pad_before_seconds, 300);
+    assert_eq!(cfg.calendars[0].matcher.calendar.as_deref(), Some("Work"));
+}
+
+#[test]
+fn a_config_with_no_schedules_at_all_is_valid() {
+    let cfg = Config::from_toml("schema_version = 1").unwrap();
+    assert!(cfg.weekly.is_empty() && cfg.calendars.is_empty());
+}
+
+#[test]
 fn the_golden_config_round_trips() {
     let cfg = Config::from_toml(GOLDEN).unwrap();
     let again = Config::from_toml(&cfg.to_toml().unwrap()).unwrap();

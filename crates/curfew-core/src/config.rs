@@ -2,6 +2,7 @@
 //! complete, diffable description of a user's setup (design invariant 4).
 
 use crate::budget::Refill;
+use crate::schedule::{CalendarSchedule, WeeklySchedule};
 use crate::target::Target;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,12 @@ pub struct Config {
     pub timezone: String,
     #[serde(default)]
     pub profiles: Vec<Profile>,
+    /// Recurring weekly windows.
+    #[serde(default)]
+    pub weekly: Vec<WeeklySchedule>,
+    /// Calendar-driven sessions (DECISIONS: the feature the whole project is named for).
+    #[serde(default)]
+    pub calendars: Vec<CalendarSchedule>,
 }
 
 fn default_timezone() -> String {
@@ -29,6 +36,8 @@ impl Default for Config {
             schema_version: CONFIG_SCHEMA_VERSION,
             timezone: default_timezone(),
             profiles: Vec::new(),
+            weekly: Vec::new(),
+            calendars: Vec::new(),
         }
     }
 }
