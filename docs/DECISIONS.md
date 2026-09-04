@@ -56,3 +56,10 @@ across devices) and reads naturally in the product itself ("curfew active until 
 - *YAFA / YAWP* ("Yet Another Focus App") — 5+ and 6+ existing GitHub projects respectively.
 Namespace notes: `github.com/curfew` is an empty squatted account, which does not matter since the
 repo lives under the owner's account. `usecurfew.com` was verified unregistered on 2026-09-04.
+
+## D6 — No domain; site on GitHub Pages (2026-09-04)
+No custom domain. Project site and docs ship from `/docs` or a `gh-pages` branch at
+`https://<owner>.github.io/curfew`. Releases are GitHub Releases plus F-Droid.
+Rationale: zero recurring cost matches the project's premise (no subscriptions, no infrastructure),
+and a serverless app has nothing a domain would serve. `usecurfew.com` stays unregistered; if that
+ever changes, Pages accepts a custom domain later with no migration.
