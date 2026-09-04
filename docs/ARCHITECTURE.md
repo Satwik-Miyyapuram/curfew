@@ -116,13 +116,15 @@ shared group key. A group is a set of paired devices; no account exists.
 - budgets: grow-only counters (G-Counter) per device, summed for the global consumption
 - stats: append-only, never merged destructively
 
-**Transports** (pluggable, tried in order, all optional):
+**Transports** (pluggable, tried in order, all optional — see D3):
 1. **LAN**: mDNS discovery + QUIC, direct, works fully offline.
-2. **iroh**: dial-by-public-key with NAT hole-punching; public relay used only for rendezvous, and
-   the payload is already E2E encrypted. Self-hostable relay for the paranoid.
-3. **Shared folder**: encrypted log segments dropped into a Syncthing/Drive/Dropbox folder. Slow,
-   but works everywhere with zero networking code.
-4. **Bluetooth/QR fallback**: manual "beam this session" for the no-network case.
+2. **Shared folder**: encrypted log segments dropped into a Syncthing/Drive/Dropbox folder. The only
+   cross-network path we ship, so it must be properly engineered: segment naming, compaction,
+   concurrent writers, and honest latency indication in the UI.
+3. **Bluetooth / manual QR beam**: no-network fallback for "push this session to my phone now".
+
+Deferred: NAT-hole-punched P2P (iroh). Consequence accepted: with no shared folder configured, a
+phone on mobile data does not receive a PC-started session until it rejoins the LAN.
 
 **Anti-escape property**: a locked session mirrored from a peer stays enforced locally even if the
 peer disappears; releasing requires the lock's own conditions. Un-pairing during an active locked
@@ -137,7 +139,10 @@ session is itself gated by the lock.
 | UsageStats poller | `PACKAGE_USAGE_STATS` | apps (1–2 s lag) | always |
 | Local VpnService DNS filter | VPN consent | domains, per-app net | always |
 | NotificationListener | notification access | notifications | always |
-| DevicePolicyManager (device owner) | ADB one-time setup | app suspend, uninstall block | strongest |
+| Device Admin (not device owner) | admin activation | requires deactivation before uninstall, gated by the active lock | strongest we ship |
+
+Device-owner / `dpm set-device-owner` is explicitly **out of scope** (D4): no factory-reset-class
+setup, nothing that can make a device unrecoverable.
 
 **Windows**
 | Layer | Needs | Blocks |
@@ -163,7 +168,7 @@ Out of scope: a determined attacker with admin rights and time. Documented hones
 pretended away; strictness is a ladder the user picks, and "hardcore mode" (device owner + Windows
 service ACLs) is the top rung.
 
-## 9. Stack decision (proposed, open for review)
+## 9. Stack (decided — see docs/DECISIONS.md D1)
 
 - **Core**: Rust — one implementation of policy, sync, crypto, calendar parsing; UniFFI-generated
   Kotlin bindings for Android; linked directly by the Windows service; also gives a CLI for free.
@@ -171,6 +176,5 @@ service ACLs) is the top rung.
 - **Windows**: Rust service + Tauri 2 desktop UI (small binary, native tray, shares the core).
 - **Browser**: TypeScript MV3 extension (Chrome + Firefox), native-messaging to the daemon.
 
-Alternative considered: Kotlin Multiplatform + Compose Multiplatform for everything. Simpler for
-Android-first work and one language across UI, but a JVM daemon on Windows is a weaker tamper and
-memory story, and WFP/service work is native anyway. Decision requested from the user before Phase 1.
+Rejected: Kotlin Multiplatform (JVM daemon on Windows is a weaker tamper and memory story) and
+Flutter (core logic in Dart, weakest service story).

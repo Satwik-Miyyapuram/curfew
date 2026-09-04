@@ -3,8 +3,8 @@
 Each phase ends with something usable. No phase depends on a server at any point.
 
 ## Phase 0 — Foundations (repo is here now)
-- [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap)
-- [ ] Workspace scaffolding for the chosen stack, CI (build + test on push), issue templates
+- [x] Git repo, AGPL-3.0, docs (research, architecture, roadmap, decisions)
+- [ ] Cargo workspace (`core`, `cli`), Android Gradle project, CI (build + test on push)
 - [ ] `nodis.toml` schema v0 + golden-file tests
 - [ ] Core rule engine: `decide()` with block / allow-only / budget / delay, plus a property test
       suite. No I/O, no platform code.
@@ -31,8 +31,8 @@ Each phase ends with something usable. No phase depends on a server at any point
 - [ ] LAN transport (mDNS + QUIC)
 - [ ] Session mirroring: start on PC, phone blocks; shared budgets across devices
 - [ ] Conflict UI, unpair gated by active locks
-- [ ] Shared-folder transport as fallback
-- [ ] iroh transport for cross-network
+- [ ] Shared-folder transport (the cross-network path: segments, compaction, concurrent writers)
+- [ ] Bluetooth / QR beam fallback
 
 ## Phase 4 — Calendar (the differentiator, part 2)
 - [ ] Android `CalendarContract` reader
@@ -50,7 +50,8 @@ Each phase ends with something usable. No phase depends on a server at any point
 - [ ] Notification muting, keyword blocking
 - [ ] Browser extension (Chrome + Firefox) for URL/path/in-page rules
 - [ ] Android VpnService DNS filter; Windows WFP filtering
-- [ ] Hardcore mode: device owner setup wizard, Windows service ACL hardening, clock-tamper detection
+- [ ] Hardening: Android Device Admin uninstall gate, Windows service ACLs + watchdog, clock-tamper
+      detection, re-lock on boot (no device-owner / factory-reset-class setup — see D4)
 
 ## Phase 6 — Polish + release
 - [ ] Widgets, quick tiles, CLI, webhooks/scripts on session start-end
