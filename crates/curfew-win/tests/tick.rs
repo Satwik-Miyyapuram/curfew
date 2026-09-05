@@ -291,3 +291,72 @@ fn a_release_gives_the_machine_back() {
 
     assert_eq!(hosts(&path), "127.0.0.1 localhost\r\n");
 }
+
+#[test]
+fn a_session_that_ends_is_kept_for_the_statistics() {
+    let (mut enforcer, _) = enforcer("history");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    assert!(enforcer.history.is_empty(), "a running session is not history yet");
+
+    // The window has closed, so the pass reaps the session — and the record of it survives.
+    enforcer.tick(AFTER, 0, &[], &table);
+
+    assert_eq!(enforcer.history.len(), 1);
+    let record = &enforcer.history[0];
+    assert_eq!(record.profile, "deep-work");
+    assert_eq!(record.started_at, NOW);
+    assert_eq!(record.ended_at, Some(AFTER));
+}
+
+/// A session can end by being reaped, by a satisfied lock, by an emergency pass or by a peer. The
+/// history is written by noticing what is no longer running, so every one of those is covered
+/// without each having to remember to say so.
+#[test]
+fn a_session_ended_by_hand_is_kept_too() {
+    let (mut enforcer, _) = enforcer("history-by-hand");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    let id = enforcer.sessions.running[0].id.clone();
+    enforcer
+        .sessions
+        .end(&id, NOW + 600, &BTreeSet::from([Lock::Timer]))
+        .expect("the timer had run out");
+    enforcer.tick(NOW + 900, 0, &[], &table);
+
+    assert_eq!(enforcer.history.len(), 1);
+    assert_eq!(enforcer.history[0].ended_at, Some(NOW + 900));
+}
+
+#[test]
+fn the_statistics_count_the_session_that_is_still_running() {
+    let (mut enforcer, _) = enforcer("stats-running");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    let stats = enforcer.stats(NOW + 3600, 7).expect("the config has a timezone");
+
+    let today = stats.days.last().expect("today is in the window");
+    assert_eq!(today.day, "2026-09-04");
+    assert_eq!(today.blocked_seconds, 3600);
+    assert_eq!(today.sessions, 1);
+    assert_eq!(stats.current_streak, 1);
+}
+
+#[test]
+fn history_older_than_thirty_days_is_dropped() {
+    let (mut enforcer, _) = enforcer("history-pruned");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    enforcer.tick(AFTER, 0, &[], &table);
+    assert_eq!(enforcer.history.len(), 1);
+
+    // A pass a fortnight later still has it; one two months later does not.
+    enforcer.tick(AFTER + 14 * 24 * 3600, 0, &[], &table);
+    assert_eq!(enforcer.history.len(), 1);
+    enforcer.tick(AFTER + 60 * 24 * 3600, 0, &[], &table);
+    assert!(enforcer.history.is_empty());
+}

@@ -14,6 +14,7 @@ pub mod lock;
 pub mod proof;
 pub mod schedule;
 pub mod session;
+pub mod stats;
 pub mod target;
 pub mod token;
 
@@ -33,6 +34,7 @@ pub use schedule::{
     CalendarSource, EventMatcher, WeeklySchedule,
 };
 pub use session::{reconcile, Refusal, Session, SessionSource, Sessions};
+pub use stats::{summarize, DayStat, SessionRecord, Stats};
 pub use target::{domain_matches, glob_match, Observation, Target, Url};
 pub use token::{fingerprint, identify, Tag};
 

@@ -20,7 +20,9 @@ import dev.curfew.policy.Target
 import dev.curfew.policy.label
 import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.Session
+import dev.curfew.policy.SessionRecord
 import dev.curfew.policy.Sessions
+import dev.curfew.policy.Stats
 import dev.curfew.policy.UsageState
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -99,6 +101,41 @@ class CurfewRuntime internal constructor(
 
     suspend fun recordLaunch(target: String, at: Long) {
         db.usage().addLaunch(LaunchRow(target = target, at = at))
+    }
+
+    // --- statistics -------------------------------------------------------------------------------
+
+    /**
+     * What the last [days] days of blocking added up to, rebuilt from the audit trail.
+     *
+     * Start and end rows are paired by session id. An end whose start has already been pruned is
+     * recorded as a session of no length on the day it ended: that day did have blocking on it,
+     * and claiming a duration nobody can check would be worse than claiming none.
+     */
+    suspend fun stats(days: Int = STATS_DAYS, now: Long = clock.now()): Stats =
+        policy.stats(sessionRecords(now), now, days)
+
+    /** The same summary as CSV, for the export. */
+    suspend fun statsCsv(days: Int = STATS_DAYS, now: Long = clock.now()): String =
+        policy.statsCsv(sessionRecords(now), now, days)
+
+    private suspend fun sessionRecords(now: Long): List<SessionRecord> {
+        val rows = db.audit().sessionEvents(now - AUDIT_RETENTION_SECONDS)
+        val open = LinkedHashMap<String, Long>()
+        val records = mutableListOf<SessionRecord>()
+        for (row in rows) {
+            when (row.kind) {
+                "session.started" -> open.putIfAbsent(row.detail, row.at)
+                "session.ended" -> {
+                    val startedAt = open.remove(row.detail) ?: row.at
+                    // The id, not a profile name: the audit trail records which session it was,
+                    // and the summary only carries the label through.
+                    records += SessionRecord(row.detail, startedAt, row.at)
+                }
+            }
+        }
+        for ((id, startedAt) in open) records += SessionRecord(id, startedAt, null)
+        return records
     }
 
     // --- sessions ----------------------------------------------------------------------------------
@@ -582,6 +619,9 @@ class CurfewRuntime internal constructor(
 
         /** Thirty days of history is enough to answer "what did it do to me?" and no more. */
         const val AUDIT_RETENTION_SECONDS = 30L * 24 * 60 * 60
+
+        /** A fortnight: long enough to see a habit, short enough to fit a phone screen. */
+        const val STATS_DAYS = 14
 
         /**
          * The real runtime, with the encrypted database.

@@ -14,6 +14,7 @@ use curfew_core::config::Platform;
 use curfew_core::engine::{charged_keys, State};
 use curfew_core::schedule::{active_at, next_change_after, upcoming, CalendarEvent};
 use curfew_core::session::{reconcile, Session, Sessions};
+use curfew_core::stats::{summarize, SessionRecord};
 use curfew_core::target::Observation;
 use curfew_core::{decide, ClockWitness, Config, Lock, Reading, Timestamp, Verdict};
 use std::collections::BTreeSet;
@@ -697,6 +698,52 @@ impl Curfew {
         let config = self.config.read().expect("config lock");
         let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         Ok(next_change_after(now, tz, &config.weekly, &config.calendars, &events))
+    }
+
+    /// What the last `days` days of blocking added up to: per-day seconds, streaks, totals.
+    ///
+    /// The history is passed in rather than kept here because each platform already stores it
+    /// somewhere it trusts — an encrypted table on Android, the state file on Windows — and the
+    /// timezone comes from the config, so the phone and the PC cannot disagree about where a day
+    /// ends.
+    pub fn stats_json(
+        &self,
+        records_json: String,
+        now: Timestamp,
+        days: u32,
+    ) -> Result<String, CurfewError> {
+        let records: Vec<SessionRecord> =
+            serde_json::from_str(if records_json.is_empty() { "[]" } else { &records_json })
+                .map_err(payload)?;
+        let tz = self
+            .config
+            .read()
+            .expect("config lock")
+            .tz()
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        serde_json::to_string(&summarize(&records, now, tz, days)).map_err(payload)
+    }
+
+    /// The same summary as CSV, for the export.
+    ///
+    /// The writer lives in the core beside the arithmetic so the file a phone exports and the file
+    /// a PC exports are the same file.
+    pub fn stats_csv(
+        &self,
+        records_json: String,
+        now: Timestamp,
+        days: u32,
+    ) -> Result<String, CurfewError> {
+        let records: Vec<SessionRecord> =
+            serde_json::from_str(if records_json.is_empty() { "[]" } else { &records_json })
+                .map_err(payload)?;
+        let tz = self
+            .config
+            .read()
+            .expect("config lock")
+            .tz()
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        Ok(summarize(&records, now, tz, days).to_csv())
     }
 }
 

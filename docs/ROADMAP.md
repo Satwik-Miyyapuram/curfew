@@ -108,7 +108,8 @@ disabling the browser extension during a locked session is detected and reported
 
 ## Phase 6 — Release
 - [ ] Widgets, quick tiles, CLI, webhooks on session start/end
-- [ ] Stats: streaks, trends, CSV/JSON export
+- [x] Stats: streaks, trends, CSV/JSON export (`curfew_core::stats`, shared by both platforms;
+      Usage tab bars and export, `curfew stats [--days n] [--csv/--json]` on the PC)
 - [ ] Themes, externalized strings
 - [x] GitHub Pages site (one static file, no trackers) and GitHub Releases for both platforms —
       Windows zips and an unsigned APK, each with a checksum

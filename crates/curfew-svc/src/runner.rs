@@ -98,6 +98,10 @@ pub fn build(
     enforcer.boots = persisted.boots;
     enforcer.boot_counter = persisted.boot_counter;
     enforcer.releases = persisted.releases;
+    enforcer.history = persisted.history;
+    // A session that ended while the service was stopped has to be noticed by the first pass, so
+    // the pass needs to know what was running when the service went away.
+    enforcer.watch_sessions();
     enforcer.config_path = Some(config_path.to_path_buf());
     enforcer.state_warning = warning;
     Ok(enforcer)
@@ -187,6 +191,7 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
         boots: enforcer.boots.clone(),
         boot_counter: enforcer.boot_counter.clone(),
         releases: enforcer.releases.clone(),
+        history: enforcer.history.clone(),
         last_tick: Some(last_tick),
     };
     if let Err(e) = state::save(state_path, &snapshot) {

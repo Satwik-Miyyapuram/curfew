@@ -35,6 +35,10 @@ pub struct Persisted {
     /// the other device, and a service restart must not take it back.
     #[serde(default)]
     pub releases: std::collections::BTreeSet<String>,
+    /// Sessions that have finished, for the statistics. Kept for thirty days and pruned by the
+    /// enforcer, not here: this file records, it does not decide.
+    #[serde(default)]
+    pub history: Vec<curfew_core::stats::SessionRecord>,
     /// When the last pass ran. Used to charge elapsed time honestly across a restart, and to notice
     /// that the machine was off — a gap is not usage.
     #[serde(default)]

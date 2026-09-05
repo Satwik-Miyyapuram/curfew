@@ -688,6 +688,7 @@ fn passes_survive_a_restart_the_way_sessions_do() {
             boots: e.boots.clone(),
             boot_counter: e.boot_counter.clone(),
             releases: e.releases.clone(),
+            history: Vec::new(),
             last_tick: Some(NOW),
         },
     )
@@ -880,6 +881,7 @@ fn restart_evidence_survives_the_service_being_restarted() {
             boots: e.boots.clone(),
             boot_counter: e.boot_counter.clone(),
             releases: e.releases.clone(),
+            history: Vec::new(),
             last_tick: Some(NOW),
         },
     )

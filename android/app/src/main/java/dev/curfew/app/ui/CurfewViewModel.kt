@@ -1,6 +1,7 @@
 package dev.curfew.app.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.curfew.app.data.AuditRow
@@ -20,12 +21,14 @@ import dev.curfew.policy.NoPass
 import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refused
 import dev.curfew.policy.Session
+import dev.curfew.policy.Stats
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 /**
  * What the screens read, and the only place they are allowed to change anything.
@@ -92,6 +95,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     .getOrDefault(emptyList()),
                 audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                     .getOrDefault(emptyList()),
+                stats = runCatching { runtime.stats(now = now) }.getOrDefault(Stats()),
                 grants = grantStates(getApplication()),
                 restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                 downtime = runtime.downtime.value,
@@ -490,6 +494,32 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * Apps are left out because the picker above already shows them, ticked; showing each one a
      * second time as a row would read as two separate blocks on the same app.
      */
+    /**
+     * Write the statistics to a file the user picked, as CSV or as JSON.
+     *
+     * Only ever the summary: the audit trail it was built from stays on the device, because a
+     * per-session log leaving the phone is the thing this app promises does not happen. Both
+     * formats are produced by the core, so the file a phone writes and the file a PC writes match.
+     */
+    fun exportStats(uri: Uri, asCsv: Boolean) {
+        viewModelScope.launch {
+            val text = runCatching {
+                if (asCsv) runtime.statsCsv() else Json.encodeToString(Stats.serializer(), state.value.stats)
+            }.getOrNull()
+            if (text == null) {
+                say("Those figures could not be prepared.")
+                return@launch
+            }
+            runCatching {
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use {
+                    it.write(text.toByteArray())
+                }
+            }
+                .onSuccess { say("Saved.") }
+                .onFailure { say("That file could not be written.") }
+        }
+    }
+
     fun rulesBeyondApps(profile: String): List<Rule> =
         runCatching { runtime.rulesBeyondApps(profile) }.getOrDefault(emptyList())
 
@@ -578,6 +608,8 @@ data class UiState(
     val calendarRules: List<CalendarSchedule> = emptyList(),
     val profiles: List<ProfileName> = emptyList(),
     val audit: List<AuditRow> = emptyList(),
+    /** Days blocked, streaks and totals over the last fortnight. */
+    val stats: Stats = Stats(),
     val grants: List<GrantState> = emptyList(),
     /** True while Android is refusing accessibility access because Curfew was sideloaded. */
     val restrictedSettings: Boolean = false,

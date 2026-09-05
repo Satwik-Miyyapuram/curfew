@@ -14,6 +14,7 @@ use crate::hosts;
 use crate::ipc::{Request, Response, Status};
 use crate::procs::{enforce, Outcome, Process, Processes};
 use curfew_core::engine::charged_keys;
+use curfew_core::stats::{summarize, SessionRecord, Stats};
 use curfew_core::{
     active_at, Config, Consumption, Launches, Platform, Session, Sessions, State, Timestamp,
 };
@@ -22,6 +23,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// What one pass did, for the tray, the log and the tests.
+/// How long a finished session stays on record. The same thirty days the phone keeps.
+pub const HISTORY_SECONDS: Timestamp = 30 * 24 * 60 * 60;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tick {
     /// Sessions a schedule started this pass.
@@ -64,6 +68,13 @@ pub struct Enforcer {
     /// Where the config was read from, so a reload knows what to re-read. `None` when it was
     /// handed in directly, as the tests do.
     pub config_path: Option<PathBuf>,
+    /// Sessions that have finished, kept for thirty days so `curfew stats` can say what the
+    /// fortnight looked like. Persisted, and pruned on every pass.
+    pub history: Vec<SessionRecord>,
+    /// The running sessions as of the last pass, keyed by id. A pass that finds one of these gone
+    /// writes it into [`Enforcer::history`], which is how ends get recorded no matter which of the
+    /// several ways a session can end took it: a reap, a satisfied lock, a pass, a peer.
+    watching: BTreeMap<String, (String, Timestamp)>,
     /// What the last pass did, so a status request is answered from fact rather than by running
     /// enforcement again on the caller's schedule.
     pub last: Tick,
@@ -115,6 +126,8 @@ impl Enforcer {
             launches: BTreeMap::new(),
             hosts_path,
             config_path: None,
+            history: Vec::new(),
+            watching: BTreeMap::new(),
             last: Tick::default(),
             state_warning: None,
             passes: Default::default(),
@@ -169,6 +182,68 @@ impl Enforcer {
             })
             .map(|s| s.id.clone())
             .collect()
+    }
+
+    /// Note that the sessions running now are the sessions running now.
+    ///
+    /// Called after restoring state, so a session that ends while the service is stopped is still
+    /// recorded when the next pass notices it is gone.
+    pub fn watch_sessions(&mut self) {
+        self.watching = self
+            .sessions
+            .running
+            .iter()
+            .map(|s| (s.id.clone(), (s.profile.clone(), s.started_at)))
+            .collect();
+    }
+
+    /// Move sessions that are no longer running into the history.
+    ///
+    /// The end time is this pass's `now` rather than the exact instant the session ended, which
+    /// can be up to one pass earlier. A statistic measured in days can afford that; threading an
+    /// exact end through every one of the ways a session can finish could not be afforded, and
+    /// each of those paths is one more place to forget.
+    fn remember(&mut self, now: Timestamp) {
+        let running: BTreeMap<String, (String, Timestamp)> = self
+            .sessions
+            .running
+            .iter()
+            .map(|s| (s.id.clone(), (s.profile.clone(), s.started_at)))
+            .collect();
+        for (id, (profile, started_at)) in &self.watching {
+            if !running.contains_key(id) {
+                self.history.push(SessionRecord {
+                    profile: profile.clone(),
+                    started_at: *started_at,
+                    ended_at: Some(now.max(*started_at)),
+                });
+            }
+        }
+        self.watching = running;
+        // The same thirty days the phone keeps, for the same reason: old slices answer no question
+        // anybody asks, and are the only part of this that is sensitive.
+        let cutoff = now - HISTORY_SECONDS;
+        self.history.retain(|record| record.ended_at.unwrap_or(now) >= cutoff);
+    }
+
+    /// What the last `days` days of blocking added up to.
+    ///
+    /// Running sessions are included, counted up to `now`: a day you are in the middle of blocking
+    /// is a day you blocked.
+    pub fn stats(&self, now: Timestamp, days: u32) -> Result<Stats, String> {
+        let tz = self.config.tz().map_err(|e| e.to_string())?;
+        Ok(summarize(&self.session_records(), now, tz, days))
+    }
+
+    /// Everything the statistics are computed from: what has finished, and what is still going.
+    pub fn session_records(&self) -> Vec<SessionRecord> {
+        let mut records = self.history.clone();
+        records.extend(self.sessions.running.iter().map(|s| SessionRecord {
+            profile: s.profile.clone(),
+            started_at: s.started_at,
+            ended_at: None,
+        }));
+        records
     }
 
     /// The world as the core sees it at `now`.
@@ -254,6 +329,8 @@ impl Enforcer {
         self.boots.observe(self.boot_id, &self.sessions.running);
         let running: Vec<String> = self.sessions.running.iter().map(|s| s.id.clone()).collect();
         self.proofs.prune(now, &running);
+
+        self.remember(now);
 
         let state = self.state(now);
         tick.processes =

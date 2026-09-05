@@ -56,6 +56,8 @@ curfew — distraction blocking that keeps its promises
                                    (run any of these with no arguments for their flags)
   curfew upcoming <config.toml> [--hours <n>]
                                    what the next day and a half will block, and why
+  curfew stats <config.toml> [--days <n>] [--csv | --json]
+                                   days blocked, streaks and totals
 
   curfew extension <browser> <id>  let a browser talk to Curfew (chrome, edge, brave,
                                    vivaldi, chromium, firefox, librewolf)
@@ -88,6 +90,7 @@ fn main() {
         "peer-release" => peer_release(&args[1..]),
         "tag" => tag(&args[1..]),
         "upcoming" => upcoming(&args[1..]),
+        "stats" => stats(&args[1..]),
         "reload" => simple(Request::Reload),
         "run" => run_in_console(),
         "watchdog" => {
@@ -177,6 +180,129 @@ fn extension(args: &[String]) -> i32 {
 
 /// Print what the schedules will block over the next while, and why.
 ///
+/// What the last fortnight of blocking added up to.
+///
+/// Read straight from the state file rather than asked of the service, so it answers on a machine
+/// where the service is stopped — which is exactly the machine somebody is most likely to be
+/// looking at their record on. The arithmetic is the core's, and the timezone is the config's, so
+/// this prints the same days the phone shows.
+fn stats(args: &[String]) -> i32 {
+    let Some(path) = args.first() else {
+        eprintln!("usage: curfew stats <config.toml> [--days <n>] [--csv | --json]");
+        return 2;
+    };
+    let mut days: u32 = 14;
+    let mut format = "text";
+    let mut rest = args[1..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--days" => match rest.next().and_then(|v| v.parse::<u32>().ok()) {
+                Some(n) if (1..=365).contains(&n) => days = n,
+                _ => {
+                    eprintln!("curfew: --days wants a number of days, up to 365.");
+                    return 2;
+                }
+            },
+            "--csv" => format = "csv",
+            "--json" => format = "json",
+            other => {
+                eprintln!("curfew: {other} is not a flag this command takes.");
+                return 2;
+            }
+        }
+    }
+
+    let config = match std::fs::read_to_string(path)
+        .map_err(|e| format!("{path}: {e}"))
+        .and_then(|text| curfew_core::Config::from_toml(&text).map_err(|e| format!("{path}: {e}")))
+    {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("curfew: {e}");
+            return 1;
+        }
+    };
+    let zone = match config.tz() {
+        Ok(zone) => zone,
+        Err(e) => {
+            eprintln!("curfew: {e}");
+            return 1;
+        }
+    };
+
+    // A missing or unreadable state file is an empty record, not an error: a fresh install has no
+    // history, and a machine that has never run the service should say "nothing yet" rather than
+    // fail.
+    let persisted = match state::load(&state::default_path()) {
+        state::Loaded::Ok(state) => state,
+        state::Loaded::Recovered { state, detail } => {
+            eprintln!("curfew: {detail}; these figures come from the backup copy.");
+            state
+        }
+        state::Loaded::Fresh => Default::default(),
+        state::Loaded::Lost { detail } => {
+            eprintln!("curfew: the state file could not be read ({detail}).");
+            Default::default()
+        }
+    };
+
+    let mut records = persisted.history;
+    records.extend(persisted.sessions.running.iter().map(|s| curfew_core::stats::SessionRecord {
+        profile: s.profile.clone(),
+        started_at: s.started_at,
+        ended_at: None,
+    }));
+
+    let now = runner::now();
+    let summary = curfew_core::stats::summarize(&records, now, zone, days);
+    match format {
+        "csv" => print!("{}", summary.to_csv()),
+        "json" => match serde_json::to_string_pretty(&summary) {
+            Ok(text) => println!("{text}"),
+            Err(e) => {
+                eprintln!("curfew: {e}");
+                return 1;
+            }
+        },
+        _ => {
+            println!(
+                "{} day{} in a row. Best so far: {}.",
+                summary.current_streak,
+                if summary.current_streak == 1 { "" } else { "s" },
+                summary.longest_streak,
+            );
+            println!(
+                "{} across {} session{} in the last {days} days.\n",
+                span(summary.total_blocked_seconds),
+                summary.total_sessions,
+                if summary.total_sessions == 1 { "" } else { "s" },
+            );
+            for day in &summary.days {
+                // A bar per day, in the terminal's own characters: readable over a remote session,
+                // and no colour to be lost in a pipe.
+                let hours = day.blocked_seconds as usize / 3600;
+                println!(
+                    "  {}  {:<24} {}",
+                    day.day,
+                    "#".repeat(hours.min(24)),
+                    span(day.blocked_seconds as u64),
+                );
+            }
+        }
+    }
+    0
+}
+
+/// A duration in the words a person would use for it.
+fn span(seconds: u64) -> String {
+    match (seconds / 3600, (seconds % 3600) / 60) {
+        (0, 0) => "nothing".to_string(),
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h {m}m"),
+    }
+}
+
 /// It lives here rather than in `curfew-cli` because it is the only config command that needs the
 /// calendars themselves: a preview that showed weekly windows and quietly left out every meeting
 /// would be worse than no preview, since the meetings are the half a user cannot work out in their

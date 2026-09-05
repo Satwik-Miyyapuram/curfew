@@ -107,6 +107,22 @@ class Policy private constructor(private val inner: Curfew) {
      * Replaces the rule already pointing at the same thing on the same platforms, so saying it
      * twice is one rule rather than two arguing with each other.
      */
+    /**
+     * What the last [days] local days of blocking added up to.
+     *
+     * The history is handed in rather than kept by the core, because the app already stores it in
+     * an encrypted table; what the core owns is the arithmetic — where a local day ends, and the
+     * fact that two sessions over the same hour are one hour of the user's day.
+     */
+    fun stats(records: List<SessionRecord>, now: Long, days: Int): Stats = invalid {
+        json.decodeFromString(inner.statsJson(json.encodeToString(records), now, days.toUInt()))
+    }
+
+    /** The same summary as CSV, written by the core so both platforms export the same file. */
+    fun statsCsv(records: List<SessionRecord>, now: Long, days: Int): String = invalid {
+        inner.statsCsv(json.encodeToString(records), now, days.toUInt())
+    }
+
     fun upsertRule(profile: String, rule: Rule) = invalid {
         inner.upsertRule(profile, json.encodeToString(rule))
     }
@@ -710,6 +726,33 @@ data class Launches(
 /** A profile as a chooser needs it: the id rules refer to, and the name a person reads. */
 @Serializable
 data class ProfileName(val id: String, val name: String)
+
+/** One session that happened, reduced to what a statistic needs. */
+@Serializable
+data class SessionRecord(
+    val profile: String,
+    @SerialName("started_at") val startedAt: Long,
+    /** `null` for a session still running, which is counted up to now. */
+    @SerialName("ended_at") val endedAt: Long? = null,
+)
+
+/** One local day of it. */
+@Serializable
+data class DayStat(
+    val day: String,
+    @SerialName("blocked_seconds") val blockedSeconds: Int = 0,
+    val sessions: Int = 0,
+)
+
+/** The summary the Usage tab shows and the export writes. */
+@Serializable
+data class Stats(
+    val days: List<DayStat> = emptyList(),
+    @SerialName("current_streak") val currentStreak: Int = 0,
+    @SerialName("longest_streak") val longestStreak: Int = 0,
+    @SerialName("total_blocked_seconds") val totalBlockedSeconds: Long = 0,
+    @SerialName("total_sessions") val totalSessions: Int = 0,
+)
 
 /**
  * A thing a rule points at, in the same shape the core writes it.

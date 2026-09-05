@@ -93,6 +93,20 @@ interface AuditDao {
     @Query("SELECT * FROM audit ORDER BY at DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<AuditRow>
 
+    /**
+     * Every session start and end still on record, oldest first.
+     *
+     * The audit trail is where the statistics come from, rather than a second history table: it is
+     * already written, already pruned at thirty days, and already the thing the user can read back.
+     * A separate table would be a second version of the same events, free to disagree with the one
+     * on screen.
+     */
+    @Query(
+        "SELECT * FROM audit WHERE kind IN ('session.started', 'session.ended') " +
+            "AND at >= :since ORDER BY at ASC",
+    )
+    suspend fun sessionEvents(since: Long): List<AuditRow>
+
     @Query("DELETE FROM audit WHERE at < :before")
     suspend fun prune(before: Long)
 }
