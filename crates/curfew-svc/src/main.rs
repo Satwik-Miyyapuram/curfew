@@ -47,6 +47,11 @@ curfew — distraction blocking that keeps its promises
   curfew add-window <config.toml> --id <id> --profile <id> --from HH:MM --to HH:MM
   curfew add-calendar <config.toml> --id <id> --profile <id> [--title <glob>] ...
   curfew add-source <config.toml> --id <id> --from <file-or-url>
+  curfew blocks <config.toml> [--profile <id>]
+                                   list what each profile blocks
+  curfew block <config.toml> --profile <id> --site <domain> | --exe <name> | --app <package>
+                                   | --url <glob> | --title <glob> | --word <text> [--on <os>]
+  curfew unblock <config.toml> --profile <id> <the same selector>
   curfew remove <config.toml> <id> remove a profile, window, rule or subscription
                                    (run any of these with no arguments for their flags)
   curfew upcoming <config.toml> [--hours <n>]

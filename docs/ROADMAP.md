@@ -80,6 +80,8 @@ both in a valid state; op-log stays under 5 MB/year/device.
 - [x] Creating profiles from the UI, so a fresh install needs no hand-written TOML: a form on the
       Schedule tab, `curfew add-profile` on the PC, and a deletion refused while a schedule still
       names it
+- [x] Choosing what a profile blocks from the PC: `curfew block` / `unblock` / `blocks`, over apps,
+      executables, sites, URLs, window titles and keywords
 
 **Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.

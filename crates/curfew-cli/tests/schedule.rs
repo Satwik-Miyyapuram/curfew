@@ -494,3 +494,141 @@ fn a_profile_flag_that_is_not_a_flag_is_refused() {
     assert_eq!(1, run(&["add-profile", box_.as_str(), "--id", "r", "--colour", "red"]));
     assert_eq!(before, box_.text());
 }
+
+// --- what a profile blocks ----------------------------------------------------------------------
+
+/// The other half of a setup that needed a text editor: a profile that blocks nothing is a
+/// schedule that does nothing, and picking apps by hand was a phone-only screen.
+#[test]
+fn a_site_can_be_blocked_and_unblocked_from_the_command_line() {
+    let box_ = Sandbox::new("block-site");
+    assert_eq!(0, run(&["block", box_.as_str(), "--profile", "deep-work", "--site", "reddit.com"]));
+
+    let rules = box_.config().profiles[0].rules.clone();
+    assert_eq!(1, rules.len());
+    assert_eq!(curfew_core::Target::Domain { domain: "reddit.com".into() }, rules[0].target);
+    assert_eq!(curfew_core::Action::Block, rules[0].action);
+    assert!(rules[0].platforms.is_empty(), "no --on means every platform");
+
+    assert_eq!(
+        0,
+        run(&["unblock", box_.as_str(), "--profile", "deep-work", "--site", "reddit.com"])
+    );
+    assert!(box_.config().profiles[0].rules.is_empty());
+}
+
+/// Blocking the same thing twice is one rule, not two: the second is the user restating the first,
+/// and two rules on one target would mean two budgets and two entries in every listing.
+#[test]
+fn blocking_the_same_thing_twice_leaves_one_rule() {
+    let box_ = Sandbox::new("block-twice");
+    let args = ["block", box_.as_str(), "--profile", "deep-work", "--exe", "steam.exe"];
+    assert_eq!(0, run(&args));
+    assert_eq!(0, run(&args));
+    assert_eq!(1, box_.config().profiles[0].rules.len());
+}
+
+/// A rule for one platform and a rule for every platform are different statements, and a user who
+/// wrote both meant both.
+#[test]
+fn a_platform_specific_rule_sits_beside_the_one_for_everywhere() {
+    let box_ = Sandbox::new("block-platform");
+    run(&["block", box_.as_str(), "--profile", "deep-work", "--site", "x.com"]);
+    assert_eq!(
+        0,
+        run(&[
+            "block",
+            box_.as_str(),
+            "--profile",
+            "deep-work",
+            "--site",
+            "x.com",
+            "--on",
+            "windows"
+        ])
+    );
+    let rules = box_.config().profiles[0].rules.clone();
+    assert_eq!(2, rules.len());
+    assert_eq!(vec![curfew_core::Platform::Windows], rules[1].platforms);
+
+    // And unblocking takes both, because "stop blocking this" with one left standing is not what
+    // anybody means.
+    assert_eq!(0, run(&["unblock", box_.as_str(), "--profile", "deep-work", "--site", "x.com"]));
+    assert!(box_.config().profiles[0].rules.is_empty());
+}
+
+#[test]
+fn a_block_naming_two_things_at_once_is_refused() {
+    let box_ = Sandbox::new("two-targets");
+    let before = box_.text();
+    assert_eq!(
+        1,
+        run(&[
+            "block",
+            box_.as_str(),
+            "--profile",
+            "deep-work",
+            "--site",
+            "x.com",
+            "--exe",
+            "steam.exe"
+        ])
+    );
+    assert_eq!(before, box_.text());
+}
+
+#[test]
+fn a_block_naming_no_thing_at_all_is_refused() {
+    let box_ = Sandbox::new("no-target");
+    assert_eq!(1, run(&["block", box_.as_str(), "--profile", "deep-work"]));
+    assert!(box_.config().profiles[0].rules.is_empty());
+}
+
+#[test]
+fn blocking_into_a_profile_that_does_not_exist_changes_nothing() {
+    let box_ = Sandbox::new("block-no-profile");
+    let before = box_.text();
+    assert_eq!(1, run(&["block", box_.as_str(), "--profile", "nope", "--site", "x.com"]));
+    assert_eq!(before, box_.text());
+}
+
+/// Unblocking something that was never blocked is worth saying out loud: silence reads as success,
+/// and the user walks away believing a site they can still open is blocked.
+#[test]
+fn unblocking_something_that_was_never_blocked_says_so() {
+    let box_ = Sandbox::new("unblock-missing");
+    let before = box_.text();
+    assert_eq!(1, run(&["unblock", box_.as_str(), "--profile", "deep-work", "--site", "x.com"]));
+    assert_eq!(before, box_.text());
+}
+
+#[test]
+fn an_unknown_platform_is_refused_before_anything_is_written() {
+    let box_ = Sandbox::new("bad-platform");
+    let before = box_.text();
+    assert_eq!(
+        1,
+        run(&[
+            "block",
+            box_.as_str(),
+            "--profile",
+            "deep-work",
+            "--site",
+            "x.com",
+            "--on",
+            "linux"
+        ])
+    );
+    assert_eq!(before, box_.text());
+}
+
+#[test]
+fn listing_what_a_profile_blocks_reads_rather_than_writes() {
+    let box_ = Sandbox::new("blocks-list");
+    run(&["block", box_.as_str(), "--profile", "deep-work", "--word", "gambling"]);
+    let before = box_.text();
+    assert_eq!(0, run(&["blocks", box_.as_str()]));
+    assert_eq!(0, run(&["blocks", box_.as_str(), "--profile", "deep-work"]));
+    assert_eq!(1, run(&["blocks", box_.as_str(), "--profile", "nope"]));
+    assert_eq!(before, box_.text());
+}

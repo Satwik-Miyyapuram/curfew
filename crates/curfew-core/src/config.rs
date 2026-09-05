@@ -127,6 +127,45 @@ impl Config {
         self.profiles.iter().find(|p| p.id == id)
     }
 
+    /// Add a rule to a profile, or replace the one already pointing at the same thing.
+    ///
+    /// Keyed on the target's own identity rather than on the whole rule, because "block
+    /// youtube.com" and "give youtube.com twenty minutes" are two answers to one question, and
+    /// keeping both would leave the stricter one deciding while the user reads the other. Platform
+    /// is part of that identity: a rule for Windows only and a rule for everywhere are different
+    /// statements about the same target, and a user who wrote both meant both.
+    pub fn upsert_rule(&mut self, profile: &str, rule: Rule) -> Result<(), ConfigError> {
+        let Some(p) = self.profiles.iter_mut().find(|p| p.id == profile) else {
+            return Err(ConfigError::Invalid(format!("no profile {profile:?}")));
+        };
+        let before = p.rules.clone();
+        let key = rule.target.key();
+        match p.rules.iter_mut().find(|r| r.target.key() == key && r.platforms == rule.platforms) {
+            Some(existing) => *existing = rule,
+            None => p.rules.push(rule),
+        }
+        if let Err(e) = self.validate() {
+            if let Some(p) = self.profiles.iter_mut().find(|p| p.id == profile) {
+                p.rules = before;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Drop every rule in a profile pointing at `target`, whatever it does to it and on whichever
+    /// platform, and say how many went. Nothing is validated, because a config with a rule removed
+    /// is valid whenever the one it came from was.
+    pub fn remove_rule(&mut self, profile: &str, target: &Target) -> usize {
+        let key = target.key();
+        let Some(p) = self.profiles.iter_mut().find(|p| p.id == profile) else {
+            return 0;
+        };
+        let before = p.rules.len();
+        p.rules.retain(|r| r.target.key() != key);
+        before - p.rules.len()
+    }
+
     /// Replace a profile's blocked-app list with exactly `packages`.
     ///
     /// This is what an app picker means: the checked boxes are the whole answer, so unchecking one

@@ -1,7 +1,7 @@
 //! The config document: parsing, validation, round-tripping and forward migration.
 
 use curfew_core::budget::Refill;
-use curfew_core::{Action, Config, ConfigError, Target, CONFIG_SCHEMA_VERSION};
+use curfew_core::{Action, Config, ConfigError, Rule, Target, CONFIG_SCHEMA_VERSION};
 
 const GOLDEN: &str = include_str!("golden/example.toml");
 const GOLDEN_V0: &str = include_str!("golden/v0_example.toml");
@@ -559,4 +559,79 @@ fn a_profile_nothing_points_at_can_be_deleted() {
     // And deleting one that was never there is not an error worth raising.
     cfg.remove_profile("reading").unwrap();
     assert!(cfg.validate().is_ok());
+}
+
+/// Two rules on one target would mean two budgets and two entries in every list, so the second
+/// statement about a target replaces the first.
+#[test]
+fn a_rule_replaces_the_one_pointing_at_the_same_thing() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.profile("deep-work").unwrap().rules.len();
+    let rule = |action| Rule {
+        target: Target::Domain { domain: "example.invalid".into() },
+        action,
+        platforms: Vec::new(),
+    };
+
+    cfg.upsert_rule("deep-work", rule(Action::Block)).unwrap();
+    let after_first = cfg.profile("deep-work").unwrap().rules.len();
+    cfg.upsert_rule("deep-work", rule(Action::Delay { seconds: 30 })).unwrap();
+
+    let rules = &cfg.profile("deep-work").unwrap().rules;
+    assert_eq!(after_first, rules.len(), "the second statement replaces the first");
+    assert!(after_first > before);
+    let stored = rules.iter().find(|r| r.target.key() == "domain:example.invalid").unwrap();
+    assert_eq!(Action::Delay { seconds: 30 }, stored.action);
+}
+
+/// A rule for Windows only and a rule for everywhere are different statements about one target.
+#[test]
+fn a_rule_for_one_platform_does_not_replace_the_one_for_all_of_them() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let target = Target::WindowsExe { exe: "steam.exe".into() };
+    cfg.upsert_rule(
+        "deep-work",
+        Rule { target: target.clone(), action: Action::Block, platforms: Vec::new() },
+    )
+    .unwrap();
+    cfg.upsert_rule(
+        "deep-work",
+        Rule {
+            target: target.clone(),
+            action: Action::Block,
+            platforms: vec![curfew_core::Platform::Windows],
+        },
+    )
+    .unwrap();
+
+    let matching = cfg
+        .profile("deep-work")
+        .unwrap()
+        .rules
+        .iter()
+        .filter(|r| r.target.key() == target.key())
+        .count();
+    assert_eq!(2, matching);
+
+    // And removing takes both: "stop blocking this" means all of it.
+    assert_eq!(2, cfg.remove_rule("deep-work", &target));
+    assert!(cfg.profile("deep-work").unwrap().rules.iter().all(|r| r.target.key() != target.key()));
+}
+
+#[test]
+fn a_rule_for_a_profile_that_does_not_exist_is_refused() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.profiles.clone();
+    assert!(cfg
+        .upsert_rule(
+            "nope",
+            Rule {
+                target: Target::Domain { domain: "x.com".into() },
+                action: Action::Block,
+                platforms: Vec::new(),
+            },
+        )
+        .is_err());
+    assert_eq!(before, cfg.profiles);
+    assert_eq!(0, cfg.remove_rule("nope", &Target::Domain { domain: "x.com".into() }));
 }

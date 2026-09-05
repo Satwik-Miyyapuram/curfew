@@ -14,7 +14,7 @@
 //! guessing at where a value ends. It is said out loud on every write rather than discovered later.
 
 use curfew_core::schedule::{CalendarSchedule, CalendarSource, EventMatcher, WeeklySchedule};
-use curfew_core::{ChallengeKind, Config, Lock};
+use curfew_core::{Action, ChallengeKind, Config, Lock, Platform, Rule, Target};
 
 pub const USAGE: &str = "\
   curfew add-profile <config.toml> --id <id> [--name <text>] [--description <text>]
@@ -29,6 +29,11 @@ pub const USAGE: &str = "\
                                                  [--shorter-than <minutes>] [--longer-than <minutes>]
                                                  [--lock <lock>]
   curfew add-source <config.toml> --id <id> --from <file-or-url> [--refresh <minutes>]
+  curfew blocks <config.toml> [--profile <id>]   list what each profile blocks
+  curfew block <config.toml> --profile <id> (--app <package> | --exe <name> | --site <domain>
+                                             | --url <glob> | --title <glob> | --word <text>)
+                                                 [--on android|windows]
+  curfew unblock <config.toml> --profile <id> <the same selector>
   curfew remove <config.toml> <id>               remove a profile, window, rule or subscription
 
 LOCKS (repeat --lock for more than one):
@@ -39,7 +44,15 @@ LOCKS (repeat --lock for more than one):
 pub fn handles(command: &str) -> bool {
     matches!(
         command,
-        "schedules" | "add-profile" | "add-window" | "add-calendar" | "add-source" | "remove"
+        "schedules"
+            | "add-profile"
+            | "add-window"
+            | "add-calendar"
+            | "add-source"
+            | "blocks"
+            | "block"
+            | "unblock"
+            | "remove"
     )
 }
 
@@ -52,6 +65,9 @@ pub fn run(args: &[&str]) -> i32 {
     let result = match args {
         ["schedules", path] => list(path),
         ["add-profile", path, rest @ ..] => add_profile(path, rest),
+        ["blocks", path, rest @ ..] => blocks(path, rest),
+        ["block", path, rest @ ..] => block(path, rest),
+        ["unblock", path, rest @ ..] => unblock(path, rest),
         ["add-window", path, rest @ ..] => add_window(path, rest),
         ["add-calendar", path, rest @ ..] => add_calendar(path, rest),
         ["add-source", path, rest @ ..] => add_source(path, rest),
@@ -496,6 +512,191 @@ fn add_profile(path: &str, args: &[&str]) -> Result<(), String> {
              the phone, or a [[profiles.rules]] table in this file, says what — and it \
              starts nothing until a schedule names it."
         );
+    }
+    Ok(())
+}
+
+/// The selectors `block` and `unblock` share, and the target each one means.
+///
+/// One list rather than a flag per command, so the two can never drift into naming the same thing
+/// differently — an unblock that does not spell its target exactly as the block did would silently
+/// remove nothing.
+const SELECTORS: [&str; 6] = ["app", "exe", "site", "url", "title", "word"];
+
+/// Read exactly one selector flag, and turn it into the target it names.
+///
+/// Exactly one, because a command naming two things is ambiguous about which of them the platform
+/// filter and the action belong to, and guessing there means blocking something the user did not
+/// ask to block.
+fn target(flags: &Flags) -> Result<Target, String> {
+    let chosen: Vec<&str> = SELECTORS.iter().copied().filter(|f| flags.has(f)).collect();
+    match chosen.as_slice() {
+        [] => Err(format!(
+            "say what to block: {}",
+            SELECTORS.iter().map(|f| format!("--{f}")).collect::<Vec<_>>().join(", ")
+        )),
+        [one] => {
+            let value = flags.required(one)?.trim().to_string();
+            if value.is_empty() {
+                return Err(format!("--{one} was given nothing to match"));
+            }
+            Ok(match *one {
+                "app" => Target::AppPackage { package: value },
+                "exe" => Target::WindowsExe { exe: value },
+                "site" => Target::Domain { domain: value },
+                "url" => Target::Url { pattern: value },
+                "title" => Target::WindowTitle { pattern: value },
+                _ => Target::Keyword { text: value },
+            })
+        }
+        many => Err(format!(
+            "one thing at a time: {} were all given, and a rule points at one target",
+            many.iter().map(|f| format!("--{f}")).collect::<Vec<_>>().join(" and ")
+        )),
+    }
+}
+
+/// The platforms a rule applies to. Empty means every one, which is what leaving `--on` out means.
+fn platforms(flags: &Flags) -> Result<Vec<Platform>, String> {
+    flags
+        .all("on")
+        .iter()
+        .map(|value| match value.to_ascii_lowercase().as_str() {
+            "android" => Ok(Platform::Android),
+            "windows" => Ok(Platform::Windows),
+            other => Err(format!("{other:?} is not a platform; say android or windows")),
+        })
+        .collect()
+}
+
+/// Say in one line what a rule points at, in the words the flags use.
+fn describe_target(t: &Target) -> String {
+    match t {
+        Target::AppPackage { package } => format!("app {package}"),
+        Target::AppScreen { package, screen } => format!("screen {screen} in {package}"),
+        Target::WindowsExe { exe } => format!("exe {exe}"),
+        Target::WindowTitle { pattern } => format!("windows titled {pattern}"),
+        Target::Domain { domain } => format!("site {domain} and its subdomains"),
+        Target::Url { pattern } => format!("urls matching {pattern}"),
+        Target::Keyword { text } => format!("the word {text}"),
+        Target::FilePath { pattern } => format!("paths matching {pattern}"),
+        Target::NotificationSource { package } => format!("notifications from {package}"),
+        Target::WholeDevice => "the whole device".to_string(),
+    }
+}
+
+/// Say what a rule does, for the listing.
+///
+/// The budget and limit shapes are described but not editable here: the core decides them already,
+/// and a flag for each would be a second way to write a setting whose UI is still being designed.
+/// Printing them is what keeps `blocks` an honest list of everything in the profile.
+fn describe_action(a: &Action) -> String {
+    match a {
+        Action::Block => "blocked".to_string(),
+        Action::AllowOnly => "allowed, and everything else blocked".to_string(),
+        Action::Budget { seconds, .. } => format!("budgeted {} min", seconds / 60),
+        Action::LaunchLimit { count, .. } => format!("limited to {count} opens"),
+        Action::Delay { seconds } => format!("delayed {seconds}s before opening"),
+        Action::MuteNotifications => "notification-muted".to_string(),
+    }
+}
+
+/// Block something in a profile.
+fn block(path: &str, args: &[&str]) -> Result<(), String> {
+    let flags = Flags::parse(args, &[])?;
+    let mut known = vec!["profile", "on"];
+    known.extend(SELECTORS);
+    flags.reject_unknown(&known)?;
+
+    let profile = flags.required("profile")?.to_string();
+    let rule =
+        Rule { target: target(&flags)?, action: Action::Block, platforms: platforms(&flags)? };
+    let described = describe_target(&rule.target);
+
+    let mut cfg = load(path)?;
+    cfg.upsert_rule(&profile, rule).map_err(|e| e.to_string())?;
+    save(path, &cfg)?;
+    // Said because it is the question people ask next: a rule does nothing until the profile it is
+    // in is running, and the profile runs when a schedule says so.
+    println!(
+        "{profile} now blocks {described}. It takes effect while {profile} is running — \
+         `curfew schedules {path}` says when that is."
+    );
+    Ok(())
+}
+
+/// Stop blocking something.
+fn unblock(path: &str, args: &[&str]) -> Result<(), String> {
+    let flags = Flags::parse(args, &[])?;
+    let mut known = vec!["profile"];
+    known.extend(SELECTORS);
+    flags.reject_unknown(&known)?;
+
+    let profile = flags.required("profile")?.to_string();
+    let target = target(&flags)?;
+    let described = describe_target(&target);
+
+    let mut cfg = load(path)?;
+    if cfg.profile(&profile).is_none() {
+        return Err(format!("no profile {profile:?} in {path}"));
+    }
+    // Every rule on that target goes, on every platform: `--on windows` is not asked for here
+    // because "stop blocking this" with one of two rules left standing is not what anybody means.
+    let removed = cfg.remove_rule(&profile, &target);
+    if removed == 0 {
+        return Err(format!(
+            "{profile} has no rule for {described}; `curfew blocks {path}` lists what it has"
+        ));
+    }
+    save(path, &cfg)?;
+    println!(
+        "{profile} no longer blocks {described}. A session already running keeps its own copy of \
+         what it blocks until it ends."
+    );
+    Ok(())
+}
+
+/// List what each profile blocks.
+fn blocks(path: &str, args: &[&str]) -> Result<(), String> {
+    let flags = Flags::parse(args, &[])?;
+    flags.reject_unknown(&["profile"])?;
+    let only = flags.one("profile").map(str::to_string);
+
+    let cfg = load(path)?;
+    if let Some(id) = &only {
+        if cfg.profile(id).is_none() {
+            return Err(format!("no profile {id:?} in {path}"));
+        }
+    }
+    let mut shown = false;
+    for p in cfg.profiles.iter().filter(|p| only.as_deref().is_none_or(|id| id == p.id)) {
+        shown = true;
+        println!("{} ({}):", p.id, p.name);
+        if p.rules.is_empty() {
+            println!("  (nothing) — `curfew block {path} --profile {} --site …`", p.id);
+        }
+        for rule in &p.rules {
+            let where_ = if rule.platforms.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " on {}",
+                    rule.platforms
+                        .iter()
+                        .map(|p| format!("{p:?}").to_lowercase())
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                )
+            };
+            println!(
+                "  {} — {}{where_}",
+                describe_target(&rule.target),
+                describe_action(&rule.action)
+            );
+        }
+    }
+    if !shown {
+        println!("No profiles yet — `curfew add-profile {path} --id <id>` adds one.");
     }
     Ok(())
 }
