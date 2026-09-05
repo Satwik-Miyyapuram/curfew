@@ -80,20 +80,21 @@ both in a valid state; op-log stays under 5 MB/year/device.
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.
 
 ## Phase 5 — Depth
-- [ ] Allowances/budgets with refill policies, launch limits, friction delays
+
+Everything here is done. What was originally listed under this phase and is *not* done has moved to
+Phase 7: it is all additional coverage on top of a blocker that already works, and shipping a
+working app on both platforms comes first.
+
 - [x] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
 - [x] ~~Biometric keyguard suppression~~ — researched and dropped: it requires device owner or
       profile owner, both out under D4 (DECISIONS D9, GAPS A7). Device Admin drops with it.
 - [x] Emergency passes with quota + cooldown (`[emergency]`, off by default, rolling window, shared across devices)
-- [ ] Allow-only mode; notification muting; keyword blocking
 - [x] Browser extension (Chrome + Firefox), paired to the service, removal detected (done in Phase 2)
-- [ ] Android VpnService DNS filter incl. DoH endpoint blocking (GAPS A2)
-- [ ] Windows WFP filtering — spike first, it is the largest unknown (GAPS B2)
-- [ ] Hardening: service ACLs, clock-tamper detection, re-lock on boot
+- [x] Hardening: clock-tamper detection, re-lock on boot
 
-**Exit criteria:** domain rules hold with Chrome DoH enabled; disabling the browser extension during
-a locked session is detected and reported; no hardening step can make a device unrecoverable;
-killing the Curfew service mid-session leaves no WFP filter behind (D11).
+**Exit criteria:** a lock cannot be opened by claiming a condition was met, only by proving it;
+moving the system clock does not release anything; a reboot resumes enforcement by itself;
+disabling the browser extension during a locked session is detected and reported.
 
 ## Phase 6 — Release
 - [ ] Widgets, quick tiles, CLI, webhooks on session start/end
@@ -104,6 +105,25 @@ killing the Curfew service mid-session leaves no WFP filter behind (D11).
 
 **Exit criteria:** a new user can install on both platforms, pair them, and run a synced calendar
 block without reading the docs.
+
+## Phase 7 — More coverage (after the app works end to end)
+
+Deferred out of Phase 5 deliberately. None of it is needed for Curfew to block what a user asked it
+to block on either platform; all of it widens the net or narrows a bypass that already has a
+mitigation. Ordered by how much of the remaining gap each one closes.
+
+- [ ] Allowances/budgets with refill policies, launch limits, friction delays — the core already
+      decides all four; what is missing is the UI for setting them without editing TOML
+- [ ] Allow-only mode; notification muting (Windows maps `Decision::Mute` to `Verdict::Leave`
+      today); keyword blocking
+- [ ] Android `VpnService` DNS filter incl. DoH endpoint blocking (GAPS A2) — today a domain rule
+      relies on the browser extension, so a browser without it is not covered
+- [ ] Windows WFP filtering — spike first, it is the largest unknown (GAPS B2)
+- [ ] Hardening: service ACLs on the Windows named pipe
+
+**Exit criteria:** domain rules hold with Chrome DoH enabled and no extension installed; killing the
+Curfew service mid-session leaves no WFP filter behind (D11); no hardening step can make a device
+unrecoverable.
 
 ## Later / optional
 - Linux and macOS enforcers (core and sync are already portable)
