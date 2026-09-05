@@ -5,8 +5,9 @@
 //! (ARCHITECTURE §3), and process enumeration is the one part of this that cannot be tested without
 //! a live machine — so it sits behind [`Processes`], and everything above it is tested with a fake.
 
+use crate::delay::{Gates, Step};
 use curfew_core::{decide, Config, Decision, Observation, State, Timestamp};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One running process, in the terms a rule can talk about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,23 +94,45 @@ pub struct Outcome {
     /// Executables Curfew decided to close and could not. These are reported, never hidden: a
     /// blocker that silently fails to block is worse than one that admits it.
     pub failed: BTreeSet<String>,
-    /// Executables that owe the user a friction screen before they continue.
-    pub delayed: BTreeSet<String>,
+    /// Executables being held behind a delay rule, and how many seconds of the wait are left.
+    ///
+    /// A held app is closed like a blocked one, and the difference is entirely in what happens next:
+    /// the countdown runs down, the app is left alone afterwards, and the user is told both facts.
+    pub delayed: BTreeMap<String, i64>,
 }
 
 /// Carry out the verdicts.
+///
+/// `gates` carries the delay countdowns between passes, and is the only state this function keeps:
+/// everything else is decided from the config and the clock every time.
 pub fn enforce(
     now: Timestamp,
     state: &State,
     config: &Config,
     processes: &impl Processes,
+    gates: &mut Gates,
 ) -> Outcome {
     let mut outcome = Outcome::default();
-    for (process, verdict) in verdicts(now, state, config, &processes.list()) {
+    let listing = processes.list();
+    // Before anything is decided: an app that is no longer running has spent its wait, so the next
+    // launch costs the same pause as the first.
+    gates.forget_absent(&listing.iter().map(|p| p.exe.to_lowercase()).collect());
+
+    for (process, verdict) in verdicts(now, state, config, &listing) {
         match verdict {
             Verdict::Leave => {}
-            Verdict::Delay { .. } => {
-                outcome.delayed.insert(process.exe.to_lowercase());
+            Verdict::Delay { seconds } => {
+                match gates.consider(&process.exe, now, seconds) {
+                    Step::Pass => {}
+                    Step::Hold { seconds_left } => {
+                        outcome.delayed.insert(process.exe.to_lowercase(), seconds_left);
+                        // Held, not blocked — but on Windows the only way to hold an app that a
+                        // program cannot ignore is to close it, so the tray says why and says how
+                        // long. Failing to close it is not reported as a failure to block: the wait
+                        // still runs down and the app was going to be allowed anyway.
+                        processes.terminate(process.pid);
+                    }
+                }
             }
             Verdict::Close { .. } => {
                 if processes.terminate(process.pid) {

@@ -99,8 +99,8 @@ pub struct Status {
     /// Executables the last pass closed. The tray watches this to know when to explain itself: a
     /// window that vanishes with no reason given is indistinguishable from a crash.
     pub closed: BTreeSet<String>,
-    /// Executables that owe the user a friction screen before they continue.
-    pub delayed: BTreeSet<String>,
+    /// Executables held behind a delay rule, and the seconds left of each wait.
+    pub delayed: std::collections::BTreeMap<String, i64>,
     /// A freeze that has been announced and has not happened yet. Carried on every status so no UI
     /// can be showing a stale "nothing is about to happen" while the machine counts down.
     #[serde(default)]

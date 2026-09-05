@@ -128,6 +128,12 @@ pub fn menu(status: &Status) -> Vec<Item> {
         }
     }
 
+    // Waits are listed after the sessions and before the trouble: they are neither, being the one
+    // thing on this menu that resolves itself with no action from anyone.
+    for (exe, left) in &status.delayed {
+        items.push(Item::Note(format!("{exe} opens in {left} s")));
+    }
+
     if status.hosts_error.is_some() || !status.failing.is_empty() || status.state_warning.is_some() {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
@@ -290,6 +296,16 @@ mod tests {
         assert!(!menu(&status(vec![]))
             .iter()
             .any(|i| matches!(i, Item::CancelFreeze { .. } | Item::ConfirmFreeze { .. })));
+    }
+
+    #[test]
+    fn a_wait_in_flight_is_visible_without_offering_anything_to_click() {
+        let mut status = status(vec![]);
+        status.delayed.insert("slack.exe".into(), 9);
+        let items = menu(&status);
+        assert!(items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("slack.exe opens in 9 s"))));
+        // Nothing to click: a wait that could be dismissed from the menu would not be a wait.
+        assert!(!items.iter().any(|i| matches!(i, Item::End { .. } | Item::Unlock { .. })));
     }
 
     #[test]

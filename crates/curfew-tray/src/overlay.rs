@@ -68,6 +68,37 @@ pub fn message(closed: &[String], status: &Status) -> String {
     text
 }
 
+/// The sentence shown when an app is being held behind a delay rule.
+///
+/// Said differently from a block on purpose. Nothing has been refused here — the app opens in a few
+/// seconds whatever the user does — so the notice reads as a pause, not as a wall, and it never
+/// mentions the release or the lock, neither of which has anything to do with it.
+pub fn waiting_message(exe: &str, seconds_left: i64) -> String {
+    let name = app_name(exe);
+    match seconds_left.max(0) {
+        0 | 1 => format!("{name} opens in a moment.
+
+This pause is what you asked for."),
+        n => format!(
+            "{name} opens in {n} seconds.
+
+This pause is what you asked for. Open it again when              the wait is up."
+        ),
+    }
+}
+
+/// Which held apps are new since the last poll, so a wait produces one notice and not one per pass.
+pub fn newly_delayed(
+    previous: &BTreeSet<String>,
+    current: &std::collections::BTreeMap<String, i64>,
+) -> Vec<(String, i64)> {
+    current
+        .iter()
+        .filter(|(exe, _)| !previous.contains(*exe))
+        .map(|(exe, left)| (exe.clone(), *left))
+        .collect()
+}
+
 /// Whether a notice is worth showing at all, given what is happening.
 ///
 /// Nothing is shown for an application the user has not touched since the last one: repetition is
@@ -209,6 +240,37 @@ mod sys {
 }
 
 pub use sys::show;
+
+#[cfg(test)]
+mod delay_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_wait_is_described_as_a_pause_and_never_as_a_block() {
+        let text = waiting_message("slack.exe", 15);
+        assert!(text.contains("Slack opens in 15 seconds"));
+        assert!(!text.to_lowercase().contains("blocked"));
+        assert!(!text.contains("release"), "a delay has nothing to do with the 24-hour release");
+    }
+
+    #[test]
+    fn the_last_second_does_not_read_as_a_countdown_of_one() {
+        assert!(waiting_message("slack.exe", 1).contains("in a moment"));
+        assert!(waiting_message("slack.exe", 0).contains("in a moment"));
+    }
+
+    #[test]
+    fn a_wait_already_being_shown_is_not_announced_again_every_pass() {
+        let current = BTreeMap::from([("slack.exe".to_string(), 12)]);
+        let seen = BTreeSet::from(["slack.exe".to_string()]);
+        assert!(newly_delayed(&seen, &current).is_empty());
+        assert_eq!(
+            newly_delayed(&BTreeSet::new(), &current),
+            vec![("slack.exe".to_string(), 12)]
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {

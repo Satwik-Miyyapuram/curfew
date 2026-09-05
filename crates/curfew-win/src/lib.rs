@@ -7,6 +7,7 @@
 
 pub mod blocked;
 pub mod credential;
+pub mod delay;
 pub mod hosts;
 pub mod ipc;
 pub mod procs;
@@ -15,5 +16,6 @@ pub mod tick;
 pub mod windows;
 
 pub use blocked::blocked_domains;
+pub use delay::{Gates, Step};
 pub use procs::{enforce, verdicts, Outcome, Process, Processes, Verdict};
 pub use tick::{Enforcer, Tick};

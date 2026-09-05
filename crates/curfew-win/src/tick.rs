@@ -62,6 +62,10 @@ pub struct Enforcer {
     /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
     /// two countdowns racing each other would leave nobody able to say what is about to occur.
     pub freeze: Option<curfew_core::Countdown>,
+    /// Delay countdowns in flight, one per held executable. Deliberately not persisted: a wait is
+    /// seconds long, and a service restart that reset one would be indistinguishable from the app
+    /// having been closed and reopened.
+    pub gates: crate::delay::Gates,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -79,6 +83,7 @@ impl Enforcer {
             last: Tick::default(),
             state_warning: None,
             freeze: None,
+            gates: Default::default(),
             counter: 0,
         }
     }
@@ -125,8 +130,7 @@ impl Enforcer {
     ) -> Tick {
         self.accrue(now, elapsed, processes.foreground());
 
-        let mut tick = Tick::default();
-        tick.froze = self.settle_freeze(now);
+        let mut tick = Tick { froze: self.settle_freeze(now), ..Default::default() };
         if let Ok(tz) = self.config.tz() {
             let mut activations =
                 active_at(now, tz, &self.config.weekly, &self.config.calendars, events);
@@ -163,7 +167,7 @@ impl Enforcer {
         tick.ended = self.sessions.reap(now);
 
         let state = self.state(now);
-        tick.processes = enforce(now, &state, &self.config, processes);
+        tick.processes = enforce(now, &state, &self.config, processes, &mut self.gates);
         tick.domains = blocked_domains(now, &state, &self.config);
 
         if let Err(e) = hosts::apply(&self.hosts_path, &tick.domains) {
@@ -310,6 +314,9 @@ impl Enforcer {
                     Err(detail) => Response::Error { detail },
                     Ok(config) => {
                         self.config = config;
+                        // A delay the user has just rewritten should not be governed by a countdown
+                        // started under the old rule.
+                        self.gates.clear();
                         Response::Ok
                     }
                 },

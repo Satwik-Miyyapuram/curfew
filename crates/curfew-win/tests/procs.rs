@@ -10,7 +10,8 @@ use curfew_core::{Config, Consumption, State};
 use curfew_win::blocked_domains;
 use curfew_win::procs::{enforce, verdicts, Process, Processes, Verdict};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use curfew_win::Gates;
+use std::collections::{BTreeMap, BTreeSet};
 
 const CONFIG: &str = r#"
 schema_version = 1
@@ -90,7 +91,7 @@ fn a_blocked_exe_is_closed_and_nothing_else_is() {
     let table =
         Fake::new(vec![proc(1, "steam.exe", "Steam"), proc(2, "code.exe", "main.rs — curfew")]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table);
+    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
 
     assert_eq!(outcome.closed, BTreeSet::from(["steam.exe".to_string()]));
     assert!(outcome.failed.is_empty());
@@ -101,7 +102,7 @@ fn a_blocked_exe_is_closed_and_nothing_else_is() {
 fn nothing_is_closed_when_no_profile_is_active() {
     let table = Fake::new(vec![proc(1, "steam.exe", "Steam")]);
 
-    let outcome = enforce(NOW, &State::default(), &config(), &table);
+    let outcome = enforce(NOW, &State::default(), &config(), &table, &mut Gates::default());
 
     assert!(outcome.closed.is_empty());
     assert!(table.killed.borrow().is_empty(), "a lock that is not running closed something");
@@ -115,7 +116,7 @@ fn every_process_of_one_app_is_closed_but_reported_once() {
         proc(12, "Steam.exe", "Friends"),
     ]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table);
+    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
 
     assert_eq!(*table.killed.borrow(), vec![10, 11, 12], "a surviving process is a bypass");
     assert_eq!(outcome.closed, BTreeSet::from(["steam.exe".to_string()]));
@@ -125,7 +126,7 @@ fn every_process_of_one_app_is_closed_but_reported_once() {
 fn a_process_that_cannot_be_killed_is_reported_rather_than_hidden() {
     let table = Fake::new(vec![proc(1, "steam.exe", "Steam")]).refusing(1);
 
-    let outcome = enforce(NOW, &active(), &config(), &table);
+    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
 
     assert!(outcome.closed.is_empty());
     assert_eq!(outcome.failed, BTreeSet::from(["steam.exe".to_string()]));
@@ -138,20 +139,55 @@ fn a_window_title_rule_matches_the_window_not_the_program() {
         proc(2, "chrome.exe", "docs.rs - Google Chrome"),
     ]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table);
+    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
 
     assert_eq!(*table.killed.borrow(), vec![1], "the whole browser was closed over one tab");
     assert_eq!(outcome.closed, BTreeSet::from(["chrome.exe".to_string()]));
 }
 
 #[test]
-fn a_delay_rule_never_closes_anything() {
+fn a_delay_holds_an_app_for_its_seconds_and_then_lets_it_run() {
     let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]);
+    let mut gates = Gates::default();
 
-    let outcome = enforce(NOW, &active(), &config(), &table);
+    let held = enforce(NOW, &active(), &config(), &table, &mut gates);
 
-    assert!(table.killed.borrow().is_empty(), "a delay is friction, not a kill");
-    assert_eq!(outcome.delayed, BTreeSet::from(["slack.exe".to_string()]));
+    assert_eq!(held.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
+    assert_eq!(*table.killed.borrow(), vec![1], "the wait is only a wait if the app is not running");
+    // A delay is friction, not a block: nothing is reported as blocked or as having failed to be.
+    assert!(held.closed.is_empty() && held.failed.is_empty());
+
+    let after = enforce(NOW + 15, &active(), &config(), &table, &mut gates);
+
+    assert!(after.delayed.is_empty(), "the wait was served and the app is owed nothing more");
+    assert_eq!(*table.killed.borrow(), vec![1], "an app was closed after it had served its wait");
+}
+
+#[test]
+fn a_delayed_app_that_cannot_be_closed_is_not_reported_as_a_failure_to_block() {
+    // It was always going to be allowed. Saying "could not close slack.exe" would send the user
+    // chasing a permissions problem that changes nothing about what they asked for.
+    let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]).refusing(1);
+
+    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+
+    assert!(outcome.failed.is_empty());
+    assert_eq!(outcome.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
+}
+
+#[test]
+fn closing_a_delayed_app_makes_the_next_launch_wait_again() {
+    let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]);
+    let mut gates = Gates::default();
+    enforce(NOW, &active(), &config(), &table, &mut gates);
+    enforce(NOW + 15, &active(), &config(), &table, &mut gates);
+
+    let gone = Fake::new(vec![]);
+    enforce(NOW + 20, &active(), &config(), &gone, &mut gates);
+
+    let again = enforce(NOW + 30, &active(), &config(), &table, &mut gates);
+
+    assert_eq!(again.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
 }
 
 #[test]
@@ -167,7 +203,7 @@ fn verdicts_answer_without_touching_anything() {
 #[test]
 fn an_empty_machine_is_not_an_error() {
     let table = Fake::new(vec![]);
-    assert_eq!(enforce(NOW, &active(), &config(), &table), Default::default());
+    assert_eq!(enforce(NOW, &active(), &config(), &table, &mut Gates::default()), Default::default());
 }
 
 // --- the hosts list ---------------------------------------------------------------------------

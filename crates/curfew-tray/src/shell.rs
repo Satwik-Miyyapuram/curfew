@@ -43,6 +43,9 @@ thread_local! {
     /// The freeze already announced on screen, so one countdown is one warning.
     static ANNOUNCED: std::cell::Cell<Option<curfew_core::Timestamp>> =
         const { std::cell::Cell::new(None) };
+    /// Apps already announced as waiting, so one wait is one notice.
+    static WAITING: RefCell<std::collections::BTreeSet<String>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
     /// When the last notice went up, for the rate limit.
     static LAST_SHOWN: std::cell::Cell<Option<curfew_core::Timestamp>> =
         const { std::cell::Cell::new(None) };
@@ -149,6 +152,17 @@ fn watch_closures(window: HWND) {
     // than the slow one: a tooltip reading "in 60 s" a minute after the fact is worse than none.
     if status.freeze.is_some() {
         show_tip(window, &tooltip(&status));
+    }
+
+    // A held app is closed too, so it needs its own sentence — and it needs the *right* one. Saying
+    // "blocked" about something that opens again in ten seconds is the sort of lie that makes people
+    // stop reading the notices.
+    let waiting =
+        WAITING.with(|slot| crate::overlay::newly_delayed(&slot.borrow(), &status.delayed));
+    WAITING.with(|slot| *slot.borrow_mut() = status.delayed.keys().cloned().collect());
+    if let Some((exe, left)) = waiting.first() {
+        crate::overlay::show(&crate::overlay::waiting_message(exe, *left), crate::overlay::DWELL_MS);
+        return;
     }
 
     let newly = CLOSED.with(|slot| crate::overlay::newly_closed(&slot.borrow(), &status.closed));
@@ -293,7 +307,7 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_COMMAND => {
-            chosen(window, (wparam & 0xffff) as usize);
+            chosen(window, wparam & 0xffff);
             0
         }
         WM_TIMER => {
@@ -354,6 +368,7 @@ pub fn run() {
         // Seed the memory before the watch starts, so a tray opened while something is already
         // being closed does not explain a closure the user has long since understood.
         if let Ok(curfew_win::ipc::Response::Status(status)) = ask(&Request::Status) {
+            WAITING.with(|slot| *slot.borrow_mut() = status.delayed.keys().cloned().collect());
             CLOSED.with(|slot| *slot.borrow_mut() = status.closed);
         }
         SetTimer(window, WATCH_TIMER, WATCH_MS, None);
