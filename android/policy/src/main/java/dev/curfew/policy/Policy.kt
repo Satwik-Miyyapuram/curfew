@@ -363,6 +363,13 @@ data class CalendarEvent(
     val end: Long,
     @SerialName("all_day") val allDay: Boolean = false,
     val busy: Boolean = false,
+    /**
+     * Categories the provider gave the event.
+     *
+     * Empty on Android: the calendar provider has no category column, and inventing one from the
+     * title would make a rule fire on a word the user never tagged anything with.
+     */
+    val categories: List<String> = emptyList(),
 )
 
 @Serializable

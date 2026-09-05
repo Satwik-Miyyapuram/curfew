@@ -51,6 +51,18 @@ pub struct CalendarEvent {
     /// Free/busy status. A "free" event is usually a placeholder, so matchers can skip them.
     #[serde(default)]
     pub busy: bool,
+    /// Categories the event carries, where the provider has them. ICS files do; Android's calendar
+    /// provider does not, so this stays empty there rather than being guessed at.
+    #[serde(default)]
+    pub categories: Vec<String>,
+}
+
+impl CalendarEvent {
+    /// How long the event runs. Saturating, because an event whose end precedes its start is a
+    /// provider bug and should read as "no time at all" rather than as an enormous block.
+    pub fn duration_seconds(&self) -> u64 {
+        self.end.saturating_sub(self.start).max(0) as u64
+    }
 }
 
 /// Turns calendar events into sessions: "anything on my Work calendar titled *focus* runs the
@@ -91,6 +103,19 @@ pub struct EventMatcher {
     /// Only match all-day events, or only timed ones. `None` matches either.
     #[serde(default)]
     pub all_day: Option<bool>,
+    /// One of these categories must be present, compared case-insensitively. An empty list matches
+    /// every event, including one carrying no categories at all.
+    #[serde(default)]
+    pub categories: Vec<String>,
+    /// Ignore anything shorter than this. The rule that wants it is "block during real meetings,
+    /// not during the fifteen-minute reminders I scatter through the day".
+    #[serde(default)]
+    pub min_duration_seconds: Option<u64>,
+    /// Ignore anything longer than this. The rule that wants it is "an all-day 'On leave' entry is
+    /// not a focus block", which cannot be said with `all_day` alone: a provider may report a
+    /// week-long event as an ordinary timed one.
+    #[serde(default)]
+    pub max_duration_seconds: Option<u64>,
 }
 
 impl EventMatcher {
@@ -115,6 +140,24 @@ impl EventMatcher {
             if !name.eq_ignore_ascii_case(&event.calendar) {
                 return false;
             }
+        }
+        if !self.categories.is_empty() {
+            let wanted = self
+                .categories
+                .iter()
+                .any(|want| event.categories.iter().any(|have| have.eq_ignore_ascii_case(want)));
+            if !wanted {
+                return false;
+            }
+        }
+        // Duration is measured on the event as the calendar has it, before padding. Padding is the
+        // user asking for a wider block around a meeting, not a claim that the meeting is longer.
+        let duration = event.duration_seconds();
+        if self.min_duration_seconds.is_some_and(|least| duration < least) {
+            return false;
+        }
+        if self.max_duration_seconds.is_some_and(|most| duration > most) {
+            return false;
         }
         true
     }

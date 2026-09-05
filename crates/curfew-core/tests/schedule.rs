@@ -46,6 +46,7 @@ fn event(id: &str, title: &str, start: Timestamp, end: Timestamp) -> CalendarEve
         end,
         all_day: false,
         busy: true,
+        categories: Vec::new(),
     }
 }
 
@@ -130,6 +131,7 @@ fn focus_schedule() -> CalendarSchedule {
             location: None,
             busy_only: true,
             all_day: None,
+            ..EventMatcher::default()
         },
         pad_before_seconds: 300,
         pad_after_seconds: 0,
@@ -258,4 +260,67 @@ fn the_next_change_looks_ahead_to_tomorrows_window_when_todays_is_over() {
 #[test]
 fn there_is_no_next_change_when_nothing_is_scheduled() {
     assert_eq!(next_change_after(local(2026, 9, 4, 10, 0), LONDON, &[], &[], &[]), None);
+}
+
+// --- category and duration matchers --------------------------------------------------------------
+
+#[test]
+fn a_category_matcher_needs_one_of_the_categories_and_ignores_case() {
+    let mut tagged = event("e1", "Sprint review", 0, 3600);
+    tagged.categories = vec!["Focus".into(), "Team".into()];
+    let matcher = EventMatcher { categories: vec!["focus".into()], ..EventMatcher::default() };
+
+    assert!(matcher.matches(&tagged));
+    assert!(!matcher.matches(&event("e2", "Sprint review", 0, 3600)));
+}
+
+#[test]
+fn an_empty_category_list_is_not_a_filter() {
+    // Otherwise every rule written before categories existed would quietly stop matching anything
+    // that came from a provider with no categories at all, which is most of them.
+    let matcher = EventMatcher::default();
+
+    assert!(matcher.matches(&event("e1", "Anything", 0, 3600)));
+}
+
+#[test]
+fn a_duration_matcher_keeps_the_meetings_and_drops_the_reminders() {
+    let matcher = EventMatcher {
+        min_duration_seconds: Some(20 * 60),
+        max_duration_seconds: Some(4 * 60 * 60),
+        ..EventMatcher::default()
+    };
+
+    assert!(!matcher.matches(&event("short", "Take pills", 0, 10 * 60)));
+    assert!(matcher.matches(&event("real", "Design review", 0, 60 * 60)));
+    assert!(!matcher.matches(&event("leave", "On leave", 0, 24 * 60 * 60)));
+}
+
+#[test]
+fn duration_is_measured_before_padding_not_after() {
+    // A rule that says "meetings of at least an hour" is about the meeting. Padding is the user
+    // asking for a wider block around it, not a claim that the meeting itself is longer.
+    let schedule = CalendarSchedule {
+        id: "long-meetings".into(),
+        profile: "deep-work".into(),
+        matcher: EventMatcher {
+            min_duration_seconds: Some(60 * 60),
+            ..EventMatcher::default()
+        },
+        pad_before_seconds: 30 * 60,
+        pad_after_seconds: 30 * 60,
+        locks: vec![],
+    };
+    let half_hour = event("e1", "Standup", 1_788_510_600, 1_788_510_600 + 30 * 60);
+
+    assert!(schedule.activations(&[half_hour]).is_empty());
+}
+
+#[test]
+fn an_event_whose_end_precedes_its_start_lasts_no_time_at_all() {
+    // A provider bug should read as an event of zero length, not as one long enough to trip every
+    // "at least this long" rule ever written.
+    let backwards = event("broken", "Corrupt", 1_000, 100);
+
+    assert_eq!(0, backwards.duration_seconds());
 }
