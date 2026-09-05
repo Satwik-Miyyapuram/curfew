@@ -17,6 +17,10 @@ pub enum Item {
     Unlock { id: String, label: String },
     /// Start the 24-hour delayed release.
     Release { id: String, label: String },
+    /// Call off an announced freeze. Never refused, and always first on the menu.
+    CancelFreeze { label: String },
+    /// Agree, here, to a freeze another device asked for.
+    ConfirmFreeze { label: String },
     Separator,
     /// Show what is blocked, and anything that is failing.
     Details,
@@ -46,6 +50,29 @@ fn remaining(now: Timestamp, ends_at: Option<Timestamp>) -> String {
 /// The menu for a given answer from the service.
 pub fn menu(status: &Status) -> Vec<Item> {
     let mut items = Vec::new();
+
+    // Before anything else, and above even what is running: a machine that is about to close every
+    // window is not a fact to find halfway down a menu.
+    if let Some(countdown) = &status.freeze {
+        match curfew_core::frozen::due(countdown, status.now) {
+            curfew_core::frozen::Due::AwaitingConfirmation => {
+                items.push(Item::Note(format!(
+                    "Another device asked to freeze {} — nothing has happened yet",
+                    countdown.profile
+                )));
+                items.push(Item::ConfirmFreeze {
+                    label: "Yes, freeze this device too".to_string(),
+                });
+            }
+            _ => items.push(Item::Note(format!(
+                "{} freezes everything in {} s — save your work",
+                countdown.profile,
+                curfew_core::frozen::remaining(countdown, status.now)
+            ))),
+        }
+        items.push(Item::CancelFreeze { label: "Cancel the freeze".to_string() });
+        items.push(Item::Separator);
+    }
 
     if status.running.is_empty() {
         items.push(Item::Note("Nothing is running. Curfew is watching.".to_string()));
@@ -227,6 +254,42 @@ mod tests {
         let text = details(&status);
         assert!(text.contains("reddit.com"));
         assert!(text.contains("steam.exe"));
+    }
+
+    fn freezing(origin: curfew_core::Origin) -> Status {
+        Status {
+            now: NOW,
+            freeze: Some(curfew_core::frozen::announce(NOW, "frozen", 3600, origin, 60)),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_countdown_is_the_first_thing_on_the_menu_and_can_always_be_called_off() {
+        let items = menu(&freezing(curfew_core::Origin::Local));
+        assert!(matches!(&items[0], Item::Note(n) if n.contains("save your work")), "{items:?}");
+        assert!(items.iter().any(|i| matches!(i, Item::CancelFreeze { .. })));
+    }
+
+    #[test]
+    fn a_peer_request_asks_rather_than_announces_and_is_still_cancellable() {
+        let items = menu(&freezing(curfew_core::Origin::Peer));
+        assert!(matches!(&items[0], Item::Note(n) if n.contains("nothing has happened yet")));
+        assert!(items.iter().any(|i| matches!(i, Item::ConfirmFreeze { .. })));
+        assert!(items.iter().any(|i| matches!(i, Item::CancelFreeze { .. })));
+    }
+
+    #[test]
+    fn a_local_countdown_is_never_offered_a_confirmation_it_does_not_need() {
+        let items = menu(&freezing(curfew_core::Origin::Local));
+        assert!(!items.iter().any(|i| matches!(i, Item::ConfirmFreeze { .. })));
+    }
+
+    #[test]
+    fn a_quiet_machine_offers_nothing_to_cancel() {
+        assert!(!menu(&status(vec![]))
+            .iter()
+            .any(|i| matches!(i, Item::CancelFreeze { .. } | Item::ConfirmFreeze { .. })));
     }
 
     #[test]

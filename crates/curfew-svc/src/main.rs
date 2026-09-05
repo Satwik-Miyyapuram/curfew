@@ -25,8 +25,15 @@ curfew — distraction blocking that keeps its promises
   curfew start <profile> <minutes> [--credential]
   curfew end <id>                  end a session (refused if it is locked)
   curfew release <id>              start the 24-hour delayed release
+  curfew cancel                    call off a freeze that is counting down
+  curfew confirm                   agree to a freeze another device asked for
   curfew reload                    re-read the config file
   curfew run                       run the loop in this console (for debugging)
+
+  curfew check <config.toml>       validate a config and list its profiles
+  curfew migrate <config.toml>     print it migrated to the current schema
+  curfew decide <config.toml> <profile> <target> [options]
+                                   ask the engine what it would do, with no service running
 
   curfew install                   register the Windows service (needs an admin prompt)
   curfew uninstall                 remove it (refused while a lock is held)
@@ -35,8 +42,18 @@ curfew — distraction blocking that keeps its promises
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("status");
+    // The config subcommands need no service and no privileges, so they are answered here before
+    // anything tries to open the pipe: `curfew check` has to work on a machine where Curfew was
+    // never installed, and on Linux, where there is no service to talk to at all.
+    if curfew_cli::handles(command) {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        std::process::exit(curfew_cli::run(&refs));
+    }
+
     let code = match command {
         "status" => status(),
+        "cancel" => simple(Request::CancelFreeze),
+        "confirm" => simple(Request::ConfirmFreeze),
         "start" => start(&args[1..]),
         "end" => end(&args[1..]),
         "release" => release(&args[1..]),
@@ -90,6 +107,16 @@ fn report(response: Response) -> i32 {
         Response::Ok => 0,
         Response::Release { at } => {
             println!("Release starts now and lands at {}. It cannot be brought forward.", when(at));
+            0
+        }
+        Response::Announced { countdown } => {
+            // Not "started": the difference matters, because the caller has a minute in which to
+            // change its mind and the exit code says the command succeeded either way.
+            println!(
+                "{} freezes this whole device at {}. Save your work. `curfew cancel` calls it off.",
+                countdown.profile,
+                when(countdown.fires_at)
+            );
             0
         }
         Response::Refused { refusal } => {

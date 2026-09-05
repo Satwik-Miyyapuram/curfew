@@ -28,6 +28,8 @@ pub struct Tick {
     pub started: Vec<String>,
     /// Sessions whose lock expired and which are therefore over.
     pub ended: Vec<Session>,
+    /// The profile a countdown froze this pass, if one fired.
+    pub froze: Option<String>,
     pub processes: Outcome,
     /// The names now written to the hosts file.
     pub domains: BTreeSet<String>,
@@ -57,6 +59,9 @@ pub struct Enforcer {
     /// Set when the state file could not be read at startup: locks may have been lost, and the
     /// user is owed that fact.
     pub state_warning: Option<String>,
+    /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
+    /// two countdowns racing each other would leave nobody able to say what is about to occur.
+    pub freeze: Option<curfew_core::Countdown>,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -73,6 +78,7 @@ impl Enforcer {
             config_path: None,
             last: Tick::default(),
             state_warning: None,
+            freeze: None,
             counter: 0,
         }
     }
@@ -120,9 +126,31 @@ impl Enforcer {
         self.accrue(now, elapsed, processes.foreground());
 
         let mut tick = Tick::default();
+        tick.froze = self.settle_freeze(now);
         if let Ok(tz) = self.config.tz() {
-            let activations =
+            let mut activations =
                 active_at(now, tz, &self.config.weekly, &self.config.calendars, events);
+            // A schedule may not freeze the machine on the stroke of the hour either. The first
+            // pass that would start a whole-device session announces it instead and holds the
+            // activation back; once the countdown has fired the session is running, and from then
+            // on reconcile sees it as any other and keeps it alive to the end of the window.
+            activations.retain(|activation| {
+                let freezing = curfew_core::frozen::freezes(&self.config, &activation.profile);
+                let running = self.sessions.for_profile(&activation.profile).is_some();
+                if !freezing || running {
+                    return true;
+                }
+                if self.freeze.is_none() {
+                    self.freeze = Some(curfew_core::frozen::announce(
+                        now,
+                        &activation.profile,
+                        (activation.end - now).max(0) as u32,
+                        curfew_core::Origin::Local,
+                        curfew_core::frozen::MINIMUM_WARNING_SECONDS,
+                    ));
+                }
+                false
+            });
             let counter = &mut self.counter;
             tick.started =
                 curfew_core::reconcile(now, &mut self.sessions, &activations, |activation| {
@@ -160,6 +188,7 @@ impl Enforcer {
                 failing: self.last.processes.failed.clone(),
                 closed: self.last.processes.closed.clone(),
                 delayed: self.last.processes.delayed.clone(),
+                freeze: self.freeze.clone(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
             }),
@@ -167,6 +196,25 @@ impl Enforcer {
             Request::Start { profile, seconds, locks } => {
                 if !self.config.profiles.iter().any(|p| p.id == profile) {
                     return Response::Error { detail: format!("no profile named {profile}") };
+                }
+                // A profile that takes the whole device away is announced, never started on the
+                // spot: the one thing Curfew cannot give back is unsaved work (GAPS B4). The
+                // countdown replaces any earlier one for the same profile rather than stacking,
+                // and never shortens a countdown already ticking.
+                if curfew_core::frozen::freezes(&self.config, &profile) {
+                    let countdown = curfew_core::frozen::announce(
+                        now,
+                        &profile,
+                        seconds,
+                        curfew_core::Origin::Local,
+                        curfew_core::frozen::MINIMUM_WARNING_SECONDS,
+                    );
+                    let countdown = match self.freeze.take() {
+                        Some(existing) if existing.profile == countdown.profile => existing,
+                        _ => countdown,
+                    };
+                    self.freeze = Some(countdown.clone());
+                    return Response::Announced { countdown };
                 }
                 self.counter += 1;
                 let counter = self.counter;
@@ -230,6 +278,22 @@ impl Enforcer {
                 }
             }
 
+            // Never refused, and never checked against a lock: nothing has been started, so there is
+            // no promise to keep. A countdown that could not be called off would make the warning a
+            // taunt rather than a courtesy.
+            Request::CancelFreeze => {
+                self.freeze = None;
+                Response::Ok
+            }
+
+            Request::ConfirmFreeze => match self.freeze.as_mut() {
+                None => Response::Error { detail: "nothing is counting down".into() },
+                Some(countdown) => {
+                    countdown.confirmed = true;
+                    Response::Announced { countdown: countdown.clone() }
+                }
+            },
+
             Request::RequestRelease { id } => match self.sessions.request_release(&id, now) {
                 Ok(at) => Response::Release { at },
                 Err(refusal) => Response::Refused { refusal },
@@ -250,6 +314,39 @@ impl Enforcer {
                     }
                 },
             },
+        }
+    }
+
+    /// Fire, drop or leave alone the announced freeze. Returns the profile a freeze started.
+    ///
+    /// Run at the top of every pass so a countdown that has run out becomes a real session before
+    /// anything else looks at what is running — a pass that enforced first would let the frozen
+    /// minute through.
+    fn settle_freeze(&mut self, now: Timestamp) -> Option<String> {
+        use curfew_core::frozen::Due;
+        let countdown = self.freeze.clone()?;
+        match curfew_core::frozen::due(&countdown, now) {
+            Due::Waiting | Due::AwaitingConfirmation => None,
+            Due::Expired => {
+                self.freeze = None;
+                None
+            }
+            Due::Fire => {
+                self.freeze = None;
+                self.counter += 1;
+                let counter = self.counter;
+                self.sessions.start(Session {
+                    id: format!("win-{now}-{}-{counter}", countdown.profile),
+                    profile: countdown.profile.clone(),
+                    source: curfew_core::SessionSource::Manual,
+                    started_at: now,
+                    lock: curfew_core::LockSet::new(
+                        [],
+                        Some(now + i64::from(countdown.seconds)),
+                    ),
+                });
+                Some(countdown.profile)
+            }
         }
     }
 

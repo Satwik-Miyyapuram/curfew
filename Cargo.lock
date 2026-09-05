@@ -323,6 +323,7 @@ name = "curfew-svc"
 version = "0.0.1"
 dependencies = [
  "chrono",
+ "curfew-cli",
  "curfew-core",
  "curfew-win",
  "interprocess",

@@ -52,6 +52,14 @@ pub enum Request {
     },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
+    /// Call off an announced freeze.
+    ///
+    /// This one message needs no lock satisfied and can never be refused on policy grounds, because
+    /// a countdown has started nothing yet — the promise Curfew keeps is about sessions it is
+    /// already running (GAPS B4).
+    CancelFreeze,
+    /// Agree, at this machine, to a freeze a paired device asked for.
+    ConfirmFreeze,
     /// Re-read the config from disk.
     Reload,
 }
@@ -64,6 +72,10 @@ pub enum Response {
     /// Release lands at this instant, and not before.
     Release {
         at: Timestamp,
+    },
+    /// A freeze has been announced and will happen unless it is cancelled.
+    Announced {
+        countdown: curfew_core::Countdown,
     },
     /// The core said no. Carried through verbatim so the UI can explain exactly which condition is
     /// unmet, rather than saying "denied" and leaving the user guessing.
@@ -89,6 +101,10 @@ pub struct Status {
     pub closed: BTreeSet<String>,
     /// Executables that owe the user a friction screen before they continue.
     pub delayed: BTreeSet<String>,
+    /// A freeze that has been announced and has not happened yet. Carried on every status so no UI
+    /// can be showing a stale "nothing is about to happen" while the machine counts down.
+    #[serde(default)]
+    pub freeze: Option<curfew_core::Countdown>,
     /// Why website blocking is not working, if it is not.
     pub hosts_error: Option<String>,
     /// Set when the state file could not be read on startup. The user is owed this: it means locks

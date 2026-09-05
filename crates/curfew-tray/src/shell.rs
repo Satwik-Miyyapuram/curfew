@@ -40,6 +40,9 @@ thread_local! {
     /// What the service reported closed on the previous poll, so only new names are explained.
     static CLOSED: RefCell<std::collections::BTreeSet<String>> =
         const { RefCell::new(std::collections::BTreeSet::new()) };
+    /// The freeze already announced on screen, so one countdown is one warning.
+    static ANNOUNCED: std::cell::Cell<Option<curfew_core::Timestamp>> =
+        const { std::cell::Cell::new(None) };
     /// When the last notice went up, for the rate limit.
     static LAST_SHOWN: std::cell::Cell<Option<curfew_core::Timestamp>> =
         const { std::cell::Cell::new(None) };
@@ -68,6 +71,12 @@ fn say(window: HWND, text: &str) {
 
 /// One line for the tooltip: what a glance at the icon should tell you.
 fn tooltip(status: &Status) -> String {
+    if let Some(countdown) = &status.freeze {
+        return format!(
+            "Curfew — freezing everything in {} s",
+            curfew_core::frozen::remaining(countdown, status.now)
+        );
+    }
     match status.running.len() {
         0 => "Curfew — nothing running".to_string(),
         1 => format!("Curfew — {} running", status.running[0].profile),
@@ -97,6 +106,13 @@ fn set_tip(data: &mut NOTIFYICONDATAW, text: &str) {
     }
 }
 
+/// Put `text` on the icon.
+fn show_tip(window: HWND, text: &str) {
+    let mut data = icon_data(window);
+    set_tip(&mut data, text);
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+}
+
 fn refresh_tooltip(window: HWND) {
     let text = match ask(&Request::Status) {
         Ok(curfew_win::ipc::Response::Status(status)) => tooltip(&status),
@@ -104,20 +120,37 @@ fn refresh_tooltip(window: HWND) {
         // and that is not something to find out by opening a menu.
         _ => "Curfew — not running".to_string(),
     };
-    let mut data = icon_data(window);
-    set_tip(&mut data, &text);
-    unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+    show_tip(window, &text);
 }
 
 /// Notice what the service has closed since the last poll, and explain it.
 ///
 /// An unreachable service clears the memory rather than keeping it: when the service comes back, the
 /// first thing it reports is not news the user needs a popup about.
-fn watch_closures() {
+fn watch_closures(window: HWND) {
     let Ok(curfew_win::ipc::Response::Status(status)) = ask(&Request::Status) else {
         CLOSED.with(|slot| slot.borrow_mut().clear());
         return;
     };
+    // A countdown gets the screen, not a tooltip. It is the one thing Curfew does that can cost
+    // work the user cannot get back, so it is announced where they are looking, once per freeze.
+    let announced = status.freeze.as_ref().map(|c| c.fires_at);
+    if announced != ANNOUNCED.with(|slot| slot.get()) {
+        ANNOUNCED.with(|slot| slot.set(announced));
+        if let Some(countdown) = &status.freeze {
+            crate::overlay::show(
+                &curfew_core::frozen::warning(countdown, status.now),
+                crate::overlay::DWELL_MS,
+            );
+        }
+    }
+
+    // While a countdown runs the icon carries the seconds, so it is refreshed on this timer rather
+    // than the slow one: a tooltip reading "in 60 s" a minute after the fact is worse than none.
+    if status.freeze.is_some() {
+        show_tip(window, &tooltip(&status));
+    }
+
     let newly = CLOSED.with(|slot| crate::overlay::newly_closed(&slot.borrow(), &status.closed));
     CLOSED.with(|slot| *slot.borrow_mut() = status.closed.clone());
 
@@ -159,7 +192,11 @@ fn show_menu(window: HWND) {
             Item::Note(text) => unsafe {
                 AppendMenuW(handle, MF_STRING | MF_GRAYED, id, wide(text).as_ptr());
             },
-            Item::End { label, .. } | Item::Unlock { label, .. } | Item::Release { label, .. } => unsafe {
+            Item::End { label, .. }
+            | Item::Unlock { label, .. }
+            | Item::Release { label, .. }
+            | Item::CancelFreeze { label }
+            | Item::ConfirmFreeze { label } => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide(label).as_ptr());
             },
             Item::Details => unsafe {
@@ -223,7 +260,10 @@ fn chosen(window: HWND, id: usize) {
             }
             refresh_tooltip(window);
         }
-        Item::End { .. } | Item::Release { .. } => {
+        Item::End { .. }
+        | Item::Release { .. }
+        | Item::CancelFreeze { .. }
+        | Item::ConfirmFreeze { .. } => {
             let Some((request, _)) = act(&item, None) else { return };
             match ask(&request) {
                 Ok(response) => say(window, &describe(&response)),
@@ -258,7 +298,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_TIMER => {
             match wparam {
-                w if w == WATCH_TIMER => watch_closures(),
+                w if w == WATCH_TIMER => watch_closures(window),
                 _ => refresh_tooltip(window),
             }
             0

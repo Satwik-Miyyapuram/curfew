@@ -1,12 +1,16 @@
 //! `curfew` -- a thin CLI over the core. It exists so the rule engine can be inspected and tested
 //! without a phone or a service running, and so the config file stays a first-class artifact.
+//!
+//! A library rather than a second binary. There is one `curfew` command and there has to be: two
+//! crates producing an executable of the same name silently overwrite each other in the target
+//! directory, so which `curfew` you got depended on which crate cargo happened to finish last.
+//! `curfew-svc` owns the executable and calls [`run`] for the subcommands that need no service.
 
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::config::Platform;
 use curfew_core::engine::State;
 use curfew_core::{decide, Config, Decision, LockSet, Observation, Target, Url};
 use std::collections::BTreeMap;
-use std::process::ExitCode;
 
 const USAGE: &str = "\
 curfew -- calendar-unified rules for every window
@@ -28,24 +32,32 @@ OPTIONS for decide:
   --platform <android|windows|browser>
 ";
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let result = match refs.as_slice() {
+/// Whether `command` is one of the config subcommands this module answers.
+///
+/// The service's dispatcher asks before delegating, so an unknown word still reaches the service's
+/// own usage text rather than this one — a user who mistypes `statsu` should be told about `status`.
+pub fn handles(command: &str) -> bool {
+    matches!(command, "check" | "migrate" | "decide")
+}
+
+/// Run one config subcommand. `args` starts at the subcommand itself.
+/// Returns the process exit code: 0 for success, 1 for a bad config, 2 for a misuse.
+pub fn run(args: &[&str]) -> i32 {
+    let result = match args {
         ["check", path] => check(path),
         ["migrate", path] => migrate(path),
         ["decide", path, profile, target, rest @ ..] => run_decide(path, profile, target, rest),
         _ => {
             eprint!("{USAGE}");
-            return ExitCode::from(2);
+            return 2;
         }
     };
 
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {e}");
-            ExitCode::FAILURE
+            1
         }
     }
 }

@@ -7,9 +7,5 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "curfew"
-path = "src/main.rs"
-
 [dependencies]
 curfew-core = { path = "../curfew-core" }

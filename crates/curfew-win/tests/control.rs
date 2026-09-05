@@ -330,3 +330,137 @@ fn unlocking_proves_only_the_credential_and_not_the_other_conditions() {
         "a password would be printed into a log line"
     );
 }
+
+// --- frozen mode (GAPS B4) ----------------------------------------------------------------------
+
+/// A config whose profile takes the whole device, which is the one thing that can cost unsaved work.
+const FROZEN: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "frozen"
+name = "Frozen"
+
+[[profiles.rules]]
+target = { kind = "whole_device" }
+action = { kind = "block" }
+"#;
+
+fn frozen(name: &str) -> Enforcer {
+    Enforcer::new(Config::from_toml(FROZEN).unwrap(), dir(name).join("hosts"))
+}
+
+#[test]
+fn asking_to_freeze_the_machine_announces_it_and_starts_nothing() {
+    let mut e = frozen("freeze-announce");
+
+    let response =
+        e.handle(NOW, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+
+    match response {
+        Response::Announced { countdown } => {
+            assert!(countdown.fires_at >= NOW + 60, "a freeze was allowed to happen immediately");
+        }
+        other => panic!("freezing the whole device answered {other:?}"),
+    }
+    assert!(e.sessions.running.is_empty(), "the freeze started before its countdown ran");
+}
+
+#[test]
+fn a_countdown_can_always_be_called_off_and_nothing_is_closed() {
+    let mut e = frozen("freeze-cancel");
+    e.handle(NOW, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+
+    // No lock is satisfied and none is needed: nothing has been started, so there is no promise.
+    assert_eq!(e.handle(NOW + 10, Request::CancelFreeze), Response::Ok);
+
+    e.tick(NOW + 3600, 1, &[], &Empty);
+    assert!(e.sessions.running.is_empty(), "a cancelled freeze fired anyway");
+    assert!(e.freeze.is_none());
+}
+
+#[test]
+fn a_countdown_that_runs_out_becomes_a_real_session() {
+    let mut e = frozen("freeze-fire");
+    e.handle(NOW, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+
+    let early = e.tick(NOW + 30, 1, &[], &Empty);
+    assert_eq!(early.froze, None, "it fired before the warning was over");
+
+    let fired = e.tick(NOW + 60, 30, &[], &Empty);
+    assert_eq!(fired.froze.as_deref(), Some("frozen"));
+    assert_eq!(e.sessions.running.len(), 1);
+    assert!(e.freeze.is_none(), "the countdown outlived the freeze it started");
+}
+
+#[test]
+fn asking_twice_never_shortens_a_countdown_already_running() {
+    let mut e = frozen("freeze-twice");
+    e.handle(NOW, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+    let first = e.freeze.clone().unwrap().fires_at;
+
+    // A second click 30 seconds in must not restart the clock in either direction: the user has
+    // been told a time, and moving it earlier would take away warning they were promised.
+    e.handle(NOW + 30, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+
+    assert_eq!(e.freeze.unwrap().fires_at, first);
+}
+
+#[test]
+fn the_status_carries_the_countdown_so_no_ui_can_show_a_calm_machine() {
+    let mut e = frozen("freeze-status");
+    e.handle(NOW, Request::Start { profile: "frozen".into(), seconds: 3600, locks: vec![] });
+
+    match e.handle(NOW + 5, Request::Status) {
+        Response::Status(status) => assert!(status.freeze.is_some()),
+        other => panic!("status answered {other:?}"),
+    }
+}
+
+#[test]
+fn a_schedule_cannot_freeze_the_machine_on_the_stroke_of_the_hour_either() {
+    // The same warning applies however the session was asked for: a calendar event is not a reason
+    // to close someone's unsaved work without notice.
+    let config = format!(
+        "{FROZEN}\n[[weekly]]\nid = \"w\"\nprofile = \"frozen\"\nstart_minute = 0\n\
+         end_minute = 1439\n"
+    );
+    let mut e =
+        Enforcer::new(Config::from_toml(&config).unwrap(), dir("freeze-sched").join("hosts"));
+
+    let first = e.tick(NOW, 1, &[], &Empty);
+
+    assert_eq!(first.started, Vec::<String>::new(), "a schedule froze the machine with no warning");
+    assert!(e.freeze.is_some(), "the schedule was dropped instead of being announced");
+
+    let later = e.tick(NOW + 60, 60, &[], &Empty);
+    assert_eq!(later.froze.as_deref(), Some("frozen"));
+}
+
+#[test]
+fn confirming_when_nothing_is_counting_down_is_an_error_rather_than_a_surprise() {
+    let mut e = frozen("freeze-confirm-none");
+    match e.handle(NOW, Request::ConfirmFreeze) {
+        Response::Error { .. } => {}
+        other => panic!("confirming nothing answered {other:?}"),
+    }
+}
+
+#[test]
+fn a_freeze_asked_for_by_a_peer_waits_for_someone_at_this_machine() {
+    use curfew_core::frozen::{announce, due, Due};
+    let mut e = frozen("freeze-peer");
+    e.freeze = Some(announce(NOW, "frozen", 3600, curfew_core::Origin::Peer, 60));
+
+    // Well past the moment a local countdown would have fired.
+    let ignored = e.tick(NOW + 120, 1, &[], &Empty);
+    assert_eq!(ignored.froze, None, "a peer froze this machine without anyone here agreeing");
+
+    match e.handle(NOW + 130, Request::ConfirmFreeze) {
+        Response::Announced { countdown } => assert!(countdown.confirmed),
+        other => panic!("confirming answered {other:?}"),
+    }
+    assert_eq!(due(&e.freeze.clone().unwrap(), NOW + 130), Due::Fire);
+    assert_eq!(e.tick(NOW + 130, 1, &[], &Empty).froze.as_deref(), Some("frozen"));
+}

@@ -37,7 +37,7 @@ jobs:
           cfg=crates/curfew-core/tests/golden/example.toml
           # A fixed instant: the answers must not depend on when CI happened to run.
           at=1788609600 # 2026-09-04T12:00:00Z, a Friday
-          run() { cargo run --quiet -p curfew-cli -- decide "$cfg" "$1" "$2" --at "$at" "${@:3}"; }
+          run() { cargo run --quiet -p curfew-svc -- decide "$cfg" "$1" "$2" --at "$at" "${@:3}"; }
           expect() {
             got=$(run "$1" "$2" "${@:4}")
             if [ "$got" != "$3" ]; then
@@ -46,7 +46,7 @@ jobs:
             fi
           }
 
-          cargo run --quiet -p curfew-cli -- check "$cfg"
+          cargo run --quiet -p curfew-svc -- check "$cfg"
 
           expect deep-work app:com.example.notes            "allow"
           expect deep-work app:com.slack                    "delay 15s"
@@ -64,8 +64,8 @@ jobs:
           # Migration is lossless in the sense that matters: the migrated v0 document decides the
           # same way the v1 one does about the rules they share.
           v0=crates/curfew-core/tests/golden/v0_example.toml
-          cargo run --quiet -p curfew-cli -- migrate "$v0" > /tmp/migrated.toml
-          cargo run --quiet -p curfew-cli -- check /tmp/migrated.toml
+          cargo run --quiet -p curfew-svc -- migrate "$v0" > /tmp/migrated.toml
+          cargo run --quiet -p curfew-svc -- check /tmp/migrated.toml
 
   android:
     name: android

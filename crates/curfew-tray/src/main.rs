@@ -52,6 +52,8 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
                 String::new(),
             ))
         }
+        menu::Item::CancelFreeze { .. } => Some((Request::CancelFreeze, String::new())),
+        menu::Item::ConfirmFreeze { .. } => Some((Request::ConfirmFreeze, String::new())),
         menu::Item::Release { id, .. } => Some((
             Request::RequestRelease { id: id.clone() },
             String::new(),
@@ -69,6 +71,9 @@ pub fn describe(response: &Response) -> String {
             "The release has started. It lands at {}, and cannot be brought forward.",
             menu::when(*at)
         ),
+        Response::Announced { countdown } => {
+            curfew_core::frozen::warning(countdown, countdown.announced_at)
+        }
         Response::Refused { refusal } => match refusal {
             curfew_core::Refusal::NotRunning => "That session has already ended.".to_string(),
             curfew_core::Refusal::Locked { delayed_release_at: Some(at), .. } => format!(

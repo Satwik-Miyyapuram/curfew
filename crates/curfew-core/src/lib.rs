@@ -7,6 +7,7 @@ pub mod budget;
 pub mod clock;
 pub mod config;
 pub mod engine;
+pub mod frozen;
 pub mod lock;
 pub mod schedule;
 pub mod session;
@@ -16,6 +17,7 @@ pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use clock::{ClockWitness, Reading, Verdict};
 pub use config::{Action, Config, ConfigError, Platform, Profile, Rule, CONFIG_SCHEMA_VERSION};
 pub use engine::{decide, BlockReason, Decision, State};
+pub use frozen::{Countdown, Origin};
 pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
 pub use schedule::{
     active_at, next_change_after, Activation, ActivationSource, CalendarEvent, CalendarSchedule,
