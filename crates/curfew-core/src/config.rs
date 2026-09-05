@@ -187,6 +187,70 @@ impl Config {
             .unwrap_or_default()
     }
 
+    // --- profiles -------------------------------------------------------------------------------
+
+    /// Add a profile, or rename the one that already has this id.
+    ///
+    /// The rules are *not* touched when a profile already exists: renaming "Deep work" must not
+    /// quietly empty the list of apps it blocks, and the app picker owns that list. A new profile
+    /// starts with no rules, which blocks nothing until the picker is used — an empty profile is a
+    /// valid thing to have half-made, and refusing to create one would mean the only way to start
+    /// is to write the whole thing at once.
+    pub fn upsert_profile(
+        &mut self,
+        id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<(), ConfigError> {
+        let before = self.profiles.clone();
+        match self.profiles.iter_mut().find(|p| p.id == id) {
+            Some(existing) => {
+                existing.name = name.to_string();
+                existing.description = description.to_string();
+            }
+            None => self.profiles.push(Profile {
+                id: id.to_string(),
+                name: name.to_string(),
+                description: description.to_string(),
+                rules: Vec::new(),
+            }),
+        }
+        if let Err(e) = self.validate() {
+            self.profiles = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Delete a profile and everything it blocks.
+    ///
+    /// Refused while a schedule still names it, because the alternative is a config that will not
+    /// load: a window pointing at a profile that is gone is exactly what [`Config::validate`]
+    /// rejects, and discovering that at the next launch is discovering it with no blocker running.
+    /// The schedules are named in the error so the user knows what to remove first.
+    ///
+    /// As everywhere else, a session this profile started keeps running. Its rules are gone from
+    /// the config, but the session holds its own copy of what it blocks.
+    pub fn remove_profile(&mut self, id: &str) -> Result<(), ConfigError> {
+        let mut used: Vec<&str> = self
+            .weekly
+            .iter()
+            .filter(|w| w.profile == id)
+            .map(|w| w.id.as_str())
+            .chain(self.calendars.iter().filter(|c| c.profile == id).map(|c| c.id.as_str()))
+            .collect();
+        used.sort_unstable();
+        if !used.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "profile {id:?} is still used by {}; remove or repoint {} first",
+                used.join(", "),
+                if used.len() == 1 { "it" } else { "them" }
+            )));
+        }
+        self.profiles.retain(|p| p.id != id);
+        Ok(())
+    }
+
     // --- schedules ------------------------------------------------------------------------------
 
     /// Add a weekly window, or replace the one that already has this id.
@@ -274,6 +338,11 @@ impl Config {
         for p in &self.profiles {
             if p.id.trim().is_empty() {
                 return Err(ConfigError::Invalid("a profile has an empty id".into()));
+            }
+            // A profile with no name is a chip with nothing written on it, which is unusable in
+            // every UI that lists them.
+            if p.name.trim().is_empty() {
+                return Err(ConfigError::Invalid(format!("profile {:?} has no name", p.id)));
             }
             if !seen.insert(&p.id) {
                 return Err(ConfigError::Invalid(format!("duplicate profile id {:?}", p.id)));

@@ -30,6 +30,15 @@ impl Sandbox {
         Self { path }
     }
 
+    /// A config with no profiles at all: what a fresh install has, and the state in which every
+    /// other command has nothing to point at.
+    fn empty(name: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("curfew-cli-{name}-{}.toml", std::process::id()));
+        std::fs::write(&path, "schema_version = 1\ntimezone = \"Europe/London\"\n").unwrap();
+        Self { path }
+    }
+
     fn as_str(&self) -> &str {
         self.path.to_str().unwrap()
     }
@@ -397,4 +406,91 @@ fn everything_written_here_is_a_config_the_service_can_load() {
     assert_eq!(0, run(&["check", box_.as_str()]));
     // And the temporary file the write went through is not left lying beside it.
     assert!(!Path::new(&format!("{}.new", box_.as_str())).exists());
+}
+
+// --- profiles -----------------------------------------------------------------------------------
+
+/// The command a fresh install starts with: every other one asks for a profile that has to exist.
+#[test]
+fn a_profile_can_be_created_from_nothing_and_then_scheduled() {
+    let box_ = Sandbox::empty("new-profile");
+    assert_eq!(0, run(&["add-profile", box_.as_str(), "--id", "reading", "--name", "Reading"]));
+
+    let profile = box_.config().profiles.into_iter().next().expect("a profile");
+    assert_eq!(profile.id, "reading");
+    assert_eq!(profile.name, "Reading");
+    assert!(profile.rules.is_empty(), "a new profile blocks nothing until the picker is used");
+
+    // And the window that could not be written before now can be.
+    assert_eq!(
+        0,
+        run(&[
+            "add-window",
+            box_.as_str(),
+            "--id",
+            "w",
+            "--profile",
+            "reading",
+            "--from",
+            "21:00",
+            "--to",
+            "22:00"
+        ])
+    );
+}
+
+/// Typing the id twice buys nothing, so the name follows the id when it is left out.
+#[test]
+fn a_profile_with_no_name_given_is_named_after_its_id() {
+    let box_ = Sandbox::empty("default-name");
+    assert_eq!(0, run(&["add-profile", box_.as_str(), "--id", "reading"]));
+    assert_eq!("reading", box_.config().profiles[0].name);
+}
+
+/// Renaming is the same command, and it must not empty the list of apps the profile blocks.
+#[test]
+fn renaming_a_profile_keeps_what_it_blocks() {
+    let box_ = Sandbox::new("rename");
+    let before = box_.config().profiles[0].rules.clone();
+    assert_eq!(0, run(&["add-profile", box_.as_str(), "--id", "deep-work", "--name", "Focus"]));
+    let profiles = box_.config().profiles;
+    assert_eq!(1, profiles.len());
+    assert_eq!("Focus", profiles[0].name);
+    assert_eq!(before, profiles[0].rules);
+}
+
+/// Deleting a profile a window still names would write a file the service refuses to load, so it is
+/// refused here instead — while the config on disk is still the one that works.
+#[test]
+fn a_profile_a_window_still_names_cannot_be_removed() {
+    let box_ = Sandbox::new("in-use");
+    run(&[
+        "add-window",
+        box_.as_str(),
+        "--id",
+        "evenings",
+        "--profile",
+        "deep-work",
+        "--from",
+        "21:00",
+        "--to",
+        "22:00",
+    ]);
+    let before = box_.text();
+
+    assert_eq!(1, run(&["remove", box_.as_str(), "deep-work"]));
+    assert_eq!(before, box_.text());
+
+    // Removing the window first is what makes it possible.
+    assert_eq!(0, run(&["remove", box_.as_str(), "evenings"]));
+    assert_eq!(0, run(&["remove", box_.as_str(), "deep-work"]));
+    assert!(box_.config().profiles.is_empty());
+}
+
+#[test]
+fn a_profile_flag_that_is_not_a_flag_is_refused() {
+    let box_ = Sandbox::empty("bad-flag");
+    let before = box_.text();
+    assert_eq!(1, run(&["add-profile", box_.as_str(), "--id", "r", "--colour", "red"]));
+    assert_eq!(before, box_.text());
 }

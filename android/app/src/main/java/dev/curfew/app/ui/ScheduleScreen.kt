@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.CalendarSchedule
+import dev.curfew.policy.ProfileName
 import dev.curfew.policy.WeeklySchedule
 
 /**
@@ -60,6 +61,8 @@ fun ScheduleScreen(model: CurfewViewModel) {
     var weeklyForm by remember { mutableStateOf<Editing<WeeklySchedule>?>(null) }
     var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
     var removing by remember { mutableStateOf<Removal?>(null) }
+    var profileForm by remember { mutableStateOf<Editing<ProfileName>?>(null) }
+    var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
 
     // Adopt the saved config whenever it changes underneath an untouched editor, so the text does
     // not silently go stale — but never overwrite an edit in progress.
@@ -154,6 +157,34 @@ fun ScheduleScreen(model: CurfewViewModel) {
         }
 
         Text(
+            "Profiles",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+        )
+        if (state.profiles.isEmpty()) {
+            // The gap a fresh install falls into: every schedule names a profile, and the app
+            // picker fills one, so with none defined neither screen can do anything at all.
+            Text(
+                "No profiles yet. A profile is a named set of things to block \u2014 add one, then " +
+                    "choose its apps under Apps and say when it runs above.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        state.profiles.forEach { profile ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                    Text(profile.id, style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { profileForm = Editing(profile) }) { Text("Rename") }
+                        TextButton(onClick = { removingProfile = profile }) { Text("Remove") }
+                    }
+                }
+            }
+        }
+        Button(onClick = { profileForm = Editing(null) }) { Text("Add a profile") }
+
+        Text(
             "Weekly windows",
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(top = 8.dp).semantics { heading() },
@@ -204,7 +235,7 @@ fun ScheduleScreen(model: CurfewViewModel) {
         // does. Said plainly rather than left as a greyed-out button with no explanation.
         if (state.profiles.isEmpty()) {
             Text(
-                "Add a profile in the rules below first \u2014 a schedule has to say which one it runs.",
+                "Add a profile above first \u2014 a schedule has to say which one it runs.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -248,6 +279,40 @@ fun ScheduleScreen(model: CurfewViewModel) {
             "Saving does not end a session that is already running. A lock you asked for is not " +
                 "something a settings edit can undo.",
             style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    profileForm?.let { form ->
+        ProfileDialog(
+            existing = form.value,
+            onDismiss = { profileForm = null },
+            onSave = { id, name ->
+                profileForm = null
+                model.saveProfile(id, name)
+            },
+        )
+    }
+
+    removingProfile?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { removingProfile = null },
+            title = { Text("Remove ${profile.name}?") },
+            text = {
+                Text(
+                    "Everything it blocks goes with it. A schedule still pointing at it has to " +
+                        "be removed first, and a session it already started keeps running.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = profile
+                    removingProfile = null
+                    model.deleteProfile(chosen.id)
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { removingProfile = null }) { Text("Keep it") }
+            },
         )
     }
 
@@ -302,6 +367,68 @@ fun ScheduleScreen(model: CurfewViewModel) {
         )
     }
 }
+
+
+/**
+ * Name a profile.
+ *
+ * Two fields, because a profile is only a name until the app picker fills it: the id is what the
+ * config and every schedule refer to, and the name is what the screens show. The id is fixed once
+ * it exists \u2014 changing it would orphan every schedule naming it, which the core would refuse
+ * anyway, so the field is simply not offered on a rename.
+ */
+@Composable
+private fun ProfileDialog(
+    existing: ProfileName?,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var id by remember { mutableStateOf(existing?.id ?: "") }
+    var name by remember { mutableStateOf(existing?.name ?: "") }
+    // An id is not something most people want to invent twice, so the name follows it until the
+    // name is touched.
+    var namedByHand by remember { mutableStateOf(existing != null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (existing == null) "New profile" else "Rename profile") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (existing == null) {
+                    OutlinedTextField(
+                        value = id,
+                        onValueChange = {
+                            id = it
+                            if (!namedByHand) name = it
+                        },
+                        label = { Text("id") },
+                        singleLine = true,
+                    )
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; namedByHand = true },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+                Text(
+                    "What it blocks is chosen under Apps. When it runs is set above.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                // Both blank fields are refused by the core too; the button is disabled so the
+                // refusal never has to be shown for something the form can see.
+                enabled = id.isNotBlank() && name.isNotBlank(),
+                onClick = { onSave(id.trim(), name.trim()) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 
 /**
  * A form that is open, over a schedule being edited or nothing for a new one.

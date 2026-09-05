@@ -394,6 +394,32 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     // written. A refusal is reported in the core's own words and changes nothing, so a form filled
     // in wrongly cannot leave the device unprotected.
 
+    /**
+     * Add a profile, or rename one.
+     *
+     * The edit that has to come first on a fresh install: everything else on this screen asks for a
+     * profile by name.
+     */
+    fun saveProfile(id: String, name: String, description: String = "") {
+        viewModelScope.launch {
+            runtime.saveProfile(id, name, description)
+                .onSuccess { say("Saved.") }
+                .onFailure { say(it.message ?: "That profile could not be saved.") }
+            refresh()
+        }
+    }
+
+    fun deleteProfile(id: String) {
+        viewModelScope.launch {
+            runtime.deleteProfile(id)
+                .onSuccess { say("Removed. A session it already started keeps running.") }
+                // The core's message names the schedules still pointing at it, which is exactly
+                // what the user needs in order to fix it.
+                .onFailure { say(it.message ?: "That profile could not be removed.") }
+            refresh()
+        }
+    }
+
     fun saveWeekly(window: WeeklySchedule) {
         viewModelScope.launch {
             runtime.saveWeekly(window)

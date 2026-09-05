@@ -176,6 +176,36 @@ impl Curfew {
     // running session: deleting a rule stops it starting new sessions, and the session it already
     // started is a promise that stands.
 
+    /// Add a profile, or rename the one with this id.
+    ///
+    /// The first edit a fresh install needs: a schedule has to name a profile, an app picker has to
+    /// fill one, and until one exists neither screen can do anything. Renaming keeps the rules,
+    /// because the picker owns those and a rename is not a way to lose them.
+    pub fn upsert_profile(
+        &self,
+        id: String,
+        name: String,
+        description: String,
+    ) -> Result<(), CurfewError> {
+        self.config
+            .write()
+            .expect("config lock")
+            .upsert_profile(&id, &name, &description)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+    }
+
+    /// Delete a profile and everything it blocks.
+    ///
+    /// Refused while a schedule still names it, carrying the core's sentence saying which ones, so
+    /// the screen can tell the user what to remove first rather than only that it will not work.
+    pub fn remove_profile(&self, id: String) -> Result<(), CurfewError> {
+        self.config
+            .write()
+            .expect("config lock")
+            .remove_profile(&id)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+    }
+
     /// Add or replace a weekly window. `window_json` is a serialized `WeeklySchedule`.
     pub fn upsert_weekly(&self, window_json: String) -> Result<(), CurfewError> {
         let window = serde_json::from_str(&window_json).map_err(payload)?;

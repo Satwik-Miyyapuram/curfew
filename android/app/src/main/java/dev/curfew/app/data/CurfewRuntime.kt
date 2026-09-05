@@ -218,6 +218,33 @@ class CurfewRuntime internal constructor(
 
     fun calendarSchedules(): List<CalendarSchedule> = policy.calendars()
 
+    /**
+     * Add a profile, or rename the one with this id.
+     *
+     * The first edit a new install can make: with no profile, no schedule can be written and the
+     * app picker has nothing to fill. Renaming keeps the apps the profile blocks.
+     */
+    suspend fun saveProfile(id: String, name: String, description: String = ""): Result<Unit> =
+        gate.withLock {
+            runCatching {
+                policy.upsertProfile(id, name, description)
+                commitConfig("profile.saved", id)
+            }
+        }
+
+    /**
+     * Delete a profile and everything it blocks.
+     *
+     * Refused while a schedule still names it; the failure carries the core's own sentence saying
+     * which schedules, because "remove those first" is useless without naming them.
+     */
+    suspend fun deleteProfile(id: String): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.removeProfile(id)
+            commitConfig("profile.removed", id)
+        }
+    }
+
     /** Add a window, or replace the one with this id. Fails with [InvalidSchedule]'s message. */
     suspend fun saveWeekly(window: WeeklySchedule): Result<Unit> = gate.withLock {
         runCatching {

@@ -100,6 +100,28 @@ class Policy private constructor(private val inner: Curfew) {
         json.decodeFromString(ListSerializer(CalendarSchedule.serializer()), inner.calendarsJson())
 
     /**
+     * Add a profile, or rename the one with this id.
+     *
+     * The edit a fresh install has to make first: the schedule screen and the app picker both ask
+     * for a profile, and with none defined neither can do anything. Renaming keeps the apps the
+     * profile blocks — the picker owns that list.
+     *
+     * Refused, with the core's own words, if the name is blank.
+     */
+    fun upsertProfile(id: String, name: String, description: String = "") = invalid {
+        inner.upsertProfile(id, name, description)
+    }
+
+    /**
+     * Delete a profile and everything it blocks.
+     *
+     * Refused while a schedule still names it: writing that config would mean the next launch
+     * loads nothing and blocks nothing. The [InvalidSchedule] message names the schedules, so the
+     * screen can say which to remove first.
+     */
+    fun removeProfile(id: String) = invalid { inner.removeProfile(id) }
+
+    /**
      * Add a window, or replace the one with this id.
      *
      * Refused if the result would not be a config the core would load — a window naming a profile

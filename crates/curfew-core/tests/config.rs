@@ -503,3 +503,60 @@ fn unsubscribing_leaves_the_rest_of_the_config_alone() {
     assert_eq!(calendars, cfg.calendars);
     assert!(cfg.validate().is_ok());
 }
+
+// --- profiles -----------------------------------------------------------------------------------
+
+/// A fresh install has no profiles, and every screen that lists them says "add one first". Creating
+/// one has to be possible from the app, or the only way in is a hand-written file.
+#[test]
+fn a_profile_can_be_created_and_renamed_without_losing_its_rules() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let rules = cfg.profile("deep-work").unwrap().rules.clone();
+
+    cfg.upsert_profile("deep-work", "Focus", "heads down").unwrap();
+    let p = cfg.profile("deep-work").unwrap();
+    assert_eq!(p.name, "Focus");
+    assert_eq!(p.description, "heads down");
+    // Renaming must not empty the app list: the picker owns the rules, not the name field.
+    assert_eq!(p.rules, rules);
+
+    cfg.upsert_profile("reading", "Reading", "").unwrap();
+    assert!(cfg.profile("reading").unwrap().rules.is_empty());
+    assert!(cfg.validate().is_ok());
+}
+
+/// A chip with nothing written on it is unusable in every UI that lists profiles.
+#[test]
+fn a_profile_with_no_name_is_refused_and_changes_nothing() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.profiles.clone();
+    assert!(cfg.upsert_profile("reading", "   ", "").is_err());
+    assert_eq!(before, cfg.profiles);
+    assert!(cfg.validate().is_ok());
+}
+
+/// Deleting a profile a window still names would write a config that will not load, and the next
+/// launch would discover that with nothing blocking.
+#[test]
+fn a_profile_a_schedule_still_names_cannot_be_deleted() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let used_by = cfg.weekly.iter().find(|w| w.profile == "deep-work").map(|w| w.id.clone());
+    let used_by = used_by.expect("the golden config points a window at deep-work");
+
+    let err = cfg.remove_profile("deep-work").unwrap_err();
+    let ConfigError::Invalid(message) = &err else { panic!("{err:?}") };
+    // The schedules are named, because "remove it first" is useless without saying which.
+    assert!(message.contains(&used_by), "{message}");
+    assert!(cfg.profile("deep-work").is_some());
+}
+
+#[test]
+fn a_profile_nothing_points_at_can_be_deleted() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_profile("reading", "Reading", "").unwrap();
+    cfg.remove_profile("reading").unwrap();
+    assert!(cfg.profile("reading").is_none());
+    // And deleting one that was never there is not an error worth raising.
+    cfg.remove_profile("reading").unwrap();
+    assert!(cfg.validate().is_ok());
+}

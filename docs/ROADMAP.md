@@ -77,6 +77,9 @@ both in a valid state; op-log stays under 5 MB/year/device.
 - [x] Preview timeline: "here is what tomorrow will block" (`schedule::upcoming`, 36 h, grouped by day)
 - [x] Editing schedules without a text editor: forms on Android, `curfew add-window` /
       `add-calendar` / `add-source` / `schedules` / `remove` / `upcoming` on the PC
+- [x] Creating profiles from the UI, so a fresh install needs no hand-written TOML: a form on the
+      Schedule tab, `curfew add-profile` on the PC, and a deletion refused while a schedule still
+      names it
 
 **Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.

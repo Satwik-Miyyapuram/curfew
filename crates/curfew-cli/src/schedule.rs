@@ -17,7 +17,8 @@ use curfew_core::schedule::{CalendarSchedule, CalendarSource, EventMatcher, Week
 use curfew_core::{ChallengeKind, Config, Lock};
 
 pub const USAGE: &str = "\
-  curfew schedules <config.toml>                 list windows, calendar rules and subscriptions
+  curfew add-profile <config.toml> --id <id> [--name <text>] [--description <text>]
+  curfew schedules <config.toml>                 list profiles, windows, rules and subscriptions
   curfew add-window <config.toml> --id <id> --profile <id> --from HH:MM --to HH:MM
                                                  [--days mon,tue|weekdays|weekends] [--lock <lock>]
   curfew add-calendar <config.toml> --id <id> --profile <id>
@@ -28,7 +29,7 @@ pub const USAGE: &str = "\
                                                  [--shorter-than <minutes>] [--longer-than <minutes>]
                                                  [--lock <lock>]
   curfew add-source <config.toml> --id <id> --from <file-or-url> [--refresh <minutes>]
-  curfew remove <config.toml> <id>               remove a window, rule or subscription
+  curfew remove <config.toml> <id>               remove a profile, window, rule or subscription
 
 LOCKS (repeat --lock for more than one):
   timer  confirm  credential  restart  typing  math  token:<tag-id>  peer:<device-id>
@@ -36,7 +37,10 @@ LOCKS (repeat --lock for more than one):
 
 /// Whether `command` is one of the schedule subcommands.
 pub fn handles(command: &str) -> bool {
-    matches!(command, "schedules" | "add-window" | "add-calendar" | "add-source" | "remove")
+    matches!(
+        command,
+        "schedules" | "add-profile" | "add-window" | "add-calendar" | "add-source" | "remove"
+    )
 }
 
 /// Run one schedule subcommand, and return the process exit code.
@@ -47,6 +51,7 @@ pub fn handles(command: &str) -> bool {
 pub fn run(args: &[&str]) -> i32 {
     let result = match args {
         ["schedules", path] => list(path),
+        ["add-profile", path, rest @ ..] => add_profile(path, rest),
         ["add-window", path, rest @ ..] => add_window(path, rest),
         ["add-calendar", path, rest @ ..] => add_calendar(path, rest),
         ["add-source", path, rest @ ..] => add_source(path, rest),
@@ -178,7 +183,26 @@ fn describe_padding(before: u32, after: u32) -> String {
 fn list(path: &str) -> Result<(), String> {
     let cfg = load(path)?;
 
-    println!("weekly windows:");
+    println!("profiles:");
+    if cfg.profiles.is_empty() {
+        // The gap a fresh install falls into: no profile means no schedule can be written at all.
+        println!("  (none) — `curfew add-profile` adds one, and everything below needs one");
+    }
+    for p in &cfg.profiles {
+        println!(
+            "  {} — {}, blocking {} thing(s){}",
+            p.id,
+            p.name,
+            p.rules.len(),
+            if p.description.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", p.description)
+            }
+        );
+    }
+
+    println!("\nweekly windows:");
     if cfg.weekly.is_empty() {
         println!("  (none) — `curfew add-window` adds one");
     }
@@ -443,6 +467,39 @@ fn add_calendar(path: &str, args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
+/// Create a profile, or rename one.
+///
+/// First in the usage text and first in practice: every other command asks for a profile by id, and
+/// on a fresh install there are none, so this is the command that has to exist before the rest mean
+/// anything. What the profile *blocks* is not set here: the phone's app picker owns that list, and
+/// on a PC it is the [[profiles.rules]] tables, which are too shaped to be worth a flag each.
+fn add_profile(path: &str, args: &[&str]) -> Result<(), String> {
+    let flags = Flags::parse(args, &[])?;
+    flags.reject_unknown(&["id", "name", "description"])?;
+
+    let id = flags.required("id")?.to_string();
+    // The name defaults to the id so that `--id reading` alone works: a name is required by the
+    // core, and making the user type "reading" twice buys nothing.
+    let name = flags.one("name").unwrap_or(&id).to_string();
+    let description = flags.one("description").unwrap_or("").to_string();
+
+    let mut cfg = load(path)?;
+    let existing = cfg.profile(&id).is_some();
+    let rules = cfg.profile(&id).map(|p| p.rules.len()).unwrap_or(0);
+    cfg.upsert_profile(&id, &name, &description).map_err(|e| e.to_string())?;
+    save(path, &cfg)?;
+    if existing {
+        println!("Renamed {id} to {name}. The {rules} thing(s) it blocks are unchanged.");
+    } else {
+        println!(
+            "Added the profile {id} ({name}). It blocks nothing yet — the app picker on \
+             the phone, or a [[profiles.rules]] table in this file, says what — and it \
+             starts nothing until a schedule names it."
+        );
+    }
+    Ok(())
+}
+
 fn add_source(path: &str, args: &[&str]) -> Result<(), String> {
     let flags = Flags::parse(args, &[])?;
     flags.reject_unknown(&["id", "from", "refresh"])?;
@@ -472,6 +529,12 @@ fn add_source(path: &str, args: &[&str]) -> Result<(), String> {
 fn remove(path: &str, id: &str) -> Result<(), String> {
     let mut cfg = load(path)?;
     let mut removed = Vec::new();
+    if cfg.profile(id).is_some() {
+        // Refused while a schedule still names it, and the core's error says which — so this is
+        // asked first, before anything else has been taken out of the document.
+        cfg.remove_profile(id).map_err(|e| e.to_string())?;
+        removed.push("profile");
+    }
     if cfg.weekly.iter().any(|w| w.id == id) {
         cfg.remove_weekly(id);
         removed.push("weekly window");
@@ -491,9 +554,16 @@ fn remove(path: &str, id: &str) -> Result<(), String> {
     }
 
     save(path, &cfg)?;
+    // A profile is a list of things to block, not something that starts on its own, so it gets its
+    // own sentence rather than being told it has stopped starting sessions it never started.
+    let consequence = if removed == ["profile"] {
+        "Everything it blocked goes with it"
+    } else {
+        "It stops starting sessions"
+    };
     println!(
-        "Removed the {} called {id}. It stops starting sessions; one it already started keeps \
-         running until its own lock lets it go.",
+        "Removed the {} called {id}. {consequence}; a session already running keeps running \
+         until its own lock lets it go.",
         removed.join(" and the ")
     );
     Ok(())

@@ -147,4 +147,60 @@ class ScheduleEditingTest {
         assertTrue(runtime.calendarSchedules().none { it.id == "standups" })
         assertFalse(runtime.config.read().contains("standup"))
     }
+
+    // --- profiles ---------------------------------------------------------------------------
+
+    @Test
+    fun `a profile added from the form can immediately be scheduled`() = runTest {
+        val runtime = TestRuntime.create(now)
+        runtime.saveProfile("reading", "Reading").getOrThrow()
+
+        assertTrue(runtime.config.read().contains("reading"))
+        // The point of creating one: the window that could not be written before now can be.
+        assertTrue(runtime.saveWeekly(window(id = "evening-read", profile = "reading")).isSuccess)
+    }
+
+    @Test
+    fun `renaming a profile keeps the apps it blocks`() = runTest {
+        val runtime = TestRuntime.create(now)
+        val before = dev.curfew.policy.Policy.blockedApps(runtime.policy.configToml(), "deep-work")
+        assertTrue(before.isNotEmpty())
+
+        runtime.saveProfile("deep-work", "Focus").getOrThrow()
+        assertEquals(
+            before,
+            dev.curfew.policy.Policy.blockedApps(runtime.policy.configToml(), "deep-work"),
+        )
+        assertTrue(runtime.config.read().contains("Focus"))
+    }
+
+    @Test
+    fun `a profile with a blank name is refused and changes nothing`() = runTest {
+        val runtime = TestRuntime.create(now)
+        val before = runtime.config.read()
+
+        assertTrue(runtime.saveProfile("reading", "   ").isFailure)
+        assertEquals(before, runtime.config.read())
+    }
+
+    @Test
+    fun `a profile a schedule still names cannot be deleted`() = runTest {
+        val runtime = TestRuntime.create(now)
+        runtime.saveWeekly(window()).getOrThrow()
+        val before = runtime.config.read()
+
+        val failure = runtime.deleteProfile("deep-work").exceptionOrNull()
+        // The message names the schedules holding it, because that is what has to go first.
+        assertTrue("$failure", failure!!.message!!.contains("evenings"))
+        assertEquals(before, runtime.config.read())
+    }
+
+    @Test
+    fun `a profile nothing points at is removed from the file`() = runTest {
+        val runtime = TestRuntime.create(now)
+        runtime.saveProfile("reading", "Reading").getOrThrow()
+        runtime.deleteProfile("reading").getOrThrow()
+
+        assertFalse(runtime.config.read().contains("reading"))
+    }
 }
