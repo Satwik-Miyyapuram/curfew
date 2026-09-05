@@ -84,6 +84,11 @@ pub struct Status {
     pub blocked_domains: BTreeSet<String>,
     /// Executables the last pass wanted to close and could not. Shown, never hidden.
     pub failing: BTreeSet<String>,
+    /// Executables the last pass closed. The tray watches this to know when to explain itself: a
+    /// window that vanishes with no reason given is indistinguishable from a crash.
+    pub closed: BTreeSet<String>,
+    /// Executables that owe the user a friction screen before they continue.
+    pub delayed: BTreeSet<String>,
     /// Why website blocking is not working, if it is not.
     pub hosts_error: Option<String>,
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
@@ -91,8 +96,8 @@ pub struct Status {
     pub state_warning: Option<String>,
 }
 
-/// The control channel's name. Namespaced, so on Windows this is a named pipe under `\.\pipe\`,
-/// which is machine-local and never reachable over the network.
+/// The control channel's name. Namespaced, so on Windows this is a named pipe under
+/// [`PIPE_NAME`]'s directory, which is machine-local and never reachable over the network.
 pub const SOCKET: &str = "curfew.sock";
 
 /// Send one request to a running service and read the answer.
@@ -108,8 +113,7 @@ pub fn ask(request: &Request) -> std::io::Result<Response> {
     let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
     let stream = Stream::connect(name)?;
     let mut reader = BufReader::new(stream);
-    let line = format!("{}
-", serde_json::to_string(request)?);
+    let line = format!("{}\n", serde_json::to_string(request)?);
     reader.get_mut().write_all(line.as_bytes())?;
     reader.get_mut().flush()?;
     let mut answer = String::new();

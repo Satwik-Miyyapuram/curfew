@@ -30,6 +30,20 @@ const TRAY_MESSAGE: u32 = WM_APP + 1;
 const TOOLTIP_TIMER: usize = 1;
 /// How often the tooltip is refreshed. Slow: it is a tooltip, and the menu is what has to be exact.
 const TOOLTIP_MS: u32 = 15_000;
+/// The timer that watches for applications the service has closed.
+const WATCH_TIMER: usize = 2;
+/// How often that watch runs. Short, because the explanation is only useful while the user is still
+/// wondering where the window went.
+const WATCH_MS: u32 = 2_000;
+
+thread_local! {
+    /// What the service reported closed on the previous poll, so only new names are explained.
+    static CLOSED: RefCell<std::collections::BTreeSet<String>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
+    /// When the last notice went up, for the rate limit.
+    static LAST_SHOWN: std::cell::Cell<Option<curfew_core::Timestamp>> =
+        const { std::cell::Cell::new(None) };
+}
 
 thread_local! {
     /// The items behind the menu currently on screen. Command ids are indices into this, so the
@@ -93,6 +107,26 @@ fn refresh_tooltip(window: HWND) {
     let mut data = icon_data(window);
     set_tip(&mut data, &text);
     unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+}
+
+/// Notice what the service has closed since the last poll, and explain it.
+///
+/// An unreachable service clears the memory rather than keeping it: when the service comes back, the
+/// first thing it reports is not news the user needs a popup about.
+fn watch_closures() {
+    let Ok(curfew_win::ipc::Response::Status(status)) = ask(&Request::Status) else {
+        CLOSED.with(|slot| slot.borrow_mut().clear());
+        return;
+    };
+    let newly = CLOSED.with(|slot| crate::overlay::newly_closed(&slot.borrow(), &status.closed));
+    CLOSED.with(|slot| *slot.borrow_mut() = status.closed.clone());
+
+    let last = LAST_SHOWN.with(|slot| slot.get());
+    if !crate::overlay::should_show(&newly, last, status.now) {
+        return;
+    }
+    LAST_SHOWN.with(|slot| slot.set(Some(status.now)));
+    crate::overlay::show(&crate::overlay::message(&newly, &status), crate::overlay::DWELL_MS);
 }
 
 fn show_menu(window: HWND) {
@@ -223,13 +257,17 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_TIMER => {
-            refresh_tooltip(window);
+            match wparam {
+                w if w == WATCH_TIMER => watch_closures(),
+                _ => refresh_tooltip(window),
+            }
             0
         }
         WM_DESTROY => {
             let data = icon_data(window);
             Shell_NotifyIconW(NIM_DELETE, &data);
             KillTimer(window, TOOLTIP_TIMER);
+            KillTimer(window, WATCH_TIMER);
             PostQuitMessage(0);
             0
         }
@@ -273,6 +311,12 @@ pub fn run() {
         Shell_NotifyIconW(NIM_ADD, &data);
         refresh_tooltip(window);
         SetTimer(window, TOOLTIP_TIMER, TOOLTIP_MS, None);
+        // Seed the memory before the watch starts, so a tray opened while something is already
+        // being closed does not explain a closure the user has long since understood.
+        if let Ok(curfew_win::ipc::Response::Status(status)) = ask(&Request::Status) {
+            CLOSED.with(|slot| *slot.borrow_mut() = status.closed);
+        }
+        SetTimer(window, WATCH_TIMER, WATCH_MS, None);
 
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {

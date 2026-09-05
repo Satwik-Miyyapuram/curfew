@@ -11,6 +11,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod menu;
+mod overlay;
 mod prompt;
 #[cfg(windows)]
 mod shell;

@@ -158,6 +158,8 @@ impl Enforcer {
                 running: self.sessions.running.clone(),
                 blocked_domains: self.last.domains.clone(),
                 failing: self.last.processes.failed.clone(),
+                closed: self.last.processes.closed.clone(),
+                delayed: self.last.processes.delayed.clone(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
             }),
