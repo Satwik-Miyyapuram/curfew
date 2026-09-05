@@ -658,9 +658,7 @@ fn a_proof_goes_stale_rather_than_standing_all_evening() {
 
     let _ = c.scan_token("s1".into(), TAG.into(), NOW);
     c.record_credential("s1".into(), NOW + curfew_core::PROOF_SECONDS);
-    assert!(c
-        .end_session("s1".into(), NOW + curfew_core::PROOF_SECONDS, String::new())
-        .is_err());
+    assert!(c.end_session("s1".into(), NOW + curfew_core::PROOF_SECONDS, String::new()).is_err());
 }
 
 #[test]

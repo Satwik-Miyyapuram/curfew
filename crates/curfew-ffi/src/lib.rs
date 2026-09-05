@@ -109,7 +109,12 @@ impl Curfew {
     }
 
     /// End a session with evidence already gathered, forgetting the proofs it used up.
-    fn finish(&self, id: &str, now: Timestamp, satisfied: &BTreeSet<Lock>) -> Result<(), CurfewError> {
+    fn finish(
+        &self,
+        id: &str,
+        now: Timestamp,
+        satisfied: &BTreeSet<Lock>,
+    ) -> Result<(), CurfewError> {
         match self.sessions.write().expect("sessions lock").end(id, now, satisfied) {
             Ok(_) => {
                 self.proofs.write().expect("proofs lock").forget(id);
@@ -298,7 +303,12 @@ impl Curfew {
     /// A scan of something unknown and a scan of a real tag this lock does not name are answered
     /// the same way -- the session stays locked -- so scanning cannot be used to enumerate the
     /// tags a config knows about.
-    pub fn scan_token(&self, id: String, payload: String, now: Timestamp) -> Result<(), CurfewError> {
+    pub fn scan_token(
+        &self,
+        id: String,
+        payload: String,
+        now: Timestamp,
+    ) -> Result<(), CurfewError> {
         let tag = {
             let config = self.config.read().expect("config lock");
             curfew_core::identify(&config.tokens, &payload)

@@ -873,5 +873,4 @@ mod tests {
         let pass = phone.pass(NOW + HOUR * 24 * 7);
         assert!(pass.released.contains_key("s1"));
     }
-
 }

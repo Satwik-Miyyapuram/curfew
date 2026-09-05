@@ -489,7 +489,11 @@ mod tests {
         let p = paired();
         let (mut on_pc, mut on_phone) = (Log::default(), Log::default());
 
-        on_pc.append(&p.pc, NOW, start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None));
+        on_pc.append(
+            &p.pc,
+            NOW,
+            start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None),
+        );
         on_pc.append(&p.pc, NOW + 60, Op::Released { session: "s1".into() });
         exchange((&mut on_phone, &p.on_phone), (&mut on_pc, &p.on_pc));
 
@@ -522,7 +526,11 @@ mod tests {
         let p = paired();
         let mut log = Log::default();
 
-        log.append(&p.pc, NOW, start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None));
+        log.append(
+            &p.pc,
+            NOW,
+            start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None),
+        );
         log.append(&p.pc, NOW + 60, Op::Released { session: "s1".into() });
         log.append(&p.pc, NOW + 120, Op::ReleaseRequested { session: "s1".into(), at: NOW + 120 });
         log.append(&p.pc, NOW + 180, start("s1", [Lock::Confirm], None));

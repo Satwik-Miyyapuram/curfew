@@ -292,9 +292,7 @@ impl Sync {
             *released = pass
                 .released
                 .iter()
-                .map(|(session, devices)| {
-                    (session.clone(), devices.iter().cloned().collect())
-                })
+                .map(|(session, devices)| (session.clone(), devices.iter().cloned().collect()))
                 .collect();
             *curfew.device_id.write().expect("device lock") =
                 Some(self.shared.identity.id().as_str().to_string());
@@ -690,7 +688,8 @@ mod tests {
 
         // The PC adopts the session and finds it is the device being asked.
         let adopted: serde_json::Value = serde_json::from_str(
-            &pc.pass(pc_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
+            &pc.pass(pc_core.clone(), NOW + 1, String::new(), String::new(), String::new())
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(adopted["releasable"][0], "p1", "the PC was not offered the release");
@@ -730,5 +729,4 @@ mod tests {
 
         assert!(phone_core.end_session("p1".into(), NOW + 3, String::new()).is_err());
     }
-
 }

@@ -75,6 +75,8 @@ both in a valid state; op-log stays under 5 MB/year/device.
 - [x] Lead-in/lead-out padding, per-matcher profiles, timezone + DST + RRULE correctness
 - [x] `calendar.snapshot` events so one device's calendar drives another device's blocks
 - [x] Preview timeline: "here is what tomorrow will block" (`schedule::upcoming`, 36 h, grouped by day)
+- [x] Editing schedules without a text editor: forms on Android, `curfew add-window` /
+      `add-calendar` / `add-source` / `schedules` / `remove` / `upcoming` on the PC
 
 **Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.

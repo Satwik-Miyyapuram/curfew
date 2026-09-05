@@ -395,8 +395,9 @@ impl Enforcer {
             Request::Token { id, payload } => {
                 match curfew_core::identify(&self.config.tokens, &payload) {
                     None => Response::Error {
-                        detail: "That is not a tag this machine knows. The session is still locked."
-                            .into(),
+                        detail:
+                            "That is not a tag this machine knows. The session is still locked."
+                                .into(),
                     },
                     Some(tag) => {
                         self.proofs.record(&id, curfew_core::Lock::Token { id: tag }, now);

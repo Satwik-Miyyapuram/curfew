@@ -238,6 +238,29 @@ impl Config {
         self.calendars.retain(|c| c.id != id);
     }
 
+    /// Subscribe to a calendar, or replace the subscription with this id.
+    ///
+    /// The location is not fetched here: whether a URL answers is a question for the machine that
+    /// will poll it, and a config edited on a phone would have no way to check a path on a PC.
+    pub fn upsert_source(&mut self, source: CalendarSource) -> Result<(), ConfigError> {
+        let before = self.calendar_sources.clone();
+        match self.calendar_sources.iter_mut().find(|s| s.id == source.id) {
+            Some(existing) => *existing = source,
+            None => self.calendar_sources.push(source),
+        }
+        if let Err(e) = self.validate() {
+            self.calendar_sources = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Unsubscribe. Rules that matched events from it simply stop matching; a session one of them
+    /// already started keeps running, as every other settings edit does.
+    pub fn remove_source(&mut self, id: &str) {
+        self.calendar_sources.retain(|s| s.id != id);
+    }
+
     /// The timezone budgets and schedules are evaluated in.
     pub fn tz(&self) -> Result<chrono_tz::Tz, ConfigError> {
         self.timezone.parse().map_err(|_| ConfigError::UnknownTimezone(self.timezone.clone()))
@@ -312,6 +335,33 @@ impl Config {
             }
             if !schedules.insert((kind, id)) {
                 return Err(ConfigError::Invalid(format!("duplicate {kind} id {id:?}")));
+            }
+        }
+        // A subscription with no id cannot be cached under a file name, and two sharing one would
+        // overwrite each other's cached copy — an outage on one would then be served the other's
+        // meetings. A refresh of zero would re-fetch someone's calendar server every pass.
+        let mut sources = std::collections::BTreeSet::new();
+        for s in &self.calendar_sources {
+            if s.id.trim().is_empty() {
+                return Err(ConfigError::Invalid("a calendar source has an empty id".into()));
+            }
+            if !sources.insert(&s.id) {
+                return Err(ConfigError::Invalid(format!(
+                    "duplicate calendar source id {:?}",
+                    s.id
+                )));
+            }
+            if s.location.trim().is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "calendar source {:?} has no file or URL to read",
+                    s.id
+                )));
+            }
+            if s.refresh_seconds == 0 {
+                return Err(ConfigError::Invalid(format!(
+                    "calendar source {:?} refreshes every zero seconds",
+                    s.id
+                )));
             }
         }
         // A minute past the end of the day is not a time. `end == start` is the one that reads as a

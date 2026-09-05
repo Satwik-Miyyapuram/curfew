@@ -6,6 +6,8 @@
 //! directory, so which `curfew` you got depended on which crate cargo happened to finish last.
 //! `curfew-svc` owns the executable and calls [`run`] for the subcommands that need no service.
 
+mod schedule;
+
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::config::Platform;
 use curfew_core::engine::State;
@@ -37,18 +39,24 @@ OPTIONS for decide:
 /// The service's dispatcher asks before delegating, so an unknown word still reaches the service's
 /// own usage text rather than this one — a user who mistypes `statsu` should be told about `status`.
 pub fn handles(command: &str) -> bool {
-    matches!(command, "check" | "migrate" | "decide")
+    matches!(command, "check" | "migrate" | "decide") || schedule::handles(command)
 }
 
 /// Run one config subcommand. `args` starts at the subcommand itself.
 /// Returns the process exit code: 0 for success, 1 for a bad config, 2 for a misuse.
 pub fn run(args: &[&str]) -> i32 {
+    // The schedule editor answers a family of commands with their own flags and their own usage
+    // text, so it is asked first and matches on the whole argument list itself.
+    if args.first().is_some_and(|c| schedule::handles(c)) {
+        return schedule::run(args);
+    }
+
     let result = match args {
         ["check", path] => check(path),
         ["migrate", path] => migrate(path),
         ["decide", path, profile, target, rest @ ..] => run_decide(path, profile, target, rest),
         _ => {
-            eprint!("{USAGE}");
+            eprint!("{USAGE}{}", schedule::USAGE);
             return 2;
         }
     };

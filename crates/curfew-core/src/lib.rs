@@ -33,8 +33,8 @@ pub use schedule::{
     CalendarSource, EventMatcher, WeeklySchedule,
 };
 pub use session::{reconcile, Refusal, Session, SessionSource, Sessions};
-pub use token::{fingerprint, identify, Tag};
 pub use target::{domain_matches, glob_match, Observation, Target, Url};
+pub use token::{fingerprint, identify, Tag};
 
 /// Seconds since the Unix epoch. Wall-clock, signed so arithmetic never wraps.
 pub type Timestamp = i64;

@@ -770,7 +770,10 @@ fn claiming_a_tag_over_the_pipe_proves_nothing() {
 
     let claimed = BTreeSet::from([Lock::Token { id: "fridge".into() }]);
     let answer = e.handle(NOW, Request::End { id, satisfied: claimed });
-    assert!(matches!(answer, Response::Refused { .. }), "a claim was taken as evidence: {answer:?}");
+    assert!(
+        matches!(answer, Response::Refused { .. }),
+        "a claim was taken as evidence: {answer:?}"
+    );
     assert_eq!(e.sessions.running.len(), 1);
 }
 
@@ -799,10 +802,8 @@ fn a_proof_goes_stale_rather_than_standing_all_evening() {
     e.handle(NOW, Request::Token { id: id.clone(), payload: PAYLOAD.into() });
     e.proofs.record(&id, Lock::DeviceCredential, NOW + curfew_core::PROOF_SECONDS);
 
-    let answer = e.handle(
-        NOW + curfew_core::PROOF_SECONDS,
-        Request::End { id, satisfied: BTreeSet::new() },
-    );
+    let answer =
+        e.handle(NOW + curfew_core::PROOF_SECONDS, Request::End { id, satisfied: BTreeSet::new() });
     assert!(
         matches!(answer, Response::Refused { .. }),
         "a tag scanned two minutes ago was still counting: {answer:?}"
@@ -910,7 +911,10 @@ fn a_peer_lock_naming_this_device_is_offered_and_then_given() {
     assert!(before.released.is_empty());
 
     assert_eq!(e.handle(NOW, Request::Release { id: id.clone() }), Response::Ok);
-    assert!(e.sessions.running.is_empty(), "the release this device gave did not open its own lock");
+    assert!(
+        e.sessions.running.is_empty(),
+        "the release this device gave did not open its own lock"
+    );
     assert!(e.releases.contains(&id), "the release was not written down to be published");
 }
 
@@ -925,7 +929,11 @@ fn a_release_from_the_wrong_device_does_not_open_the_lock() {
     assert!(status.releasable.is_empty(), "a device the lock does not name was offered the button");
 
     e.handle(NOW, Request::Release { id: id.clone() });
-    assert_eq!(e.sessions.running.len(), 1, "the wrong device released a lock it was not asked for");
+    assert_eq!(
+        e.sessions.running.len(),
+        1,
+        "the wrong device released a lock it was not asked for"
+    );
 
     // And a claim over the pipe is not a release either.
     let claimed = BTreeSet::from([Lock::PeerRelease { device_id: "PHONE7".into() }]);

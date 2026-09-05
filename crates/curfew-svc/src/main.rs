@@ -12,6 +12,7 @@ mod service;
 #[cfg(windows)]
 mod watchdog;
 
+use chrono::TimeZone as _;
 use curfew_win::ipc::{Request, Response};
 use curfew_win::{hosts, state};
 use std::collections::BTreeSet;
@@ -40,6 +41,15 @@ curfew — distraction blocking that keeps its promises
   curfew migrate <config.toml>     print it migrated to the current schema
   curfew decide <config.toml> <profile> <target> [options]
                                    ask the engine what it would do, with no service running
+
+  curfew schedules <config.toml>   list windows, calendar rules and subscriptions
+  curfew add-window <config.toml> --id <id> --profile <id> --from HH:MM --to HH:MM
+  curfew add-calendar <config.toml> --id <id> --profile <id> [--title <glob>] ...
+  curfew add-source <config.toml> --id <id> --from <file-or-url>
+  curfew remove <config.toml> <id> remove a window, rule or subscription
+                                   (run any of these with no arguments for their flags)
+  curfew upcoming <config.toml> [--hours <n>]
+                                   what the next day and a half will block, and why
 
   curfew extension <browser> <id>  let a browser talk to Curfew (chrome, edge, brave,
                                    vivaldi, chromium, firefox, librewolf)
@@ -71,6 +81,7 @@ fn main() {
         "scan" => scan(&args[1..]),
         "peer-release" => peer_release(&args[1..]),
         "tag" => tag(&args[1..]),
+        "upcoming" => upcoming(&args[1..]),
         "reload" => simple(Request::Reload),
         "run" => run_in_console(),
         "watchdog" => {
@@ -158,6 +169,123 @@ fn extension(args: &[String]) -> i32 {
     }
 }
 
+/// Print what the schedules will block over the next while, and why.
+///
+/// It lives here rather than in `curfew-cli` because it is the only config command that needs the
+/// calendars themselves: a preview that showed weekly windows and quietly left out every meeting
+/// would be worse than no preview, since the meetings are the half a user cannot work out in their
+/// head. Subscriptions are fetched exactly as the service fetches them, so a URL that will not
+/// answer says so here rather than at the moment it was supposed to block something.
+fn upcoming(args: &[String]) -> i32 {
+    let Some(path) = args.first() else {
+        eprintln!("usage: curfew upcoming <config.toml> [--hours <n>]");
+        return 2;
+    };
+    let mut hours: i64 = 36;
+    let mut rest = args[1..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--hours" => match rest.next().and_then(|v| v.parse::<i64>().ok()) {
+                Some(n) if (1..=336).contains(&n) => hours = n,
+                _ => {
+                    eprintln!("curfew: --hours wants a number of hours, up to 336 (two weeks).");
+                    return 2;
+                }
+            },
+            other => {
+                eprintln!("curfew: {other} is not a flag this command takes.");
+                return 2;
+            }
+        }
+    }
+
+    let config = match std::fs::read_to_string(path)
+        .map_err(|e| format!("{path}: {e}"))
+        .and_then(|text| curfew_core::Config::from_toml(&text).map_err(|e| format!("{path}: {e}")))
+    {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("curfew: {e}");
+            return 1;
+        }
+    };
+    let zone = match config.tz() {
+        Ok(zone) => zone,
+        Err(e) => {
+            eprintln!("curfew: {e}");
+            return 1;
+        }
+    };
+
+    let now = runner::now();
+    // Fetched into the same cache directory the service uses, so previewing warms the cache the
+    // service will read rather than making a second copy of everybody's calendar.
+    let mut feeds =
+        curfew_win::calendar::Feeds::new(state::default_path().with_file_name("calendars"));
+    feeds.restore(&config.calendar_sources);
+    let (events, outcomes) =
+        feeds.events(now, &config.calendar_sources, zone, &feeds::Subscriptions::default());
+    for outcome in outcomes {
+        if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } = outcome {
+            eprintln!(
+                "curfew: calendar '{id}' could not be read ({detail}){}",
+                if still_serving { "; showing the last copy that worked" } else { "" }
+            );
+        }
+    }
+
+    let horizon = now + hours * 3_600;
+    let activations = curfew_core::schedule::upcoming(
+        now,
+        horizon,
+        zone,
+        &config.weekly,
+        &config.calendars,
+        &events,
+    );
+    if activations.is_empty() {
+        println!("Nothing is scheduled in the next {hours} hours.");
+        if config.weekly.is_empty() && config.calendars.is_empty() {
+            println!("There are no schedules yet — `curfew add-window {path} --help` shows how.");
+        }
+        return 0;
+    }
+
+    // Printed in the config's own zone rather than the machine's. Schedules fire in that zone —
+    // that is the whole point of the setting — so a window written as 21:00 has to read as 21:00
+    // here, even on a laptop carried somewhere else.
+    println!("Times are {zone}, the zone this config is written in.");
+    // Grouped by day, because "what does tomorrow look like" is the question being asked and a flat
+    // list of thirty timestamps does not answer it.
+    let mut day = String::new();
+    for a in &activations {
+        let starts = zone.timestamp_opt(a.start, 0).single();
+        let heading = starts
+            .map(|t| t.format("%A %-d %B").to_string())
+            .unwrap_or_else(|| "later".to_string());
+        if heading != day {
+            println!("\n{heading}");
+            day = heading;
+        }
+        let because = match &a.source {
+            curfew_core::schedule::ActivationSource::Weekly { schedule } => schedule.clone(),
+            curfew_core::schedule::ActivationSource::Calendar { schedule, event } => {
+                format!("{schedule}: {event}")
+            }
+        };
+        println!(
+            "  {}-{}  {}  ({because})",
+            starts.map(|t| t.format("%H:%M").to_string()).unwrap_or_default(),
+            zone.timestamp_opt(a.end, 0)
+                .single()
+                .map(|t| t.format("%H:%M").to_string())
+                .unwrap_or_default(),
+            a.profile,
+        );
+    }
+    0
+}
+
 /// Ask the service, and turn "the service is not running" into the sentence that actually helps.
 fn ask(request: Request) -> Result<Response, i32> {
     runner::ask(&request).map_err(|e| {
@@ -175,7 +303,6 @@ fn ask(request: Request) -> Result<Response, i32> {
 /// Epoch seconds are what the wire carries and what the tests assert on, but a release time is
 /// something a user has to plan around, so it is never printed as a number.
 fn when(ts: curfew_core::Timestamp) -> String {
-    use chrono::TimeZone as _;
     match chrono::Local.timestamp_opt(ts, 0).single() {
         Some(local) => local.format("%a %-d %b, %H:%M").to_string(),
         None => ts.to_string(),
@@ -433,15 +560,19 @@ fn tag(args: &[String]) -> i32 {
         Some(given) => given.clone(),
         None => mint(),
     };
-    println!("Write this on the tag:
+    println!(
+        "Write this on the tag:
   {payload}
-");
+"
+    );
     println!("Put this in curfew.toml:");
     println!("  [[tokens]]");
     println!("  id = \"fridge\"");
     println!("  hash = \"{}\"", curfew_core::fingerprint(&payload));
-    println!("
-The payload is not stored anywhere. Lose the tag and the lock stays shut until");
+    println!(
+        "
+The payload is not stored anywhere. Lose the tag and the lock stays shut until"
+    );
     println!("its time is up or the 24-hour release lands.");
     0
 }

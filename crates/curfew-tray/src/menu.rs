@@ -534,19 +534,18 @@ mod tests {
         s.released = vec!["s1".into()];
         let items = menu(&s);
         assert!(!items.iter().any(|i| matches!(i, Item::PeerRelease { .. })), "offered twice");
-        assert!(items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("you have released"))));
+        assert!(items
+            .iter()
+            .any(|i| matches!(i, Item::Note(n) if n.contains("you have released"))));
     }
 
     #[test]
     fn a_peer_lock_naming_another_device_offers_nothing_to_press() {
-        let items = menu(&status(vec![session(
-            [Lock::PeerRelease { device_id: "PHONE7".into() }],
-            None,
-        )]));
+        let items =
+            menu(&status(vec![session([Lock::PeerRelease { device_id: "PHONE7".into() }], None)]));
         assert!(
             !items.iter().any(|i| matches!(i, Item::PeerRelease { .. } | Item::End { .. })),
             "a lock for another device offered a way out here: {items:?}"
         );
     }
-
 }

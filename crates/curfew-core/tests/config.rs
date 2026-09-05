@@ -291,7 +291,7 @@ fn tokens_survive_a_round_trip_through_the_document() {
 
 // --- editing schedules from a settings screen ---------------------------------------------------
 
-use curfew_core::schedule::{CalendarSchedule, EventMatcher, WeeklySchedule};
+use curfew_core::schedule::{CalendarSchedule, CalendarSource, EventMatcher, WeeklySchedule};
 
 fn window(id: &str, profile: &str) -> WeeklySchedule {
     WeeklySchedule {
@@ -397,10 +397,7 @@ fn a_calendar_rule_saved_twice_is_edited_rather_than_duplicated() {
     edited.pad_after_seconds = 900;
     cfg.upsert_calendar(edited).unwrap();
     assert_eq!(cfg.calendars.len(), before + 1);
-    assert_eq!(
-        cfg.calendars.iter().find(|c| c.id == "standups").unwrap().pad_after_seconds,
-        900
-    );
+    assert_eq!(cfg.calendars.iter().find(|c| c.id == "standups").unwrap().pad_after_seconds, 900);
 }
 
 #[test]
@@ -440,4 +437,69 @@ fn two_windows_with_one_id_are_refused_at_load() {
         [[weekly]]\nid = \"w\"\nprofile = \"deep-work\"\nstart_minute = 180\nend_minute = 240\n";
     let err = Config::from_toml(toml).unwrap_err();
     assert!(matches!(&err, ConfigError::Invalid(m) if m.contains("duplicate")), "{err:?}");
+}
+
+// --- calendar subscriptions ---------------------------------------------------------------------
+//
+// The desktop has no system calendar to read, so a subscription is the whole of the calendar
+// feature there: a rule with nothing behind it never fires, and nothing else says so.
+
+fn source(id: &str, location: &str) -> CalendarSource {
+    CalendarSource { id: id.into(), location: location.into(), refresh_seconds: 3_600 }
+}
+
+#[test]
+fn a_subscription_can_be_added_and_replaced_by_its_id() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_source(source("work", "https://example.invalid/a.ics")).unwrap();
+    cfg.upsert_source(source("work", "https://example.invalid/b.ics")).unwrap();
+
+    let mine: Vec<_> = cfg.calendar_sources.iter().filter(|s| s.id == "work").collect();
+    assert_eq!(1, mine.len());
+    assert_eq!("https://example.invalid/b.ics", mine[0].location);
+}
+
+#[test]
+fn a_subscription_with_nothing_to_read_is_refused() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.calendar_sources.clone();
+    assert!(cfg.upsert_source(source("work", "  ")).is_err());
+    assert_eq!(before, cfg.calendar_sources);
+    assert!(cfg.validate().is_ok());
+}
+
+/// Zero seconds means re-fetching someone's calendar server on every pass, which is every two
+/// seconds. Refused rather than clamped, because a value that quietly becomes another value is a
+/// setting the user cannot reason about.
+#[test]
+fn a_subscription_that_refreshes_constantly_is_refused() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let mut s = source("work", "cal.ics");
+    s.refresh_seconds = 0;
+    assert!(cfg.upsert_source(s).is_err());
+}
+
+/// Two subscriptions sharing an id share a cached copy, so an outage on one would be served the
+/// other's meetings.
+#[test]
+fn two_subscriptions_with_one_id_are_refused_at_load() {
+    let toml = "schema_version = 1\n\
+        [[calendar_sources]]\nid = \"work\"\nlocation = \"a.ics\"\n\
+        [[calendar_sources]]\nid = \"work\"\nlocation = \"b.ics\"\n";
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(matches!(&err, ConfigError::Invalid(m) if m.contains("duplicate")), "{err:?}");
+}
+
+#[test]
+fn unsubscribing_leaves_the_rest_of_the_config_alone() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_source(source("work", "cal.ics")).unwrap();
+    let calendars = cfg.calendars.clone();
+
+    cfg.remove_source("work");
+    cfg.remove_source("work");
+    assert!(cfg.calendar_sources.iter().all(|s| s.id != "work"));
+    // The rules that were reading it stay: they simply match nothing until a calendar comes back.
+    assert_eq!(calendars, cfg.calendars);
+    assert!(cfg.validate().is_ok());
 }
