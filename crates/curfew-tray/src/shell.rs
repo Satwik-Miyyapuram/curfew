@@ -17,11 +17,11 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW, PostQuitMessage,
-    RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu, TranslateMessage, HMENU,
-    IDI_INFORMATION, MB_ICONINFORMATION, MB_OK, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
-    TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WM_TIMER,
-    WNDCLASSW, WS_OVERLAPPED,
+    DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW,
+    PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu,
+    TranslateMessage, HMENU, IDI_INFORMATION, MB_ICONINFORMATION, MB_OK, MF_GRAYED, MF_SEPARATOR,
+    MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
+    WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 /// The message the shell sends us when someone clicks the icon.
@@ -161,7 +161,10 @@ fn watch_closures(window: HWND) {
         WAITING.with(|slot| crate::overlay::newly_delayed(&slot.borrow(), &status.delayed));
     WAITING.with(|slot| *slot.borrow_mut() = status.delayed.keys().cloned().collect());
     if let Some((exe, left)) = waiting.first() {
-        crate::overlay::show(&crate::overlay::waiting_message(exe, *left), crate::overlay::DWELL_MS);
+        crate::overlay::show(
+            &crate::overlay::waiting_message(exe, *left),
+            crate::overlay::DWELL_MS,
+        );
         return;
     }
 
@@ -301,7 +304,9 @@ unsafe extern "system" fn window_proc(
             // thing a left click could reasonably do — end the session — is exactly the thing that
             // must never happen by accident.
             let event = (lparam as u32) & 0xffff;
-            if event == WM_RBUTTONUP || event == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP {
+            if event == WM_RBUTTONUP
+                || event == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP
+            {
                 show_menu(window);
             }
             0

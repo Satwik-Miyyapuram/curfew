@@ -122,10 +122,8 @@ pub fn refusal(query: &[u8]) -> Vec<u8> {
     reply[3] = 0x80;
 
     let qtype_at = 12 + name_length(query);
-    let qtype = query
-        .get(qtype_at..qtype_at + 2)
-        .map(|b| u16::from_be_bytes([b[0], b[1]]))
-        .unwrap_or(0);
+    let qtype =
+        query.get(qtype_at..qtype_at + 2).map(|b| u16::from_be_bytes([b[0], b[1]])).unwrap_or(0);
 
     // Only an A question gets an address. AAAA and everything else get an empty, successful answer,
     // which is how a resolver says "nothing here" without pretending a name does not exist — and
@@ -277,10 +275,17 @@ mod tests {
 
         assert_eq!(reply[0..2], query[0..2], "the transaction id must come back unchanged");
         assert_eq!(reply[2] & 0x80, 0x80, "not marked as a response");
-        assert_eq!(reply[3] & 0x0f, 0, "an error code would make some clients try another resolver");
+        assert_eq!(
+            reply[3] & 0x0f,
+            0,
+            "an error code would make some clients try another resolver"
+        );
         assert_eq!(u16::from_be_bytes([reply[6], reply[7]]), 1);
         assert_eq!(reply[reply.len() - 4..], [0, 0, 0, 0]);
-        assert_eq!(u32::from_be_bytes(reply[reply.len() - 10..reply.len() - 6].try_into().unwrap()), BLOCK_TTL);
+        assert_eq!(
+            u32::from_be_bytes(reply[reply.len() - 10..reply.len() - 6].try_into().unwrap()),
+            BLOCK_TTL
+        );
     }
 
     #[test]
@@ -533,7 +538,11 @@ mod proxy_tests {
         let reply = client(&proxy, "docs.rs").expect("no answer came back");
 
         assert_eq!(asked.recv_timeout(std::time::Duration::from_secs(2)).unwrap(), "docs.rs");
-        assert_eq!(reply[reply.len() - 1], 0xff, "the upstream's own answer was not passed through");
+        assert_eq!(
+            reply[reply.len() - 1],
+            0xff,
+            "the upstream's own answer was not passed through"
+        );
     }
 
     #[test]
@@ -546,7 +555,11 @@ mod proxy_tests {
         proxy.set(BTreeSet::new());
 
         let reply = client(&proxy, "reddit.com").expect("no answer came back");
-        assert_eq!(reply[reply.len() - 1], 0xff, "the site was still refused after the block ended");
+        assert_eq!(
+            reply[reply.len() - 1],
+            0xff,
+            "the site was still refused after the block ended"
+        );
     }
 
     #[test]
@@ -811,8 +824,12 @@ Configuration for interface \"Loopback Pseudo-Interface 1\"\r
         let wifi: Vec<&Vec<String>> =
             commands.iter().filter(|c| c.contains(&"name=Wi-Fi".to_string())).collect();
         assert_eq!(wifi.len(), 2);
-        assert!(wifi[0].contains(&"1.1.1.1".to_string()) && wifi[0].contains(&"primary".to_string()));
-        assert!(wifi[1].contains(&"8.8.8.8".to_string()) && wifi[1].contains(&"index=2".to_string()));
+        assert!(
+            wifi[0].contains(&"1.1.1.1".to_string()) && wifi[0].contains(&"primary".to_string())
+        );
+        assert!(
+            wifi[1].contains(&"8.8.8.8".to_string()) && wifi[1].contains(&"index=2".to_string())
+        );
     }
 
     #[test]

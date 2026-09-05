@@ -265,14 +265,16 @@ impl Enforcer {
                     // count of attempts: this is a commitment device, not a login screen, and the
                     // only thing worth saying is that the lock is still shut.
                     return Response::Error {
-                        detail: "Windows did not accept that password. The session is still locked."
-                            .into(),
+                        detail:
+                            "Windows did not accept that password. The session is still locked."
+                                .into(),
                     };
                 }
                 // Only now, and only this condition. Proving ownership of the machine says nothing
                 // about a timer, a token or a peer, so those still have to be satisfied their own
                 // way.
-                let satisfied = std::collections::BTreeSet::from([curfew_core::Lock::DeviceCredential]);
+                let satisfied =
+                    std::collections::BTreeSet::from([curfew_core::Lock::DeviceCredential]);
                 match self.sessions.end(&id, now, &satisfied) {
                     Ok(_) => {
                         let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
@@ -347,10 +349,7 @@ impl Enforcer {
                     profile: countdown.profile.clone(),
                     source: curfew_core::SessionSource::Manual,
                     started_at: now,
-                    lock: curfew_core::LockSet::new(
-                        [],
-                        Some(now + i64::from(countdown.seconds)),
-                    ),
+                    lock: curfew_core::LockSet::new([], Some(now + i64::from(countdown.seconds))),
                 });
                 Some(countdown.profile)
             }

@@ -36,8 +36,8 @@ mod sys {
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Foundation::{ERROR_CANCELLED, HWND};
     use windows_sys::Win32::Security::Credentials::{
-        CredUIPromptForWindowsCredentialsW, CredUnPackAuthenticationBufferW, CREDUIWIN_ENUMERATE_CURRENT_USER,
-        CREDUI_INFOW,
+        CredUIPromptForWindowsCredentialsW, CredUnPackAuthenticationBufferW,
+        CREDUIWIN_ENUMERATE_CURRENT_USER, CREDUI_INFOW,
     };
     use windows_sys::Win32::System::Com::CoTaskMemFree;
 

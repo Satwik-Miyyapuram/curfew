@@ -9,8 +9,8 @@
 use curfew_core::{Config, Consumption, State};
 use curfew_win::blocked_domains;
 use curfew_win::procs::{enforce, verdicts, Process, Processes, Verdict};
-use std::cell::RefCell;
 use curfew_win::Gates;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 const CONFIG: &str = r#"
@@ -153,7 +153,11 @@ fn a_delay_holds_an_app_for_its_seconds_and_then_lets_it_run() {
     let held = enforce(NOW, &active(), &config(), &table, &mut gates);
 
     assert_eq!(held.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
-    assert_eq!(*table.killed.borrow(), vec![1], "the wait is only a wait if the app is not running");
+    assert_eq!(
+        *table.killed.borrow(),
+        vec![1],
+        "the wait is only a wait if the app is not running"
+    );
     // A delay is friction, not a block: nothing is reported as blocked or as having failed to be.
     assert!(held.closed.is_empty() && held.failed.is_empty());
 
@@ -203,7 +207,10 @@ fn verdicts_answer_without_touching_anything() {
 #[test]
 fn an_empty_machine_is_not_an_error() {
     let table = Fake::new(vec![]);
-    assert_eq!(enforce(NOW, &active(), &config(), &table, &mut Gates::default()), Default::default());
+    assert_eq!(
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default()),
+        Default::default()
+    );
 }
 
 // --- the hosts list ---------------------------------------------------------------------------

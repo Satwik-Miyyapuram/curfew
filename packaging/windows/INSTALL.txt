@@ -1,0 +1,98 @@
+Curfew for Windows
+==================
+
+What is in this folder
+----------------------
+
+  curfew.exe        the service and the command line. Everything is done through this.
+  curfew-tray.exe   the tray icon: what is blocked now, and the overlay when something is.
+  LICENSE           AGPL-3.0-or-later. The source is the release this was built from.
+  INSTALL.txt       this file.
+
+
+Installing
+----------
+
+1. Put this folder somewhere permanent. C:\Program Files\Curfew is the usual choice, but any
+   path works — the service remembers where it was registered from, so moving the folder
+   afterwards breaks it until you register it again.
+
+2. Open a terminal as administrator and run:
+
+       curfew install
+
+   That registers the Windows service, starts it, and sets the tray to run at login. A service
+   is needed because a blocker that a task manager can close is not a blocker.
+
+3. Check it came up:
+
+       curfew status
+
+
+Uninstalling
+------------
+
+       curfew uninstall
+
+This is refused while a lock is running, and that refusal is the product working. If you are
+locked and you want out, start the way out and wait for it:
+
+       curfew release <session-id>
+
+The release takes 24 hours. Nothing shortens it — not reinstalling Windows, not deleting the
+files, not the developer. That is the promise you made to yourself when you started the block,
+and Curfew keeping it when you no longer want it kept is the only reason it is worth running.
+
+If the machine is genuinely unusable and you need out now, you can still sign in with your
+Windows password wherever a block offers a credential unlock, if the profile allowed one.
+
+
+Your antivirus may object
+-------------------------
+
+Curfew does several things that malware also does: it installs a service that restarts itself,
+it closes other programs, it edits the hosts file, and (if you turn the resolver on) it points
+your DNS at itself. Those are the blocking mechanism. There is no version of a distraction
+blocker that does not look like this to a heuristic.
+
+So expect one of these:
+
+  * SmartScreen: "Windows protected your PC" on first run. These builds are not signed with an
+    EV certificate — that is a few hundred dollars a year, and Curfew has no revenue. Click
+    "More info", then "Run anyway", after you have checked the hash below.
+
+  * Defender or a third-party scanner flagging curfew.exe, usually as a generic
+    "Trojan:Win32/Wacatac" or "Agent" detection. These are unsigned-binary heuristics, not a
+    match against known malware.
+
+Do not just click through it. Verify the download instead:
+
+    certutil -hashfile curfew-x64.zip SHA256
+
+and compare that against the SHA256SUMS file on the release page. If they match, the archive is
+byte-for-byte what the public GitHub Actions run built from the tagged source. If they do not
+match, delete it and tell us — that is the case that actually matters.
+
+If you want to be more careful than that, build it yourself. That is the whole point of the
+licence:
+
+    cargo build --release -p curfew-svc -p curfew-tray
+
+To submit a false positive to Microsoft:
+https://www.microsoft.com/en-us/wdsi/filesubmission
+
+
+What Curfew touches on this machine
+-----------------------------------
+
+  * A Windows service, "Curfew", set to restart on failure.
+  * A run-at-login entry for the tray.
+  * %PROGRAMDATA%\Curfew — the config, the sessions, and the state.
+  * The hosts file, while a website block is running. Curfew's lines are marked and only
+    Curfew's lines are removed.
+  * Your per-interface DNS settings, but only if you turned the resolver on in the config.
+    What they were before is written to dns-before.json first and given back on uninstall,
+    including if the service was killed rather than stopped.
+
+Nothing is sent anywhere. There is no account, no server, and no telemetry. Sync, when you turn
+it on, goes device to device.

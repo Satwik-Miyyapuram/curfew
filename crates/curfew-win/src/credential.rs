@@ -44,7 +44,9 @@ mod sys {
     use super::Secret;
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::Security::{LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT};
+    use windows_sys::Win32::Security::{
+        LogonUserW, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+    };
 
     fn wide(text: &str) -> Vec<u16> {
         std::ffi::OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()

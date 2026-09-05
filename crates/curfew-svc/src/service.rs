@@ -67,14 +67,19 @@ fn run() -> windows_service::Result<()> {
     ))?;
 
     let state_path = state::default_path();
-    match crate::runner::build(&crate::runner::config_path(), &state_path, crate::runner::hosts_path()) {
+    match crate::runner::build(
+        &crate::runner::config_path(),
+        &state_path,
+        crate::runner::hosts_path(),
+    ) {
         Ok(enforcer) => {
             crate::runner::run(enforcer, state_path, || stop.load(Ordering::SeqCst), None, true);
         }
         Err(detail) => eprintln!("curfew: {detail}"),
     }
 
-    status_handle.set_service_status(running(ServiceState::Stopped, ServiceControlAccept::empty()))?;
+    status_handle
+        .set_service_status(running(ServiceState::Stopped, ServiceControlAccept::empty()))?;
     Ok(())
 }
 
@@ -138,8 +143,10 @@ pub fn install() -> windows_service::Result<()> {
 
 pub fn uninstall() -> windows_service::Result<()> {
     let manager = manager(ServiceManagerAccess::CONNECT)?;
-    let service = manager
-        .open_service(NAME, ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS)?;
+    let service = manager.open_service(
+        NAME,
+        ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS,
+    )?;
     if service.query_status()?.current_state != ServiceState::Stopped {
         service.stop()?;
     }

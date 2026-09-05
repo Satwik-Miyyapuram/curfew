@@ -4,14 +4,12 @@
 //! the pass produced, and hand control messages to the enforcer — so that the interesting parts
 //! stay in `curfew-win`, where they are tested without a machine.
 
+use curfew_core::Config;
 use curfew_win::ipc::{encode, parse_request, Response};
 use curfew_win::state::{self, Loaded, Persisted};
 use curfew_win::{hosts, procs::SystemProcesses, Enforcer};
-use curfew_core::Config;
 use interprocess::local_socket::traits::ListenerExt as _;
-use interprocess::local_socket::{
-    GenericNamespaced, ListenerOptions, ToNsName,
-};
+use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -57,7 +55,11 @@ pub fn now() -> i64 {
 /// A config that will not parse is fatal *only* on a fresh start with no sessions: if locks are
 /// running, the service carries on enforcing the config it cannot re-read rather than releasing
 /// them, because "break the config file" must not be a way out.
-pub fn build(config_path: &Path, state_path: &Path, hosts_path: PathBuf) -> Result<Enforcer, String> {
+pub fn build(
+    config_path: &Path,
+    state_path: &Path,
+    hosts_path: PathBuf,
+) -> Result<Enforcer, String> {
     let config = std::fs::read_to_string(config_path)
         .map_err(|e| e.to_string())
         .and_then(|text| Config::from_toml(&text).map_err(|e| e.to_string()));

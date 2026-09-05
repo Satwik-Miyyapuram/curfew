@@ -6,9 +6,9 @@
 //! separate program is an uninstaller that can be run when the service is not looking.
 
 mod runner;
-mod watchdog;
 #[cfg(windows)]
 mod service;
+mod watchdog;
 
 use curfew_win::ipc::{Request, Response};
 use curfew_win::{hosts, state};
@@ -191,7 +191,10 @@ fn status() -> i32 {
         }
     }
     if !status.blocked_domains.is_empty() {
-        println!("\nBlocked: {}", status.blocked_domains.iter().cloned().collect::<Vec<_>>().join(", "));
+        println!(
+            "\nBlocked: {}",
+            status.blocked_domains.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
     }
     // Failures are printed after the good news, never instead of it, and never suppressed: a
     // blocker that quietly fails to block is worse than one that admits it.
@@ -270,14 +273,14 @@ fn simple(request: Request) -> i32 {
 /// Run the loop in the foreground. Useful for debugging, and the only way to run Curfew at all on a
 /// machine where the service cannot be installed.
 fn run_in_console() -> i32 {
-    let enforcer = match runner::build(&runner::config_path(), &state::default_path(), runner::hosts_path())
-    {
-        Ok(enforcer) => enforcer,
-        Err(detail) => {
-            eprintln!("curfew: {detail}");
-            return 1;
-        }
-    };
+    let enforcer =
+        match runner::build(&runner::config_path(), &state::default_path(), runner::hosts_path()) {
+            Ok(enforcer) => enforcer,
+            Err(detail) => {
+                eprintln!("curfew: {detail}");
+                return 1;
+            }
+        };
     println!("Curfew is enforcing. Ctrl-C to stop.");
     runner::run(enforcer, state::default_path(), || false, None, false);
     0

@@ -306,7 +306,10 @@ fn a_wrong_password_does_not_open_a_credential_lock() {
         },
     );
 
-    assert!(matches!(response, Response::Error { .. }), "a bad password was accepted: {response:?}");
+    assert!(
+        matches!(response, Response::Error { .. }),
+        "a bad password was accepted: {response:?}"
+    );
     assert_eq!(e.sessions.running.len(), 1);
 }
 

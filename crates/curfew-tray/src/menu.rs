@@ -12,15 +12,28 @@ pub enum Item {
     /// A line of text with nothing behind it.
     Note(String),
     /// End a session that has no unmet conditions.
-    End { id: String, label: String },
+    End {
+        id: String,
+        label: String,
+    },
     /// End one that needs the machine's password, via the operating system's own prompt.
-    Unlock { id: String, label: String },
+    Unlock {
+        id: String,
+        label: String,
+    },
     /// Start the 24-hour delayed release.
-    Release { id: String, label: String },
+    Release {
+        id: String,
+        label: String,
+    },
     /// Call off an announced freeze. Never refused, and always first on the menu.
-    CancelFreeze { label: String },
+    CancelFreeze {
+        label: String,
+    },
     /// Agree, here, to a freeze another device asked for.
-    ConfirmFreeze { label: String },
+    ConfirmFreeze {
+        label: String,
+    },
     Separator,
     /// Show what is blocked, and anything that is failing.
     Details,
@@ -60,9 +73,8 @@ pub fn menu(status: &Status) -> Vec<Item> {
                     "Another device asked to freeze {} — nothing has happened yet",
                     countdown.profile
                 )));
-                items.push(Item::ConfirmFreeze {
-                    label: "Yes, freeze this device too".to_string(),
-                });
+                items
+                    .push(Item::ConfirmFreeze { label: "Yes, freeze this device too".to_string() });
             }
             _ => items.push(Item::Note(format!(
                 "{} freezes everything in {} s — save your work",
@@ -85,12 +97,8 @@ pub fn menu(status: &Status) -> Vec<Item> {
             remaining(status.now, session.lock.ends_at)
         )));
 
-        let conditions: Vec<&Lock> = session
-            .lock
-            .conditions
-            .iter()
-            .filter(|lock| !matches!(lock, Lock::Timer))
-            .collect();
+        let conditions: Vec<&Lock> =
+            session.lock.conditions.iter().filter(|lock| !matches!(lock, Lock::Timer)).collect();
 
         // Only the credential can be satisfied from here. A token, a peer release or a challenge is
         // satisfied somewhere else by design, and an item that opened a prompt leading nowhere would
@@ -134,7 +142,8 @@ pub fn menu(status: &Status) -> Vec<Item> {
         items.push(Item::Note(format!("{exe} opens in {left} s")));
     }
 
-    if status.hosts_error.is_some() || !status.failing.is_empty() || status.state_warning.is_some() {
+    if status.hosts_error.is_some() || !status.failing.is_empty() || status.state_warning.is_some()
+    {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
 
@@ -303,7 +312,9 @@ mod tests {
         let mut status = status(vec![]);
         status.delayed.insert("slack.exe".into(), 9);
         let items = menu(&status);
-        assert!(items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("slack.exe opens in 9 s"))));
+        assert!(items
+            .iter()
+            .any(|i| matches!(i, Item::Note(n) if n.contains("slack.exe opens in 9 s"))));
         // Nothing to click: a wait that could be dismissed from the menu would not be a wait.
         assert!(!items.iter().any(|i| matches!(i, Item::End { .. } | Item::Unlock { .. })));
     }

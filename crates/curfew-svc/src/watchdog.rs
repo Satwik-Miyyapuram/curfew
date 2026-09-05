@@ -72,7 +72,8 @@ mod sys {
     use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
     pub fn look(name: &str) -> Seen {
-        let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        let Ok(manager) =
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
         else {
             // The manager itself is unreachable, which is not the service being gone. Waiting is the
             // conservative answer: it neither releases a lock nor starts a fight.

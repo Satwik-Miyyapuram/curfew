@@ -76,9 +76,11 @@ pub fn message(closed: &[String], status: &Status) -> String {
 pub fn waiting_message(exe: &str, seconds_left: i64) -> String {
     let name = app_name(exe);
     match seconds_left.max(0) {
-        0 | 1 => format!("{name} opens in a moment.
+        0 | 1 => format!(
+            "{name} opens in a moment.
 
-This pause is what you asked for."),
+This pause is what you asked for."
+        ),
         n => format!(
             "{name} opens in {n} seconds.
 
@@ -125,9 +127,9 @@ mod sys {
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetSystemMetrics,
-        KillTimer, RegisterClassW, SetTimer, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA,
-        WM_DESTROY, WM_LBUTTONUP, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetSystemMetrics, KillTimer,
+        RegisterClassW, SetTimer, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA, WM_DESTROY,
+        WM_LBUTTONUP, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
         WS_EX_TOPMOST, WS_POPUP,
     };
 
@@ -265,10 +267,7 @@ mod delay_tests {
         let current = BTreeMap::from([("slack.exe".to_string(), 12)]);
         let seen = BTreeSet::from(["slack.exe".to_string()]);
         assert!(newly_delayed(&seen, &current).is_empty());
-        assert_eq!(
-            newly_delayed(&BTreeSet::new(), &current),
-            vec![("slack.exe".to_string(), 12)]
-        );
+        assert_eq!(newly_delayed(&BTreeSet::new(), &current), vec![("slack.exe".to_string(), 12)]);
     }
 }
 

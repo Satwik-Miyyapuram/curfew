@@ -66,15 +66,10 @@ pub struct Countdown {
 /// whole-device rule later acquires the countdown with it. A budget or a delay on the whole device
 /// is not a freeze: it takes nothing away without warning.
 pub fn freezes(config: &Config, profile: &str) -> bool {
-    config
-        .profiles
-        .iter()
-        .filter(|p| p.id == profile)
-        .flat_map(|p| &p.rules)
-        .any(|rule| {
-            matches!(rule.target, Target::WholeDevice)
-                && matches!(rule.action, Action::Block | Action::AllowOnly)
-        })
+    config.profiles.iter().filter(|p| p.id == profile).flat_map(|p| &p.rules).any(|rule| {
+        matches!(rule.target, Target::WholeDevice)
+            && matches!(rule.action, Action::Block | Action::AllowOnly)
+    })
 }
 
 /// Announce a freeze. `warning` is clamped up to the minimum, never down.
