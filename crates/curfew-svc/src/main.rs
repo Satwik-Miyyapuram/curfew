@@ -338,6 +338,9 @@ fn uninstall() -> i32 {
     match service::uninstall() {
         Ok(()) => {
             let _ = hosts::clear(&runner::hosts_path());
+            // And the resolvers, from whatever the service left behind. An uninstall that leaves a
+            // machine pointing at a proxy that is gone has broken the internet on its way out.
+            curfew_win::dns::give_back_remembered(&runner::dns_record());
             println!("Curfew is uninstalled and the hosts file has been given back.");
             0
         }

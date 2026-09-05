@@ -97,6 +97,39 @@ pub fn build(config_path: &Path, state_path: &Path, hosts_path: PathBuf) -> Resu
     Ok(enforcer)
 }
 
+/// Where the machine's own DNS settings are recorded while Curfew is holding them.
+pub fn dns_record() -> PathBuf {
+    state::default_path().with_file_name("dns-before.json")
+}
+
+/// Start the local resolver if the config asks for one, and point the machine at it.
+fn start_resolver(config: &Config) -> Option<curfew_win::dns::Proxy> {
+    if !config.resolver.enabled {
+        return None;
+    }
+    let upstream = match config.resolver.upstream.parse() {
+        Ok(upstream) => upstream,
+        Err(e) => {
+            eprintln!("curfew: {} is not a resolver address ({e})", config.resolver.upstream);
+            return None;
+        }
+    };
+    match curfew_win::dns::Proxy::start(curfew_win::dns::LISTEN, upstream) {
+        Ok(mut proxy) => {
+            if let Err(e) = proxy.take_over(Some(dns_record())) {
+                eprintln!("curfew: the resolver is running but nothing is asking it ({e})");
+            }
+            Some(proxy)
+        }
+        Err(e) => {
+            eprintln!(
+                "curfew: could not start the resolver ({e}). Something else is answering DNS on                  this machine. The hosts file is still blocking the exact names."
+            );
+            None
+        }
+    }
+}
+
 fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
     let snapshot = Persisted {
         sessions: enforcer.sessions.clone(),
@@ -158,6 +191,14 @@ pub fn run(
         false => None,
     };
 
+    // The resolver, when the config asks for one. A failure to bind is reported and then lived
+    // with: the hosts file is still enforcing the exact names, so this degrades the block rather
+    // than ending it, and a service that refused to start over it would be worse than the gap.
+    let resolver = {
+        let guard = enforcer.lock().expect("enforcer");
+        start_resolver(&guard.config)
+    };
+
     let mut previous = last_tick;
     while !stop() {
         let now = now();
@@ -170,7 +211,10 @@ pub fn run(
         };
         {
             let mut guard = enforcer.lock().expect("enforcer");
-            guard.tick(now, elapsed, &[], &SystemProcesses::default());
+            let tick = guard.tick(now, elapsed, &[], &SystemProcesses::default());
+            if let Some(resolver) = &resolver {
+                resolver.set(tick.domains.clone());
+            }
             persist(&guard, &state_path, now);
         }
         // The other half of the pair: killing the watchdog is as obvious an attack as killing the

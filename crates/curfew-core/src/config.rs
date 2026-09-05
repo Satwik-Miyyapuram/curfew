@@ -24,6 +24,34 @@ pub struct Config {
     /// Calendar-driven sessions (DECISIONS: the feature the whole project is named for).
     #[serde(default)]
     pub calendars: Vec<CalendarSchedule>,
+    /// Website blocking beyond the hosts file.
+    #[serde(default)]
+    pub resolver: Resolver,
+}
+
+/// The local DNS proxy, which is what makes a blocked domain cover its subdomains.
+///
+/// Off by default, and deliberately so: it takes over name resolution for the whole machine, and a
+/// tool that quietly repoints a user's DNS the first time it runs has helped itself to something it
+/// was not given. The hosts file works without it and stays the floor underneath it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resolver {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Where everything that is not blocked is sent. Whatever the machine used before Curfew is not
+    /// usable here — the interface now points at Curfew, so following it would be a loop.
+    #[serde(default = "default_upstream")]
+    pub upstream: String,
+}
+
+fn default_upstream() -> String {
+    "1.1.1.1:53".to_string()
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        Self { enabled: false, upstream: default_upstream() }
+    }
 }
 
 fn default_timezone() -> String {
@@ -38,6 +66,7 @@ impl Default for Config {
             profiles: Vec::new(),
             weekly: Vec::new(),
             calendars: Vec::new(),
+            resolver: Resolver::default(),
         }
     }
 }

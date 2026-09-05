@@ -15,7 +15,9 @@ pub mod target;
 
 pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use clock::{ClockWitness, Reading, Verdict};
-pub use config::{Action, Config, ConfigError, Platform, Profile, Rule, CONFIG_SCHEMA_VERSION};
+pub use config::{
+    Action, Config, ConfigError, Platform, Profile, Resolver, Rule, CONFIG_SCHEMA_VERSION,
+};
 pub use engine::{decide, BlockReason, Decision, State};
 pub use frozen::{Countdown, Origin};
 pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
