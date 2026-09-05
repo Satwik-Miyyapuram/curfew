@@ -110,8 +110,11 @@ disabling the browser extension during a locked session is detected and reported
 - [ ] Widgets, quick tiles, CLI, webhooks on session start/end
 - [ ] Stats: streaks, trends, CSV/JSON export
 - [ ] Themes, externalized strings
-- [ ] GitHub Pages site; GitHub Releases; F-Droid; winget/scoop
-- [ ] Threat-model page and an explicit "this is not parental-control software" statement (GAPS D3)
+- [x] GitHub Pages site (one static file, no trackers) and GitHub Releases for both platforms —
+      Windows zips and an unsigned APK, each with a checksum
+- [ ] F-Droid; winget/scoop
+- [x] Threat-model summary and an explicit "this is not parental-control software" statement, in
+      the README and on the site (GAPS D3)
 
 **Exit criteria:** a new user can install on both platforms, pair them, and run a synced calendar
 block without reading the docs.

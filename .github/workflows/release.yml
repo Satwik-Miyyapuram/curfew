@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the Windows binaries for both architectures anyone actually runs Windows on, publishes
-# them with checksums, and prints the manifests that winget and scoop want. Everything here is
+# Builds the Windows binaries for both architectures anyone actually runs Windows on and the
+# Android APK, publishes them with checksums, and prints the manifests that winget and scoop want. Everything here is
 # reproducible from a tag: a release nobody can rebuild is a binary users are asked to trust on
 # faith, which is exactly what an AGPL blocker should not be asking for (GAPS B1).
 
@@ -68,9 +68,53 @@ jobs:
             curfew-${{ matrix.arch }}.zip
             curfew-${{ matrix.arch }}.zip.sha256
 
+  android:
+    name: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test
+        working-directory: android
+        run: ./gradlew --no-daemon :policy:testDebugUnitTest :app:testDebugUnitTest
+
+      - name: Build
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      # The APK is unsigned on purpose. Signing keys are a cost and a secret to hold, and this
+      # project has neither (GAPS D6); an unsigned build a user signs themselves, or installs
+      # from a build they made, is honest about that. The checksum is what makes the download
+      # verifiable without trusting the page it came from.
+      - name: Stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=$(find android -path '*/outputs/apk/release/*.apk' | head -1)
+          test -n "$apk"
+          cp "$apk" curfew-android-unsigned.apk
+          sha256sum curfew-android-unsigned.apk > curfew-android-unsigned.apk.sha256
+          cat curfew-android-unsigned.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: curfew-android
+          path: |
+            curfew-android-unsigned.apk
+            curfew-android-unsigned.apk.sha256
+
   publish:
     name: publish
-    needs: windows
+    needs: [windows, android]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:

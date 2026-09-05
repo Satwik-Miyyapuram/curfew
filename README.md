@@ -8,7 +8,9 @@ server**, and that can drive its blocks from **your calendar**.
 Think Freedom's cross-device sessions + Cold Turkey's strictness + StayFocusd's rule granularity —
 without a subscription, without a cloud account, and with your data never leaving your devices.
 
-> Status: **planning / phase 0**. Nothing to install yet.
+> Status: **working on both platforms.** Windows binaries and an unsigned Android APK are published
+> from a tag; see [Install](#install). Budgets, launch limits and friction delays are enforced by
+> the engine but are still edited in the config file rather than in a form.
 
 ## Why
 
@@ -21,6 +23,36 @@ without a subscription, without a cloud account, and with your data never leavin
 | Hard locks + challenges | yes | yes | yes | yes |
 | Open source | no | no | no | **AGPL-3.0** |
 | Cost | subscription | paid | free | free |
+
+## Install
+
+Both downloads come from [Releases](../../releases), with a `.sha256` beside each one.
+
+**Windows.** Unzip `curfew-x64.zip` (or `curfew-arm64.zip`) and read `INSTALL.txt`. `curfew.exe` is
+both the service and the command line; `curfew-tray.exe` is the tray icon.
+
+**Android.** `curfew-android-unsigned.apk`. It is unsigned on purpose — a signing key is a cost and
+a secret this project does not hold — so Android will warn you, and you can instead build it
+yourself with `cd android && ./gradlew assembleRelease`.
+
+Nothing here phones home, so there is no account step and nothing to sign up for.
+
+## Using it
+
+The two devices are set up the same way, in the same order:
+
+1. **Make a profile** — a named set of things to block. On the phone: *Schedule → Add a profile*.
+   On the PC: `curfew add-profile curfew.toml --id deep-work`.
+2. **Say what it blocks.** On the phone: *Apps*, which ticks apps and, under *Sites and words*,
+   takes a domain, an address, a keyword or a window title. On the PC:
+   `curfew block curfew.toml --profile deep-work --site reddit.com`.
+3. **Say when it runs** — a weekly window, or a calendar rule that matches events by title.
+   On the phone: *Schedule*. On the PC: `curfew add-window` / `curfew add-calendar`.
+4. **Pair the devices**, if you have both — *Devices → Pair*, scanning a QR from the other one.
+   Sessions, budgets and calendar events then travel between them over a shared folder, with no
+   server in the middle.
+
+`curfew schedules curfew.toml` and `curfew blocks curfew.toml` print back everything that is set.
 
 ## Docs
 
@@ -42,6 +74,50 @@ without a subscription, without a cloud account, and with your data never leavin
 4. Every enforcement mechanism has a fallback; losing a permission weakens blocking, never kills it.
 5. Everything the UI can do is expressible in an exportable config file.
 6. There is always a way out: a 24-hour delayed release, on every lock, visible from the start.
+
+## This is not parental-control software
+
+Curfew is a tool for restricting **your own** devices, and it is built so that it cannot comfortably
+be used for anything else. There is no parent role, no admin role, no remote monitoring of another
+person's device, and no hidden or disguised mode. Usage data never leaves the group of devices you
+paired yourself, and there is nowhere for it to be sent.
+
+Two consequences follow, and both are deliberate:
+
+- **Every lock is visible and every lock ends.** Each one shows what it is waiting for from the
+  moment it starts, and each one offers a 24-hour delayed release. Somebody who installs this on
+  another person's phone cannot make a block they cannot see or wait out.
+- **Nothing is set that we could not lift.** Curfew never takes device-owner mode, and never asks
+  for a factory reset to remove. Device admin is optional, user-revocable, and used only to make
+  uninstalling deliberate rather than impossible.
+
+If what you want is to watch or restrict somebody else, this is the wrong project, and no amount of
+configuration will make it the right one.
+
+## Security and privacy
+
+The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the short version:
+
+- **What it stops:** the impulse, and the moment of weakness ten minutes later. Blocking is enforced
+  in the OS the app runs in, and a lock cannot be ended early by uninstalling, by editing the config,
+  or by changing the clock.
+- **What it does not stop:** somebody with root, an unlocked bootloader, an Administrator account
+  they are willing to use, or a second device you never told Curfew about. That ceiling is a
+  property of what Android and Windows let an app do, and pretending otherwise would be the
+  dishonest part.
+- **Where the data is:** on your devices. Usage statistics are stored in an encrypted database and
+  excluded from cloud backup; there is no code in this repository that uploads them anywhere. The
+  config file is exportable on demand, from *Schedule → Export*.
+
+## Building
+
+```
+cargo test --workspace                 # the shared engine, the CLI, the Windows service
+cd android && ./gradlew :policy:testDebugUnitTest :app:testDebugUnitTest assembleDebug
+```
+
+The engine is Rust and is shared verbatim by both platforms through UniFFI, so a policy question has
+exactly one answer on the phone and on the PC.
 
 ## License
 

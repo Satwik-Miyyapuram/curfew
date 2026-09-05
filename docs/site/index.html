@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curfew — a distraction blocker with no server and no subscription</title>
+<meta name="description" content="Open-source distraction blocker for Android and PC. Syncs peer-to-peer with no server, blocks from your calendar, and costs nothing.">
+<!--
+  One file, no build step, no fonts or scripts from anywhere else.
+
+  A page for a tool whose whole claim is that nothing about you leaves your devices should not
+  itself hand your IP address to a font host on load. It is also why there is no analytics tag:
+  the honest version of "no telemetry" includes the website.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7;
+    --fg: #1b1a17;
+    --dim: #55524b;
+    --line: #ddd9d0;
+    --card: #ffffff;
+    --accent: #7a4b12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16151a;
+      --fg: #eceaf3;
+      --dim: #a5a1b0;
+      --line: #302e38;
+      --card: #1e1d24;
+      --accent: #e0b070;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 17px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 2.6rem; line-height: 1.1; margin: 0 0 .4rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.35rem; margin: 3rem 0 .75rem; letter-spacing: -.01em; }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .35rem; }
+  p, li { color: var(--fg); }
+  .tagline { font-size: 1.15rem; color: var(--dim); margin: 0 0 2rem; }
+  a { color: var(--accent); }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, monospace;
+    font-size: .875em;
+  }
+  pre {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: .5rem;
+    padding: .85rem 1rem;
+    overflow-x: auto;
+  }
+  .buttons { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.75rem 0; }
+  .button {
+    display: inline-block;
+    padding: .65rem 1.1rem;
+    border: 1px solid var(--line);
+    border-radius: .5rem;
+    background: var(--card);
+    text-decoration: none;
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 600; }
+  td.yes { font-weight: 700; }
+  .cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: .6rem; padding: 1rem 1.1rem; }
+  .card h3 { margin-top: 0; }
+  .card p { margin: 0; color: var(--dim); font-size: .95rem; }
+  .note {
+    border-left: 3px solid var(--accent);
+    padding: .1rem 0 .1rem 1rem;
+    margin: 1.5rem 0;
+    color: var(--dim);
+  }
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--dim); font-size: .9rem; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Curfew</h1>
+  <p class="tagline">
+    A distraction blocker for your phone <em>and</em> your PC that keeps them in step with
+    <strong>no server, no account, and no subscription</strong> — and that can take its orders from
+    your calendar.
+  </p>
+
+  <div class="buttons">
+    <a class="button primary" href="https://github.com/__REPO__/releases">Download</a>
+    <a class="button" href="https://github.com/__REPO__">Source on GitHub</a>
+  </div>
+
+  <h2>What it does</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>Blocks on both devices at once</h3>
+      <p>Start a session on your phone and your PC is blocked too. The devices talk directly, over
+        a folder you already sync or a code you scan across a table.</p>
+    </div>
+    <div class="card">
+      <h3>Reads your calendar</h3>
+      <p>A rule can say &ldquo;whenever an event's title contains <em>focus</em>, run the deep-work
+        profile.&rdquo; Book the time once and the blocking follows it.</p>
+    </div>
+    <div class="card">
+      <h3>Locks you meant to set</h3>
+      <p>A timer, your device PIN, a typing challenge, a restart, or another device's say-so. Every
+        one of them shows what it is waiting for.</p>
+    </div>
+    <div class="card">
+      <h3>Costs nothing, ever</h3>
+      <p>No subscription and no paid tier, because there is no server to pay for. AGPL-3.0, so it
+        stays that way.</p>
+    </div>
+  </div>
+
+  <h2>Against the alternatives</h2>
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr><th></th><th>Freedom</th><th>Cold Turkey</th><th>StayFocusd</th><th>Curfew</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Android + PC</td><td>yes</td><td>PC only</td><td>browser only</td><td class="yes">yes</td></tr>
+      <tr><td>Cross-device sync</td><td>their cloud</td><td>no</td><td>no</td><td class="yes">peer-to-peer</td></tr>
+      <tr><td>Calendar-driven</td><td>no</td><td>no</td><td>no</td><td class="yes">yes</td></tr>
+      <tr><td>Account required</td><td>yes</td><td>no</td><td>no</td><td class="yes">no</td></tr>
+      <tr><td>Open source</td><td>no</td><td>no</td><td>no</td><td class="yes">AGPL-3.0</td></tr>
+      <tr><td>Cost</td><td>subscription</td><td>paid</td><td>free</td><td class="yes">free</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Getting started</h2>
+  <p>Grab a build from <a href="https://github.com/__REPO__/releases">Releases</a>. Windows ships as
+    a zip with a <code>curfew.exe</code> that is both the service and the command line; Android
+    ships as an unsigned APK, which you can also build yourself.</p>
+
+  <p>Then, on either device, in the same three steps:</p>
+  <pre><code>curfew add-profile curfew.toml --id deep-work
+curfew block      curfew.toml --profile deep-work --site reddit.com
+curfew add-window curfew.toml --id mornings --profile deep-work --from 09:00 --to 12:00</code></pre>
+  <p>On the phone the same three steps are the <em>Schedule</em> and <em>Apps</em> tabs, and either
+    device can be the one you set it up on.</p>
+
+  <h2>What it will not do</h2>
+  <p class="note">
+    Curfew is for restricting <strong>your own</strong> devices. There is no parent role, no admin
+    role, no remote monitoring of somebody else's phone, and no hidden mode. Every lock is visible
+    from the moment it starts and every lock offers a 24-hour delayed release, so a block cannot be
+    made invisible or permanent — including by somebody who installed it on a device that is not
+    theirs. If that is what you are looking for, this is the wrong project.
+  </p>
+  <p>It also will not pretend to be unbeatable. Somebody with root, an unlocked bootloader, or an
+    Administrator account they are willing to use can get past it, and so can a second device you
+    never told it about. What it stops is the impulse, and the moment of weakness ten minutes
+    later.</p>
+
+  <h2>Read further</h2>
+  <ul>
+    <li><a href="https://github.com/__REPO__/blob/main/docs/ARCHITECTURE.md">Architecture</a> — the
+      invariants, the rule engine, the sync protocol, and the threat model</li>
+    <li><a href="https://github.com/__REPO__/blob/main/docs/DECISIONS.md">Decisions</a> — what was
+      chosen, and what was rejected and why</li>
+    <li><a href="https://github.com/__REPO__/blob/main/docs/GAPS.md">Gaps</a> — the open problems,
+      listed honestly</li>
+  </ul>
+
+  <footer>
+    AGPL-3.0-or-later. This page loads no scripts, no fonts and no trackers — the honest version of
+    &ldquo;no telemetry&rdquo; includes the website.
+  </footer>
+
+</main>
+</body>
+</html>
