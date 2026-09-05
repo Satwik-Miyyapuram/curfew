@@ -3,6 +3,8 @@ package dev.curfew.policy
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonClassDiscriminator
@@ -98,6 +100,31 @@ class Policy private constructor(private val inner: Curfew) {
     /** Every calendar rule. */
     fun calendars(): List<CalendarSchedule> =
         json.decodeFromString(ListSerializer(CalendarSchedule.serializer()), inner.calendarsJson())
+
+    /**
+     * Block something the app picker cannot express — a site, a word, a window title.
+     *
+     * Replaces the rule already pointing at the same thing on the same platforms, so saying it
+     * twice is one rule rather than two arguing with each other.
+     */
+    fun upsertRule(profile: String, rule: Rule) = invalid {
+        inner.upsertRule(profile, json.encodeToString(rule))
+    }
+
+    /** Stop blocking something, on every platform. Returns how many rules that took out. */
+    fun removeRule(profile: String, target: Target): Int =
+        invalid { inner.removeRule(profile, json.encodeToString(target)) }.toInt()
+
+    /**
+     * Everything a profile blocks.
+     *
+     * Rules the forms cannot express are still in the config and still enforced; they are simply
+     * not decodable into [Rule], so they are dropped from this list rather than shown wrongly.
+     */
+    fun rules(profile: String): List<Rule> {
+        val raw = json.parseToJsonElement(inner.rulesJson(profile)).jsonArray
+        return raw.mapNotNull { runCatching { json.decodeFromJsonElement<Rule>(it) }.getOrNull() }
+    }
 
     /**
      * Add a profile, or rename the one with this id.
@@ -683,6 +710,153 @@ data class Launches(
 /** A profile as a chooser needs it: the id rules refer to, and the name a person reads. */
 @Serializable
 data class ProfileName(val id: String, val name: String)
+
+/**
+ * A thing a rule points at, in the same shape the core writes it.
+ *
+ * Every kind the core has is named, not only the four a phone form can write, so that a screen
+ * listing a profile can show back a rule somebody wrote in the TOML instead of quietly leaving it
+ * off the list. Deciding whether a target matches is still the core's job; this is the shape, not
+ * the logic.
+ */
+@Serializable
+sealed interface Target {
+    @Serializable
+    @SerialName("app_package")
+    data class AppPackage(val `package`: String) : Target
+
+    @Serializable
+    @SerialName("app_screen")
+    data class AppScreen(val `package`: String, val screen: String) : Target
+
+    @Serializable
+    @SerialName("windows_exe")
+    data class WindowsExe(val exe: String) : Target
+
+    @Serializable
+    @SerialName("window_title")
+    data class WindowTitle(val pattern: String) : Target
+
+    @Serializable
+    @SerialName("domain")
+    data class Domain(val domain: String) : Target
+
+    @Serializable
+    @SerialName("url")
+    data class Url(val pattern: String) : Target
+
+    @Serializable
+    @SerialName("keyword")
+    data class Keyword(val text: String) : Target
+
+    @Serializable
+    @SerialName("file_path")
+    data class FilePath(val pattern: String) : Target
+
+    @Serializable
+    @SerialName("notification_source")
+    data class NotificationSource(val `package`: String) : Target
+
+    @Serializable @SerialName("whole_device") data object WholeDevice : Target
+}
+
+/**
+ * What this target points at, in the words a person would use.
+ *
+ * Deliberately not the core's `key()`: that is an identity for storage, with its own domain
+ * normalisation, and a second implementation of it here would drift. This is for reading.
+ */
+fun Target.label(): String = when (this) {
+    is Target.AppPackage -> `package`
+    is Target.AppScreen -> "$screen in ${`package`}"
+    is Target.WindowsExe -> exe
+    is Target.WindowTitle -> "windows titled $pattern"
+    is Target.Domain -> domain
+    is Target.Url -> pattern
+    is Target.Keyword -> "the word $text"
+    is Target.FilePath -> pattern
+    is Target.NotificationSource -> "notifications from ${`package`}"
+    Target.WholeDevice -> "the whole device"
+}
+
+/** What a rule does, in one phrase, for a list. */
+fun Action.label(): String = when (this) {
+    Action.Block -> "blocked"
+    Action.AllowOnly -> "allowed, everything else blocked"
+    Action.MuteNotifications -> "muted"
+    is Action.Delay -> "held $seconds s before opening"
+    is Action.Budget -> "${seconds / 60} min a window"
+    is Action.LaunchLimit -> "$count opens a window"
+}
+
+/** When a budget starts over. Mirrors the core's `Refill`. */
+@Serializable
+sealed interface Refill {
+    @Serializable @SerialName("never") data object Never : Refill
+
+    @Serializable @SerialName("rolling") data class Rolling(val seconds: Int) : Refill
+
+    @Serializable @SerialName("daily") data class Daily(@SerialName("at_minute") val atMinute: Int) : Refill
+
+    @Serializable
+    @SerialName("weekly")
+    data class Weekly(val weekday: Int, @SerialName("at_minute") val atMinute: Int) : Refill
+
+    @Serializable
+    @SerialName("monthly")
+    data class Monthly(val day: Int, @SerialName("at_minute") val atMinute: Int) : Refill
+
+    companion object {
+        /** What the core uses when a rule does not say: 4am local, every day. */
+        val Default: Refill = Daily(atMinute = 4 * 60)
+    }
+}
+
+/**
+ * What a rule does to what it points at.
+ *
+ * Every shape the core has is named, not only the ones a form can write, because a screen that
+ * lists a profile's rules has to be able to read back a budget somebody set in the TOML rather
+ * than dropping it silently and leaving them looking at a list that is missing a line.
+ */
+@Serializable
+sealed interface Action {
+    @Serializable @SerialName("block") data object Block : Action
+
+    @Serializable @SerialName("allow_only") data object AllowOnly : Action
+
+    @Serializable @SerialName("mute_notifications") data object MuteNotifications : Action
+
+    @Serializable @SerialName("delay") data class Delay(val seconds: Int) : Action
+
+    @Serializable
+    @SerialName("budget")
+    data class Budget(val seconds: Int, val refill: Refill = Refill.Default) : Action
+
+    @Serializable
+    @SerialName("launch_limit")
+    data class LaunchLimit(val count: Int, val refill: Refill = Refill.Default) : Action
+}
+
+@Serializable
+enum class Platform {
+    @SerialName("android")
+    ANDROID,
+
+    @SerialName("windows")
+    WINDOWS,
+
+    @SerialName("browser")
+    BROWSER,
+}
+
+@Serializable
+data class Rule(
+    val target: Target,
+    val action: Action = Action.Block,
+    val platforms: List<Platform> = emptyList(),
+)
+
 
 /**
  * What one reading of the device's clocks turned out to mean.

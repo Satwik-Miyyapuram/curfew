@@ -12,6 +12,8 @@ import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.Lock
 import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.Policy
+import dev.curfew.policy.Rule
+import dev.curfew.policy.Target
 import dev.curfew.policy.ProfileName
 import dev.curfew.policy.LockSet
 import dev.curfew.policy.NoPass
@@ -457,6 +459,39 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             refresh()
         }
     }
+
+    /**
+     * Block something the app picker cannot express — a site, a url, a word, a window title.
+     *
+     * Saying it twice is one rule rather than two: the core keys a rule on what it points at, so
+     * the second statement replaces the first instead of leaving two arguing with each other.
+     */
+    fun saveRule(profile: String, rule: Rule) {
+        viewModelScope.launch {
+            runtime.saveRule(profile, rule)
+                .onSuccess { say("Saved.") }
+                .onFailure { say(it.message ?: "That could not be blocked.") }
+            refresh()
+        }
+    }
+
+    fun deleteRule(profile: String, target: Target) {
+        viewModelScope.launch {
+            runtime.deleteRule(profile, target)
+                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onFailure { say(it.message ?: "That could not be unblocked.") }
+            refresh()
+        }
+    }
+
+    /**
+     * What [profile] blocks apart from apps, for the list under the picker.
+     *
+     * Apps are left out because the picker above already shows them, ticked; showing each one a
+     * second time as a row would read as two separate blocks on the same app.
+     */
+    fun rulesBeyondApps(profile: String): List<Rule> =
+        runCatching { runtime.rulesBeyondApps(profile) }.getOrDefault(emptyList())
 
     /**
      * Save the app picker's answer for one profile.

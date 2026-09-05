@@ -82,6 +82,9 @@ both in a valid state; op-log stays under 5 MB/year/device.
       names it
 - [x] Choosing what a profile blocks from the PC: `curfew block` / `unblock` / `blocks`, over apps,
       executables, sites, URLs, window titles and keywords
+- [x] Choosing what a profile blocks from the phone: a "Sites and words" section under the app
+      picker for domains, addresses, keywords and window titles, listing budgets and delays it
+      cannot yet edit rather than hiding them
 
 **Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.

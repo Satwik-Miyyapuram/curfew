@@ -176,6 +176,34 @@ impl Curfew {
     // running session: deleting a rule stops it starting new sessions, and the session it already
     // started is a promise that stands.
 
+    /// Add a rule to a profile, or replace the one already pointing at the same thing.
+    ///
+    /// `rule_json` is a serialized `Rule`. The app picker owns plain app blocks and has its own
+    /// entry point; this is how everything the picker cannot express — a site, a word, a window
+    /// title — is written without the user editing TOML.
+    pub fn upsert_rule(&self, profile: String, rule_json: String) -> Result<(), CurfewError> {
+        let rule = serde_json::from_str(&rule_json).map_err(payload)?;
+        self.config
+            .write()
+            .expect("config lock")
+            .upsert_rule(&profile, rule)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+    }
+
+    /// Drop every rule in a profile pointing at `target_json`, a serialized `Target`, and say how
+    /// many went.
+    pub fn remove_rule(&self, profile: String, target_json: String) -> Result<u32, CurfewError> {
+        let target = serde_json::from_str(&target_json).map_err(payload)?;
+        Ok(self.config.write().expect("config lock").remove_rule(&profile, &target) as u32)
+    }
+
+    /// Everything a profile blocks, as a serialized `Vec<Rule>`, for a screen to list.
+    pub fn rules_json(&self, profile: String) -> Result<String, CurfewError> {
+        let config = self.config.read().expect("config lock");
+        let rules = config.profile(&profile).map(|p| p.rules.as_slice()).unwrap_or(&[]);
+        serde_json::to_string(rules).map_err(payload)
+    }
+
     /// Add a profile, or rename the one with this id.
     ///
     /// The first edit a fresh install needs: a schedule has to name a profile, an app picker has to

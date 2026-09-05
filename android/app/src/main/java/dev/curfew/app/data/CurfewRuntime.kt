@@ -15,6 +15,9 @@ import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Passes
 import dev.curfew.policy.Policy
 import dev.curfew.policy.Rollup
+import dev.curfew.policy.Rule
+import dev.curfew.policy.Target
+import dev.curfew.policy.label
 import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.Session
 import dev.curfew.policy.Sessions
@@ -244,6 +247,32 @@ class CurfewRuntime internal constructor(
             commitConfig("profile.removed", id)
         }
     }
+
+    /**
+     * Block something that is not an app — a site, a url, a word, a window title.
+     *
+     * Apps have their own path through [setBlockedApps] because the app picker writes the whole
+     * list at once; everything else arrives one statement at a time, and a second statement about
+     * the same thing replaces the first rather than piling up beside it.
+     */
+    suspend fun saveRule(profile: String, rule: Rule): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.upsertRule(profile, rule)
+            commitConfig("rule.saved", "$profile/${rule.target.label()}")
+        }
+    }
+
+    /** Stop blocking something, on every platform. */
+    suspend fun deleteRule(profile: String, target: Target): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.removeRule(profile, target)
+            commitConfig("rule.removed", "$profile/${target.label()}")
+        }
+    }
+
+    /** Everything a profile blocks that is not a plain app block. */
+    fun rulesBeyondApps(profile: String): List<Rule> =
+        policy.rules(profile).filter { it.target !is Target.AppPackage }
 
     /** Add a window, or replace the one with this id. Fails with [InvalidSchedule]'s message. */
     suspend fun saveWeekly(window: WeeklySchedule): Result<Unit> = gate.withLock {
