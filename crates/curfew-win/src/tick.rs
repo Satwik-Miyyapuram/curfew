@@ -22,10 +22,10 @@ use curfew_core::{CalendarEvent, Observation};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-/// What one pass did, for the tray, the log and the tests.
 /// How long a finished session stays on record. The same thirty days the phone keeps.
 pub const HISTORY_SECONDS: Timestamp = 30 * 24 * 60 * 60;
 
+/// What one pass did, for the tray, the log and the tests.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Tick {
     /// Sessions a schedule started this pass.
