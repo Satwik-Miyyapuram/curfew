@@ -89,13 +89,26 @@ fun ScheduleScreen(model: CurfewViewModel) {
             modifier = Modifier.semantics { heading() },
         )
 
-        if (state.activations.isEmpty()) {
+        if (state.upcoming.isEmpty()) {
             Text(
                 "Nothing is scheduled. Add a profile with a schedule below and it will appear here.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        state.activations.forEach { activation ->
+        // Grouped by day so a block tomorrow morning can never be read as one this evening. The
+        // list is a preview, not a promise about the past: anything that has already ended is
+        // dropped before it reaches here.
+        var day: String? = null
+        state.upcoming.forEach { activation ->
+            val label = dayLabel(activation.start, state.now)
+            if (label != day) {
+                day = label
+                Text(
+                    label,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 4.dp).semantics { heading() },
+                )
+            }
             Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(activation.profile, style = MaterialTheme.typography.titleMedium)
@@ -115,7 +128,9 @@ fun ScheduleScreen(model: CurfewViewModel) {
                     )
                     if (activation.locks.isNotEmpty()) {
                         Text(
-                            "Will lock: needs " +
+                            // Said in the future tense for a block that has not begun: the whole
+                            // point of a preview is to let someone decide before the lock exists.
+                            (if (activation.start > state.now) "Will lock: needs " else "Locked: needs ") +
                                 activation.locks.joinToString(", ") { describeLock(it) } + ".",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 4.dp),

@@ -291,6 +291,62 @@ pub fn active_at(
     out
 }
 
+/// Everything that will be running between `from` and `to`, whether or not it is running now.
+///
+/// The preview timeline: "here is what tomorrow will block". A calendar rule is the one kind of
+/// schedule a user cannot check by reading their own config — it depends on meetings someone else
+/// may have put in their calendar — so being able to see it before it happens is what makes it
+/// something a person will trust enough to attach a lock to.
+///
+/// Activations are returned whole rather than clipped to the window: a block that starts an hour
+/// before the window and runs three hours into it is one block, and showing it as starting at the
+/// edge of the view would tell the user it starts later than it does. Overlapping activations are
+/// not merged, for the same reason [`active_at`] does not merge them.
+pub fn upcoming(
+    from: Timestamp,
+    to: Timestamp,
+    tz: Tz,
+    weekly: &[WeeklySchedule],
+    calendars: &[CalendarSchedule],
+    events: &[CalendarEvent],
+) -> Vec<Activation> {
+    let mut out = Vec::new();
+    let overlaps = |start: Timestamp, end: Timestamp| start < to && end > from;
+
+    // A weekly window opens at most once a day, so a day either side of the range covers every
+    // window that can reach into it, midnight-crossing ones included.
+    if let Some(first) = local_date(from, tz) {
+        let days = (to.saturating_sub(from) / 86_400) + 2;
+        for schedule in weekly {
+            for offset in -1..=days {
+                let date = first + Duration::days(offset);
+                if !schedule.runs_on(date) {
+                    continue;
+                }
+                let Some((start, end)) = schedule.span_on(date, tz) else { continue };
+                if overlaps(start, end) {
+                    out.push(Activation {
+                        profile: schedule.profile.clone(),
+                        source: ActivationSource::Weekly { schedule: schedule.id.clone() },
+                        start,
+                        end,
+                        locks: schedule.locks.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    for schedule in calendars {
+        out.extend(schedule.activations(events).into_iter().filter(|a| overlaps(a.start, a.end)));
+    }
+
+    out.sort_by(|a, b| {
+        a.start.cmp(&b.start).then_with(|| a.end.cmp(&b.end)).then_with(|| a.profile.cmp(&b.profile))
+    });
+    out
+}
+
 /// The next instant at or after `now` when the set of activations could change, so the platform
 /// can set one alarm instead of polling (Android doze, GAPS A5).
 pub fn next_change_after(

@@ -293,6 +293,49 @@ class PolicyTest {
         assertEquals(listOf(Lock.Confirm), calendarOne.locks)
     }
 
+    // --- the preview timeline ---------------------------------------------------------------------
+
+    @Test
+    fun `the preview shows a running window whole rather than clipped`() {
+        val p = policy()
+        // 36 hours from Friday 09:30 reaches Saturday evening, and the weekly window is Mon-Fri,
+        // so this Friday morning is the only thing in it.
+        val preview = p.upcoming(friday0930, friday0930 + 36 * 3600, emptyList())
+        assertEquals(1, preview.size)
+        // 09:00, half an hour before "now" — the preview says how long the block really is, not
+        // how much of it is left.
+        assertEquals(friday0930 - 1800, preview.first().start)
+        assertEquals(friday0930 + 2 * 3600 + 1800, preview.first().end)
+        assertEquals(listOf(Lock.Timer), preview.first().locks)
+    }
+
+    @Test
+    fun `a meeting later today is previewed before it starts`() {
+        val p = policy()
+        val meeting = CalendarEvent(
+            id = "e1",
+            title = "Focus block",
+            calendar = "Work",
+            start = friday0930 + 8 * 3600,
+            end = friday0930 + 9 * 3600,
+            busy = true,
+        )
+        val preview = p.upcoming(friday0930, friday0930 + 36 * 3600, listOf(meeting))
+        val fromCalendar = preview.filter { it.source is ActivationSource.Calendar }
+        assertEquals(1, fromCalendar.size)
+        assertEquals(friday0930 + 8 * 3600 - 300, fromCalendar.first().start)
+        // It is not active yet, so nothing about it appears in the current activations.
+        assertTrue(p.activations(friday0930, listOf(meeting)).none { it.source is ActivationSource.Calendar })
+    }
+
+    @Test
+    fun `a window with nothing in it previews as empty rather than failing`() {
+        val p = policy()
+        // Saturday 00:00 to Saturday 06:00: outside every rule this config has.
+        val saturday = friday0930 + 14 * 3600 + 1800
+        assertEquals(emptyList<Activation>(), p.upcoming(saturday, saturday + 6 * 3600, emptyList()))
+    }
+
     /** Deleting the meeting must not be a way out of the lock the meeting started. */
     @Test
     fun `a calendar event that disappears does not end the session it started`() {

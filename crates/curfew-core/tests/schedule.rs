@@ -3,7 +3,7 @@
 use chrono::TimeZone;
 use chrono_tz::Tz;
 use curfew_core::schedule::{
-    active_at, next_change_after, ActivationSource, CalendarEvent, CalendarSchedule, EventMatcher,
+    active_at, next_change_after, upcoming, ActivationSource, CalendarEvent, CalendarSchedule, EventMatcher,
     WeeklySchedule,
 };
 use curfew_core::{Lock, Timestamp};
@@ -323,4 +323,123 @@ fn an_event_whose_end_precedes_its_start_lasts_no_time_at_all() {
     let backwards = event("broken", "Corrupt", 1_000, 100);
 
     assert_eq!(0, backwards.duration_seconds());
+}
+
+// --- the preview timeline ----------------------------------------------------------------------
+
+/// A schedule that acts on every event, for previews where the matcher is not what is being tested.
+fn everything() -> CalendarSchedule {
+    CalendarSchedule {
+        id: "all".into(),
+        profile: "meetings".into(),
+        matcher: EventMatcher::default(),
+        pad_before_seconds: 0,
+        pad_after_seconds: 0,
+        locks: vec![Lock::Timer],
+    }
+}
+
+#[test]
+fn tomorrow_is_shown_before_it_happens() {
+    // The whole point of a preview: a block that has not started yet is still listed, so a user can
+    // see what a rule is about to do to their morning before it does it. 2026-09-04 is a Friday, so
+    // four days from here is Friday and Monday and neither of the weekend days.
+    let friday_morning = local(2026, 9, 4, 8, 0);
+    let ahead = upcoming(
+        friday_morning,
+        friday_morning + 4 * 24 * 3600,
+        LONDON,
+        &[weekday_mornings()],
+        &[],
+        &[],
+    );
+
+    assert_eq!(
+        vec![local(2026, 9, 4, 9, 0), local(2026, 9, 7, 9, 0)],
+        ahead.iter().map(|a| a.start).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn nothing_outside_the_window_is_previewed() {
+    let friday_night = local(2026, 9, 4, 20, 0);
+    let ahead = upcoming(friday_night, friday_night + 3600, LONDON, &[weekday_mornings()], &[], &[]);
+
+    assert!(ahead.is_empty());
+}
+
+#[test]
+fn a_block_already_running_is_previewed_whole_rather_than_clipped() {
+    // Showing it as starting at the edge of the view would tell the user it starts later than it
+    // does, which for a lock is the one direction that matters.
+    let mid_window = local(2026, 9, 4, 10, 0);
+    let ahead = upcoming(mid_window, mid_window + 3600, LONDON, &[weekday_mornings()], &[], &[]);
+
+    assert_eq!(1, ahead.len());
+    assert_eq!(local(2026, 9, 4, 9, 0), ahead[0].start);
+    assert_eq!(local(2026, 9, 4, 12, 0), ahead[0].end);
+}
+
+#[test]
+fn an_overnight_window_that_began_yesterday_is_still_in_the_preview() {
+    let after_midnight = local(2026, 9, 5, 1, 0);
+    let ahead = upcoming(after_midnight, after_midnight + 3600, LONDON, &[overnight()], &[], &[]);
+
+    assert_eq!(1, ahead.len());
+    assert_eq!(local(2026, 9, 4, 23, 0), ahead[0].start);
+}
+
+#[test]
+fn meetings_and_weekly_windows_are_previewed_together_in_time_order() {
+    let friday = local(2026, 9, 4, 6, 0);
+    let ahead = upcoming(
+        friday,
+        friday + 24 * 3600,
+        LONDON,
+        &[weekday_mornings()],
+        &[everything()],
+        &[event("e1", "Design review", local(2026, 9, 4, 14, 0), local(2026, 9, 4, 15, 0))],
+    );
+
+    assert_eq!(
+        vec!["deep-work".to_string(), "meetings".to_string()],
+        ahead.iter().map(|a| a.profile.clone()).collect::<Vec<_>>(),
+    );
+    assert!(matches!(ahead[1].source, ActivationSource::Calendar { .. }));
+}
+
+#[test]
+fn a_preview_carries_the_lock_the_block_will_come_with() {
+    // A preview that showed the times but not the lock would be the least useful half: the thing a
+    // user needs to know before tomorrow is whether they will be able to get out of it.
+    let friday = local(2026, 9, 4, 6, 0);
+    let ahead = upcoming(friday, friday + 12 * 3600, LONDON, &[overnight()], &[], &[]);
+
+    assert_eq!(vec![Lock::DeviceCredential], ahead[0].locks);
+}
+
+#[test]
+fn a_window_that_spans_the_clock_change_is_previewed_at_its_real_length() {
+    // The UK leaves summer time at 02:00 on 2026-10-25, inside the overnight window.
+    let saturday = local(2026, 10, 24, 20, 0);
+    let ahead = upcoming(saturday, saturday + 24 * 3600, LONDON, &[overnight()], &[], &[]);
+
+    let night = &ahead[0];
+    assert_eq!(9 * 3600, night.end - night.start, "the extra hour was not previewed");
+}
+
+#[test]
+fn a_preview_of_a_day_with_no_rules_is_empty_rather_than_an_error() {
+    let friday = local(2026, 9, 4, 6, 0);
+
+    assert!(upcoming(friday, friday + 24 * 3600, LONDON, &[], &[], &[]).is_empty());
+}
+
+#[test]
+fn a_backwards_window_previews_nothing() {
+    // A UI can ask for one by arithmetic on a date the user changed; it must not answer with the
+    // whole week.
+    let friday = local(2026, 9, 4, 12, 0);
+
+    assert!(upcoming(friday, friday - 3600, LONDON, &[weekday_mornings()], &[], &[]).is_empty());
 }

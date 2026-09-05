@@ -56,6 +56,12 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
         val activations = runCatching { runtime.policy.activations(now, events) }
             .getOrDefault(emptyList())
+        // Everything the rules will do between now and this time tomorrow, whether or not it has
+        // started. The window is deliberately longer than a day so "tomorrow morning" is on screen
+        // late tonight, which is exactly when someone checks whether they can stay up.
+        val upcoming = runCatching { runtime.policy.upcoming(now, now + PREVIEW_SECONDS, events) }
+            .getOrDefault(emptyList())
+            .filter { it.end > now }
         val usage = runCatching { runtime.usage(now) }.getOrNull()
         val spent = usage?.usage.orEmpty()
             .mapValues { (_, consumption) -> consumption.rollups.sumOf { it.seconds } }
@@ -70,6 +76,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 sessions = sessions,
                 activeProfiles = runtime.activeProfiles.value,
                 activations = activations.sortedBy { it.start },
+                upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
                 spentSeconds = spent,
                 launchCounts = opens,
                 configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
@@ -354,6 +361,12 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 }
 
 /**
+ * How far ahead the schedule tab looks. A day and a half: far enough that tomorrow morning is
+ * visible tonight, short enough that the list stays readable without paging.
+ */
+internal const val PREVIEW_SECONDS = 36L * 3600
+
+/**
  * Everything on screen, as one value.
  *
  * One state object rather than a flow per field, because the screens show things that must agree
@@ -367,6 +380,11 @@ data class UiState(
     val sessions: List<Session> = emptyList(),
     val activeProfiles: List<String> = emptyList(),
     val activations: List<Activation> = emptyList(),
+    /**
+     * Everything scheduled in the next [PREVIEW_SECONDS], including what is already running.
+     * A superset of [activations], so the timeline reads as one list rather than two.
+     */
+    val upcoming: List<Activation> = emptyList(),
     /** Seconds spent per target key today, largest first. */
     val spentSeconds: List<Pair<String, Int>> = emptyList(),
     val launchCounts: Map<String, Int> = emptyMap(),

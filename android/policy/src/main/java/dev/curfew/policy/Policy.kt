@@ -171,6 +171,17 @@ class Policy private constructor(private val inner: Curfew) {
         json.decodeFromString(inner.activationsJson(now, json.encodeToString(events)))
 
     /**
+     * Everything that will be running between [from] and [to]: the preview timeline, "here is what
+     * tomorrow will block".
+     *
+     * A calendar rule is the one kind of schedule a user cannot check by reading their own settings
+     * — it depends on meetings other people put in their calendar — so seeing it before it happens
+     * is what makes it something worth attaching a lock to.
+     */
+    fun upcoming(from: Long, to: Long, events: List<CalendarEvent>): List<Activation> =
+        json.decodeFromString(inner.upcomingJson(from, to, json.encodeToString(events)))
+
+    /**
      * When the schedules could next change, so the service can set one alarm instead of polling.
      * Polling is what doze punishes, and a blocker that doze kills is not a blocker.
      */

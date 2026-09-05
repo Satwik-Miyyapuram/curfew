@@ -12,7 +12,7 @@
 
 use curfew_core::config::Platform;
 use curfew_core::engine::{charged_keys, State};
-use curfew_core::schedule::{active_at, next_change_after, CalendarEvent};
+use curfew_core::schedule::{active_at, next_change_after, upcoming, CalendarEvent};
 use curfew_core::session::{reconcile, Session, Sessions};
 use curfew_core::target::Observation;
 use curfew_core::{decide, ClockWitness, Config, Lock, Reading, Timestamp, Verdict};
@@ -292,6 +292,25 @@ impl Curfew {
         let config = self.config.read().expect("config lock");
         let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
         serde_json::to_string(&active_at(now, tz, &config.weekly, &config.calendars, &events))
+            .map_err(payload)
+    }
+
+    /// Everything that will be running between `from` and `to`: the preview timeline.
+    ///
+    /// Activations come back whole rather than clipped to the window, so a block that started
+    /// before the view is shown starting when it really did.
+    pub fn upcoming_json(
+        &self,
+        from: Timestamp,
+        to: Timestamp,
+        events_json: String,
+    ) -> Result<String, CurfewError> {
+        let events: Vec<CalendarEvent> =
+            serde_json::from_str(if events_json.is_empty() { "[]" } else { &events_json })
+                .map_err(payload)?;
+        let config = self.config.read().expect("config lock");
+        let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        serde_json::to_string(&upcoming(from, to, tz, &config.weekly, &config.calendars, &events))
             .map_err(payload)
     }
 

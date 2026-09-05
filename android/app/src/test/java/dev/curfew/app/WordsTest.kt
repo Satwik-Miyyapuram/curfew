@@ -1,6 +1,7 @@
 package dev.curfew.app
 
 import dev.curfew.app.block.BlockActivity
+import dev.curfew.app.ui.dayLabel
 import dev.curfew.app.ui.describeLock
 import dev.curfew.app.ui.describeTarget
 import dev.curfew.app.ui.duration
@@ -102,4 +103,32 @@ class WordsTest {
             assertFalse(text, text.contains("Lock"))
         }
     }
+
+    /**
+     * The preview timeline groups rows by day, so this label is what stops a block tomorrow
+     * morning from being read as one tonight. It has to follow the device's own midnight, not
+     * a fixed number of seconds from now.
+     */
+    @Test
+    fun `a day label says today, tomorrow, or a date`() {
+        val zone = java.util.TimeZone.getDefault()
+        fun at(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long {
+            val c = java.util.Calendar.getInstance(zone)
+            c.clear()
+            c.set(year, month - 1, day, hour, minute, 0)
+            return c.timeInMillis / 1000
+        }
+
+        val now = at(2026, 9, 4, 22, 0)
+        assertEquals("Today", dayLabel(now + 600, now))
+        // Two hours later is the next calendar day, even though it is barely any time away.
+        assertEquals("Tomorrow", dayLabel(at(2026, 9, 5, 0, 30), now))
+        assertEquals("Tomorrow", dayLabel(at(2026, 9, 5, 23, 0), now))
+        // Anything further reads as a date rather than a day name nobody can place.
+        assertTrue(dayLabel(at(2026, 9, 6, 9, 0), now) !in listOf("Today", "Tomorrow"))
+        // And across a new year, where the day-of-year arithmetic would otherwise go backwards.
+        val newYearsEve = at(2026, 12, 31, 23, 0)
+        assertEquals("Tomorrow", dayLabel(at(2027, 1, 1, 9, 0), newYearsEve))
+    }
+
 }

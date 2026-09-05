@@ -6,6 +6,7 @@ import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import dev.curfew.policy.SessionSource
 import java.text.DateFormat
+import java.util.Calendar
 import java.util.Date
 
 /**
@@ -42,6 +43,38 @@ fun clockTime(epochSeconds: Long): String =
 fun dateTime(epochSeconds: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         .format(Date(epochSeconds * 1000))
+
+/**
+ * Which day an instant falls on, said the way a person would: "Today", "Tomorrow", else the date.
+ *
+ * The preview timeline groups by this, so a row two days out is never mistaken for one this
+ * evening. Both instants go through the device's own calendar, so a day boundary is the user's
+ * midnight rather than UTC's.
+ */
+fun dayLabel(epochSeconds: Long, now: Long): String {
+    val day = Calendar.getInstance().apply { time = Date(epochSeconds * 1000) }
+    val today = Calendar.getInstance().apply { time = Date(now * 1000) }
+    val sameYear = day.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+    val delta = if (sameYear) {
+        day.get(Calendar.DAY_OF_YEAR) - today.get(Calendar.DAY_OF_YEAR)
+    } else {
+        // Across a new year, only "tomorrow" is worth the arithmetic; anything further reads as a
+        // date anyway.
+        if (day.get(Calendar.YEAR) == today.get(Calendar.YEAR) + 1 &&
+            day.get(Calendar.DAY_OF_YEAR) == 1 &&
+            today.get(Calendar.DAY_OF_YEAR) == today.getActualMaximum(Calendar.DAY_OF_YEAR)
+        ) {
+            1
+        } else {
+            99
+        }
+    }
+    return when (delta) {
+        0 -> "Today"
+        1 -> "Tomorrow"
+        else -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(epochSeconds * 1000))
+    }
+}
 
 /**
  * A usage key as the user would recognise it.

@@ -69,12 +69,12 @@ session started on the PC blocks the phone within 5s on LAN; killing either devi
 both in a valid state; op-log stays under 5 MB/year/device.
 
 ## Phase 4 — Calendar (differentiator, part 2)
-- [ ] Android `CalendarContract` reader
-- [ ] Windows ICS URL / CalDAV / local `.ics` reader
-- [ ] Matchers (calendar, title regex, busy status, category, duration) -> profile + lock
-- [ ] Lead-in/lead-out padding, per-matcher profiles, timezone + DST + RRULE correctness
-- [ ] `calendar.snapshot` events so one device's calendar drives another device's blocks
-- [ ] Preview timeline: "here is what tomorrow will block"
+- [x] Android `CalendarContract` reader
+- [x] Windows ICS URL / CalDAV / local `.ics` reader
+- [x] Matchers (calendar, title regex, busy status, category, duration) -> profile + lock
+- [x] Lead-in/lead-out padding, per-matcher profiles, timezone + DST + RRULE correctness
+- [x] `calendar.snapshot` events so one device's calendar drives another device's blocks
+- [x] Preview timeline: "here is what tomorrow will block" (`schedule::upcoming`, 36 h, grouped by day)
 
 **Exit criteria:** a PC-only calendar drives a phone block with no server involved; DST transitions
 and all-day events handled correctly in a dated test suite; a deleted event releases its block.
