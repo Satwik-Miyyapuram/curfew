@@ -259,6 +259,10 @@ pub fn run(
         feeds.restore(&guard.config.calendar_sources);
     }
 
+    // What the other devices' calendars said on the previous pass. Held across passes because sync
+    // runs after enforcement: a meeting the phone can see reaches this machine's rules two seconds
+    // later, which is the same latency everything else in the mirror has.
+    let mut peer_events: Vec<curfew_core::CalendarEvent> = Vec::new();
     let mut previous = last_tick;
     while !stop() {
         let now = now();
@@ -296,6 +300,12 @@ pub fn run(
                 }
                 Err(_) => Vec::new(),
             };
+            // Only what this machine saw is ever published; the peers' events are merged in for
+            // enforcement only, so a calendar cannot be echoed back and forth between devices.
+            let mine = events.clone();
+            let mut events = events;
+            events.extend(peer_events.iter().cloned());
+            events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
             let tick = guard.tick(now, elapsed, &events, &SystemProcesses::default());
             if let Some(resolver) = &resolver {
                 resolver.set(tick.domains.clone());
@@ -304,9 +314,22 @@ pub fn run(
             // one has just decided, and what it hears back is enforced on the very next pass two
             // seconds later, which is what keeps the five-second promise.
             if let Some((node, root)) = &sync {
+                let calendars = guard.config.calendars.clone();
                 let Enforcer { sessions, usage, launches, .. } = &mut *guard;
                 let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
-                if pass.published > 0 {
+                peer_events = pass.calendar.clone();
+                // Only the events some rule here would act on. A lock does not need to know the
+                // name of every meeting in someone's week to do its job, and the log is smaller and
+                // duller for it.
+                let matched: Vec<curfew_core::CalendarEvent> = mine
+                    .iter()
+                    .filter(|event| {
+                        calendars.iter().any(|schedule| schedule.matcher.matches(event))
+                    })
+                    .cloned()
+                    .collect();
+                let said = mirror.publish_calendar(node.shared(), now, &matched);
+                if pass.published + said > 0 {
                     node.push_all(now);
                     if let Err(e) = curfew_sync::store::save(root, node.shared()) {
                         eprintln!("curfew: could not save the sync log: {e}");

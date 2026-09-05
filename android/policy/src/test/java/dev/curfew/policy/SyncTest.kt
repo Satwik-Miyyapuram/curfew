@@ -167,4 +167,59 @@ class SyncTest {
 
         assertFalse(sync.isRunning())
     }
+
+    /** A policy whose rules act on meetings, so a published event has something to match. */
+    private fun calendarPolicy(): Policy =
+        Policy.load(
+            """
+            timezone = "UTC"
+
+            [[profiles]]
+            id = "deep-work"
+            name = "Deep work"
+
+            [[calendars]]
+            id = "meetings"
+            profile = "deep-work"
+
+            [calendars.matcher]
+            busy_only = true
+            """.trimIndent(),
+        )
+
+    private fun meeting(title: String, busy: Boolean) =
+        CalendarEvent(
+            id = "e1",
+            title = title,
+            calendar = "Work",
+            start = now + 600,
+            end = now + 4200,
+            busy = busy,
+        )
+
+    @Test
+    fun `a meeting only one device can see reaches the other`() {
+        val (phone, pc) = paired("calendar")
+        val root = dir("calendar-folder")
+        pc.pass(calendarPolicy(), now, emptyMap(), emptyMap(), listOf(meeting("Design review", busy = true)))
+        carry(pc, phone, root)
+
+        val pass = phone.pass(policy(), now + 1, emptyMap(), emptyMap())
+
+        assertEquals(1, pass.calendar.size)
+        assertEquals("Design review", pass.calendar[0].title)
+        assertEquals("${pc.deviceId()}/e1", pass.calendar[0].id)
+    }
+
+    @Test
+    fun `a meeting no rule cares about is never published`() {
+        // Minimal disclosure: the log carries the meetings that drive a block, not a transcript of
+        // someone's week.
+        val (phone, pc) = paired("calendar-quiet")
+        val root = dir("calendar-quiet-folder")
+        pc.pass(calendarPolicy(), now, emptyMap(), emptyMap(), listOf(meeting("Lunch", busy = false)))
+        carry(pc, phone, root)
+
+        assertTrue(phone.pass(policy(), now + 1, emptyMap(), emptyMap()).calendar.isEmpty())
+    }
 }

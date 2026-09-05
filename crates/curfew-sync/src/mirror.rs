@@ -22,7 +22,7 @@ use crate::node::Shared;
 use crate::oplog::Op;
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::session::Sessions;
-use curfew_core::Timestamp;
+use curfew_core::{CalendarEvent, Timestamp};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What one pass of the mirror did, for logging and for the status a UI shows.
@@ -35,6 +35,10 @@ pub struct Pass {
     /// Sessions another device ended that are still locked here (GAPS C6). Not a conflict to
     /// resolve — the lock is doing its job — but the UI is owed the explanation.
     pub still_locked: Vec<String>,
+    /// Calendar events other devices published, for this device's schedules to act on. This
+    /// device's own events are not in here: it already has them, and taking its own snapshot back
+    /// would make an event's id depend on whether sync happened to be running.
+    pub calendar: Vec<CalendarEvent>,
 }
 
 /// How much of the local state has already been written to the log.
@@ -46,7 +50,17 @@ pub struct Mirror {
     sessions: BTreeMap<String, Published>,
     usage: BTreeMap<String, usize>,
     launches: BTreeMap<String, usize>,
+    /// The calendar snapshot last written to the log, and when. Kept so an unchanged calendar is
+    /// published once rather than every two seconds.
+    calendar: Option<(Vec<CalendarEvent>, Timestamp)>,
 }
+
+/// How long a published calendar snapshot stands before it is written again unchanged.
+///
+/// A snapshot is republished on change immediately; this is only the floor under an *unchanged*
+/// one, which exists so that a device joining later is not left waiting on a calendar that never
+/// changes.
+pub const CALENDAR_SECONDS: Timestamp = 15 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Published {
@@ -126,6 +140,30 @@ impl Mirror {
         wrote
     }
 
+    /// Publish this device's calendar, if it has changed or has gone unsaid for long enough.
+    ///
+    /// `events` should be only what a rule on *this* device would act on. The log is encrypted and
+    /// goes nowhere but the user's own devices, but a lock does not need to know the name of every
+    /// meeting in someone's week to do its job, and the smallest thing that works is the thing to
+    /// send.
+    pub fn publish_calendar(
+        &mut self,
+        shared: &Shared,
+        now: Timestamp,
+        events: &[CalendarEvent],
+    ) -> usize {
+        let due = match &self.calendar {
+            None => true,
+            Some((said, at)) => said != events || now.saturating_sub(*at) >= CALENDAR_SECONDS,
+        };
+        if !due {
+            return 0;
+        }
+        shared.record(now, Op::Calendar { events: events.to_vec() });
+        self.calendar = Some((events.to_vec(), now));
+        1
+    }
+
     /// Take the log's view back into local enforcement.
     ///
     /// `usage` and `launches` are replaced rather than merged: after [`Mirror::publish`] the log
@@ -180,7 +218,24 @@ impl Mirror {
         self.usage = usage.iter().map(|(k, v)| (k.clone(), v.rollups.len())).collect();
         self.launches = launches.iter().map(|(k, v)| (k.clone(), v.at.len())).collect();
 
-        Pass { published: 0, adopted, still_locked: believed.still_locked }
+        // Another device's events, tagged with the device they came from. Without the tag, two
+        // phones with the same meeting in the same calendar would produce one event id, and ending
+        // one would look like ending both.
+        let mine = shared.identity.id();
+        let mut calendar: Vec<CalendarEvent> = believed
+            .calendars
+            .iter()
+            .filter(|(author, _)| **author != mine)
+            .flat_map(|(author, events)| {
+                events.iter().cloned().map(move |mut event| {
+                    event.id = format!("{author}/{}", event.id);
+                    event
+                })
+            })
+            .collect();
+        calendar.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
+
+        Pass { published: 0, adopted, still_locked: believed.still_locked, calendar }
     }
 
     /// One full pass: say what happened here, then take back what everyone knows.
@@ -430,5 +485,160 @@ mod tests {
             "an expiry wrote more than one"
         );
         assert!(pc.sessions.running.is_empty());
+    }
+
+    fn event(id: &str, title: &str, start: Timestamp) -> CalendarEvent {
+        CalendarEvent {
+            id: id.into(),
+            title: title.into(),
+            calendar: "Work".into(),
+            location: String::new(),
+            start,
+            end: start + HOUR,
+            all_day: false,
+            busy: true,
+            categories: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_calendar_seen_on_one_device_reaches_the_other() {
+        // The point of the feature: a phone that was never given calendar permission still goes
+        // quiet during a meeting, because the PC can see the meeting and says so.
+        let (mut phone, mut pc) = two();
+        pc.mirror.publish_calendar(&pc.shared, NOW, &[event("e1", "Design review", NOW + 600)]);
+        carry(&pc, &phone);
+
+        let pass = phone.pass(NOW + 1);
+
+        assert_eq!(1, pass.calendar.len());
+        assert_eq!("Design review", pass.calendar[0].title);
+    }
+
+    #[test]
+    fn an_event_says_which_device_saw_it() {
+        let (mut phone, mut pc) = two();
+        pc.mirror.publish_calendar(&pc.shared, NOW, &[event("e1", "Standup", NOW + 600)]);
+        carry(&pc, &phone);
+
+        let pass = phone.pass(NOW + 1);
+
+        assert_eq!(format!("{}/e1", pc.shared.identity.id()), pass.calendar[0].id);
+    }
+
+    #[test]
+    fn a_device_does_not_adopt_its_own_calendar_back() {
+        // It already holds these events untagged. Taking them back through sync would make an
+        // event's id depend on whether sync happened to be running.
+        let (mut phone, _pc) = two();
+        phone.mirror.publish_calendar(&phone.shared, NOW, &[event("e1", "Standup", NOW + 600)]);
+
+        assert!(phone.pass(NOW + 1).calendar.is_empty());
+    }
+
+    #[test]
+    fn a_deleted_meeting_disappears_rather_than_lingering() {
+        // A snapshot replaces its predecessor wholesale, which is why a cancelled meeting needs no
+        // tombstone of its own.
+        let (mut phone, mut pc) = two();
+        let both = [event("e1", "Standup", NOW + 600), event("e2", "Review", NOW + 7200)];
+        pc.mirror.publish_calendar(&pc.shared, NOW, &both);
+        carry(&pc, &phone);
+        phone.pass(NOW + 1);
+
+        pc.mirror.publish_calendar(&pc.shared, NOW + 2, &both[1..]);
+        carry(&pc, &phone);
+        let pass = phone.pass(NOW + 3);
+
+        assert_eq!(vec!["Review".to_string()], pass.calendar.iter().map(|e| e.title.clone()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn one_device_clearing_its_calendar_leaves_anothers_alone() {
+        let (mut phone, mut pc) = two();
+        let identity = Identity::generate("laptop");
+        let mut on_laptop = Peers::default();
+        on_laptop.accept(&identity, &Invite::new(&phone.shared.identity, NOW, [9; 16]), NOW).unwrap();
+        phone
+            .shared
+            .peers
+            .lock()
+            .unwrap()
+            .accept(&phone.shared.identity, &Invite::new(&identity, NOW, [9; 16]), NOW)
+            .unwrap();
+        let mut laptop = Device {
+            shared: Shared::new(identity, on_laptop, Log::default()),
+            mirror: Mirror::default(),
+            sessions: Sessions::default(),
+            usage: BTreeMap::new(),
+            launches: BTreeMap::new(),
+        };
+
+        pc.mirror.publish_calendar(&pc.shared, NOW, &[event("e1", "PC meeting", NOW + 600)]);
+        laptop.mirror.publish_calendar(&laptop.shared, NOW, &[event("e2", "Laptop meeting", NOW + 600)]);
+        carry(&pc, &phone);
+        carry(&laptop, &phone);
+        phone.pass(NOW + 1);
+
+        laptop.mirror.publish_calendar(&laptop.shared, NOW + 2, &[]);
+        carry(&laptop, &phone);
+        let pass = phone.pass(NOW + 3);
+
+        assert_eq!(
+            vec!["PC meeting".to_string()],
+            pass.calendar.iter().map(|e| e.title.clone()).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn an_unchanged_calendar_is_not_republished_every_pass() {
+        // A pass runs every two seconds. Writing the week's meetings each time would fill the log
+        // in an afternoon.
+        let (_phone, mut pc) = two();
+        let events = [event("e1", "Standup", NOW + 600)];
+
+        assert_eq!(1, pc.mirror.publish_calendar(&pc.shared, NOW, &events));
+        assert_eq!(0, pc.mirror.publish_calendar(&pc.shared, NOW + 2, &events));
+        assert_eq!(0, pc.mirror.publish_calendar(&pc.shared, NOW + CALENDAR_SECONDS - 1, &events));
+    }
+
+    #[test]
+    fn a_changed_calendar_is_published_at_once() {
+        let (_phone, mut pc) = two();
+        pc.mirror.publish_calendar(&pc.shared, NOW, &[event("e1", "Standup", NOW + 600)]);
+
+        assert_eq!(
+            1,
+            pc.mirror.publish_calendar(&pc.shared, NOW + 2, &[event("e1", "Standup", NOW + 900)]),
+        );
+    }
+
+    #[test]
+    fn an_unchanged_calendar_is_said_again_eventually() {
+        // So a device that pairs later is not left waiting on a calendar that never changes.
+        let (_phone, mut pc) = two();
+        let events = [event("e1", "Standup", NOW + 600)];
+        pc.mirror.publish_calendar(&pc.shared, NOW, &events);
+
+        assert_eq!(1, pc.mirror.publish_calendar(&pc.shared, NOW + CALENDAR_SECONDS, &events));
+    }
+
+    #[test]
+    fn a_stranger_s_calendar_is_never_absorbed() {
+        // Anyone can shout a snapshot at a device. Only paired devices are listened to, and a
+        // calendar is an instruction to block, so an unpaired one must not reach enforcement.
+        let (mut phone, _pc) = two();
+        let stranger = Device {
+            shared: Shared::new(Identity::generate("stranger"), Peers::default(), Log::default()),
+            mirror: Mirror::default(),
+            sessions: Sessions::default(),
+            usage: BTreeMap::new(),
+            launches: BTreeMap::new(),
+        };
+        let mut stranger = stranger;
+        stranger.mirror.publish_calendar(&stranger.shared, NOW, &[event("e1", "Lunch", NOW + 600)]);
+        carry(&stranger, &phone);
+
+        assert!(phone.pass(NOW + 1).calendar.is_empty());
     }
 }

@@ -13,7 +13,7 @@
 
 use crate::{payload, Curfew, CurfewError};
 use curfew_core::budget::{Consumption, Launches};
-use curfew_core::Timestamp;
+use curfew_core::{CalendarEvent, Timestamp};
 use curfew_sync::device::DeviceId;
 use curfew_sync::mirror::Mirror;
 use curfew_sync::node::{Node, Shared};
@@ -35,6 +35,9 @@ struct PassResult {
     still_locked: Vec<String>,
     usage: BTreeMap<String, Consumption>,
     launches: BTreeMap<String, Launches>,
+    /// Events the *other* devices' calendars hold, for this device's rules to act on. This is how a
+    /// phone that was never given calendar permission still goes quiet during a meeting.
+    calendar: Vec<CalendarEvent>,
 }
 
 /// Sync on this device: the log, the peers, and the node that carries them, if it is running.
@@ -236,11 +239,14 @@ impl Sync {
         now: Timestamp,
         usage_json: String,
         launches_json: String,
+        calendar_json: String,
     ) -> Result<String, CurfewError> {
         let mut usage: BTreeMap<String, Consumption> =
             serde_json::from_str(blank_to_object(&usage_json)).map_err(payload)?;
         let mut launches: BTreeMap<String, Launches> =
             serde_json::from_str(blank_to_object(&launches_json)).map_err(payload)?;
+        let seen: Vec<CalendarEvent> =
+            serde_json::from_str(blank_to_array(&calendar_json)).map_err(payload)?;
 
         let pass = {
             let mut sessions = curfew.sessions.write().expect("sessions lock");
@@ -253,7 +259,23 @@ impl Sync {
             )
         };
 
-        if pass.published > 0 {
+        // Only the events a rule on this device would act on are published. The log is encrypted
+        // and goes nowhere but the user's own devices, but a lock does not need the name of every
+        // meeting in someone's week to do its job.
+        let said = {
+            let config = curfew.config.read().expect("config lock");
+            let matched: Vec<CalendarEvent> = seen
+                .into_iter()
+                .filter(|event| config.calendars.iter().any(|s| s.matcher.matches(event)))
+                .collect();
+            self.mirror.lock().expect("the mirror lock is never poisoned").publish_calendar(
+                &self.shared,
+                now,
+                &matched,
+            )
+        };
+
+        if pass.published + said > 0 {
             self.push_all(now);
         }
         self.save()?;
@@ -263,6 +285,7 @@ impl Sync {
             still_locked: pass.still_locked,
             usage,
             launches,
+            calendar: pass.calendar,
         })
         .map_err(payload)
     }
@@ -278,6 +301,13 @@ impl Sync {
     /// Write peers and log back to storage.
     pub fn save(&self) -> Result<(), CurfewError> {
         store::save(&self.root, &self.shared).map_err(sync_error)
+    }
+}
+
+fn blank_to_array(text: &str) -> &str {
+    match text.trim().is_empty() {
+        true => "[]",
+        false => text,
     }
 }
 
@@ -358,10 +388,10 @@ mod tests {
         let (phone_core, pc_core) = (core(), core());
         pc_core.start_session(session_json("pc-1")).unwrap();
 
-        pc.pass(pc_core, NOW, String::new(), String::new()).unwrap();
+        pc.pass(pc_core, NOW, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
         let result: serde_json::Value = serde_json::from_str(
-            &phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new()).unwrap(),
+            &phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
         )
         .unwrap();
 
@@ -378,18 +408,18 @@ mod tests {
         let (phone, pc) = paired("refuse");
         let (phone_core, pc_core) = (core(), core());
         pc_core.start_session(session_json("pc-1")).unwrap();
-        pc.pass(pc_core.clone(), NOW, String::new(), String::new()).unwrap();
+        pc.pass(pc_core.clone(), NOW, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
-        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new()).unwrap();
+        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap();
 
         // The PC releases it with the evidence its own user gave. The phone was given none.
         pc_core
             .end_session("pc-1".into(), NOW + 2, "[{\"kind\":\"device_credential\"}]".into())
             .unwrap();
-        pc.pass(pc_core, NOW + 2, String::new(), String::new()).unwrap();
+        pc.pass(pc_core, NOW + 2, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
         let result: serde_json::Value = serde_json::from_str(
-            &phone.pass(phone_core.clone(), NOW + 3, String::new(), String::new()).unwrap(),
+            &phone.pass(phone_core.clone(), NOW + 3, String::new(), String::new(), String::new()).unwrap(),
         )
         .unwrap();
 
@@ -408,10 +438,10 @@ mod tests {
         )]))
         .unwrap();
 
-        phone.pass(core(), NOW, spent, String::new()).unwrap();
+        phone.pass(core(), NOW, spent, String::new(), String::new()).unwrap();
         carry(&phone, &pc);
         let result: serde_json::Value =
-            serde_json::from_str(&pc.pass(core(), NOW + 1, String::new(), String::new()).unwrap())
+            serde_json::from_str(&pc.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap())
                 .unwrap();
 
         let usage: BTreeMap<String, Consumption> =
@@ -425,11 +455,11 @@ mod tests {
         let pc_core = core();
         phone.revoke(pc.device_id(), NOW).unwrap();
         pc_core.start_session(session_json("pc-1")).unwrap();
-        pc.pass(pc_core, NOW + 1, String::new(), String::new()).unwrap();
+        pc.pass(pc_core, NOW + 1, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
 
         let phone_core = core();
-        phone.pass(phone_core.clone(), NOW + 2, String::new(), String::new()).unwrap();
+        phone.pass(phone_core.clone(), NOW + 2, String::new(), String::new(), String::new()).unwrap();
 
         let sessions: Sessions =
             serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
@@ -445,15 +475,15 @@ mod tests {
         pc.accept_invite(phone.invite_json(NOW).unwrap(), NOW).unwrap();
         let pc_core = core();
         pc_core.start_session(session_json("pc-1")).unwrap();
-        pc.pass(pc_core, NOW, String::new(), String::new()).unwrap();
+        pc.pass(pc_core, NOW, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
-        phone.pass(core(), NOW + 1, String::new(), String::new()).unwrap();
+        phone.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap();
         let id = phone.device_id();
 
         // Force-stopped, then opened again.
         let after = Sync::open(phone_dir, "phone".into()).unwrap();
         let restored = core();
-        after.pass(restored.clone(), NOW + 2, String::new(), String::new()).unwrap();
+        after.pass(restored.clone(), NOW + 2, String::new(), String::new(), String::new()).unwrap();
 
         assert_eq!(after.device_id(), id, "the phone came back as a different device");
         let sessions: Sessions = serde_json::from_str(&restored.sessions_json().unwrap()).unwrap();
@@ -467,12 +497,12 @@ mod tests {
         std::fs::create_dir_all(&shared_folder).unwrap();
         let pc_core = core();
         pc_core.start_session(session_json("pc-1")).unwrap();
-        pc.pass(pc_core, NOW, String::new(), String::new()).unwrap();
+        pc.pass(pc_core, NOW, String::new(), String::new(), String::new()).unwrap();
 
         pc.folder_pass(shared_folder.clone()).unwrap();
         phone.folder_pass(shared_folder).unwrap();
         let phone_core = core();
-        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new()).unwrap();
+        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap();
 
         let sessions: Sessions =
             serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
@@ -488,5 +518,93 @@ mod tests {
         phone.stop_node();
         assert!(!phone.is_running());
         phone.stop_node();
+    }
+
+    /// A core whose rules act on meetings, so calendar events have something to match.
+    fn core_with_calendar_rule() -> Arc<Curfew> {
+        Curfew::new(
+            "timezone = \"UTC\"\n\n[[profiles]]\nid = \"deep-work\"\nname = \"Deep work\"\n\n\
+             [[calendars]]\nid = \"meetings\"\nprofile = \"deep-work\"\n\
+             [calendars.matcher]\nbusy_only = true\n"
+                .into(),
+        )
+        .unwrap()
+    }
+
+    fn events_json(title: &str, busy: bool) -> String {
+        serde_json::json!([{
+            "id": "e1",
+            "title": title,
+            "calendar": "Work",
+            "start": NOW + 600,
+            "end": NOW + 4200,
+            "busy": busy,
+        }])
+        .to_string()
+    }
+
+    #[test]
+    fn a_meeting_only_one_device_can_see_reaches_the_other() {
+        // The phone was never given calendar permission; the PC has the subscription. The phone is
+        // still blocked during the meeting.
+        let (phone, pc) = paired("calendar");
+        pc.pass(core_with_calendar_rule(), NOW, String::new(), String::new(), events_json("Design review", true))
+            .unwrap();
+        carry(&pc, &phone);
+
+        let result: serde_json::Value = serde_json::from_str(
+            &phone
+                .pass(core(), NOW + 1, String::new(), String::new(), String::new())
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(result["calendar"][0]["title"], "Design review");
+        assert_eq!(
+            result["calendar"][0]["id"],
+            serde_json::Value::String(format!("{}/e1", pc.device_id())),
+            "an event did not say which device saw it",
+        );
+    }
+
+    #[test]
+    fn a_meeting_no_rule_here_cares_about_is_not_published() {
+        // Minimal disclosure: the log carries the meetings that drive a block, not a transcript of
+        // someone's week.
+        let (phone, pc) = paired("calendar-quiet");
+        pc.pass(
+            core_with_calendar_rule(),
+            NOW,
+            String::new(),
+            String::new(),
+            events_json("Lunch", false),
+        )
+        .unwrap();
+        carry(&pc, &phone);
+
+        let result: serde_json::Value = serde_json::from_str(
+            &phone.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(result["calendar"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_device_does_not_take_its_own_calendar_back() {
+        let (_phone, pc) = paired("calendar-own");
+        let result: serde_json::Value = serde_json::from_str(
+            &pc.pass(
+                core_with_calendar_rule(),
+                NOW,
+                String::new(),
+                String::new(),
+                events_json("Design review", true),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(result["calendar"].as_array().unwrap().len(), 0);
     }
 }

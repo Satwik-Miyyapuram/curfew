@@ -136,9 +136,28 @@ class CurfewRuntime internal constructor(
 
     private val calendar = CalendarReader(context)
 
-    /** The events a calendar rule could be looking at right now. Empty without the permission. */
-    fun calendarEvents(now: Long = clock.now()): List<CalendarEvent> =
+    /**
+     * Events the other devices' calendars hold, from the last sync pass.
+     *
+     * Held here rather than fetched, because sync runs after enforcement: a meeting only the PC can
+     * see reaches this device's rules on the next tick, which is the latency everything else in the
+     * mirror has. It is deliberately not persisted — a peer's calendar is derived state, and after
+     * a restart the peer will say it again.
+     */
+    @Volatile
+    private var peerEvents: List<CalendarEvent> = emptyList()
+
+    /** What this device's own calendar provider says. Empty without the permission. */
+    fun localCalendarEvents(now: Long = clock.now()): List<CalendarEvent> =
         calendar.events(now - CalendarReader.WINDOW_SECONDS, now + CalendarReader.WINDOW_SECONDS)
+
+    /**
+     * Every event a calendar rule could be looking at right now: this device's own, plus the ones
+     * its paired devices published. A phone that was never given calendar permission is still
+     * blocked during a meeting the PC can see.
+     */
+    fun calendarEvents(now: Long = clock.now()): List<CalendarEvent> =
+        (localCalendarEvents(now) + peerEvents).sortedWith(compareBy({ it.start }, { it.id }))
 
     // --- sync --------------------------------------------------------------------------------------
 
@@ -165,9 +184,12 @@ class CurfewRuntime internal constructor(
     suspend fun syncPass(now: Long = clock.now()): dev.curfew.policy.Pass? {
         val hub = hub ?: return null
         val before = usage(now)
+        // Only this device's own events are published; the peers' are merged in for enforcement
+        // only, so a calendar cannot be echoed back and forth between two devices.
+        val seen = runCatching { localCalendarEvents(now) }.getOrDefault(emptyList())
         val pass = gate.withLock {
             val pass = runCatching {
-                hub.sync.pass(policy, now, before.usage, before.launches)
+                hub.sync.pass(policy, now, before.usage, before.launches, seen)
             }.getOrElse {
                 audit(now, "sync.failed", it.message.orEmpty())
                 return@withLock null
@@ -185,6 +207,7 @@ class CurfewRuntime internal constructor(
             persist(now)
             pass
         } ?: return null
+        peerEvents = pass.calendar
         hub.record(pass)
         if (pass.published > 0) {
             hub.push(now)

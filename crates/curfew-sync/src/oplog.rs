@@ -20,7 +20,7 @@ use crate::device::{DeviceId, Identity};
 use crate::pair::{Error as PairError, Peers};
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::session::{Session, Sessions};
-use curfew_core::Timestamp;
+use curfew_core::{CalendarEvent, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeMap;
@@ -59,6 +59,16 @@ pub enum Op {
     /// A device was removed. Carried in the log so the other devices stop listening to it too,
     /// without the user having to remove it separately on each one.
     Revoked { device: DeviceId },
+    /// What this device's calendars say is coming, so a device that cannot see a calendar can still
+    /// be blocked by one — a desktop with no subscription, or a phone whose calendar permission was
+    /// never granted.
+    ///
+    /// A snapshot rather than a stream of changes: a calendar is small, it is entirely derived
+    /// state, and replacing it wholesale means a deleted meeting actually disappears instead of
+    /// needing its own tombstone. Only the events some rule on the sending device would act on are
+    /// ever put in here, so the log carries the meetings that matter to a block and not a
+    /// transcript of someone's week.
+    Calendar { events: Vec<CalendarEvent> },
 }
 
 /// An operation, with everything needed to place it in its author's chain.
@@ -124,6 +134,10 @@ pub struct Replay {
     pub launches: BTreeMap<String, Launches>,
     /// Devices the log itself says are gone.
     pub revoked: Vec<DeviceId>,
+    /// Each device's latest calendar snapshot, keyed by the device that sent it. Kept per author
+    /// rather than merged so that a device going quiet does not silently lose its events, and so a
+    /// later snapshot from one device cannot delete another's.
+    pub calendars: BTreeMap<DeviceId, Vec<CalendarEvent>>,
     /// Sessions a peer ended that are still locked here. Not an error and not a conflict to
     /// resolve — the lock is doing its job — but the UI is owed an explanation for why the phone
     /// says one thing and the PC another.
@@ -375,6 +389,11 @@ fn apply(state: &mut Replay, entry: &Entry, now: Timestamp) {
         }
         Op::Launched { key, at } => state.launches.entry(key.clone()).or_default().record(*at),
         Op::Revoked { device } => state.revoked.push(device.clone()),
+        // Last snapshot wins, and only over its own author's previous one. Entries are applied in
+        // time order, so this is the newest thing that device said about its calendar.
+        Op::Calendar { events } => {
+            state.calendars.insert(entry.author.clone(), events.clone());
+        }
     }
 }
 

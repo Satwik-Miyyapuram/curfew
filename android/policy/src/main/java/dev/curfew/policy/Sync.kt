@@ -3,6 +3,7 @@ package dev.curfew.policy
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import uniffi.curfew_ffi.Sync as FfiSync
@@ -115,12 +116,14 @@ class Sync private constructor(private val inner: FfiSync) {
         now: Long,
         usage: Map<String, Consumption>,
         launches: Map<String, Launches>,
+        calendar: List<CalendarEvent> = emptyList(),
     ): Pass {
         val result = inner.pass(
             policy.core(),
             now,
             Policy.json.encodeToString(UsageMap, usage),
             Policy.json.encodeToString(LaunchMap, launches),
+            Policy.json.encodeToString(EventList, calendar),
         )
         return Policy.json.decodeFromString(Pass.serializer(), result)
     }
@@ -150,6 +153,14 @@ data class Pass(
     @SerialName("still_locked") val stillLocked: List<String> = emptyList(),
     val usage: Map<String, Consumption> = emptyMap(),
     val launches: Map<String, Launches> = emptyMap(),
+    /**
+     * Events the other devices' calendars hold, each tagged with the device that saw it.
+     *
+     * This is how a phone that was never given calendar permission still goes quiet during a
+     * meeting: the PC can see the meeting and says so. This device's own events are not in here —
+     * it already has them, untagged.
+     */
+    val calendar: List<CalendarEvent> = emptyList(),
 )
 
 /**
@@ -196,5 +207,6 @@ data class PeerIdentity(
 @Serializable
 private data class PeerList(val devices: Map<String, Peer> = emptyMap())
 
+private val EventList = ListSerializer(CalendarEvent.serializer())
 private val UsageMap = MapSerializer(String.serializer(), Consumption.serializer())
 private val LaunchMap = MapSerializer(String.serializer(), Launches.serializer())
