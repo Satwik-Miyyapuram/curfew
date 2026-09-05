@@ -97,6 +97,11 @@ class EnforcementService : Service() {
     private fun updateNotification() {
         val manager = getSystemService(android.app.NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification(runtime.activeProfiles.value.isNotEmpty()))
+        // The other two faces of the same fact. Driven from here rather than left to the system's
+        // own widget refresh, which is half-hourly at best: a widget that is thirty minutes stale
+        // about whether a block is on is worse than no widget.
+        dev.curfew.app.ui.widget.CurfewWidget.refresh(this)
+        runCatching { CurfewTileService.refresh(this) }
     }
 
     private fun notification(running: Boolean): Notification {

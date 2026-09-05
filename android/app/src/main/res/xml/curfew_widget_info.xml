@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  updatePeriodMillis is zero: the system will not honour anything under half an hour, which is long
+  enough for the widget to claim a session is running twenty minutes after it ended. The enforcement
+  loop redraws it instead, on the same pass that updates the notification.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_curfew"
+    android:minHeight="70dp"
+    android:minWidth="180dp"
+    android:previewLayout="@layout/widget_curfew"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

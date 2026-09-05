@@ -14,4 +14,7 @@
     <string name="block_title">Blocked by Curfew</string>
     <string name="block_close">Close</string>
     <string name="block_open_curfew">Open Curfew</string>
+
+    <string name="widget_description">Shows whether Curfew is blocking anything, and how many days in a row you have kept.</string>
+    <string name="tile_idle">Standing by</string>
 </resources>
