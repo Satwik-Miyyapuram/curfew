@@ -248,6 +248,17 @@ pub fn run(
     let sync = start_sync();
     let mut mirror = curfew_sync::mirror::Mirror::default();
 
+    // Calendar subscriptions. Cached beside the state file so an outage — or a restart during one —
+    // does not release a block the calendar was driving.
+    let subscriptions = crate::feeds::Subscriptions::default();
+    let mut feeds = curfew_win::calendar::Feeds::new(
+        state_path.parent().unwrap_or_else(|| Path::new(".")).join("calendars"),
+    );
+    {
+        let guard = enforcer.lock().expect("enforcer");
+        feeds.restore(&guard.config.calendar_sources);
+    }
+
     let mut previous = last_tick;
     while !stop() {
         let now = now();
@@ -260,7 +271,32 @@ pub fn run(
         };
         {
             let mut guard = enforcer.lock().expect("enforcer");
-            let tick = guard.tick(now, elapsed, &[], &SystemProcesses::default());
+            let events = match guard.config.tz() {
+                Ok(zone) => {
+                    let sources = guard.config.calendar_sources.clone();
+                    let (events, outcomes) = feeds.events(now, &sources, zone, &subscriptions);
+                    for outcome in outcomes {
+                        if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } =
+                            outcome
+                        {
+                            // Reported every time rather than once: a subscription that has been
+                            // failing for a week is worth being noisy about, and the alternative is
+                            // a block quietly running on a stale calendar with nobody told.
+                            eprintln!(
+                                "curfew: calendar '{id}' could not be read ({detail}){}",
+                                if still_serving {
+                                    "; the last copy that worked is still in force"
+                                } else {
+                                    "; it has never been read, so it is blocking nothing"
+                                }
+                            );
+                        }
+                    }
+                    events
+                }
+                Err(_) => Vec::new(),
+            };
+            let tick = guard.tick(now, elapsed, &events, &SystemProcesses::default());
             if let Some(resolver) = &resolver {
                 resolver.set(tick.domains.clone());
             }

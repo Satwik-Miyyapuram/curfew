@@ -6,6 +6,7 @@
 //! function, so the parts that need a machine stay small enough to read.
 
 pub mod blocked;
+pub mod calendar;
 pub mod credential;
 pub mod delay;
 pub mod dns;

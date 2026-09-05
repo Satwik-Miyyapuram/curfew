@@ -2,7 +2,7 @@
 //! complete, diffable description of a user's setup (design invariant 4).
 
 use crate::budget::Refill;
-use crate::schedule::{CalendarSchedule, WeeklySchedule};
+use crate::schedule::{CalendarSchedule, CalendarSource, WeeklySchedule};
 use crate::target::Target;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,10 @@ pub struct Config {
     /// Calendar-driven sessions (DECISIONS: the feature the whole project is named for).
     #[serde(default)]
     pub calendars: Vec<CalendarSchedule>,
+    /// Where calendar events come from on a desktop, which has no system calendar to read. Empty
+    /// on Android, where the events come from the platform's own provider instead.
+    #[serde(default)]
+    pub calendar_sources: Vec<CalendarSource>,
     /// Website blocking beyond the hosts file.
     #[serde(default)]
     pub resolver: Resolver,
@@ -66,6 +70,7 @@ impl Default for Config {
             profiles: Vec::new(),
             weekly: Vec::new(),
             calendars: Vec::new(),
+            calendar_sources: Vec::new(),
             resolver: Resolver::default(),
         }
     }

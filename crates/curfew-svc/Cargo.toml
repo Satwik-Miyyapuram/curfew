@@ -20,6 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 chrono = { workspace = true, features = ["clock"] }
 interprocess = "2.4"
+ureq = { version = "3.2.1", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.7"

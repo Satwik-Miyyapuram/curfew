@@ -68,6 +68,26 @@ impl CalendarEvent {
 /// Turns calendar events into sessions: "anything on my Work calendar titled *focus* runs the
 /// deep-work profile, starting five minutes early".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarSource {
+    pub id: String,
+    /// A path to an `.ics` file on this machine, or an `http(s)`/`webcal` URL to subscribe to.
+    ///
+    /// One field rather than two because a subscription and an exported file are the same document
+    /// arriving by different means, and a rule written against one should keep working when the
+    /// user switches to the other.
+    pub location: String,
+    /// How long a fetched copy stays good for. A subscription that is re-fetched every pass would
+    /// hammer someone's calendar server every two seconds; an hour is short enough that a meeting
+    /// added this morning blocks this afternoon.
+    #[serde(default = "default_refresh")]
+    pub refresh_seconds: u32,
+}
+
+fn default_refresh() -> u32 {
+    3600
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarSchedule {
     pub id: String,
     pub profile: String,

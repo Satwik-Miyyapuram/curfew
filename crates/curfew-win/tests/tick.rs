@@ -272,6 +272,7 @@ fn a_calendar_event_starts_a_session_the_same_way_a_weekly_window_does() {
             end: NOW + 3600,
             all_day: false,
             busy: true,
+            categories: Vec::new(),
         }],
         &table,
     );

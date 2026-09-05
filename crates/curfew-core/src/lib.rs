@@ -23,7 +23,7 @@ pub use frozen::{Countdown, Origin};
 pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
 pub use schedule::{
     active_at, next_change_after, Activation, ActivationSource, CalendarEvent, CalendarSchedule,
-    EventMatcher, WeeklySchedule,
+    CalendarSource, EventMatcher, WeeklySchedule,
 };
 pub use session::{reconcile, Refusal, Session, SessionSource, Sessions};
 pub use target::{domain_matches, glob_match, Observation, Target, Url};

@@ -5,6 +5,7 @@
 //! control manager at an executable that will still be there, and because an uninstaller that is a
 //! separate program is an uninstaller that can be run when the service is not looking.
 
+mod feeds;
 mod host;
 mod runner;
 mod service;
