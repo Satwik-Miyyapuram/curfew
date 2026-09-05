@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/curfew-core", "crates/curfew-cli", "crates/curfew-ffi", "crates/curfew-win", "crates/curfew-svc", "crates/curfew-tray"]
+members = ["crates/curfew-core", "crates/curfew-cli", "crates/curfew-ffi", "crates/curfew-sync", "crates/curfew-win", "crates/curfew-svc", "crates/curfew-tray"]
 
 [workspace.package]
 version = "0.0.1"
@@ -17,3 +17,8 @@ chrono = { version = "0.4", default-features = false, features = ["alloc", "serd
 chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 serde_json = "1"
 uniffi = "0.28"
+ed25519-dalek = { version = "2", features = ["rand_core", "serde"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
+sha2 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }

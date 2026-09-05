@@ -55,9 +55,9 @@ the 24h delayed release still works; credential release is verified by `LogonUse
 Windows account, with no Curfew-held password anywhere.
 
 ## Phase 3 — Sync (differentiator, part 1)
-- [ ] Lock lattice defined and property-tested *before* any merge code (GAPS C1)
-- [ ] Concrete pairing protocol, per-device keys, revocation path (GAPS C2, C3)
-- [ ] Signed encrypted op-log, rollups + checkpoint compaction (GAPS C4)
+- [x] Lock lattice defined and property-tested *before* any merge code (GAPS C1)
+- [x] Concrete pairing protocol, per-device keys, revocation path (GAPS C2, C3)
+- [x] Signed encrypted op-log, rollups + checkpoint compaction (GAPS C4)
 - [ ] LAN transport (mDNS + QUIC)
 - [ ] Shared-folder transport: immutable segments, concurrent writers, honest latency UI (GAPS C5)
 - [ ] Bluetooth / QR beam fallback
