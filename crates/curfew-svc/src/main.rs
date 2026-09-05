@@ -5,6 +5,7 @@
 //! control manager at an executable that will still be there, and because an uninstaller that is a
 //! separate program is an uninstaller that can be run when the service is not looking.
 
+mod host;
 mod runner;
 #[cfg(windows)]
 mod service;
@@ -35,6 +36,10 @@ curfew — distraction blocking that keeps its promises
   curfew decide <config.toml> <profile> <target> [options]
                                    ask the engine what it would do, with no service running
 
+  curfew extension <browser> <id>  let a browser talk to Curfew (chrome, edge, brave,
+                                   vivaldi, chromium, firefox, librewolf)
+  curfew extension-host            spoken by the browser, not by people
+
   curfew install                   register the Windows service (needs an admin prompt)
   curfew uninstall                 remove it (refused while a lock is held)
 ";
@@ -64,6 +69,8 @@ fn main() {
             0
         }
         "service" => service_entry(),
+        "extension-host" => host::run(),
+        "extension" => extension(&args[1..]),
         "install" => install(),
         "uninstall" => uninstall(),
         "help" | "--help" | "-h" => {
@@ -76,6 +83,70 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+/// Register the native-messaging host so one browser's extension can reach the service.
+///
+/// Per-user, and no elevation: this writes under `HKCU` and into the user's own profile, because a
+/// machine-wide registration would reach into every account on a shared PC. Enforcement is not what
+/// is being installed here — the service already does that — so nothing here needs to be privileged.
+fn extension(args: &[String]) -> i32 {
+    use curfew_win::extension::{manifest, Browser};
+
+    let (Some(name), Some(id)) = (args.first(), args.get(1)) else {
+        eprintln!(
+            "usage: curfew extension <browser> <extension-id>
+
+             The id is shown on the browser's extensions page. Chromium browsers give a long 
+             lowercase id; Firefox gives an address like curfew@curfew.dev."
+        );
+        return 2;
+    };
+    let Some(browser) = Browser::parse(name) else {
+        eprintln!("curfew: I do not know how to register with {name}.");
+        return 2;
+    };
+
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("curfew: could not work out where this program lives.");
+        return 1;
+    };
+    let directory = state::default_path().with_file_name("hosts");
+    if let Err(e) = std::fs::create_dir_all(&directory) {
+        eprintln!("curfew: could not create {}: {e}", directory.display());
+        return 1;
+    }
+    let path = directory.join(browser.manifest_file());
+    if let Err(e) = std::fs::write(&path, manifest(browser.family(), &exe, id)) {
+        eprintln!("curfew: could not write {}: {e}", path.display());
+        return 1;
+    }
+
+    // `reg add` rather than a registry crate: one process, one obvious command, and a failure the
+    // user can reproduce by hand from the message.
+    let key = browser.registry_key();
+    let status = std::process::Command::new("reg")
+        .args(["add", &key, "/ve", "/t", "REG_SZ", "/d", &path.display().to_string(), "/f"])
+        .status();
+    match status {
+        Ok(status) if status.success() => {
+            println!(
+                "{name} can now talk to Curfew.
+                 Load the extension from the `extension/` folder, then restart the browser.
+                 While a URL rule is running, a browser with no extension answering for it is 
+                 closed — so install it in every browser you use."
+            );
+            0
+        }
+        Ok(status) => {
+            eprintln!("curfew: reg add {key} failed ({status}).");
+            1
+        }
+        Err(e) => {
+            eprintln!("curfew: could not run reg ({e}).");
+            1
+        }
+    }
 }
 
 /// Ask the service, and turn "the service is not running" into the sentence that actually helps.
@@ -116,6 +187,18 @@ fn report(response: Response) -> i32 {
                 "{} freezes this whole device at {}. Save your work. `curfew cancel` calls it off.",
                 countdown.profile,
                 when(countdown.fires_at)
+            );
+            0
+        }
+        // Only the extension asks for one of these, and it never comes through this path.
+        Response::Verdict { blocked, reason } => {
+            println!(
+                "{}",
+                if blocked {
+                    reason.unwrap_or_else(|| "Blocked.".into())
+                } else {
+                    "Allowed.".into()
+                }
             );
             0
         }

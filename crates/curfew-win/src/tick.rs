@@ -66,6 +66,9 @@ pub struct Enforcer {
     /// seconds long, and a service restart that reset one would be indistinguishable from the app
     /// having been closed and reopened.
     pub gates: crate::delay::Gates,
+    /// Which browsers have an extension answering for them. Not persisted either: after a restart
+    /// every browser is unproven, and each gets its startup grace to say so again.
+    pub watch: crate::extension::Watch,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -84,6 +87,7 @@ impl Enforcer {
             state_warning: None,
             freeze: None,
             gates: Default::default(),
+            watch: Default::default(),
             counter: 0,
         }
     }
@@ -167,7 +171,8 @@ impl Enforcer {
         tick.ended = self.sessions.reap(now);
 
         let state = self.state(now);
-        tick.processes = enforce(now, &state, &self.config, processes, &mut self.gates);
+        tick.processes =
+            enforce(now, &state, &self.config, processes, &mut self.gates, &mut self.watch);
         tick.domains = blocked_domains(now, &state, &self.config);
 
         if let Err(e) = hosts::apply(&self.hosts_path, &tick.domains) {
@@ -191,6 +196,7 @@ impl Enforcer {
                 blocked_domains: self.last.domains.clone(),
                 failing: self.last.processes.failed.clone(),
                 closed: self.last.processes.closed.clone(),
+                unwatched: self.last.processes.unwatched.clone(),
                 delayed: self.last.processes.delayed.clone(),
                 freeze: self.freeze.clone(),
                 hosts_error: self.last.hosts_error.clone(),
@@ -305,6 +311,31 @@ impl Enforcer {
                 Err(refusal) => Response::Refused { refusal },
             },
 
+            // Recorded and nothing else. A heartbeat is not a request to change anything, which is
+            // why it is safe for it to be unauthenticated on a local pipe.
+            Request::Beat { browser } => {
+                self.watch.beat(&browser, now);
+                Response::Ok
+            }
+
+            // Decided here rather than in the browser. The extension reports the URL and shows what
+            // it is told; an extension someone has edited can lie about the URL, but it cannot mint
+            // an allow, and lying about the URL is only worth doing to block yourself harder.
+            Request::Check { browser, url } => {
+                self.watch.beat(&browser, now);
+                let state = self.state(now);
+                let obs = Observation::Web { url: curfew_core::Url::parse(&url) };
+                match curfew_core::decide(now, &state, &obs, &self.config) {
+                    curfew_core::Decision::Block { reason } => Response::Verdict {
+                        blocked: true,
+                        reason: Some(crate::extension::explain(&reason)),
+                    },
+                    // A delay or a mute has no meaning for a page load, and blocking on a decision
+                    // the engine did not make is the bug that gets a blocker uninstalled.
+                    _ => Response::Verdict { blocked: false, reason: None },
+                }
+            }
+
             Request::Reload => match &self.config_path {
                 None => Response::Error { detail: "no config path is configured".into() },
                 Some(path) => match std::fs::read_to_string(path)
@@ -319,6 +350,8 @@ impl Enforcer {
                         // A delay the user has just rewritten should not be governed by a countdown
                         // started under the old rule.
                         self.gates.clear();
+                        // Likewise a browser judged against rules that no longer exist.
+                        self.watch.clear();
                         Response::Ok
                     }
                 },

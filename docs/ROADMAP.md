@@ -39,13 +39,13 @@ any in-app path, by clearing data, or by changing the system clock; added batter
 measured over 24h; instrumented tests green on an emulator in CI.
 
 ## Phase 2 — Windows MVP (usable alone)
-- [ ] Service + watchdog, tray UI, installer requiring admin
-- [ ] Process + window-title blocking, block overlay
-- [ ] Website blocking v1: hosts file + local DNS proxy
-- [ ] Same profiles/sessions/schedules/strictness as Android, same `curfew.toml`
-- [ ] Frozen mode with a cancellable countdown (GAPS B4)
-- [ ] x64 + ARM64 builds; winget/scoop manifests; checksums; AV false-positive notes (GAPS B1, B5)
-- [ ] Browser extension as a granularity layer only — URL-path rules a service cannot see, joined to
+- [x] Service + watchdog, tray UI, installer requiring admin
+- [x] Process + window-title blocking, block overlay
+- [x] Website blocking v1: hosts file + local DNS proxy
+- [x] Same profiles/sessions/schedules/strictness as Android, same `curfew.toml`
+- [x] Frozen mode with a cancellable countdown (GAPS B4)
+- [x] x64 + ARM64 builds; winget/scoop manifests; checksums; AV false-positive notes (GAPS B1, B5)
+- [x] Browser extension as a granularity layer only — URL-path rules a service cannot see, joined to
       the service by a native-messaging heartbeat so a removed extension blocks the browser outright
       (GAPS G1). It is never the enforcement floor.
 
@@ -86,7 +86,7 @@ and all-day events handled correctly in a dated test suite; a deleted event rele
       profile owner, both out under D4 (DECISIONS D9, GAPS A7). Device Admin drops with it.
 - [ ] Emergency passes with quota + cooldown
 - [ ] Allow-only mode; notification muting; keyword blocking
-- [ ] Browser extension (Chrome + Firefox), paired to the service, removal detected
+- [x] Browser extension (Chrome + Firefox), paired to the service, removal detected (done in Phase 2)
 - [ ] Android VpnService DNS filter incl. DoH endpoint blocking (GAPS A2)
 - [ ] Windows WFP filtering — spike first, it is the largest unknown (GAPS B2)
 - [ ] Hardening: service ACLs, clock-tamper detection, re-lock on boot

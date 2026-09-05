@@ -9,6 +9,7 @@ pub mod blocked;
 pub mod credential;
 pub mod delay;
 pub mod dns;
+pub mod extension;
 pub mod hosts;
 pub mod ipc;
 pub mod procs;

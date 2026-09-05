@@ -85,6 +85,9 @@ pub fn describe(response: &Response) -> String {
         },
         Response::Error { detail } => detail.clone(),
         Response::Status(_) => String::new(),
+        // The tray never asks for a verdict; only the extension host does. Saying so is better
+        // than a wildcard that would quietly swallow a real answer added later.
+        Response::Verdict { .. } => String::new(),
     }
 }
 

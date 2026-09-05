@@ -6,6 +6,7 @@
 //! a live machine — so it sits behind [`Processes`], and everything above it is tested with a fake.
 
 use crate::delay::{Gates, Step};
+use crate::extension::{self, Watch};
 use curfew_core::{decide, Config, Decision, Observation, State, Timestamp};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -99,6 +100,10 @@ pub struct Outcome {
     /// A held app is closed like a blocked one, and the difference is entirely in what happens next:
     /// the countdown runs down, the app is left alone afterwards, and the user is told both facts.
     pub delayed: BTreeMap<String, i64>,
+    /// Browsers closed because nothing inside them was reporting while a path-level rule was in
+    /// force. Kept apart from [`Outcome::closed`] because the user is owed a different sentence:
+    /// this one is fixed by installing the extension, not by waiting for a session to end.
+    pub unwatched: BTreeSet<String>,
 }
 
 /// Carry out the verdicts.
@@ -111,14 +116,34 @@ pub fn enforce(
     config: &Config,
     processes: &impl Processes,
     gates: &mut Gates,
+    watch: &mut Watch,
 ) -> Outcome {
     let mut outcome = Outcome::default();
     let listing = processes.list();
     // Before anything is decided: an app that is no longer running has spent its wait, so the next
     // launch costs the same pause as the first.
-    gates.forget_absent(&listing.iter().map(|p| p.exe.to_lowercase()).collect());
+    let running: BTreeSet<String> = listing.iter().map(|p| p.exe.to_lowercase()).collect();
+    gates.forget_absent(&running);
+    watch.saw(&running, now);
+
+    // A browser with no extension answering for it can see things the service cannot, so while a
+    // path- or keyword-level rule is in force it is closed outright (GAPS G1). This is decided
+    // before the per-process loop so a browser that is both blocked outright and unwatched is
+    // reported as blocked: that is the reason the user needs to hear first.
+    let needed = extension::needs_extension(state, config);
+    let unwatched = watch.unwatched(&running, now, needed);
 
     for (process, verdict) in verdicts(now, state, config, &listing) {
+        if unwatched.contains(&process.exe.to_lowercase())
+            && !matches!(verdict, Verdict::Close { .. })
+        {
+            if processes.terminate(process.pid) {
+                outcome.unwatched.insert(process.exe.to_lowercase());
+            } else {
+                outcome.failed.insert(process.exe.to_lowercase());
+            }
+            continue;
+        }
         match verdict {
             Verdict::Leave => {}
             Verdict::Delay { seconds } => {

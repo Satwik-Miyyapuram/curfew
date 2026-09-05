@@ -8,6 +8,7 @@
 
 use curfew_core::{Config, Consumption, State};
 use curfew_win::blocked_domains;
+use curfew_win::extension::Watch;
 use curfew_win::procs::{enforce, verdicts, Process, Processes, Verdict};
 use curfew_win::Gates;
 use std::cell::RefCell;
@@ -91,7 +92,8 @@ fn a_blocked_exe_is_closed_and_nothing_else_is() {
     let table =
         Fake::new(vec![proc(1, "steam.exe", "Steam"), proc(2, "code.exe", "main.rs — curfew")]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+    let outcome =
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default());
 
     assert_eq!(outcome.closed, BTreeSet::from(["steam.exe".to_string()]));
     assert!(outcome.failed.is_empty());
@@ -102,7 +104,14 @@ fn a_blocked_exe_is_closed_and_nothing_else_is() {
 fn nothing_is_closed_when_no_profile_is_active() {
     let table = Fake::new(vec![proc(1, "steam.exe", "Steam")]);
 
-    let outcome = enforce(NOW, &State::default(), &config(), &table, &mut Gates::default());
+    let outcome = enforce(
+        NOW,
+        &State::default(),
+        &config(),
+        &table,
+        &mut Gates::default(),
+        &mut Watch::default(),
+    );
 
     assert!(outcome.closed.is_empty());
     assert!(table.killed.borrow().is_empty(), "a lock that is not running closed something");
@@ -116,7 +125,8 @@ fn every_process_of_one_app_is_closed_but_reported_once() {
         proc(12, "Steam.exe", "Friends"),
     ]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+    let outcome =
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default());
 
     assert_eq!(*table.killed.borrow(), vec![10, 11, 12], "a surviving process is a bypass");
     assert_eq!(outcome.closed, BTreeSet::from(["steam.exe".to_string()]));
@@ -126,7 +136,8 @@ fn every_process_of_one_app_is_closed_but_reported_once() {
 fn a_process_that_cannot_be_killed_is_reported_rather_than_hidden() {
     let table = Fake::new(vec![proc(1, "steam.exe", "Steam")]).refusing(1);
 
-    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+    let outcome =
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default());
 
     assert!(outcome.closed.is_empty());
     assert_eq!(outcome.failed, BTreeSet::from(["steam.exe".to_string()]));
@@ -139,7 +150,8 @@ fn a_window_title_rule_matches_the_window_not_the_program() {
         proc(2, "chrome.exe", "docs.rs - Google Chrome"),
     ]);
 
-    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+    let outcome =
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default());
 
     assert_eq!(*table.killed.borrow(), vec![1], "the whole browser was closed over one tab");
     assert_eq!(outcome.closed, BTreeSet::from(["chrome.exe".to_string()]));
@@ -150,7 +162,7 @@ fn a_delay_holds_an_app_for_its_seconds_and_then_lets_it_run() {
     let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]);
     let mut gates = Gates::default();
 
-    let held = enforce(NOW, &active(), &config(), &table, &mut gates);
+    let held = enforce(NOW, &active(), &config(), &table, &mut gates, &mut Watch::default());
 
     assert_eq!(held.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
     assert_eq!(
@@ -161,7 +173,7 @@ fn a_delay_holds_an_app_for_its_seconds_and_then_lets_it_run() {
     // A delay is friction, not a block: nothing is reported as blocked or as having failed to be.
     assert!(held.closed.is_empty() && held.failed.is_empty());
 
-    let after = enforce(NOW + 15, &active(), &config(), &table, &mut gates);
+    let after = enforce(NOW + 15, &active(), &config(), &table, &mut gates, &mut Watch::default());
 
     assert!(after.delayed.is_empty(), "the wait was served and the app is owed nothing more");
     assert_eq!(*table.killed.borrow(), vec![1], "an app was closed after it had served its wait");
@@ -173,7 +185,8 @@ fn a_delayed_app_that_cannot_be_closed_is_not_reported_as_a_failure_to_block() {
     // chasing a permissions problem that changes nothing about what they asked for.
     let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]).refusing(1);
 
-    let outcome = enforce(NOW, &active(), &config(), &table, &mut Gates::default());
+    let outcome =
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default());
 
     assert!(outcome.failed.is_empty());
     assert_eq!(outcome.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
@@ -183,13 +196,13 @@ fn a_delayed_app_that_cannot_be_closed_is_not_reported_as_a_failure_to_block() {
 fn closing_a_delayed_app_makes_the_next_launch_wait_again() {
     let table = Fake::new(vec![proc(1, "slack.exe", "Slack")]);
     let mut gates = Gates::default();
-    enforce(NOW, &active(), &config(), &table, &mut gates);
-    enforce(NOW + 15, &active(), &config(), &table, &mut gates);
+    enforce(NOW, &active(), &config(), &table, &mut gates, &mut Watch::default());
+    enforce(NOW + 15, &active(), &config(), &table, &mut gates, &mut Watch::default());
 
     let gone = Fake::new(vec![]);
-    enforce(NOW + 20, &active(), &config(), &gone, &mut gates);
+    enforce(NOW + 20, &active(), &config(), &gone, &mut gates, &mut Watch::default());
 
-    let again = enforce(NOW + 30, &active(), &config(), &table, &mut gates);
+    let again = enforce(NOW + 30, &active(), &config(), &table, &mut gates, &mut Watch::default());
 
     assert_eq!(again.delayed, BTreeMap::from([("slack.exe".to_string(), 15)]));
 }
@@ -208,7 +221,7 @@ fn verdicts_answer_without_touching_anything() {
 fn an_empty_machine_is_not_an_error() {
     let table = Fake::new(vec![]);
     assert_eq!(
-        enforce(NOW, &active(), &config(), &table, &mut Gates::default()),
+        enforce(NOW, &active(), &config(), &table, &mut Gates::default(), &mut Watch::default()),
         Default::default()
     );
 }
@@ -241,4 +254,101 @@ fn a_spent_budget_does_reach_the_hosts_file() {
 #[test]
 fn no_active_profile_blocks_no_domains() {
     assert!(blocked_domains(NOW, &State::default(), &config()).is_empty());
+}
+
+// --- the browser extension as a granularity layer (GAPS G1) -----------------------------------
+
+const WITH_PATH_RULE: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "url", pattern = "*youtube.com/shorts*" }
+action = { kind = "block" }
+"#;
+
+fn path_rule_config() -> Config {
+    Config::from_toml(WITH_PATH_RULE).expect("the test config must parse")
+}
+
+#[test]
+fn a_browser_with_no_extension_answering_for_it_is_closed_while_a_path_rule_runs() {
+    // The service cannot see which tab is open, so the honest options are to close the browser or
+    // to pretend the rule is being enforced. Pretending is the one that loses people their evening.
+    let table = Fake::new(vec![proc(1, "chrome.exe", "New Tab")]);
+    let mut watch = Watch::default();
+
+    let start =
+        enforce(NOW, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+    assert!(start.unwatched.is_empty(), "a browser is given time to load its extension");
+
+    let later = NOW + curfew_win::extension::GRACE_SECONDS + 60;
+    let outcome =
+        enforce(later, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+
+    assert_eq!(outcome.unwatched, BTreeSet::from(["chrome.exe".to_string()]));
+    assert_eq!(*table.killed.borrow(), vec![1]);
+    assert!(outcome.closed.is_empty(), "this is not a blocked app and must not be reported as one");
+}
+
+#[test]
+fn a_browser_whose_extension_is_reporting_is_left_alone() {
+    let table = Fake::new(vec![proc(1, "chrome.exe", "New Tab")]);
+    let mut watch = Watch::default();
+    enforce(NOW, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+
+    let later = NOW + curfew_win::extension::GRACE_SECONDS + 60;
+    watch.beat("chrome.exe", later - 5);
+    let outcome =
+        enforce(later, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+
+    assert!(outcome.unwatched.is_empty());
+    assert!(table.killed.borrow().is_empty());
+}
+
+#[test]
+fn a_profile_with_no_path_rules_costs_nobody_their_browser() {
+    let table = Fake::new(vec![proc(1, "chrome.exe", "New Tab")]);
+    let mut watch = Watch::default();
+    let later = NOW + curfew_win::extension::GRACE_SECONDS + 60;
+
+    let outcome = enforce(later, &active(), &config(), &table, &mut Gates::default(), &mut watch);
+
+    assert!(outcome.unwatched.is_empty());
+    assert!(table.killed.borrow().is_empty());
+}
+
+#[test]
+fn a_browser_that_is_blocked_outright_is_reported_as_blocked_and_not_as_unwatched() {
+    // Both are true of it, but only one is the reason: telling someone to install an extension
+    // when the rule closes the browser regardless would be advice that changes nothing.
+    let text = WITH_PATH_RULE.to_string()
+        + "\n[[profiles.rules]]\ntarget = { kind = \"windows_exe\", exe = \"chrome.exe\" }\naction = { kind = \"block\" }\n";
+    let config = Config::from_toml(&text).unwrap();
+    let table = Fake::new(vec![proc(1, "chrome.exe", "New Tab")]);
+    let later = NOW + curfew_win::extension::GRACE_SECONDS + 60;
+
+    let outcome =
+        enforce(later, &active(), &config, &table, &mut Gates::default(), &mut Watch::default());
+
+    assert_eq!(outcome.closed, BTreeSet::from(["chrome.exe".to_string()]));
+    assert!(outcome.unwatched.is_empty());
+}
+
+#[test]
+fn a_browser_that_cannot_be_closed_is_reported_rather_than_quietly_left() {
+    let table = Fake::new(vec![proc(1, "chrome.exe", "New Tab")]).refusing(1);
+    let mut watch = Watch::default();
+    enforce(NOW, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+    let later = NOW + curfew_win::extension::GRACE_SECONDS + 60;
+
+    let outcome =
+        enforce(later, &active(), &path_rule_config(), &table, &mut Gates::default(), &mut watch);
+
+    assert_eq!(outcome.failed, BTreeSet::from(["chrome.exe".to_string()]));
+    assert!(outcome.unwatched.is_empty(), "nothing was actually closed");
 }

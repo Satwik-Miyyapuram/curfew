@@ -142,7 +142,17 @@ pub fn menu(status: &Status) -> Vec<Item> {
         items.push(Item::Note(format!("{exe} opens in {left} s")));
     }
 
-    if status.hosts_error.is_some() || !status.failing.is_empty() || status.state_warning.is_some()
+    // A closed browser is the one piece of trouble whose cause is not obvious from the outside: it
+    // looks like a crash. Naming it on the menu, above details, is the difference between the user
+    // installing the extension and the user filing a bug.
+    for exe in &status.unwatched {
+        items.push(Item::Note(format!("{exe} was closed — it is running without the extension")));
+    }
+
+    if status.hosts_error.is_some()
+        || !status.failing.is_empty()
+        || status.state_warning.is_some()
+        || !status.unwatched.is_empty()
     {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
@@ -172,6 +182,27 @@ pub fn details(status: &Status) -> String {
         text.push_str(&format!(
             "\nCould not close {exe}. It is running with privileges Curfew does not have.\n"
         ));
+    }
+    if !status.unwatched.is_empty() {
+        text.push_str(
+            "
+A rule you are running names a page rather than a whole site, and only the browser 
+             can see which page a tab is on. These browsers were closed because they are running 
+             without the Curfew extension:
+",
+        );
+        for exe in &status.unwatched {
+            text.push_str(&format!(
+                "  {exe}
+"
+            ));
+        }
+        text.push_str(
+            "Install the extension and register it with `curfew extension <browser> <id>`; they 
+             will stay open. Nothing else lifts this, because a browser Curfew cannot see is a 
+             browser that can go anywhere.
+",
+        );
     }
     if let Some(e) = &status.hosts_error {
         text.push_str(&format!("\nWebsite blocking is not working: {e}\n"));
@@ -269,6 +300,38 @@ mod tests {
         let text = details(&status);
         assert!(text.contains("reddit.com"));
         assert!(text.contains("steam.exe"));
+    }
+
+    #[test]
+    fn a_browser_closed_for_want_of_the_extension_says_so_where_it_will_be_read() {
+        let mut status = status(vec![]);
+        status.unwatched.insert("chrome.exe".into());
+
+        let items = menu(&status);
+        let notes: Vec<&String> = items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Note(note) => Some(note),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            notes.iter().any(|n| n.contains("chrome.exe") && n.contains("extension")),
+            "the menu blamed nothing for the browser vanishing: {notes:?}"
+        );
+        assert!(notes.iter().any(|n| n.contains("see details")));
+
+        // The details have to carry the fix, not just the fact: a user who is told what happened
+        // and not what to do about it will conclude that Curfew is broken.
+        let text = details(&status);
+        assert!(text.contains("chrome.exe"));
+        assert!(text.contains("curfew extension"));
+    }
+
+    #[test]
+    fn a_tray_with_nothing_wrong_never_mentions_the_extension() {
+        let text = details(&status(vec![]));
+        assert!(!text.contains("extension"), "an idle tray advertised at the user: {text}");
     }
 
     fn freezing(origin: curfew_core::Origin) -> Status {

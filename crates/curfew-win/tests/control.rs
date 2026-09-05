@@ -467,3 +467,97 @@ fn a_freeze_asked_for_by_a_peer_waits_for_someone_at_this_machine() {
     assert_eq!(due(&e.freeze.clone().unwrap(), NOW + 130), Due::Fire);
     assert_eq!(e.tick(NOW + 130, 1, &[], &Empty).froze.as_deref(), Some("frozen"));
 }
+
+// --- what the browser extension may ask (GAPS G1) ------------------------------------------------
+
+const URL_CONFIG: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "url", pattern = "*youtube.com/shorts*" }
+action = { kind = "block" }
+"#;
+
+fn url_enforcer(name: &str) -> Enforcer {
+    Enforcer::new(Config::from_toml(URL_CONFIG).unwrap(), dir(name).join("hosts"))
+}
+
+#[test]
+fn the_service_answers_a_url_check_and_says_which_rule_did_it() {
+    let mut e = url_enforcer("check");
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+
+    let answer = e.handle(
+        NOW,
+        Request::Check {
+            browser: "chrome.exe".into(),
+            url: "https://www.youtube.com/shorts/abc?x=1".into(),
+        },
+    );
+
+    match answer {
+        Response::Verdict { blocked, reason } => {
+            assert!(blocked);
+            assert!(reason.unwrap().contains("deep-work"));
+        }
+        other => panic!("expected a verdict, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_url_no_rule_covers_is_allowed_rather_than_blocked_by_default() {
+    // An extension that blocks whatever the service fails to answer for would turn a service
+    // restart into a browser that shows nothing but block pages.
+    let mut e = url_enforcer("allow");
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+
+    let answer = e.handle(
+        NOW,
+        Request::Check { browser: "chrome.exe".into(), url: "https://docs.rs/".into() },
+    );
+
+    assert_eq!(answer, Response::Verdict { blocked: false, reason: None });
+}
+
+#[test]
+fn a_check_counts_as_a_heartbeat_because_a_browser_that_is_asking_is_plainly_alive() {
+    let mut e = url_enforcer("check-beats");
+    e.handle(NOW, Request::Check { browser: "chrome.exe".into(), url: "https://docs.rs/".into() });
+
+    assert!(e.watch.trusted("chrome.exe", NOW + 10));
+}
+
+#[test]
+fn a_heartbeat_is_recorded_and_changes_nothing_else() {
+    let mut e = url_enforcer("beat");
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+
+    assert_eq!(e.handle(NOW, Request::Beat { browser: "chrome.exe".into() }), Response::Ok);
+
+    assert!(e.watch.trusted("chrome.exe", NOW + 10));
+    // The one thing a heartbeat must never be is a way out of a session.
+    assert_eq!(e.sessions.running.len(), 1);
+}
+
+#[test]
+fn nothing_the_extension_can_say_ends_a_locked_session() {
+    let mut e = url_enforcer("no-exit");
+    e.handle(
+        NOW,
+        Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![Lock::Timer] },
+    );
+    let id = e.sessions.running[0].id.clone();
+
+    e.handle(NOW, Request::Beat { browser: "chrome.exe".into() });
+    e.handle(NOW, Request::Check { browser: "chrome.exe".into(), url: "https://x.test/".into() });
+
+    assert!(matches!(
+        e.handle(NOW + 1, Request::End { id, satisfied: BTreeSet::new() }),
+        Response::Refused { .. }
+    ));
+}

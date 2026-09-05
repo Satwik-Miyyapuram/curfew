@@ -62,6 +62,17 @@ pub enum Request {
     ConfirmFreeze,
     /// Re-read the config from disk.
     Reload,
+    /// "The extension in this browser is alive." Sent by the native-messaging host on a timer.
+    ///
+    /// Unauthenticated, like everything else on this pipe, and that is a known limit rather than an
+    /// oversight: anyone who can write here could forge a heartbeat and get their browser back
+    /// without path rules being enforced. It buys them nothing below that layer — domains, apps and
+    /// the lock itself are enforced by the service and are not reachable from here — which is
+    /// exactly why the extension is a granularity layer and never the floor (GAPS G1).
+    Beat { browser: String },
+    /// "The user is opening this URL. May they?" The service decides; the extension only reports
+    /// and obeys, so a tampered extension cannot invent an allow the core did not give.
+    Check { browser: String, url: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +93,13 @@ pub enum Response {
     Refused {
         refusal: Refusal,
     },
+    /// The answer to a [`Request::Check`].
+    Verdict {
+        blocked: bool,
+        /// Said out loud on the block page. A page that says only "blocked" invites the reader to
+        /// suspect a bug and go looking for the way round it.
+        reason: Option<String>,
+    },
     /// Something went wrong that is not a policy decision: a config that no longer parses, a
     /// profile that does not exist.
     Error {
@@ -99,6 +117,10 @@ pub struct Status {
     /// Executables the last pass closed. The tray watches this to know when to explain itself: a
     /// window that vanishes with no reason given is indistinguishable from a crash.
     pub closed: BTreeSet<String>,
+    /// Browsers closed for having no extension answering for them while a path-level rule was in
+    /// force. The tray says how to fix it, because this one is fixable.
+    #[serde(default)]
+    pub unwatched: BTreeSet<String>,
     /// Executables held behind a delay rule, and the seconds left of each wait.
     pub delayed: std::collections::BTreeMap<String, i64>,
     /// A freeze that has been announced and has not happened yet. Carried on every status so no UI

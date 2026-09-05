@@ -29,6 +29,25 @@ Installing
        curfew status
 
 
+Blocking a page rather than a whole site
+----------------------------------------
+
+A rule like *youtube.com/shorts* names a page, and nothing outside the browser can see which page
+a tab is on. For those rules Curfew needs its extension, in the extension/ folder of the source:
+
+  1. Load it as an unpacked extension in your browser and copy the id it is given.
+  2. Register it, from an ordinary terminal — no administrator needed:
+
+         curfew extension chrome <extension-id>
+
+     chrome, edge, brave, vivaldi, chromium, firefox and librewolf are understood. Do this once
+     for every browser you use.
+
+While a page-level rule is running, a browser that is not reporting is closed. That is deliberate:
+removing the extension has to cost you the browser, or it would be a way around the rule. Rules
+that name whole sites or apps need none of this.
+
+
 Uninstalling
 ------------
 
