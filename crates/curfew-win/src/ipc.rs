@@ -37,6 +37,19 @@ pub enum Request {
         #[serde(default)]
         satisfied: BTreeSet<Lock>,
     },
+    /// End a session by proving ownership of the machine.
+    ///
+    /// The password is checked by the service with `LogonUser`, never by the caller: the point of
+    /// [`Request::End`] refusing an unproven claim is lost if some other message accepts one. The
+    /// pipe is machine-local and the process at the other end is SYSTEM, which is the same trust
+    /// boundary the operating system's own credential prompt sits on.
+    Unlock {
+        id: String,
+        username: String,
+        #[serde(default)]
+        domain: String,
+        password: String,
+    },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
     /// Re-read the config from disk.
@@ -76,6 +89,32 @@ pub struct Status {
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
     /// may have been lost.
     pub state_warning: Option<String>,
+}
+
+/// The control channel's name. Namespaced, so on Windows this is a named pipe under `\.\pipe\`,
+/// which is machine-local and never reachable over the network.
+pub const SOCKET: &str = "curfew.sock";
+
+/// Send one request to a running service and read the answer.
+///
+/// This lives beside the message types rather than in the service, because everything that talks to
+/// the service — the command line, the tray, the overlay — needs it, and a second hand-written copy
+/// of the framing is a second place for it to drift.
+pub fn ask(request: &Request) -> std::io::Result<Response> {
+    use interprocess::local_socket::traits::Stream as _;
+    use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
+    use std::io::{BufRead, BufReader, Write};
+
+    let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
+    let stream = Stream::connect(name)?;
+    let mut reader = BufReader::new(stream);
+    let line = format!("{}
+", serde_json::to_string(request)?);
+    reader.get_mut().write_all(line.as_bytes())?;
+    reader.get_mut().flush()?;
+    let mut answer = String::new();
+    reader.read_line(&mut answer)?;
+    serde_json::from_str(answer.trim()).map_err(std::io::Error::other)
 }
 
 /// Parse one line from the wire.

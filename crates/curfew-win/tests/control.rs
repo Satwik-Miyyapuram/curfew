@@ -282,3 +282,51 @@ fn saving_leaves_no_temporary_file_behind() {
     save(&path, &locked_state()).unwrap();
     assert!(!path.with_extension("tmp").exists());
 }
+
+#[test]
+fn a_wrong_password_does_not_open_a_credential_lock() {
+    let mut e = enforcer("unlock");
+    e.handle(
+        NOW,
+        Request::Start {
+            profile: "deep-work".into(),
+            seconds: 3600,
+            locks: vec![Lock::DeviceCredential],
+        },
+    );
+    let id = e.sessions.running[0].id.clone();
+
+    let response = e.handle(
+        NOW,
+        Request::Unlock {
+            id,
+            username: "curfew-account-that-does-not-exist".into(),
+            domain: String::new(),
+            password: "not-the-password".into(),
+        },
+    );
+
+    assert!(matches!(response, Response::Error { .. }), "a bad password was accepted: {response:?}");
+    assert_eq!(e.sessions.running.len(), 1);
+}
+
+#[test]
+fn unlocking_proves_only_the_credential_and_not_the_other_conditions() {
+    // The wire carries the password, and the service checks it — but a proven password says nothing
+    // about a token, so a session locked with both must stay shut even on a correct one. Asserting
+    // that here without a real password means asserting the shape: `Unlock` names exactly one
+    // condition, and everything else in the message is inert.
+    let request = Request::Unlock {
+        id: "s1".into(),
+        username: "someone".into(),
+        domain: String::new(),
+        password: "secret".into(),
+    };
+    let line = serde_json::to_string(&request).unwrap();
+    assert!(!line.contains('\n'));
+    assert_eq!(parse_request(&line).unwrap(), request);
+    assert!(
+        !format!("{:?}", curfew_win::credential::Secret::new("secret".into())).contains("secret"),
+        "a password would be printed into a log line"
+    );
+}

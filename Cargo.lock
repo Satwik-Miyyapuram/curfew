@@ -336,6 +336,7 @@ name = "curfew-win"
 version = "0.0.1"
 dependencies = [
  "curfew-core",
+ "interprocess",
  "serde",
  "serde_json",
  "sysinfo",

@@ -204,6 +204,30 @@ impl Enforcer {
                 }
             }
 
+            Request::Unlock { id, username, domain, password } => {
+                let secret = crate::credential::Secret::new(password);
+                if !crate::credential::verify(&username, &domain, &secret) {
+                    // Deliberately the same sentence whether the account exists or not, and no
+                    // count of attempts: this is a commitment device, not a login screen, and the
+                    // only thing worth saying is that the lock is still shut.
+                    return Response::Error {
+                        detail: "Windows did not accept that password. The session is still locked."
+                            .into(),
+                    };
+                }
+                // Only now, and only this condition. Proving ownership of the machine says nothing
+                // about a timer, a token or a peer, so those still have to be satisfied their own
+                // way.
+                let satisfied = std::collections::BTreeSet::from([curfew_core::Lock::DeviceCredential]);
+                match self.sessions.end(&id, now, &satisfied) {
+                    Ok(_) => {
+                        let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
+                        Response::Ok
+                    }
+                    Err(refusal) => Response::Refused { refusal },
+                }
+            }
+
             Request::RequestRelease { id } => match self.sessions.request_release(&id, now) {
                 Ok(at) => Response::Release { at },
                 Err(refusal) => Response::Refused { refusal },

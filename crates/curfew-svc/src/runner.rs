@@ -4,22 +4,22 @@
 //! the pass produced, and hand control messages to the enforcer — so that the interesting parts
 //! stay in `curfew-win`, where they are tested without a machine.
 
-use curfew_win::ipc::{encode, parse_request, Request, Response};
+use curfew_win::ipc::{encode, parse_request, Response};
 use curfew_win::state::{self, Loaded, Persisted};
 use curfew_win::{hosts, procs::SystemProcesses, Enforcer};
 use curfew_core::Config;
-use interprocess::local_socket::traits::{ListenerExt as _, Stream as _};
+use interprocess::local_socket::traits::ListenerExt as _;
 use interprocess::local_socket::{
-    GenericNamespaced, ListenerOptions, Stream, ToNsName,
+    GenericNamespaced, ListenerOptions, ToNsName,
 };
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// The control channel's name. Namespaced, so on Windows this is a named pipe under `\\.\pipe\`,
-/// which is machine-local and never reachable over the network.
-pub const SOCKET: &str = "curfew.sock";
+/// The control channel's name and the client that speaks on it, both owned by `curfew-win` so the
+/// service and everything that talks to it cannot disagree about either.
+pub use curfew_win::ipc::{ask, SOCKET};
 
 /// How often a pass runs.
 ///
@@ -193,17 +193,4 @@ pub fn run(
     if guard.sessions.running.is_empty() {
         let _ = hosts::clear(&guard.hosts_path);
     }
-}
-
-/// Send one request to a running service and read the answer.
-pub fn ask(request: &Request) -> std::io::Result<Response> {
-    let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
-    let stream = Stream::connect(name)?;
-    let mut reader = BufReader::new(stream);
-    let line = format!("{}\n", serde_json::to_string(request)?);
-    reader.get_mut().write_all(line.as_bytes())?;
-    reader.get_mut().flush()?;
-    let mut answer = String::new();
-    reader.read_line(&mut answer)?;
-    serde_json::from_str(answer.trim()).map_err(std::io::Error::other)
 }
