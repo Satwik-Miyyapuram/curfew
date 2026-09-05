@@ -1,0 +1,23 @@
+[package]
+name = "curfew-svc"
+description = "The Curfew Windows service: the enforcement loop, its control channel, and its installer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "curfew"
+path = "src/main.rs"
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
+curfew-win = { path = "../curfew-win" }
+serde.workspace = true
+serde_json.workspace = true
+chrono = { workspace = true, features = ["clock"] }
+interprocess = "2.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
