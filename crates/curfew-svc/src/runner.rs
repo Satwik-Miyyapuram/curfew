@@ -132,6 +132,34 @@ fn start_resolver(config: &Config) -> Option<curfew_win::dns::Proxy> {
     }
 }
 
+/// Bring sync up: identity, peers and log from disk, and a node listening on the LAN.
+///
+/// Every failure here is survivable and none of them may stop enforcement. A machine with no
+/// network, a locked-down LAN, or a sync directory it cannot write is still a machine that has to
+/// keep its own locks; sync is how the *other* device finds out, and a device that refused to block
+/// because it could not gossip would have the priorities exactly backwards.
+fn start_sync() -> Option<(curfew_sync::node::Node, PathBuf)> {
+    let root = crate::store::root();
+    let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into());
+    let (shared, complaints) = match crate::store::open(&root, &name) {
+        Ok(opened) => opened,
+        Err(e) => {
+            eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
+            return None;
+        }
+    };
+    for complaint in complaints {
+        eprintln!("curfew: {complaint}");
+    }
+    match curfew_sync::node::Node::start(shared) {
+        Ok(node) => Some((node, root)),
+        Err(e) => {
+            eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
+            None
+        }
+    }
+}
+
 fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
     let snapshot = Persisted {
         sessions: enforcer.sessions.clone(),
@@ -201,6 +229,11 @@ pub fn run(
         start_resolver(&guard.config)
     };
 
+    // Sync, if this machine can have it. Held for the life of the loop: dropping the node stops
+    // its threads, which is exactly what should happen when the service stops.
+    let sync = start_sync();
+    let mut mirror = crate::mirror::Mirror::default();
+
     let mut previous = last_tick;
     while !stop() {
         let now = now();
@@ -216,6 +249,19 @@ pub fn run(
             let tick = guard.tick(now, elapsed, &[], &SystemProcesses::default());
             if let Some(resolver) = &resolver {
                 resolver.set(tick.domains.clone());
+            }
+            // Sync runs after the pass, not before it: what the other device is told is what this
+            // one has just decided, and what it hears back is enforced on the very next pass two
+            // seconds later, which is what keeps the five-second promise.
+            if let Some((node, root)) = &sync {
+                let Enforcer { sessions, usage, launches, .. } = &mut *guard;
+                let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
+                if pass.published > 0 {
+                    node.push_all(now);
+                    if let Err(e) = crate::store::save(root, node.shared()) {
+                        eprintln!("curfew: could not save the sync log: {e}");
+                    }
+                }
             }
             persist(&guard, &state_path, now);
         }

@@ -6,9 +6,11 @@
 //! separate program is an uninstaller that can be run when the service is not looking.
 
 mod host;
+mod mirror;
 mod runner;
-#[cfg(windows)]
 mod service;
+#[cfg(windows)]
+mod store;
 mod watchdog;
 
 use curfew_win::ipc::{Request, Response};

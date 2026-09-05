@@ -61,7 +61,7 @@ Windows account, with no Curfew-held password anywhere.
 - [x] LAN transport (signed multicast beacons + TCP; mDNS and QUIC dropped, reasons in `lan.rs`)
 - [x] Shared-folder transport: immutable segments, concurrent writers (GAPS C5) — latency UI pending
 - [ ] Bluetooth / QR beam fallback
-- [ ] Session mirroring: start on PC, phone blocks; budgets shared across devices
+- [x] Session mirroring: start on PC, phone blocks; budgets shared across devices (Windows service wired; Android app pending)
 - [ ] Conflict UI
 
 **Exit criteria:** merging any two lock states never produces a weaker lock (property test); a
