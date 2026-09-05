@@ -11,6 +11,7 @@ pub mod ipc;
 pub mod procs;
 pub mod state;
 pub mod tick;
+pub mod windows;
 
 pub use blocked::blocked_domains;
 pub use procs::{enforce, verdicts, Outcome, Process, Processes, Verdict};

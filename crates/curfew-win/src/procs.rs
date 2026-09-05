@@ -126,14 +126,15 @@ pub fn enforce(
 /// The real process table.
 #[derive(Default)]
 pub struct SystemProcesses {
-    /// Window titles by pid, filled in by the platform layer. Enumerating windows needs Win32 and
-    /// is done by the caller on Windows; elsewhere this stays empty and title rules simply never
-    /// match, which is honest rather than wrong.
+    /// Titles to use instead of asking the desktop. Empty in production; the escape hatch exists
+    /// so a machine without a desktop session (a service before anyone logs in) can be driven.
     pub titles: std::collections::BTreeMap<u32, String>,
 }
 
 impl Processes for SystemProcesses {
     fn list(&self) -> Vec<Process> {
+        let mut titles = crate::windows::window_titles();
+        titles.extend(self.titles.clone());
         let mut system = sysinfo::System::new();
         system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         system
@@ -144,7 +145,7 @@ impl Processes for SystemProcesses {
                 Process {
                     pid: id,
                     exe: process.name().to_string_lossy().to_string(),
-                    title: self.titles.get(&id).cloned().unwrap_or_default(),
+                    title: titles.get(&id).cloned().unwrap_or_default(),
                 }
             })
             .collect()
@@ -159,5 +160,9 @@ impl Processes for SystemProcesses {
         // cost is unsaved work, so the UI warns before a session starts and Frozen mode never fires
         // without a countdown (GAPS B4).
         system.process(pid).map(|p| p.kill()).unwrap_or(false)
+    }
+
+    fn foreground(&self) -> Option<Process> {
+        crate::windows::foreground()
     }
 }

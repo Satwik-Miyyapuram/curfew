@@ -14,5 +14,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 toml.workspace = true
