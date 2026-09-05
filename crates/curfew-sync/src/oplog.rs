@@ -356,7 +356,13 @@ fn apply(state: &mut Replay, entry: &Entry, now: Timestamp) {
             // for it, which is the same wait the asking device had to serve.
             let earliest = entry.at + curfew_core::lock::DELAYED_RELEASE_SECONDS;
             let at = &(*at).max(earliest);
-            if let Some(running) = state.sessions.running.iter_mut().find(|s| &s.id == session) {
+            // Only a session that is actually holding someone has a release to schedule. Recording
+            // one against an unlocked session would turn a set that promises nothing into one that
+            // does — and a set whose `ends_at: None` then reads as "until released" rather than as
+            // "nothing here at all", which is how a merge could end up *removing* an end time.
+            if let Some(running) =
+                state.sessions.running.iter_mut().find(|s| &s.id == session && s.lock.is_locked())
+            {
                 // Through the lattice rather than by assignment, so a peer cannot push a release
                 // that is already visible to the user further away.
                 let mut proposed = running.lock.clone();
@@ -791,5 +797,21 @@ mod tests {
 
         assert_eq!(restored, log);
         assert_eq!(restored.replay(NOW + 60), log.replay(NOW + 60));
+    }
+
+    #[test]
+    fn a_release_against_a_session_that_holds_nobody_invents_no_promise() {
+        // A release only means something for a lock. Recorded against an unlocked session it would
+        // build a lock set that says "until released", and merging that with a real one could then
+        // take away an end time the user had been shown — syncing making a promise weaker, which
+        // is the one thing this layer may never do.
+        let p = paired();
+        let mut log = Log::default();
+        log.append(&p.pc, NOW, start("s1", [], None));
+        log.append(&p.pc, NOW, Op::ReleaseRequested { session: "s1".into(), at: NOW });
+
+        let session = log.replay(NOW).sessions.get("s1").cloned().expect("s1 is running");
+
+        assert!(session.lock.is_empty(), "a release invented a lock: {:?}", session.lock);
     }
 }

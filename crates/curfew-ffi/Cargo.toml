@@ -14,6 +14,7 @@ name = "curfew_ffi"
 
 [dependencies]
 curfew-core = { path = "../curfew-core" }
+curfew-sync = { path = "../curfew-sync" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

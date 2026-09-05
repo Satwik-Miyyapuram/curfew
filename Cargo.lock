@@ -398,6 +398,7 @@ name = "curfew-ffi"
 version = "0.0.1"
 dependencies = [
  "curfew-core",
+ "curfew-sync",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

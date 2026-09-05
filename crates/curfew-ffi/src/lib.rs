@@ -19,6 +19,8 @@ use curfew_core::{decide, ClockWitness, Config, Lock, Reading, Timestamp, Verdic
 use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
+pub mod sync;
+
 uniffi::setup_scaffolding!();
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]

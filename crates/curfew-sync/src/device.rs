@@ -50,6 +50,23 @@ impl DeviceId {
     }
 }
 
+impl std::str::FromStr for DeviceId {
+    type Err = Error;
+
+    /// Read back an id a user or a UI is holding. The shape is checked — nothing else can be: an
+    /// id is a hash, so the only real proof that one belongs to a device is that device signing
+    /// something. This exists so a typo becomes an error here rather than a peer lookup that
+    /// mysteriously never matches.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let text = text.trim().to_ascii_uppercase();
+        let expected = ID_BYTES * 8 / 5 + usize::from(ID_BYTES * 8 % 5 != 0);
+        if text.len() != expected || !text.bytes().all(|b| ALPHABET.contains(&b)) {
+            return Err(Error::BadKey);
+        }
+        Ok(Self(text))
+    }
+}
+
 impl std::fmt::Display for DeviceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -307,5 +324,22 @@ mod tests {
                 && !printed.contains(&format!("{:?}", &secret[..8])),
             "the debug output leaked key material: {printed}"
         );
+    }
+
+    #[test]
+    fn an_id_survives_being_written_down_and_typed_back() {
+        use std::str::FromStr as _;
+        let id = Identity::generate("desk").id();
+
+        assert_eq!(DeviceId::from_str(&id.to_string()).unwrap(), id);
+        assert_eq!(DeviceId::from_str(&id.to_string().to_lowercase()).unwrap(), id);
+    }
+
+    #[test]
+    fn something_that_is_not_an_id_is_refused_rather_than_carried_around() {
+        use std::str::FromStr as _;
+        for text in ["", "hello", "AAAA", "IIIIIIIIIIIIIIIIIIIIIIIIII"] {
+            assert!(DeviceId::from_str(text).is_err(), "{text} was accepted as a device id");
+        }
     }
 }

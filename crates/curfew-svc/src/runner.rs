@@ -132,6 +132,20 @@ fn start_resolver(config: &Config) -> Option<curfew_win::dns::Proxy> {
     }
 }
 
+/// Where this machine keeps its sync identity, its peers and its log: under `%ProgramData%`
+/// beside the config and the state, for the same reason those are there. A standard user must not
+/// be able to hand themselves a new identity, delete the peer that holds their locks, or truncate
+/// the log.
+pub fn sync_root() -> PathBuf {
+    match std::env::var("CURFEW_SYNC_DIR") {
+        Ok(path) if !path.is_empty() => PathBuf::from(path),
+        _ => {
+            let data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".into());
+            Path::new(&data).join("Curfew").join("sync")
+        }
+    }
+}
+
 /// Bring sync up: identity, peers and log from disk, and a node listening on the LAN.
 ///
 /// Every failure here is survivable and none of them may stop enforcement. A machine with no
@@ -139,9 +153,9 @@ fn start_resolver(config: &Config) -> Option<curfew_win::dns::Proxy> {
 /// keep its own locks; sync is how the *other* device finds out, and a device that refused to block
 /// because it could not gossip would have the priorities exactly backwards.
 fn start_sync() -> Option<(curfew_sync::node::Node, PathBuf)> {
-    let root = crate::store::root();
+    let root = sync_root();
     let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into());
-    let (shared, complaints) = match crate::store::open(&root, &name) {
+    let (shared, complaints) = match curfew_sync::store::open(&root, &name) {
         Ok(opened) => opened,
         Err(e) => {
             eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
@@ -232,7 +246,7 @@ pub fn run(
     // Sync, if this machine can have it. Held for the life of the loop: dropping the node stops
     // its threads, which is exactly what should happen when the service stops.
     let sync = start_sync();
-    let mut mirror = crate::mirror::Mirror::default();
+    let mut mirror = curfew_sync::mirror::Mirror::default();
 
     let mut previous = last_tick;
     while !stop() {
@@ -258,7 +272,7 @@ pub fn run(
                 let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
                 if pass.published > 0 {
                     node.push_all(now);
-                    if let Err(e) = crate::store::save(root, node.shared()) {
+                    if let Err(e) = curfew_sync::store::save(root, node.shared()) {
                         eprintln!("curfew: could not save the sync log: {e}");
                     }
                 }

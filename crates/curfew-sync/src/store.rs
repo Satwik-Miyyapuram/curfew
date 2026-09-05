@@ -1,30 +1,22 @@
-//! Where this machine keeps its sync identity, its peers and its log.
+//! Where a device keeps its sync identity, its peers and its log.
 //!
-//! Under `%ProgramData%` beside the config and the state, for the same reason they are: a standard
-//! user must not be able to hand themselves a new identity, delete the peer that holds their locks,
-//! or truncate the log. The service runs as LocalSystem and the directory is protected with it.
+//! The directory is chosen by the caller, because what "somewhere a standard user cannot rewrite"
+//! means is a platform question: on Windows it is `%ProgramData%\Curfew\sync`, held by the service
+//! running as LocalSystem; on Android it is the app's own private storage. Everything else about
+//! how the three files are read and written is the same on both, so it lives here.
 //!
 //! Three files rather than one. The identity is the only secret and is written on its own so it can
 //! be given tighter permissions and so a corrupt log never costs the device its name; peers and log
 //! are the parts that legitimately change every few seconds.
 
-use curfew_sync::device::Identity;
-use curfew_sync::node::Shared;
-use curfew_sync::oplog::Log;
-use curfew_sync::pair::Peers;
+use crate::device::Identity;
+use crate::node::Shared;
+use crate::oplog::Log;
+use crate::pair::Peers;
 use std::io;
-use std::path::{Path, PathBuf};
-
-/// The directory the three files live in.
-pub fn root() -> PathBuf {
-    match std::env::var("CURFEW_SYNC_DIR") {
-        Ok(path) if !path.is_empty() => PathBuf::from(path),
-        _ => {
-            let data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".into());
-            Path::new(&data).join("Curfew").join("sync")
-        }
-    }
-}
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 /// Load what is there, generating an identity the first time. A log or peer file that will not
 /// parse is a serious matter, so it is reported rather than silently replaced: the caller decides,
@@ -113,9 +105,9 @@ fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oplog::Op;
     use curfew_core::session::{Session, SessionSource};
     use curfew_core::{Lock, LockSet};
-    use curfew_sync::oplog::Op;
 
     const NOW: i64 = 1_788_510_600;
 

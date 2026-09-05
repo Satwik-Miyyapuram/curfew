@@ -18,11 +18,11 @@
 //! ended here only if the *local* lock allows it, which is [`Sessions::end`] refusing, not this
 //! module deciding. An `End` from a peer is a request, never an instruction.
 
+use crate::node::Shared;
+use crate::oplog::Op;
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::session::Sessions;
 use curfew_core::Timestamp;
-use curfew_sync::node::Shared;
-use curfew_sync::oplog::Op;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What one pass of the mirror did, for logging and for the status a UI shows.
@@ -202,11 +202,11 @@ impl Mirror {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::Identity;
+    use crate::oplog::Log;
+    use crate::pair::{Invite, Peers};
     use curfew_core::session::{Session, SessionSource};
     use curfew_core::{Lock, LockSet};
-    use curfew_sync::device::Identity;
-    use curfew_sync::oplog::Log;
-    use curfew_sync::pair::{Invite, Peers};
 
     const NOW: Timestamp = 1_788_510_600;
     const HOUR: Timestamp = 60 * 60;
@@ -255,7 +255,7 @@ mod tests {
         };
         let peers = to.shared.peers.lock().unwrap();
         let mut log = to.shared.log.lock().unwrap();
-        curfew_sync::wire::receive(&mut log, &peers, &entries);
+        crate::wire::receive(&mut log, &peers, &entries);
     }
 
     fn session(id: &str, profile: &str, lock: LockSet) -> Session {
