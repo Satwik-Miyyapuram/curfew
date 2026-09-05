@@ -757,4 +757,144 @@ class PolicyTest {
         val profiles = Policy.profiles(configToml)
         assertEquals(listOf(ProfileName("deep-work", "Deep work")), profiles)
     }
+
+    // --- editing schedules --------------------------------------------------------------------
+
+    /** The window the config was written with, read back through the Kotlin shape, field by field. */
+    @Test
+    fun `a window written in TOML is the same window in Kotlin`() {
+        val w = policy().weekly().single()
+        assertEquals("mornings", w.id)
+        assertEquals("deep-work", w.profile)
+        assertEquals(listOf(0, 1, 2, 3, 4), w.days)
+        assertEquals(540, w.startMinute)
+        assertEquals(720, w.endMinute)
+        assertEquals(listOf(Lock.Timer), w.locks)
+    }
+
+    @Test
+    fun `a calendar rule written in TOML is the same rule in Kotlin`() {
+        val c = policy().calendars().single()
+        assertEquals("work-focus", c.id)
+        assertEquals(300, c.padBeforeSeconds)
+        assertEquals("*focus*", c.matcher.title)
+        assertEquals("Work", c.matcher.calendar)
+        assertTrue(c.matcher.busyOnly)
+        assertEquals(listOf(Lock.Confirm), c.locks)
+    }
+
+    @Test
+    fun `a window added from the editor is there, and runs`() {
+        val p = policy()
+        p.upsertWeekly(
+            WeeklySchedule(
+                id = "evenings",
+                profile = "deep-work",
+                days = emptyList(),
+                startMinute = 9 * 60,
+                endMinute = 10 * 60,
+                locks = listOf(Lock.Timer),
+            ),
+        )
+        assertEquals(listOf("mornings", "evenings"), p.weekly().map { it.id })
+        // The point of the whole exercise: what the form saved actually starts a session.
+        assertTrue(p.reconcile(friday0930, emptyList(), "seed").isNotEmpty())
+    }
+
+    @Test
+    fun `saving a window twice edits it instead of adding a second`() {
+        val p = policy()
+        val w = WeeklySchedule("evenings", "deep-work", emptyList(), 1_200, 1_260)
+        p.upsertWeekly(w)
+        p.upsertWeekly(w.copy(startMinute = 1_260, endMinute = 1_380))
+        assertEquals(1, p.weekly().count { it.id == "evenings" })
+        assertEquals(1_260, p.weekly().first { it.id == "evenings" }.startMinute)
+    }
+
+    /**
+     * A form that reports an error and keeps the bad value would make the *next* save fail too,
+     * for a reason the user cannot see.
+     */
+    @Test
+    fun `a window naming a profile that is not there is refused and changes nothing`() {
+        val p = policy()
+        try {
+            p.upsertWeekly(WeeklySchedule("evenings", "no-such-profile", emptyList(), 60, 120))
+            fail("a window for a profile that does not exist was accepted")
+        } catch (e: InvalidSchedule) {
+            assertTrue(e.message.orEmpty().contains("no-such-profile"))
+        }
+        assertEquals(listOf("mornings"), p.weekly().map { it.id })
+    }
+
+    @Test
+    fun `a window that starts and ends at the same minute is refused`() {
+        try {
+            policy().upsertWeekly(WeeklySchedule("evenings", "deep-work", emptyList(), 600, 600))
+            fail("an empty-or-whole-day window was accepted")
+        } catch (e: InvalidSchedule) {
+            assertNotNull(e.message)
+        }
+    }
+
+    @Test
+    fun `a deleted window stops starting sessions`() {
+        val p = policy()
+        p.removeWeekly("mornings")
+        assertTrue(p.weekly().isEmpty())
+        assertTrue(p.reconcile(friday0930, emptyList(), "seed").isEmpty())
+    }
+
+    /** Deleting one that is not there is what the caller asked for: it is gone. */
+    @Test
+    fun `deleting a window that is not there is not an error`() {
+        val p = policy()
+        p.removeWeekly("never-existed")
+        assertEquals(listOf("mornings"), p.weekly().map { it.id })
+    }
+
+    @Test
+    fun `a calendar rule added from the editor is there`() {
+        val p = policy()
+        p.upsertCalendar(
+            CalendarSchedule(
+                id = "standups",
+                profile = "deep-work",
+                matcher = EventMatcher(title = "*standup*"),
+                padBeforeSeconds = 60,
+            ),
+        )
+        assertEquals(listOf("work-focus", "standups"), p.calendars().map { it.id })
+    }
+
+    @Test
+    fun `a calendar rule naming a profile that is not there is refused and changes nothing`() {
+        val p = policy()
+        try {
+            p.upsertCalendar(CalendarSchedule("standups", "no-such-profile"))
+            fail("a rule for a profile that does not exist was accepted")
+        } catch (e: InvalidSchedule) {
+            assertNotNull(e.message)
+        }
+        assertEquals(listOf("work-focus"), p.calendars().map { it.id })
+    }
+
+    @Test
+    fun `a deleted calendar rule is gone`() {
+        val p = policy()
+        p.removeCalendar("work-focus")
+        assertTrue(p.calendars().isEmpty())
+    }
+
+    /** Whatever the editor wrote has to survive being saved to disk, or it works until next launch. */
+    @Test
+    fun `an edited schedule survives being written out and loaded again`() {
+        val p = policy()
+        p.upsertWeekly(WeeklySchedule("evenings", "deep-work", listOf(5, 6), 1_200, 60))
+        p.upsertCalendar(CalendarSchedule("standups", "deep-work", EventMatcher(title = "*sync*")))
+
+        val reloaded = Policy.load(p.configToml())
+        assertEquals(p.weekly(), reloaded.weekly())
+        assertEquals(p.calendars(), reloaded.calendars())
+    }
 }

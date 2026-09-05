@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +30,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.policy.CalendarSchedule
+import dev.curfew.policy.WeeklySchedule
 
 /**
  * What is going to happen, and the rules that decide it.
@@ -37,16 +40,26 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * going to do to me later today?", and that has to be answerable without reading a config. The
  * config itself is below it, as text.
  *
- * Editing the rules as TOML is a deliberate choice for the first release, not a placeholder: the
- * config is the thing a user backs up, diffs and carries between devices, and a form that can only
- * express a subset of it would quietly become the real interface while the file became a mystery.
- * The core validates before anything is written, so a bad edit cannot leave the device unprotected.
+ * Below it are the schedules themselves, as forms: a weekly window is "these days, between these
+ * two times", and a calendar rule is "whatever my calendar calls a meeting". Neither should require
+ * learning a file format.
+ *
+ * The TOML editor stays underneath, and is not a fallback for the forms: the config is the thing a
+ * user backs up, diffs and carries between devices, and hiding it would make the file a mystery to
+ * the person who owns it. Both paths write through the same core validation, so neither can leave
+ * the device unprotected.
  */
 @Composable
 fun ScheduleScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(state.configToml) }
     var editing by remember { mutableStateOf(false) }
+
+    // Which form is open, if any. `Editing(null)` is a new schedule; a value is an edit of that
+    // one. Held here rather than in the cards so only one form can be open at a time.
+    var weeklyForm by remember { mutableStateOf<Editing<WeeklySchedule>?>(null) }
+    var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
+    var removing by remember { mutableStateOf<Removal?>(null) }
 
     // Adopt the saved config whenever it changes underneath an untouched editor, so the text does
     // not silently go stale — but never overwrite an edit in progress.
@@ -141,6 +154,62 @@ fun ScheduleScreen(model: CurfewViewModel) {
         }
 
         Text(
+            "Weekly windows",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+        )
+        if (state.weekly.isEmpty()) {
+            Text(
+                "No weekly windows. Add one to block a profile at the same time every week.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        state.weekly.forEach { window ->
+            WeeklyCard(
+                window = window,
+                onEdit = { weeklyForm = Editing(window) },
+                onDelete = { removing = Removal(window.id, describeWindow(window), weekly = true) },
+            )
+        }
+        Button(
+            onClick = { weeklyForm = Editing(null) },
+            enabled = state.profiles.isNotEmpty(),
+        ) { Text("Add a window") }
+
+        Text(
+            "From your calendar",
+            style = MaterialTheme.typography.headlineSmall,
+            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+        )
+        if (state.calendarRules.isEmpty()) {
+            Text(
+                "No calendar rules. Add one to block a profile for as long as a meeting lasts.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        state.calendarRules.forEach { rule ->
+            CalendarRuleCard(
+                rule = rule,
+                onEdit = { calendarForm = Editing(rule) },
+                onDelete = {
+                    removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
+                },
+            )
+        }
+        Button(
+            onClick = { calendarForm = Editing(null) },
+            enabled = state.profiles.isNotEmpty(),
+        ) { Text("Add a calendar rule") }
+        // A schedule has to name a profile that exists, so the buttons above are dead until one
+        // does. Said plainly rather than left as a greyed-out button with no explanation.
+        if (state.profiles.isEmpty()) {
+            Text(
+                "Add a profile in the rules below first \u2014 a schedule has to say which one it runs.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        Text(
             "Rules",
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(top = 8.dp).semantics { heading() },
@@ -181,4 +250,66 @@ fun ScheduleScreen(model: CurfewViewModel) {
             style = MaterialTheme.typography.bodySmall,
         )
     }
+
+    weeklyForm?.let { form ->
+        WeeklyDialog(
+            existing = form.value,
+            profiles = state.profiles,
+            now = state.now,
+            onDismiss = { weeklyForm = null },
+            onSave = { window ->
+                weeklyForm = null
+                model.saveWeekly(window)
+            },
+        )
+    }
+
+    calendarForm?.let { form ->
+        CalendarDialog(
+            existing = form.value,
+            profiles = state.profiles,
+            now = state.now,
+            onDismiss = { calendarForm = null },
+            onSave = { rule ->
+                calendarForm = null
+                model.saveCalendarRule(rule)
+            },
+        )
+    }
+
+    // Removal is confirmed because it is the one edit here that cannot be undone by pressing the
+    // same button again, and because what it does *not* do \u2014 end a session already running
+    // \u2014 is the thing people expect it to.
+    removing?.let { target ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove this schedule?") },
+            text = {
+                Text(
+                    target.description + "\n\nIt will stop starting sessions. A session it has " +
+                        "already started keeps running until its own lock lets it go.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = target
+                    removing = null
+                    if (chosen.weekly) model.deleteWeekly(chosen.id)
+                    else model.deleteCalendarRule(chosen.id)
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep it") } },
+        )
+    }
 }
+
+/**
+ * A form that is open, over a schedule being edited or nothing for a new one.
+ *
+ * A wrapper rather than a bare nullable because null already means "no form open", and the two
+ * cases have to be told apart: a new window and an edit of an existing one are different saves.
+ */
+internal data class Editing<T>(val value: T?)
+
+/** A schedule the user has asked to remove, waiting on the confirmation. */
+internal data class Removal(val id: String, val description: String, val weekly: Boolean)

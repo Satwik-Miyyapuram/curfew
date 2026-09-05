@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.policy.CalendarEvent
+import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.Consumption
 import dev.curfew.policy.Decision
 import dev.curfew.policy.Launches
@@ -14,6 +15,7 @@ import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Passes
 import dev.curfew.policy.Policy
 import dev.curfew.policy.Rollup
+import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.Session
 import dev.curfew.policy.Sessions
 import dev.curfew.policy.UsageState
@@ -100,13 +102,16 @@ class CurfewRuntime internal constructor(
 
     /** Bring sessions into line with the schedules, persist, and return the ids that started. */
     suspend fun reconcile(now: Long = clock.now(), events: List<CalendarEvent> = emptyList()): List<String> =
-        gate.withLock {
-            val started = policy.reconcile(now, events, idSeed = now.toString())
-            for (id in started) audit(now, "session.started", id)
-            for (session in policy.reap(now)) audit(now, "session.ended", session.id)
-            persist(now)
-            started
-        }
+        gate.withLock { reconcileLocked(now, events) }
+
+    /** The body of [reconcile], for callers that already hold the gate. */
+    private suspend fun reconcileLocked(now: Long, events: List<CalendarEvent>): List<String> {
+        val started = policy.reconcile(now, events, idSeed = now.toString())
+        for (id in started) audit(now, "session.started", id)
+        for (session in policy.reap(now)) audit(now, "session.ended", session.id)
+        persist(now)
+        return started
+    }
 
     suspend fun startSession(session: Session) = gate.withLock {
         policy.startSession(session)
@@ -201,6 +206,61 @@ class CurfewRuntime internal constructor(
             audit(clock.now(), "config.replaced", "")
             refresh(clock.now())
         }
+    }
+
+    // --- editing schedules ------------------------------------------------------------------------
+    //
+    // Every edit goes through the core, which validates the whole config, and is only written to
+    // disk once it has been accepted. A rejected edit leaves both the running config and the file
+    // exactly as they were, so a form the user got wrong cannot break the blocker.
+
+    fun weeklySchedules(): List<WeeklySchedule> = policy.weekly()
+
+    fun calendarSchedules(): List<CalendarSchedule> = policy.calendars()
+
+    /** Add a window, or replace the one with this id. Fails with [InvalidSchedule]'s message. */
+    suspend fun saveWeekly(window: WeeklySchedule): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.upsertWeekly(window)
+            commitConfig("schedule.weekly.saved", window.id)
+        }
+    }
+
+    suspend fun deleteWeekly(id: String): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.removeWeekly(id)
+            commitConfig("schedule.weekly.removed", id)
+        }
+    }
+
+    suspend fun saveCalendarRule(rule: CalendarSchedule): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.upsertCalendar(rule)
+            commitConfig("schedule.calendar.saved", rule.id)
+        }
+    }
+
+    suspend fun deleteCalendarRule(id: String): Result<Unit> = gate.withLock {
+        runCatching {
+            policy.removeCalendar(id)
+            commitConfig("schedule.calendar.removed", id)
+        }
+    }
+
+    /**
+     * Write the config the core now holds, and act on it.
+     *
+     * Reconciling straight away is what makes a saved window feel like a setting rather than a
+     * request: if the window covers this minute, the session is running before the form closes.
+     */
+    private suspend fun commitConfig(kind: String, detail: String) {
+        config.write(policy.configToml()).getOrThrow()
+        val now = clock.now()
+        audit(now, kind, detail)
+        // Calendar events are deliberately not read here: this runs on whatever thread saved the
+        // form, the provider read is slow, and the next tick is a few seconds away. A window is
+        // what a person expects to start immediately; a calendar rule waits for the poll.
+        reconcileLocked(now, emptyList())
     }
 
     suspend fun nextChange(now: Long = clock.now(), events: List<CalendarEvent> = emptyList()): Long? =

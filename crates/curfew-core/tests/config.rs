@@ -288,3 +288,156 @@ fn tokens_survive_a_round_trip_through_the_document() {
     let back = Config::from_toml(&config.to_toml().unwrap()).unwrap();
     assert_eq!(back.tokens, config.tokens);
 }
+
+// --- editing schedules from a settings screen ---------------------------------------------------
+
+use curfew_core::schedule::{CalendarSchedule, EventMatcher, WeeklySchedule};
+
+fn window(id: &str, profile: &str) -> WeeklySchedule {
+    WeeklySchedule {
+        id: id.into(),
+        profile: profile.into(),
+        days: vec![0, 1, 2],
+        start_minute: 9 * 60,
+        end_minute: 17 * 60,
+        locks: Vec::new(),
+    }
+}
+
+fn rule(id: &str, profile: &str) -> CalendarSchedule {
+    CalendarSchedule {
+        id: id.into(),
+        profile: profile.into(),
+        matcher: EventMatcher { calendar: Some("Work".into()), ..EventMatcher::default() },
+        pad_before_seconds: 60,
+        pad_after_seconds: 0,
+        locks: Vec::new(),
+    }
+}
+
+#[test]
+fn a_window_saved_twice_is_edited_rather_than_duplicated() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.weekly.len();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    assert_eq!(cfg.weekly.len(), before + 1);
+
+    let mut edited = window("evenings", "deep-work");
+    edited.start_minute = 20 * 60;
+    cfg.upsert_weekly(edited).unwrap();
+    assert_eq!(cfg.weekly.len(), before + 1, "editing a window added a second one");
+    let saved = cfg.weekly.iter().find(|w| w.id == "evenings").unwrap();
+    assert_eq!(saved.start_minute, 20 * 60);
+}
+
+/// The refusal is only half of it. A form that reports an error and leaves the bad value in the
+/// config means the next thing the user saves is refused too, for a reason they cannot see.
+#[test]
+fn a_window_naming_a_profile_that_does_not_exist_is_refused_and_leaves_nothing_behind() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.weekly.clone();
+    let err = cfg.upsert_weekly(window("evenings", "no-such-profile")).unwrap_err();
+    assert!(matches!(&err, ConfigError::Invalid(m) if m.contains("no-such-profile")), "{err:?}");
+    assert_eq!(cfg.weekly, before);
+    assert!(cfg.validate().is_ok(), "the config was left unsaveable");
+}
+
+/// The same, for an edit to a window that was already there: the old one has to come back.
+#[test]
+fn a_bad_edit_puts_the_window_back_as_it_was() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    let good = cfg.weekly.clone();
+
+    let mut broken = window("evenings", "deep-work");
+    broken.start_minute = 9_999;
+    assert!(cfg.upsert_weekly(broken).is_err());
+    assert_eq!(cfg.weekly, good);
+}
+
+#[test]
+fn a_window_that_starts_and_ends_at_the_same_minute_is_refused() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let mut w = window("evenings", "deep-work");
+    w.end_minute = w.start_minute;
+    assert!(cfg.upsert_weekly(w).is_err(), "an empty-or-whole-day window was accepted");
+}
+
+#[test]
+fn a_window_naming_an_eighth_day_is_refused() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let mut w = window("evenings", "deep-work");
+    w.days = vec![7];
+    assert!(cfg.upsert_weekly(w).is_err());
+}
+
+#[test]
+fn removing_a_window_that_is_not_there_is_not_an_error() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.weekly.clone();
+    cfg.remove_weekly("never-existed");
+    assert_eq!(cfg.weekly, before);
+}
+
+#[test]
+fn a_removed_window_is_gone() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    cfg.remove_weekly("evenings");
+    assert!(cfg.weekly.iter().all(|w| w.id != "evenings"));
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn a_calendar_rule_saved_twice_is_edited_rather_than_duplicated() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.calendars.len();
+    cfg.upsert_calendar(rule("standups", "deep-work")).unwrap();
+    let mut edited = rule("standups", "deep-work");
+    edited.pad_after_seconds = 900;
+    cfg.upsert_calendar(edited).unwrap();
+    assert_eq!(cfg.calendars.len(), before + 1);
+    assert_eq!(
+        cfg.calendars.iter().find(|c| c.id == "standups").unwrap().pad_after_seconds,
+        900
+    );
+}
+
+#[test]
+fn a_calendar_rule_naming_a_profile_that_does_not_exist_is_refused_and_leaves_nothing_behind() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let before = cfg.calendars.clone();
+    assert!(cfg.upsert_calendar(rule("standups", "no-such-profile")).is_err());
+    assert_eq!(cfg.calendars, before);
+}
+
+#[test]
+fn a_removed_calendar_rule_is_gone() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_calendar(rule("standups", "deep-work")).unwrap();
+    cfg.remove_calendar("standups");
+    assert!(cfg.calendars.iter().all(|c| c.id != "standups"));
+}
+
+/// Whatever the editor writes has to survive being saved to disk and read back, or the schedule
+/// works until the app is next opened.
+#[test]
+fn edited_schedules_survive_a_round_trip_through_the_document() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    cfg.upsert_calendar(rule("standups", "deep-work")).unwrap();
+    let back = Config::from_toml(&cfg.to_toml().unwrap()).unwrap();
+    assert_eq!(back.weekly, cfg.weekly);
+    assert_eq!(back.calendars, cfg.calendars);
+}
+
+/// Two windows with one id would make every edit to either land on whichever parsed first.
+#[test]
+fn two_windows_with_one_id_are_refused_at_load() {
+    let toml = "schema_version = 1\n\
+        [[profiles]]\nid = \"deep-work\"\nname = \"Deep work\"\n\
+        [[weekly]]\nid = \"w\"\nprofile = \"deep-work\"\nstart_minute = 60\nend_minute = 120\n\
+        [[weekly]]\nid = \"w\"\nprofile = \"deep-work\"\nstart_minute = 180\nend_minute = 240\n";
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(matches!(&err, ConfigError::Invalid(m) if m.contains("duplicate")), "{err:?}");
+}

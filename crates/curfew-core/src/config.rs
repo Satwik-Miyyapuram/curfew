@@ -187,6 +187,57 @@ impl Config {
             .unwrap_or_default()
     }
 
+    // --- schedules ------------------------------------------------------------------------------
+
+    /// Add a weekly window, or replace the one that already has this id.
+    ///
+    /// Upsert rather than add-or-fail because that is what an editor screen does: the same form
+    /// opens for a new window and for an existing one, and which it was is not something the caller
+    /// should have to tell us. The whole config is validated afterwards, so a window naming a
+    /// profile that does not exist is refused here rather than at the moment it would have fired.
+    pub fn upsert_weekly(&mut self, window: WeeklySchedule) -> Result<(), ConfigError> {
+        let before = self.weekly.clone();
+        match self.weekly.iter_mut().find(|w| w.id == window.id) {
+            Some(existing) => *existing = window,
+            None => self.weekly.push(window),
+        }
+        // Put the config back exactly as it was if the edit does not stand up. A validate that
+        // leaves the invalid value behind turns one bad edit into a config nobody can save.
+        if let Err(e) = self.validate() {
+            self.weekly = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Delete a weekly window. Deleting one that is not there is not an error: the caller wanted it
+    /// gone, and it is gone.
+    pub fn remove_weekly(&mut self, id: &str) {
+        self.weekly.retain(|w| w.id != id);
+    }
+
+    /// Add a calendar rule, or replace the one that already has this id. See [`Config::upsert_weekly`].
+    pub fn upsert_calendar(&mut self, rule: CalendarSchedule) -> Result<(), ConfigError> {
+        let before = self.calendars.clone();
+        match self.calendars.iter_mut().find(|c| c.id == rule.id) {
+            Some(existing) => *existing = rule,
+            None => self.calendars.push(rule),
+        }
+        if let Err(e) = self.validate() {
+            self.calendars = before;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Delete a calendar rule.
+    ///
+    /// A session this rule started keeps running: it is a promise already made, and a settings
+    /// edit is not a way out of a lock. The rule simply stops starting new ones.
+    pub fn remove_calendar(&mut self, id: &str) {
+        self.calendars.retain(|c| c.id != id);
+    }
+
     /// The timezone budgets and schedules are evaluated in.
     pub fn tz(&self) -> Result<chrono_tz::Tz, ConfigError> {
         self.timezone.parse().map_err(|_| ConfigError::UnknownTimezone(self.timezone.clone()))
@@ -242,6 +293,7 @@ impl Config {
         // A schedule naming a profile that does not exist would start a session that enforces
         // nothing: a lock with no rules behind it, which is worse than an error because it looks
         // like it is working. Catch the typo at load, where it can still be corrected.
+        let mut schedules = std::collections::BTreeSet::new();
         for (kind, id, profile) in self
             .weekly
             .iter()
@@ -251,6 +303,37 @@ impl Config {
             if self.profile(profile).is_none() {
                 return Err(ConfigError::Invalid(format!(
                     "{kind} {id:?} names profile {profile:?}, which is not defined"
+                )));
+            }
+            // Ids identify a schedule to the editor that changes it and to the session it starts.
+            // Two windows sharing one would make an edit to either land on whichever came first.
+            if id.trim().is_empty() {
+                return Err(ConfigError::Invalid(format!("a {kind} has an empty id")));
+            }
+            if !schedules.insert((kind, id)) {
+                return Err(ConfigError::Invalid(format!("duplicate {kind} id {id:?}")));
+            }
+        }
+        // A minute past the end of the day is not a time. `end == start` is the one that reads as a
+        // mistake either way — an empty window or a whole day, depending on who is asked — so it is
+        // refused rather than guessed at.
+        for w in &self.weekly {
+            if w.start_minute >= 1_440 || w.end_minute >= 1_440 {
+                return Err(ConfigError::Invalid(format!(
+                    "weekly schedule {:?} has a time outside the day",
+                    w.id
+                )));
+            }
+            if w.start_minute == w.end_minute {
+                return Err(ConfigError::Invalid(format!(
+                    "weekly schedule {:?} starts and ends at the same minute",
+                    w.id
+                )));
+            }
+            if w.days.iter().any(|d| *d > 6) {
+                return Err(ConfigError::Invalid(format!(
+                    "weekly schedule {:?} names a day that is not a day of the week",
+                    w.id
                 )));
             }
         }

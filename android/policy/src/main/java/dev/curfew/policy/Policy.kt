@@ -85,6 +85,60 @@ class Policy private constructor(private val inner: Curfew) {
      */
     fun setConfig(configToml: String) = inner.setConfig(configToml)
 
+    // --- editing schedules ------------------------------------------------------------------------
+    //
+    // The schedule screen builds these objects, not TOML. Writing a config document from Kotlin
+    // would be a second definition of what a schedule is, and it is the one written in the UI
+    // language that drifts.
+
+    /** Every weekly window, in the order the config holds them. */
+    fun weekly(): List<WeeklySchedule> =
+        json.decodeFromString(ListSerializer(WeeklySchedule.serializer()), inner.weeklyJson())
+
+    /** Every calendar rule. */
+    fun calendars(): List<CalendarSchedule> =
+        json.decodeFromString(ListSerializer(CalendarSchedule.serializer()), inner.calendarsJson())
+
+    /**
+     * Add a window, or replace the one with this id.
+     *
+     * Refused if the result would not be a config the core would load — a window naming a profile
+     * that is not there, a time outside the day. On a refusal the config is exactly as it was, so
+     * a rejected form does not poison the next save.
+     */
+    fun upsertWeekly(window: WeeklySchedule) = invalid {
+        inner.upsertWeekly(json.encodeToString(window))
+    }
+
+    /** Delete a window. Deleting one that is not there is not an error. */
+    fun removeWeekly(id: String) = inner.removeWeekly(id)
+
+    /** Add a calendar rule, or replace the one with this id. See [upsertWeekly]. */
+    fun upsertCalendar(rule: CalendarSchedule) = invalid {
+        inner.upsertCalendar(json.encodeToString(rule))
+    }
+
+    /**
+     * Delete a calendar rule.
+     *
+     * A session it already started keeps running: that is a promise already made, and a settings
+     * edit is not a way out of a lock. The rule simply stops starting new ones.
+     */
+    fun removeCalendar(id: String) = inner.removeCalendar(id)
+
+    /**
+     * Turn the binding's config error into one carrying the core's own words.
+     *
+     * The message is written for whoever wrote the config, which for an edit made in the app is
+     * the person looking at the form, so it is what the screen shows.
+     */
+    private inline fun <T> invalid(body: () -> T): T =
+        try {
+            body()
+        } catch (e: CurfewException.Config) {
+            throw InvalidSchedule(e.detail)
+        }
+
     /** What to do about what the user is looking at. */
     fun decide(now: Long, observation: Observation, usage: UsageState = UsageState()): Decision {
         val out = inner.decide(
@@ -518,6 +572,53 @@ data class CalendarEvent(
      * title would make a rule fire on a word the user never tagged anything with.
      */
     val categories: List<String> = emptyList(),
+)
+
+/** A schedule the core would not accept, with the core's own explanation of why. */
+class InvalidSchedule(message: String) : Exception(message)
+
+/**
+ * A window that runs on the clock: this profile, these days, between these two times.
+ *
+ * Days are 0 = Monday, and an empty list means every day. [endMinute] at or before [startMinute]
+ * means the window runs past midnight, which is the shape every "nothing after 11pm" rule has.
+ */
+@Serializable
+data class WeeklySchedule(
+    val id: String,
+    val profile: String,
+    val days: List<Int> = emptyList(),
+    @SerialName("start_minute") val startMinute: Int,
+    @SerialName("end_minute") val endMinute: Int,
+    val locks: List<Lock> = emptyList(),
+)
+
+/** A rule that runs a profile for as long as a matching calendar event does, plus its padding. */
+@Serializable
+data class CalendarSchedule(
+    val id: String,
+    val profile: String,
+    val matcher: EventMatcher = EventMatcher(),
+    /** Start this many seconds early, so the lock is already up when the meeting begins. */
+    @SerialName("pad_before_seconds") val padBeforeSeconds: Int = 0,
+    @SerialName("pad_after_seconds") val padAfterSeconds: Int = 0,
+    val locks: List<Lock> = emptyList(),
+)
+
+/** All of these must match. An empty matcher matches every event on every calendar. */
+@Serializable
+data class EventMatcher(
+    /** Glob over the event title. */
+    val title: String? = null,
+    /** Exact calendar name, case-insensitive. */
+    val calendar: String? = null,
+    /** Glob over the location. */
+    val location: String? = null,
+    @SerialName("busy_only") val busyOnly: Boolean = false,
+    @SerialName("all_day") val allDay: Boolean? = null,
+    val categories: List<String> = emptyList(),
+    @SerialName("min_duration_seconds") val minDurationSeconds: Long? = null,
+    @SerialName("max_duration_seconds") val maxDurationSeconds: Long? = null,
 )
 
 @Serializable

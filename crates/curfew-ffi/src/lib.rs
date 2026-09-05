@@ -161,6 +161,54 @@ impl Curfew {
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
+    // --- editing schedules ----------------------------------------------------------------------
+    //
+    // These exist so the schedule screen never has to build a config document by hand. A settings
+    // form that writes TOML would be a second definition of what a schedule is, and the one that
+    // drifts is always the one written in the UI language.
+    //
+    // Each one leaves the config valid or unchanged, never in between, and none of them touch a
+    // running session: deleting a rule stops it starting new sessions, and the session it already
+    // started is a promise that stands.
+
+    /// Add or replace a weekly window. `window_json` is a serialized `WeeklySchedule`.
+    pub fn upsert_weekly(&self, window_json: String) -> Result<(), CurfewError> {
+        let window = serde_json::from_str(&window_json).map_err(payload)?;
+        self.config
+            .write()
+            .expect("config lock")
+            .upsert_weekly(window)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+    }
+
+    pub fn remove_weekly(&self, id: String) {
+        self.config.write().expect("config lock").remove_weekly(&id);
+    }
+
+    /// Add or replace a calendar rule. `rule_json` is a serialized `CalendarSchedule`.
+    pub fn upsert_calendar(&self, rule_json: String) -> Result<(), CurfewError> {
+        let rule = serde_json::from_str(&rule_json).map_err(payload)?;
+        self.config
+            .write()
+            .expect("config lock")
+            .upsert_calendar(rule)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+    }
+
+    pub fn remove_calendar(&self, id: String) {
+        self.config.write().expect("config lock").remove_calendar(&id);
+    }
+
+    /// Every weekly window, as a serialized `Vec<WeeklySchedule>`, for the editor to list.
+    pub fn weekly_json(&self) -> Result<String, CurfewError> {
+        serde_json::to_string(&self.config.read().expect("config lock").weekly).map_err(payload)
+    }
+
+    /// Every calendar rule, as a serialized `Vec<CalendarSchedule>`.
+    pub fn calendars_json(&self) -> Result<String, CurfewError> {
+        serde_json::to_string(&self.config.read().expect("config lock").calendars).map_err(payload)
+    }
+
     /// The decision for one observation. `observation_json` is a serialized `Observation`; the
     /// answer is a serialized `Decision`.
     ///

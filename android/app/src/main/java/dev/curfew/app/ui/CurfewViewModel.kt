@@ -8,7 +8,9 @@ import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
 import dev.curfew.policy.Activation
+import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.Lock
+import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.Policy
 import dev.curfew.policy.ProfileName
 import dev.curfew.policy.LockSet
@@ -82,6 +84,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 spentSeconds = spent,
                 launchCounts = opens,
                 configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
+                weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
+                calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
                 profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
                     .getOrDefault(emptyList()),
                 audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
@@ -384,6 +388,50 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- editing schedules ------------------------------------------------------------------------
+    //
+    // Each of these hands one schedule to the core, which validates the whole config before it is
+    // written. A refusal is reported in the core's own words and changes nothing, so a form filled
+    // in wrongly cannot leave the device unprotected.
+
+    fun saveWeekly(window: WeeklySchedule) {
+        viewModelScope.launch {
+            runtime.saveWeekly(window)
+                .onSuccess { say("Saved.") }
+                .onFailure { say(it.message ?: "That window could not be saved.") }
+            refresh()
+        }
+    }
+
+    fun deleteWeekly(id: String) {
+        viewModelScope.launch {
+            // Said plainly, because it is the part people get wrong: deleting the rule that
+            // started a session does not end the session.
+            runtime.deleteWeekly(id)
+                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onFailure { say(it.message ?: "That window could not be removed.") }
+            refresh()
+        }
+    }
+
+    fun saveCalendarRule(rule: CalendarSchedule) {
+        viewModelScope.launch {
+            runtime.saveCalendarRule(rule)
+                .onSuccess { say("Saved.") }
+                .onFailure { say(it.message ?: "That rule could not be saved.") }
+            refresh()
+        }
+    }
+
+    fun deleteCalendarRule(id: String) {
+        viewModelScope.launch {
+            runtime.deleteCalendarRule(id)
+                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onFailure { say(it.message ?: "That rule could not be removed.") }
+            refresh()
+        }
+    }
+
     /**
      * Save the app picker's answer for one profile.
      *
@@ -464,6 +512,9 @@ data class UiState(
     val spentSeconds: List<Pair<String, Int>> = emptyList(),
     val launchCounts: Map<String, Int> = emptyMap(),
     val configToml: String = "",
+    /** The weekly windows and calendar rules, as the schedule editor lists them. */
+    val weekly: List<WeeklySchedule> = emptyList(),
+    val calendarRules: List<CalendarSchedule> = emptyList(),
     val profiles: List<ProfileName> = emptyList(),
     val audit: List<AuditRow> = emptyList(),
     val grants: List<GrantState> = emptyList(),
