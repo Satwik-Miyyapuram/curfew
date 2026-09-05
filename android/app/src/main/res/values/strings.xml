@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">Curfew</string>
     <string name="accessibility_service_label">Curfew enforcement</string>
-    <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can close the ones you have chosen to block. It does not read the contents of your screen, and nothing it sees leaves your device.</string>
+    <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can close the ones you have chosen to block. While a lock is running it also checks whether the screen in front is the Curfew settings or uninstall page, so it can hold that page shut; that is the only time it looks at what is on screen, and it looks only for its own name. Nothing it sees is stored, and nothing leaves your device.</string>
 
     <string name="notification_listener_label">Curfew notification muting</string>
 

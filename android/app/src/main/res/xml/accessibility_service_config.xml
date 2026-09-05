@@ -1,15 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The narrowest configuration that can still tell which app is in front.
+  The narrowest configuration that can still do the two jobs.
 
-  `typeWindowStateChanged` alone is enough to know that the foreground app changed; Curfew asks for
-  no content events, no key filtering and no screen retrieval, so it cannot read what is on screen
-  even if a future version wanted to. `canRetrieveWindowContent` is deliberately false.
+  `typeWindowStateChanged` alone is enough to know that the foreground app changed, which is what
+  makes a block feel like a closed door rather than a delayed complaint. No content events, no key
+  filtering.
+
+  `canRetrieveWindowContent` is true for exactly one reason, and it is worth stating plainly: while
+  a lock is running, Curfew checks whether the window in front is its own page in Settings or its
+  own uninstall dialog, and presses Back if it is. That check is the alternative to being a device
+  admin — which many banking apps refuse to run alongside — and it is the only use of this
+  capability in the app. See UninstallGuard: it reads one thing (does this window mention Curfew),
+  only while a lock is held, only on a short list of packages that can remove an app, and it stores
+  and logs nothing.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagIncludeNotImportantViews"
-    android:canRetrieveWindowContent="false"
+    android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100" />

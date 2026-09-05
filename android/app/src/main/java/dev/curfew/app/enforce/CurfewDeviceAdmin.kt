@@ -74,18 +74,13 @@ class CurfewDeviceAdmin : DeviceAdminReceiver() {
         }
 
         /**
-         * Whether a lock is currently held.
-         *
-         * Kept in preferences rather than read from the database, because a broadcast receiver has
-         * no coroutine scope and the deactivation warning has to be returned synchronously.
+         * Whether a lock is currently held. Owned by [UninstallGuard], which is the other reader
+         * of the same fact: one flag, so admin and the accessibility guard cannot disagree about
+         * whether anything is running.
          */
-        fun isLockHeld(context: Context): Boolean =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_LOCK_HELD, false)
+        fun isLockHeld(context: Context): Boolean = UninstallGuard.isLockHeld(context)
 
-        fun setLockHeld(context: Context, held: Boolean) {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit { putBoolean(KEY_LOCK_HELD, held) }
-        }
+        fun setLockHeld(context: Context, held: Boolean) =
+            UninstallGuard.setLockHeld(context, held)
     }
 }

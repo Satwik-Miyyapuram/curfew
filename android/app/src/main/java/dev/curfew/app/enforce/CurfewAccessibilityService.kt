@@ -28,12 +28,44 @@ class CurfewAccessibilityService : AccessibilityService() {
         // how a blocker makes a phone unusable, which the design forbids outright.
         if (packageName == packageName()) return
 
+        // Before anything else: is this the screen that would remove Curfew mid-lock? Cheap to
+        // ask, and it has to be asked here because this is the only moment the window is known.
+        if (guard(packageName)) return
+
         val runtime = curfew
         runtime.scope.launch {
             EnforcementService.enforcer(applicationContext)
                 .onObservation(Observation.App(packageName), runtime.clock.now())
         }
     }
+
+    /**
+     * Hold Curfew's own Settings page and uninstall dialog shut while a lock runs.
+     *
+     * Returns true when it acted, so the caller does not also treat the screen as an app to decide
+     * about. The screen is read only in this narrow case — a lock running, on one of a short list
+     * of packages that can remove an app — and only to answer one question: does this window
+     * mention Curfew. Nothing is stored and nothing else is looked at; see [UninstallGuard].
+     */
+    private fun guard(packageName: String): Boolean {
+        if (!UninstallGuard.isLockHeld(this)) return false
+        if (!UninstallGuard.watches(packageName)) return false
+        val mentions = runCatching {
+            UninstallGuard.mentions(rootInActiveWindow, appLabel(), packageName())
+        }.getOrDefault(false)
+        if (!UninstallGuard.shouldIntervene(packageName, lockHeld = true, mentionsCurfew = mentions)) {
+            return false
+        }
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        // Said out loud, because a Back press that arrives with no explanation reads as the phone
+        // being broken rather than as the lock the user asked for.
+        android.widget.Toast.makeText(this, UninstallGuard.EXPLANATION, android.widget.Toast.LENGTH_LONG)
+            .show()
+        return true
+    }
+
+    private fun appLabel(): String =
+        runCatching { applicationInfo.loadLabel(packageManager).toString() }.getOrDefault("Curfew")
 
     override fun onInterrupt() = Unit
 

@@ -83,13 +83,18 @@ enum class Grant(
     ),
 
     /**
-     * Last on purpose. This is the scariest dialog in the whole wizard, and it is the one grant
-     * Curfew can honestly do without, so it is asked for after the user has seen the app work.
+     * Last on purpose, and genuinely optional.
+     *
+     * This is the scariest dialog in the wizard and it has a real cost outside Curfew: a great many
+     * banking and payment apps refuse to run on a device with any active device admin, and one that
+     * cost somebody their bank app would have taken more than it gave. The accessibility guard
+     * covers the same ground without that cost, so this is now the stronger-but-pricier option
+     * rather than the recommended one.
      */
     UninstallProtection(
-        title = "Uninstall protection",
-        because = "Uninstalling Curfew is the last easy way out of a running lock. Android will not uninstall an app that is an active device admin.",
-        cost = "Nothing else changes: every block, schedule and lock works the same. Curfew can simply be uninstalled mid-lock. Curfew asks for no admin powers beyond this — it cannot erase, lock or unlock the device, or touch any password — and you can turn it off whenever no lock is running.",
+        title = "Uninstall protection (device admin)",
+        because = "Android will not uninstall an app that is an active device admin, which closes the last easy way out of a running lock. Curfew already holds its own settings and uninstall pages shut through the accessibility service; this is the stricter version of the same idea.",
+        cost = "Nothing inside Curfew changes: every block, schedule and lock works the same either way. The cost is outside it — many banking and payment apps refuse to run while any device admin is active, so leave this off if you use one. Curfew asks for no admin powers beyond being active: it cannot erase, lock or unlock the device, or touch any password, and you can turn it off whenever no lock is running.",
         required = false,
     ),
     ;
