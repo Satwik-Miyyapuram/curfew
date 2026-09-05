@@ -97,7 +97,7 @@ pub struct Signed {
     pub signature: [u8; 64],
 }
 
-mod signature_bytes {
+pub(crate) mod signature_bytes {
     use serde::{Deserialize as _, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(bytes: &[u8; 64], s: S) -> Result<S::Ok, S::Error> {

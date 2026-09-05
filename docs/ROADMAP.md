@@ -58,8 +58,8 @@ Windows account, with no Curfew-held password anywhere.
 - [x] Lock lattice defined and property-tested *before* any merge code (GAPS C1)
 - [x] Concrete pairing protocol, per-device keys, revocation path (GAPS C2, C3)
 - [x] Signed encrypted op-log, rollups + checkpoint compaction (GAPS C4)
-- [ ] LAN transport (mDNS + QUIC)
-- [ ] Shared-folder transport: immutable segments, concurrent writers, honest latency UI (GAPS C5)
+- [x] LAN transport (signed multicast beacons + TCP; mDNS and QUIC dropped, reasons in `lan.rs`)
+- [x] Shared-folder transport: immutable segments, concurrent writers (GAPS C5) — latency UI pending
 - [ ] Bluetooth / QR beam fallback
 - [ ] Session mirroring: start on PC, phone blocks; budgets shared across devices
 - [ ] Conflict UI

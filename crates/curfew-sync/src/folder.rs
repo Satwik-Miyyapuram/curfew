@@ -121,7 +121,7 @@ impl Folder {
     pub fn collect(&self, me: &Identity, peers: &Peers, log: &mut Log) -> io::Result<Pass> {
         let mut pass = Pass::default();
         for id in peers.active_ids() {
-            let inbox = self.outbox(&id, &me.id());
+            let inbox = self.outbox(id, &me.id());
             for path in self.segments(&inbox)? {
                 let Ok(bytes) = std::fs::read(&path) else {
                     pass.skipped += 1;
@@ -156,7 +156,7 @@ impl Folder {
     pub fn last_written(&self, me: &Identity, peers: &Peers) -> BTreeMap<DeviceId, Timestamp> {
         let mut out = BTreeMap::new();
         for id in peers.active_ids() {
-            let heads = self.outbox(&id, &me.id()).join("heads.json");
+            let heads = self.outbox(id, &me.id()).join("heads.json");
             if let Ok(at) = std::fs::metadata(&heads).and_then(|m| m.modified()) {
                 if let Ok(since) = at.duration_since(std::time::UNIX_EPOCH) {
                     out.insert(id.clone(), since.as_secs() as Timestamp);

@@ -18,6 +18,8 @@
 pub mod device;
 pub mod envelope;
 pub mod folder;
+pub mod lan;
+pub mod node;
 pub mod oplog;
 pub mod pair;
 pub mod wire;
