@@ -6,12 +6,17 @@
 //! separate program is an uninstaller that can be run when the service is not looking.
 
 mod runner;
+mod watchdog;
 #[cfg(windows)]
 mod service;
 
 use curfew_win::ipc::{Request, Response};
 use curfew_win::{hosts, state};
 use std::collections::BTreeSet;
+
+/// The service the watchdog looks after. Named here rather than imported from `service`, which is
+/// Windows-only, so the watchdog subcommand still compiles everywhere.
+const WATCHED: &str = "Curfew";
 
 const USAGE: &str = "\
 curfew — distraction blocking that keeps its promises
@@ -37,6 +42,10 @@ fn main() {
         "release" => release(&args[1..]),
         "reload" => simple(Request::Reload),
         "run" => run_in_console(),
+        "watchdog" => {
+            watchdog::run(WATCHED, &state::default_path());
+            0
+        }
         "service" => service_entry(),
         "install" => install(),
         "uninstall" => uninstall(),
@@ -243,7 +252,7 @@ fn run_in_console() -> i32 {
         }
     };
     println!("Curfew is enforcing. Ctrl-C to stop.");
-    runner::run(enforcer, state::default_path(), || false, None);
+    runner::run(enforcer, state::default_path(), || false, None, false);
     0
 }
 

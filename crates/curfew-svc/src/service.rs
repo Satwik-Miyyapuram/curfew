@@ -69,7 +69,7 @@ fn run() -> windows_service::Result<()> {
     let state_path = state::default_path();
     match crate::runner::build(&crate::runner::config_path(), &state_path, crate::runner::hosts_path()) {
         Ok(enforcer) => {
-            crate::runner::run(enforcer, state_path, || stop.load(Ordering::SeqCst), None);
+            crate::runner::run(enforcer, state_path, || stop.load(Ordering::SeqCst), None, true);
         }
         Err(detail) => eprintln!("curfew: {detail}"),
     }

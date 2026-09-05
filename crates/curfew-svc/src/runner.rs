@@ -139,6 +139,7 @@ pub fn run(
     state_path: PathBuf,
     stop: impl Fn() -> bool,
     last_tick: Option<i64>,
+    guarded: bool,
 ) {
     let enforcer = Arc::new(Mutex::new(enforcer));
     {
@@ -149,6 +150,13 @@ pub fn run(
             }
         });
     }
+
+    // The watchdog is only worth having when there is a service for it to restart, so a console run
+    // does without one.
+    let mut watchdog = match guarded {
+        true => crate::watchdog::spawn().map_err(|e| eprintln!("curfew: no watchdog: {e}")).ok(),
+        false => None,
+    };
 
     let mut previous = last_tick;
     while !stop() {
@@ -165,6 +173,15 @@ pub fn run(
             guard.tick(now, elapsed, &[], &SystemProcesses::default());
             persist(&guard, &state_path, now);
         }
+        // The other half of the pair: killing the watchdog is as obvious an attack as killing the
+        // service, so the service starts it again the moment it notices it has gone.
+        if guarded {
+            let dead = watchdog.as_mut().map(|c| c.try_wait().map(|s| s.is_some()).unwrap_or(true));
+            if dead != Some(false) {
+                watchdog = crate::watchdog::spawn().ok();
+            }
+        }
+
         previous = Some(now);
         std::thread::sleep(TICK);
     }
