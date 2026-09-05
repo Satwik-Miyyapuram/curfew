@@ -685,6 +685,9 @@ fn passes_survive_a_restart_the_way_sessions_do() {
             usage: Default::default(),
             launches: Default::default(),
             passes: e.passes.clone(),
+            boots: e.boots.clone(),
+            boot_counter: e.boot_counter.clone(),
+            releases: e.releases.clone(),
             last_tick: Some(NOW),
         },
     )
@@ -692,4 +695,262 @@ fn passes_survive_a_restart_the_way_sessions_do() {
 
     let Loaded::Ok(back) = load(&path) else { panic!("the state did not come back") };
     assert_eq!(back.passes, e.passes, "a restart handed back a fresh ration");
+}
+
+// --- the other three ways out -------------------------------------------------------------------
+//
+// A tag, a reboot and a paired device. Each is a condition the *service* checks: the tests below
+// are as much about what a caller cannot claim as about what a user can prove.
+
+const TAGGED: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+
+[[tokens]]
+id = "fridge"
+hash = "PLACEHOLDER"
+"#;
+
+const PAYLOAD: &str = "curfew-tag-abcdefghijkmnopqrstuvwx";
+
+fn tagged(name: &str) -> Enforcer {
+    let toml = TAGGED.replace("PLACEHOLDER", &curfew_core::fingerprint(PAYLOAD));
+    Enforcer::new(Config::from_toml(&toml).unwrap(), dir(name).join("hosts"))
+}
+
+fn held(e: &mut Enforcer, locks: Vec<Lock>) -> String {
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 999_999, locks });
+    e.sessions.running[0].id.clone()
+}
+
+#[test]
+fn the_right_tag_ends_a_session_and_the_wrong_one_does_not() {
+    let mut e = tagged("tag-right");
+    let id = held(&mut e, vec![Lock::Token { id: "fridge".into() }]);
+
+    let wrong = e.handle(NOW, Request::Token { id: id.clone(), payload: "hello".into() });
+    assert!(matches!(wrong, Response::Error { .. }), "an unknown tag was accepted");
+    assert_eq!(e.sessions.running.len(), 1);
+
+    assert_eq!(
+        e.handle(NOW, Request::Token { id, payload: PAYLOAD.into() }),
+        Response::Ok,
+        "the tag the config names did not open its own lock"
+    );
+    assert!(e.sessions.running.is_empty());
+}
+
+#[test]
+fn a_tag_that_exists_but_is_not_the_one_this_lock_asks_for_is_refused() {
+    let mut e = tagged("tag-other");
+    let id = held(&mut e, vec![Lock::Token { id: "desk".into() }]);
+
+    let answer = e.handle(NOW, Request::Token { id, payload: PAYLOAD.into() });
+    assert!(
+        matches!(answer, Response::Refused { refusal: Refusal::Locked { .. } }),
+        "the fridge tag opened a lock that asks for the desk one: {answer:?}"
+    );
+    assert_eq!(e.sessions.running.len(), 1);
+}
+
+#[test]
+fn claiming_a_tag_over_the_pipe_proves_nothing() {
+    // The whole point of the tag is the walk to it. A caller that could simply say "token
+    // satisfied" would turn a physical lock into a JSON message.
+    let mut e = tagged("tag-claim");
+    let id = held(&mut e, vec![Lock::Token { id: "fridge".into() }]);
+
+    let claimed = BTreeSet::from([Lock::Token { id: "fridge".into() }]);
+    let answer = e.handle(NOW, Request::End { id, satisfied: claimed });
+    assert!(matches!(answer, Response::Refused { .. }), "a claim was taken as evidence: {answer:?}");
+    assert_eq!(e.sessions.running.len(), 1);
+}
+
+#[test]
+fn a_tag_and_a_password_can_be_presented_one_after_the_other() {
+    // Two conditions, two actions, in either order and a minute apart. If each proof vanished as
+    // soon as it was made, a lock asking for both could never be satisfied at all.
+    let mut e = tagged("tag-and-pin");
+    let id = held(&mut e, vec![Lock::Token { id: "fridge".into() }, Lock::DeviceCredential]);
+
+    let first = e.handle(NOW, Request::Token { id: id.clone(), payload: PAYLOAD.into() });
+    assert!(matches!(first, Response::Refused { .. }), "the tag alone ended a two-part lock");
+    assert_eq!(e.sessions.running.len(), 1);
+
+    // Standing in for the password check, which needs a real account to exercise. The proof is
+    // recorded by the same call that verifies it, so this is the state the verification leaves.
+    e.proofs.record(&id, Lock::DeviceCredential, NOW + 30);
+    assert_eq!(e.handle(NOW + 30, Request::End { id, satisfied: BTreeSet::new() }), Response::Ok);
+}
+
+#[test]
+fn a_proof_goes_stale_rather_than_standing_all_evening() {
+    let mut e = tagged("tag-stale");
+    let id = held(&mut e, vec![Lock::Token { id: "fridge".into() }, Lock::DeviceCredential]);
+
+    e.handle(NOW, Request::Token { id: id.clone(), payload: PAYLOAD.into() });
+    e.proofs.record(&id, Lock::DeviceCredential, NOW + curfew_core::PROOF_SECONDS);
+
+    let answer = e.handle(
+        NOW + curfew_core::PROOF_SECONDS,
+        Request::End { id, satisfied: BTreeSet::new() },
+    );
+    assert!(
+        matches!(answer, Response::Refused { .. }),
+        "a tag scanned two minutes ago was still counting: {answer:?}"
+    );
+}
+
+#[test]
+fn a_restart_lock_holds_until_the_machine_is_actually_restarted() {
+    let mut e = enforcer("restart");
+    e.observe_boot(4_000);
+    let id = held(&mut e, vec![Lock::RestartRequired]);
+    e.tick(NOW, 0, &[], &Empty);
+
+    let refused = e.handle(NOW, Request::End { id: id.clone(), satisfied: BTreeSet::new() });
+    assert!(matches!(refused, Response::Refused { .. }), "a restart lock opened without one");
+
+    // Uptime back at nearly nothing: the machine went down and came up.
+    e.observe_boot(12);
+    e.tick(NOW + 3600, 0, &[], &Empty);
+    assert_eq!(
+        e.handle(NOW + 3600, Request::End { id, satisfied: BTreeSet::new() }),
+        Response::Ok,
+        "the reboot the lock asked for did not satisfy it"
+    );
+}
+
+#[test]
+fn a_clock_moved_forward_is_not_a_restart() {
+    // The cheapest bypass there is, if boot time were taken to be "now minus uptime".
+    let mut e = enforcer("restart-clock");
+    e.observe_boot(4_000);
+    let id = held(&mut e, vec![Lock::RestartRequired]);
+    e.tick(NOW, 0, &[], &Empty);
+
+    e.observe_boot(4_100);
+    e.tick(NOW + 400_000, 0, &[], &Empty);
+    let answer = e.handle(NOW + 400_000, Request::End { id, satisfied: BTreeSet::new() });
+    assert!(matches!(answer, Response::Refused { .. }), "a clock change ended a restart lock");
+}
+
+#[test]
+fn a_session_started_after_the_reboot_still_needs_its_own() {
+    let mut e = enforcer("restart-after");
+    e.observe_boot(4_000);
+    e.tick(NOW, 0, &[], &Empty);
+    e.observe_boot(9);
+    let id = held(&mut e, vec![Lock::RestartRequired]);
+    e.tick(NOW + 60, 0, &[], &Empty);
+
+    let answer = e.handle(NOW + 60, Request::End { id, satisfied: BTreeSet::new() });
+    assert!(
+        matches!(answer, Response::Refused { .. }),
+        "a reboot before the session began was counted for it: {answer:?}"
+    );
+}
+
+#[test]
+fn restart_evidence_survives_the_service_being_restarted() {
+    // The evidence is a fact about the machine, so it must not be a fact about the process. A
+    // service that forgot which boot it started a session in could never satisfy this lock.
+    let path = dir("restart-state").join("state.json");
+    let mut e = enforcer("restart-state");
+    e.observe_boot(4_000);
+    let id = held(&mut e, vec![Lock::RestartRequired]);
+    e.tick(NOW, 0, &[], &Empty);
+
+    save(
+        &path,
+        &Persisted {
+            sessions: e.sessions.clone(),
+            usage: Default::default(),
+            launches: Default::default(),
+            passes: Default::default(),
+            boots: e.boots.clone(),
+            boot_counter: e.boot_counter.clone(),
+            releases: e.releases.clone(),
+            last_tick: Some(NOW),
+        },
+    )
+    .unwrap();
+
+    let Loaded::Ok(back) = load(&path) else { panic!("the state did not come back") };
+    let mut after = enforcer("restart-state");
+    after.sessions = back.sessions;
+    after.boots = back.boots;
+    after.boot_counter = back.boot_counter;
+    after.observe_boot(11);
+    after.tick(NOW + 3600, 0, &[], &Empty);
+
+    assert_eq!(
+        after.handle(NOW + 3600, Request::End { id, satisfied: BTreeSet::new() }),
+        Response::Ok
+    );
+}
+
+#[test]
+fn a_peer_lock_naming_this_device_is_offered_and_then_given() {
+    let mut e = enforcer("peer");
+    e.device_id = Some("PHONE7".into());
+    let id = held(&mut e, vec![Lock::PeerRelease { device_id: "PHONE7".into() }]);
+    e.tick(NOW, 0, &[], &Empty);
+
+    let Response::Status(before) = e.handle(NOW, Request::Status) else { panic!("no status") };
+    assert_eq!(before.releasable, vec![id.clone()], "this device was not offered the release");
+    assert!(before.released.is_empty());
+
+    assert_eq!(e.handle(NOW, Request::Release { id: id.clone() }), Response::Ok);
+    assert!(e.sessions.running.is_empty(), "the release this device gave did not open its own lock");
+    assert!(e.releases.contains(&id), "the release was not written down to be published");
+}
+
+#[test]
+fn a_release_from_the_wrong_device_does_not_open_the_lock() {
+    let mut e = enforcer("peer-wrong");
+    e.device_id = Some("LAPTOP2".into());
+    let id = held(&mut e, vec![Lock::PeerRelease { device_id: "PHONE7".into() }]);
+    e.tick(NOW, 0, &[], &Empty);
+
+    let Response::Status(status) = e.handle(NOW, Request::Status) else { panic!("no status") };
+    assert!(status.releasable.is_empty(), "a device the lock does not name was offered the button");
+
+    e.handle(NOW, Request::Release { id: id.clone() });
+    assert_eq!(e.sessions.running.len(), 1, "the wrong device released a lock it was not asked for");
+
+    // And a claim over the pipe is not a release either.
+    let claimed = BTreeSet::from([Lock::PeerRelease { device_id: "PHONE7".into() }]);
+    let answer = e.handle(NOW, Request::End { id, satisfied: claimed });
+    assert!(matches!(answer, Response::Refused { .. }), "a claimed peer release was believed");
+}
+
+#[test]
+fn a_release_heard_through_the_log_ends_the_session_here() {
+    // What the sync loop does: the peer's entry becomes an entry in `released`, and from then on
+    // the ordinary end works.
+    let mut e = enforcer("peer-heard");
+    let id = held(&mut e, vec![Lock::PeerRelease { device_id: "PHONE7".into() }]);
+    e.released.insert(id.clone(), BTreeSet::from(["PHONE7".to_string()]));
+
+    assert_eq!(e.handle(NOW, Request::End { id, satisfied: BTreeSet::new() }), Response::Ok);
+}
+
+#[test]
+fn a_release_for_a_session_this_device_has_never_heard_of_is_still_recorded() {
+    // The usual case: the lock is on the phone, and the PC is only being asked to say yes. Waiting
+    // for the session to arrive here first would make the button work only sometimes.
+    let mut e = enforcer("peer-unknown");
+    e.device_id = Some("PC1".into());
+
+    assert_eq!(e.handle(NOW, Request::Release { id: "elsewhere".into() }), Response::Ok);
+    assert!(e.releases.contains("elsewhere"));
 }

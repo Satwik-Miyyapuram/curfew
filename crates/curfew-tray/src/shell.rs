@@ -213,6 +213,7 @@ fn show_menu(window: HWND) {
             | Item::Unlock { label, .. }
             | Item::Release { label, .. }
             | Item::Emergency { label, .. }
+            | Item::PeerRelease { label, .. }
             | Item::CancelFreeze { label }
             | Item::ConfirmFreeze { label } => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide(label).as_ptr());
@@ -272,6 +273,31 @@ fn chosen(window: HWND, id: usize) {
             // Closing the prompt is not an attempt and gets no dialog: changing your mind is the
             // system working, not a failure to report.
             let Some((request, _)) = act(&item, credential) else { return };
+            match ask(&request) {
+                Ok(response) => say(window, &describe(&response)),
+                Err(detail) => say(window, &detail),
+            }
+            refresh_tooltip(window);
+        }
+        // A release cannot be taken back, so it is asked about once. The wording says who it
+        // frees rather than what it does, because on this machine it usually appears to do nothing
+        // at all: the lock it opens is on the other device.
+        Item::PeerRelease { .. } => {
+            let confirmed = unsafe {
+                MessageBoxW(
+                    window,
+                    wide(
+                        "Release this session? The device holding it can then end it whenever it likes, and this cannot be taken back.",
+                    )
+                    .as_ptr(),
+                    wide("Curfew").as_ptr(),
+                    MB_YESNO | MB_ICONWARNING,
+                ) == IDYES
+            };
+            if !confirmed {
+                return;
+            }
+            let Some((request, _)) = act(&item, None) else { return };
             match ask(&request) {
                 Ok(response) => say(window, &describe(&response)),
                 Err(detail) => say(window, &detail),

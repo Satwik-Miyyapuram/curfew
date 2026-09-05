@@ -109,9 +109,9 @@ fun describeLock(lock: Lock): String = when (lock) {
         ChallengeKind.TYPING -> "a passage typed out in full"
         ChallengeKind.MATH -> "a few arithmetic problems"
     }
-    is Lock.PeerRelease -> "another of your devices to agree"
-    is Lock.Token -> "the token you set aside"
-    is Lock.RestartRequired -> "a restart of this device"
+    is Lock.PeerRelease -> "another of your devices to let it go"
+    is Lock.Token -> "the tag you set aside (${lock.id})"
+    is Lock.RestartRequired -> "this device to be restarted"
 }
 
 /**

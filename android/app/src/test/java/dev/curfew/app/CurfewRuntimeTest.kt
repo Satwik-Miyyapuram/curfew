@@ -58,7 +58,16 @@ class CurfewRuntimeTest {
         val runtime = TestRuntime.create(now)
         runtime.startSession(session(listOf(Lock.DeviceCredential)))
 
-        runtime.endSession("s1", satisfied = listOf(Lock.DeviceCredential), now = now + 60)
+        // Naming the condition proves nothing — `endSession` is reachable from anywhere in this
+        // process — so the refusal comes first and the recorded prompt is what actually opens it.
+        try {
+            runtime.endSession("s1", satisfied = listOf(Lock.DeviceCredential), now = now + 60)
+            fail("a claim is not a proof")
+        } catch (expected: Refused) {
+            // What the refusal says is PolicyTest's business; that there is one is this test's.
+        }
+        runtime.recordCredential("s1", now + 60)
+        runtime.endSession("s1", now = now + 60)
 
         assertTrue(runtime.policy.sessions().running.isEmpty())
     }

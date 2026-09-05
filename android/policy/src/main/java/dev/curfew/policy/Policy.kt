@@ -110,9 +110,14 @@ class Policy private constructor(private val inner: Curfew) {
     fun startSession(session: Session) = inner.startSession(json.encodeToString(session))
 
     /**
-     * End a session, given whatever the platform managed to prove. Throws [Refused] carrying the
-     * core's own refusal when the lock is not satisfied, so the UI can ask for exactly what is
+     * End a session, given the conditions the caller itself witnessed. Throws [Refused] carrying
+     * the core's own refusal when the lock is not satisfied, so the UI can ask for exactly what is
      * missing rather than saying "no".
+     *
+     * Only [Lock.Timer], [Lock.Confirm] and [Lock.Challenge] may be passed here, because those are
+     * the conditions this code is the only witness to. A credential, a tag, a restart and a peer
+     * release are proved to the core by [recordCredential], [scanToken], [observeBoot] and
+     * [observeReleases]; listing them in `satisfied` ends nothing.
      */
     fun endSession(id: String, now: Long, satisfied: List<Lock> = emptyList()) {
         try {
@@ -121,6 +126,76 @@ class Policy private constructor(private val inner: Curfew) {
             throw Refused(json.decodeFromString<Refusal>(e.refusal))
         }
     }
+
+    // --- evidence -----------------------------------------------------------------------------
+
+    /**
+     * Tell the core the device credential prompt has just succeeded for this session.
+     *
+     * Called after `BiometricPrompt` reports success and *before* [endSession]. The two are
+     * separate so a lock asking for a credential and a tag can be satisfied by doing both, a short
+     * walk apart, rather than being impossible to satisfy at all. The proof is not kept for long,
+     * and never across a restart.
+     */
+    fun recordCredential(id: String, now: Long) = inner.recordCredential(id, now)
+
+    /**
+     * Present a physical tag — read over NFC, or typed in when there is no reader.
+     *
+     * The payload is fingerprinted and dropped; nothing about it is stored or logged. A tag this
+     * lock does not name and a tag that is not a Curfew tag at all are refused identically, so a
+     * scan cannot be used to discover which tags a config knows about.
+     */
+    fun scanToken(id: String, payload: String, now: Long) {
+        try {
+            inner.scanToken(id, payload, now)
+        } catch (e: CurfewException.Refused) {
+            throw Refused(json.decodeFromString<Refusal>(e.refusal))
+        }
+    }
+
+    /**
+     * Give the release a peer's lock is waiting on this device for.
+     *
+     * There is no way to take one back. A release that could be withdrawn would let one device
+     * re-shut a lock the user had already been told they were out of, and a lock that can come back
+     * is not a promise.
+     */
+    fun releasePeer(id: String, now: Long) = inner.releasePeer(id, now)
+
+    /** Sessions whose lock asks *this* device for the release, for the button that gives it. */
+    fun releasable(): List<String> = inner.releasable()
+
+    /** The releases this device has given, for the sync layer to publish. */
+    fun releases(): Set<String> = json.decodeFromString(inner.releasesJson())
+
+    /** The same, still encoded, for writing straight down beside the sessions. */
+    fun releasesJson(): String = inner.releasesJson()
+
+    /** Adopt what the op-log says about releases, and the id this device is known by there. */
+    fun observeReleases(deviceId: String, released: Map<String, Set<String>>) =
+        inner.observeReleases(deviceId, json.encodeToString(released))
+
+    /** Restore the releases this device gave before it was last killed, as [releasesJson] wrote them. */
+    fun restoreReleases(releasesJson: String) = inner.restoreReleases(releasesJson)
+
+    /**
+     * Take a reading of how long the device has been up, in seconds.
+     *
+     * Uptime rather than the wall clock, on purpose: uptime can only go backwards by rebooting, so
+     * a clock moved forward in Settings cannot be made to look like the restart a lock asked for.
+     */
+    fun observeBoot(uptimeSeconds: Long) = inner.observeBoot(uptimeSeconds)
+
+    /** The boot bookkeeping as JSON, to be written down beside the sessions. */
+    fun boots(): String = inner.bootsJson()
+
+    /** Restore boot bookkeeping written by [boots]. A relaunch is not a restart; this is why. */
+    fun restoreBoots(bootsJson: String) = inner.restoreBoots(bootsJson)
+
+    /** Which of a session's conditions this device can already prove, so the UI can stop asking. */
+    fun proven(id: String, now: Long): List<Lock> =
+        json.decodeFromString(inner.provenJson(id, now))
 
     /** Start the 24-hour delayed release, returning the instant it lands. Never movable later. */
     fun requestRelease(id: String, now: Long): Long =
@@ -341,7 +416,11 @@ sealed interface Lock {
     @SerialName("challenge")
     data class Challenge(val challenge: ChallengeKind) : Lock
 
-    @Serializable @SerialName("peer_release") data class PeerRelease(val deviceId: String) : Lock
+    @Serializable
+    @SerialName("peer_release")
+    // The field is named on both sides: the core writes `device_id`, and a lock whose only
+    // difference from the Rust one is a spelling would fail to cross with no rule to point at.
+    data class PeerRelease(@SerialName("device_id") val deviceId: String) : Lock
 
     @Serializable @SerialName("token") data class Token(val id: String) : Lock
 

@@ -195,8 +195,15 @@ fn a_locked_session_refuses_and_names_what_is_missing() {
 fn the_evidence_the_platform_collected_is_what_releases_the_lock() {
     let c = curfew();
     start(&c, "s1", "deep-work", json!([{"kind": "device_credential"}]), None);
-    let evidence = json!([{"kind": "device_credential"}]).to_string();
-    c.end_session("s1".into(), NOW, evidence).expect("credential accepted");
+
+    // Saying it happened is not it happening. `end_session` is reachable from anywhere in the app
+    // process, so a claim is worth exactly nothing.
+    let claimed = json!([{"kind": "device_credential"}]).to_string();
+    assert!(c.end_session("s1".into(), NOW, claimed).is_err(), "a claimed credential ended a lock");
+
+    // What the platform actually does after `BiometricPrompt` reports success.
+    c.record_credential("s1".into(), NOW);
+    c.end_session("s1".into(), NOW, String::new()).expect("credential accepted");
     assert!(c.active_profiles(NOW).is_empty());
 }
 
@@ -579,4 +586,175 @@ fn a_corrupt_witness_is_a_payload_error_rather_than_a_reset_baseline() {
         CurfewError::Payload { detail } => assert!(!detail.is_empty()),
         other => panic!("expected a payload error, got {other:?}"),
     }
+}
+
+// --- the other three ways out ---------------------------------------------------------------
+//
+// A tag, a restart and a paired device. Each is a condition the core checks for itself; the tests
+// are as much about what Kotlin cannot claim as about what a user can prove.
+
+const TAG: &str = "curfew-tag-abcdefghijkmnopqrstuvwx";
+
+fn with_tag() -> std::sync::Arc<Curfew> {
+    let toml = format!(
+        "schema_version = 1\ntimezone = \"Europe/London\"\n\
+         [[profiles]]\nid = \"deep-work\"\nname = \"Deep work\"\n\
+         [[tokens]]\nid = \"fridge\"\nhash = \"{}\"\n",
+        curfew_core::fingerprint(TAG)
+    );
+    Curfew::new(toml).expect("config")
+}
+
+#[test]
+fn the_right_tag_ends_a_session_and_a_stranger_does_not() {
+    let c = with_tag();
+    start(&c, "s1", "deep-work", json!([{"kind": "token", "id": "fridge"}]), None);
+
+    assert!(c.scan_token("s1".into(), "not a tag".into(), NOW).is_err(), "a stranger was accepted");
+    c.scan_token("s1".into(), TAG.into(), NOW).expect("the tag the config names");
+    assert!(c.active_profiles(NOW).is_empty());
+}
+
+/// A tag that exists but is not the one this lock asks for is answered exactly like an unknown
+/// one, so scanning cannot be used to find out which tags a config knows about.
+#[test]
+fn a_tag_for_another_lock_is_refused_the_same_way_a_stranger_is() {
+    let c = with_tag();
+    start(&c, "s1", "deep-work", json!([{"kind": "token", "id": "desk"}]), None);
+
+    let mine = c.scan_token("s1".into(), TAG.into(), NOW).unwrap_err();
+    let stranger = c.scan_token("s1".into(), "not a tag".into(), NOW).unwrap_err();
+    assert_eq!(format!("{mine:?}"), format!("{stranger:?}"), "the reply told the two apart");
+}
+
+#[test]
+fn claiming_a_tag_proves_nothing() {
+    let c = with_tag();
+    start(&c, "s1", "deep-work", json!([{"kind": "token", "id": "fridge"}]), None);
+    let claimed = json!([{"kind": "token", "id": "fridge"}]).to_string();
+    assert!(c.end_session("s1".into(), NOW, claimed).is_err(), "a claim was taken as evidence");
+}
+
+/// A lock asking for two things has to be satisfiable by doing two things, in either order and a
+/// short walk apart -- otherwise it could never be satisfied at all.
+#[test]
+fn a_tag_and_a_credential_can_be_presented_one_after_the_other() {
+    let c = with_tag();
+    let locks = json!([{"kind": "token", "id": "fridge"}, {"kind": "device_credential"}]);
+    start(&c, "s1", "deep-work", locks, None);
+
+    assert!(c.scan_token("s1".into(), TAG.into(), NOW).is_err(), "the tag alone ended it");
+    c.record_credential("s1".into(), NOW + 30);
+    c.end_session("s1".into(), NOW + 30, String::new()).expect("both conditions met");
+}
+
+/// Long enough to walk to the other room, short enough that a prompt answered this morning is not
+/// an open door this evening.
+#[test]
+fn a_proof_goes_stale_rather_than_standing_all_evening() {
+    let c = with_tag();
+    let locks = json!([{"kind": "token", "id": "fridge"}, {"kind": "device_credential"}]);
+    start(&c, "s1", "deep-work", locks, None);
+
+    let _ = c.scan_token("s1".into(), TAG.into(), NOW);
+    c.record_credential("s1".into(), NOW + curfew_core::PROOF_SECONDS);
+    assert!(c
+        .end_session("s1".into(), NOW + curfew_core::PROOF_SECONDS, String::new())
+        .is_err());
+}
+
+#[test]
+fn a_restart_lock_holds_until_the_device_is_actually_restarted() {
+    let c = curfew();
+    c.observe_boot(40_000);
+    start(&c, "s1", "deep-work", json!([{"kind": "restart_required"}]), None);
+    c.observe_boot(40_060);
+    assert!(c.end_session("s1".into(), NOW, String::new()).is_err(), "opened without a restart");
+
+    c.observe_boot(15);
+    c.end_session("s1".into(), NOW + 3600, String::new()).expect("the restart it asked for");
+}
+
+/// The cheapest bypass there is, if boot time were taken to be "now minus uptime": change the
+/// clock in Settings and every restart lock opens.
+#[test]
+fn moving_the_clock_a_year_is_not_a_restart() {
+    let c = curfew();
+    c.observe_boot(40_000);
+    start(&c, "s1", "deep-work", json!([{"kind": "restart_required"}]), None);
+    c.observe_boot(40_100);
+    assert!(c.end_session("s1".into(), NOW + 365 * 24 * 3600, String::new()).is_err());
+}
+
+#[test]
+fn restart_evidence_survives_the_app_being_killed() {
+    let c = curfew();
+    c.observe_boot(40_000);
+    start(&c, "s1", "deep-work", json!([{"kind": "restart_required"}]), None);
+    let (sessions, boots) = (c.sessions_json().unwrap(), c.boots_json().unwrap());
+
+    let back = curfew();
+    back.restore_sessions(sessions).unwrap();
+    back.restore_boots(boots).unwrap();
+    back.observe_boot(40_100);
+    assert!(back.end_session("s1".into(), NOW, String::new()).is_err(), "a relaunch was a restart");
+
+    back.observe_boot(12);
+    back.end_session("s1".into(), NOW + 3600, String::new()).expect("the real restart");
+}
+
+#[test]
+fn a_peer_lock_naming_this_device_is_offered_and_then_given() {
+    let c = curfew();
+    c.observe_releases("PHONE7".into(), String::new()).unwrap();
+    start(&c, "s1", "deep-work", json!([{"kind": "peer_release", "device_id": "PHONE7"}]), None);
+
+    assert_eq!(c.releasable(), vec!["s1".to_string()]);
+    c.release_peer("s1".into(), NOW);
+    assert!(c.active_profiles(NOW).is_empty(), "the release this device gave did not open it");
+    assert!(c.releases_json().unwrap().contains("s1"), "the release was not kept to be published");
+}
+
+#[test]
+fn a_device_the_lock_does_not_name_is_offered_nothing_and_can_claim_nothing() {
+    let c = curfew();
+    c.observe_releases("LAPTOP2".into(), String::new()).unwrap();
+    start(&c, "s1", "deep-work", json!([{"kind": "peer_release", "device_id": "PHONE7"}]), None);
+
+    assert!(c.releasable().is_empty(), "a device the lock does not name was offered the button");
+    c.release_peer("s1".into(), NOW);
+    assert!(!c.active_profiles(NOW).is_empty(), "the wrong device released the lock");
+
+    let claimed = json!([{"kind": "peer_release", "device_id": "PHONE7"}]).to_string();
+    assert!(c.end_session("s1".into(), NOW, claimed).is_err(), "a claimed release was believed");
+}
+
+#[test]
+fn a_release_heard_through_the_log_ends_the_session_here() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([{"kind": "peer_release", "device_id": "PHONE7"}]), None);
+    c.observe_releases("PC1".into(), json!({"s1": ["PHONE7"]}).to_string()).unwrap();
+
+    c.end_session("s1".into(), NOW, String::new()).expect("the peer said so");
+}
+
+/// The lock a release opens is usually on the *other* device, so waiting for the session to arrive
+/// here first would make the button work only sometimes.
+#[test]
+fn a_release_for_a_session_this_device_has_never_heard_of_is_still_kept() {
+    let c = curfew();
+    c.observe_releases("PC1".into(), String::new()).unwrap();
+    c.release_peer("elsewhere".into(), NOW);
+    assert!(c.releases_json().unwrap().contains("elsewhere"));
+}
+
+#[test]
+fn releases_survive_the_app_being_killed() {
+    let c = curfew();
+    c.observe_releases("PC1".into(), String::new()).unwrap();
+    c.release_peer("s1".into(), NOW);
+
+    let back = curfew();
+    back.restore_releases(c.releases_json().unwrap()).unwrap();
+    assert!(back.releases_json().unwrap().contains("s1"));
 }

@@ -81,7 +81,7 @@ and all-day events handled correctly in a dated test suite; a deleted event rele
 
 ## Phase 5 — Depth
 - [ ] Allowances/budgets with refill policies, launch limits, friction delays
-- [ ] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
+- [x] Challenge locks (typing, math), restart-required, NFC/QR token, peer-release lock
 - [x] ~~Biometric keyguard suppression~~ — researched and dropped: it requires device owner or
       profile owner, both out under D4 (DECISIONS D9, GAPS A7). Device Admin drops with it.
 - [x] Emergency passes with quota + cooldown (`[emergency]`, off by default, rolling window, shared across devices)

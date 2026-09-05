@@ -90,6 +90,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                 downtime = runtime.downtime.value,
                 clockTamper = runtime.clockTamper.value,
+                releasable = runtime.releasable.value,
                 passesLeft = runCatching { runtime.passesRemaining(now) }.getOrDefault(0),
                 passRefusal = runCatching { runtime.passRefusal(now) }.getOrNull(),
                 sync = syncState(now, previous.sync),
@@ -268,6 +269,55 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * End a session the user has just proved they own the device for.
+     *
+     * The prompt is shown by the caller; this is what happens after it says yes. The proof is
+     * recorded first and separately, so a lock that also wants a tag is left one step from open
+     * rather than refusing everything and starting again.
+     */
+    fun endWithCredential(session: Session, satisfied: List<Lock> = emptyList()) {
+        viewModelScope.launch {
+            runtime.recordCredential(session.id)
+            endSession(session, satisfied)
+        }
+    }
+
+    /**
+     * Present a tag to a session, from an NFC read or from the field for typing one in.
+     *
+     * The payload is handed straight to the core and never kept here: not in the state, not in a
+     * message, not in the audit log. A wrong tag and a tag belonging to another lock are answered
+     * identically, so nothing about which tags exist can be learned by trying.
+     */
+    fun scanToken(session: Session, payload: String) {
+        viewModelScope.launch {
+            try {
+                runtime.scanToken(session.id, payload)
+                say("${session.profile} ended.")
+            } catch (refused: Refused) {
+                _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
+            }
+            refresh()
+        }
+    }
+
+    /**
+     * Give the release another device's lock is waiting on this one for.
+     *
+     * Takes an id rather than a [Session] because the session being released usually belongs to
+     * the other device and is not running here at all. The confirmation lives in the UI: this
+     * cannot be undone, and a release given by accident would hand back a lock the user asked for
+     * and could not take away again.
+     */
+    fun releasePeer(id: String) {
+        viewModelScope.launch {
+            runtime.releasePeer(id)
+            say("Released. The other device will act on it within a few seconds.")
+            refresh()
+        }
+    }
+
     /** Start the delayed release. The instant it lands is the core's to choose, and never moves. */
     fun requestRelease(session: Session) {
         viewModelScope.launch {
@@ -426,6 +476,13 @@ data class UiState(
     /** Sync as the devices screen shows it. Present even when nothing has been paired. */
     val sync: SyncState = SyncState(),
     val message: String? = null,
+    /**
+     * Sessions whose lock names *this* device as the one that must let them out.
+     *
+     * Usually the lock is on the other device, so this is normally about a session that is not in
+     * [sessions] at all.
+     */
+    val releasable: List<String> = emptyList(),
     /** Emergency passes that could be spent right now, and why not when there are none. */
     val passesLeft: Int = 0,
     val passRefusal: PassRefusal? = null,

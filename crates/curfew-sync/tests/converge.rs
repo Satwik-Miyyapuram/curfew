@@ -37,6 +37,7 @@ fn any_op() -> impl Strategy<Value = Op> {
                 }),
             }),
         (0usize..3).prop_map(|profile| Op::End { session: format!("s{profile}") }),
+        (0usize..3).prop_map(|profile| Op::Released { session: format!("s{profile}") }),
         (0usize..3, 0i64..10_000).prop_map(|(profile, at)| Op::ReleaseRequested {
             session: format!("s{profile}"),
             at: NOW + at,

@@ -26,6 +26,11 @@ pub enum Item {
         id: String,
         label: String,
     },
+    /// Give the release a lock on this or another device is waiting on this machine for.
+    PeerRelease {
+        id: String,
+        label: String,
+    },
     /// Start the 24-hour delayed release.
     Release {
         id: String,
@@ -105,11 +110,34 @@ pub fn menu(status: &Status) -> Vec<Item> {
         let conditions: Vec<&Lock> =
             session.lock.conditions.iter().filter(|lock| !matches!(lock, Lock::Timer)).collect();
 
-        // Only the credential can be satisfied from here. A token, a peer release or a challenge is
-        // satisfied somewhere else by design, and an item that opened a prompt leading nowhere would
-        // be worse than no item at all.
+        // Only the credential can be satisfied from here by pressing something. A tag is scanned,
+        // a challenge is answered in the app, a restart is a restart — an item that opened a prompt
+        // leading nowhere would be worse than no item at all. What *is* actionable here is a peer
+        // release this machine is the named device for, which is a click and nothing more.
         let credential = conditions.iter().any(|lock| matches!(lock, Lock::DeviceCredential));
         let others = conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential));
+        let releasable = status.releasable.contains(&session.id);
+
+        // Said before the actions, because it is the answer to "why can I not end this?" and it is
+        // the one condition the user satisfies by doing something to the whole machine.
+        if conditions.iter().any(|lock| matches!(lock, Lock::RestartRequired)) {
+            items.push(Item::Note("    needs this machine restarted".to_string()));
+        }
+        for lock in &conditions {
+            if let Lock::Token { id } = lock {
+                items.push(Item::Note(format!("    needs the tag {id}")));
+            }
+        }
+        if releasable {
+            if status.released.contains(&session.id) {
+                items.push(Item::Note("    you have released this; the lock is elsewhere".into()));
+            } else {
+                items.push(Item::PeerRelease {
+                    id: session.id.clone(),
+                    label: format!("Release {} — this device is the one it asks", session.profile),
+                });
+            }
+        }
 
         if others {
             items.push(Item::Note("    this session is locked elsewhere".to_string()));
@@ -463,4 +491,62 @@ mod tests {
         assert_eq!(remaining(NOW, Some(NOW + 2 * 3600)), "2 h 0 min left");
         assert_eq!(remaining(NOW, None), "until released");
     }
+
+    /// A restart is the one condition satisfied by doing something to the whole machine, so it has
+    /// to be said before the actions rather than left under "locked elsewhere".
+    #[test]
+    fn a_restart_lock_says_what_it_wants() {
+        let items = menu(&status(vec![session([Lock::RestartRequired], None)]));
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("machine restarted"))),
+            "the menu did not say a restart was needed: {items:?}"
+        );
+    }
+
+    /// Naming the tag is the whole use of the note: "locked elsewhere" would send someone hunting
+    /// through the house for a tag they cannot identify.
+    #[test]
+    fn a_token_lock_names_the_tag_by_its_id() {
+        let items = menu(&status(vec![session([Lock::Token { id: "fridge".into() }], None)]));
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("the tag fridge"))),
+            "the menu did not name the tag: {items:?}"
+        );
+    }
+
+    #[test]
+    fn a_peer_lock_this_device_is_asked_for_is_a_button_and_not_a_note() {
+        let mut s = status(vec![session([Lock::PeerRelease { device_id: "PC1".into() }], None)]);
+        s.releasable = vec!["s1".into()];
+        let items = menu(&s);
+        assert!(
+            items.iter().any(|i| matches!(i, Item::PeerRelease { id, .. } if id == "s1")),
+            "the device the lock names was not offered the release: {items:?}"
+        );
+    }
+
+    /// The release cannot be taken back, so offering it twice would suggest it could be redone --
+    /// and pressing it again would do nothing anyone could see.
+    #[test]
+    fn a_release_already_given_is_reported_rather_than_offered_again() {
+        let mut s = status(vec![session([Lock::PeerRelease { device_id: "PC1".into() }], None)]);
+        s.releasable = vec!["s1".into()];
+        s.released = vec!["s1".into()];
+        let items = menu(&s);
+        assert!(!items.iter().any(|i| matches!(i, Item::PeerRelease { .. })), "offered twice");
+        assert!(items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("you have released"))));
+    }
+
+    #[test]
+    fn a_peer_lock_naming_another_device_offers_nothing_to_press() {
+        let items = menu(&status(vec![session(
+            [Lock::PeerRelease { device_id: "PHONE7".into() }],
+            None,
+        )]));
+        assert!(
+            !items.iter().any(|i| matches!(i, Item::PeerRelease { .. } | Item::End { .. })),
+            "a lock for another device offered a way out here: {items:?}"
+        );
+    }
+
 }

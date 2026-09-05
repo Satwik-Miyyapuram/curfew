@@ -13,10 +13,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,6 +59,14 @@ fun NowScreen(model: CurfewViewModel) {
     // it takes something scarce, shared with every paired device, and impossible to give back.
     var confirmingPass by remember { mutableStateOf<Session?>(null) }
 
+    // Giving a peer its release is the same kind of act, and asked about the same way: the other
+    // device opens the moment this one says yes, and there is no way to say no afterwards.
+    var confirmingRelease by remember { mutableStateOf<String?>(null) }
+
+    // The session a tag is being presented to, if any. The tag itself lives inside the dialog and
+    // is never lifted into this state, so a recomposition cannot leave it lying around.
+    var presenting by remember { mutableStateOf<Session?>(null) }
+
     fun finish(session: Session, satisfied: List<Lock>) {
         pending = null
         val credential = session.lock.conditions.filterIsInstance<Lock.DeviceCredential>()
@@ -64,7 +75,13 @@ fun NowScreen(model: CurfewViewModel) {
                 activity,
                 title = "End ${session.profile}",
                 subtitle = "Confirm it is you.",
-            ) { proven -> model.endSession(session, satisfied + proven) }
+            ) { proven ->
+                // A cancelled prompt still goes to the core, which refuses and says what is
+                // missing. Deciding here that it would have been refused would be this screen
+                // making the core's decision for it.
+                if (proven) model.endWithCredential(session, satisfied)
+                else model.endSession(session, satisfied)
+            }
         } else {
             model.endSession(session, satisfied)
         }
@@ -116,7 +133,18 @@ fun NowScreen(model: CurfewViewModel) {
                     onEnd = { end(session) },
                     onRelease = { model.requestRelease(session) },
                     onEmergency = { confirmingPass = session },
+                    onPresentTag = { presenting = session },
                 )
+            }
+            // Sessions another device is waiting on this one for. Usually not in the list above:
+            // the lock is over there, and this device is only the key.
+            if (state.releasable.isNotEmpty()) {
+                item {
+                    ReleaseCard(
+                        sessions = state.releasable,
+                        onRelease = { confirmingRelease = it },
+                    )
+                }
             }
             if (state.sessions.isEmpty()) {
                 item {
@@ -146,6 +174,42 @@ fun NowScreen(model: CurfewViewModel) {
             },
             dismissButton = {
                 TextButton(onClick = { confirmingPass = null }) { Text("Keep it") }
+            },
+        )
+    }
+
+    confirmingRelease?.let { id ->
+        AlertDialog(
+            onDismissRequest = { confirmingRelease = null },
+            title = { Text("Let the other device out?") },
+            text = {
+                Text(
+                    "Your other device is holding a session that only this one can end. Saying " +
+                        "yes ends it there as soon as the two devices next talk, and there is no " +
+                        "way to take it back.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = id
+                    confirmingRelease = null
+                    model.releasePeer(chosen)
+                }) { Text("Let it out") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingRelease = null }) { Text("Not yet") }
+            },
+        )
+    }
+
+    presenting?.let { session ->
+        TagDialog(
+            profile = session.profile,
+            activity = activity,
+            onDismiss = { presenting = null },
+            onPresent = { payload ->
+                presenting = null
+                model.scanToken(session, payload)
             },
         )
     }
@@ -251,6 +315,7 @@ private fun SessionCard(
     onEnd: () -> Unit,
     onRelease: () -> Unit,
     onEmergency: () -> Unit,
+    onPresentTag: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -296,6 +361,18 @@ private fun SessionCard(
                 )
             }
 
+            // A restart is the one condition nothing on this screen can offer a button for, so it
+            // is spelled out instead. Said as the plain instruction it is, because a lock whose way
+            // out is invisible is indistinguishable from one with no way out at all.
+            if (session.lock.conditions.any { it is Lock.RestartRequired }) {
+                Text(
+                    "Restart this device, then come back and end it. Force-stopping Curfew or " +
+                        "reopening it is not a restart.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
             session.lock.delayedReleaseAt?.let { at ->
                 Text(
                     "A release you asked for lands ${relative(at, now)}.",
@@ -329,6 +406,16 @@ private fun SessionCard(
                 // Offered only on a session nothing else here can end, and only when there is one
                 // to spend. Next to an unlocked session it would teach people to reach for the
                 // scarce thing first, which is exactly backwards.
+                // Offered only when the lock actually names a tag. A field for one otherwise is
+                // an invitation to hunt for a tag that would open nothing.
+                if (session.lock.conditions.any { it is Lock.Token }) {
+                    TextButton(
+                        onClick = onPresentTag,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Present a tag for ${session.profile}"
+                        },
+                    ) { Text("Present a tag") }
+                }
                 if (session.lock.isLocked && passesLeft > 0) {
                     TextButton(
                         onClick = onEmergency,
@@ -368,6 +455,104 @@ private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
         title = { Text("Not yet") },
         text = { Text(text) },
+    )
+}
+
+/**
+ * The card that appears when another device is waiting on this one.
+ *
+ * It shows up on its own, without anything happening here, because the lock it opens is on the
+ * other device. Only ids are shown: the profile name lives over there, and guessing at it would be
+ * worse than naming the session plainly.
+ */
+@Composable
+private fun ReleaseCard(sessions: List<String>, onRelease: (String) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Waiting on you",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                "Another of your devices has a session only this one can end.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            sessions.forEach { id ->
+                TextButton(
+                    onClick = { onRelease(id) },
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .semantics { contentDescription = "Let session $id out" },
+                ) { Text("Let $id out") }
+            }
+        }
+    }
+}
+
+/**
+ * Presenting a physical tag, by tapping it or by typing what is written on it.
+ *
+ * Typing is offered next to tapping rather than as a fallback for old phones: a tag whose only
+ * reader is the phone it locks is a tag that a broken NFC chip turns into no way out at all. What
+ * is typed goes straight to the core and is not kept here.
+ */
+@Composable
+private fun TagDialog(
+    profile: String,
+    activity: FragmentActivity?,
+    onDismiss: () -> Unit,
+    onPresent: (String) -> Unit,
+) {
+    var typed by remember { mutableStateOf("") }
+    val present by rememberUpdatedState(onPresent)
+
+    // The radio is on for exactly as long as this dialog is, and the reader is torn down on the way
+    // out whichever way the dialog closes.
+    if (activity != null) {
+        DisposableEffect(activity) {
+            // The reader callback arrives on a binder thread; everything it touches — the dialog's
+            // own state, the view model — belongs to the main one.
+            val stop = Tags.listen(activity) { payload ->
+                activity.runOnUiThread { present(payload) }
+            }
+            onDispose { stop() }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Present the tag") },
+        text = {
+            Column {
+                Text(
+                    if (activity != null && Tags.isAvailable(activity)) {
+                        "Hold the tag against the back of the phone, or type what is on it."
+                    } else {
+                        // Said plainly rather than hidden: someone whose NFC is switched off should
+                        // know why tapping is doing nothing.
+                        "This phone is not reading tags right now. Type what is on it instead."
+                    },
+                )
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    singleLine = true,
+                    label = { Text("Tag") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                        .semantics { contentDescription = "The tag that ends $profile" },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onPresent(typed.trim()) },
+                enabled = typed.isNotBlank(),
+            ) { Text("Present") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

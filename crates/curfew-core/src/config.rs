@@ -35,6 +35,11 @@ pub struct Config {
     /// The escape hatch, and how tightly it is rationed. Disabled unless the user asks for it.
     #[serde(default)]
     pub emergency: EmergencyPolicy,
+    /// Physical tags a `Lock::Token` can be satisfied by, as fingerprints rather than payloads
+    /// (see [`crate::token`]). Empty means no scan can release anything, which is the right
+    /// default: a token lock with no tag behind it must fail shut.
+    #[serde(default)]
+    pub tokens: Vec<crate::token::Tag>,
 }
 
 /// The local DNS proxy, which is what makes a blocked domain cover its subdomains.
@@ -77,6 +82,7 @@ impl Default for Config {
             calendar_sources: Vec::new(),
             resolver: Resolver::default(),
             emergency: EmergencyPolicy::default(),
+            tokens: Vec::new(),
         }
     }
 }
@@ -212,6 +218,25 @@ impl Config {
                         p.id
                     )));
                 }
+            }
+        }
+        let mut tags = std::collections::BTreeSet::new();
+        for tag in &self.tokens {
+            if tag.id.trim().is_empty() {
+                return Err(ConfigError::Invalid("a token has an empty id".into()));
+            }
+            if !tags.insert(&tag.id) {
+                return Err(ConfigError::Invalid(format!("duplicate token id {:?}", tag.id)));
+            }
+            // A payload written where a fingerprint belongs would be a secret sitting in a file
+            // the user is told to back up and sync, and it would silently never match. Both are
+            // worth catching at load rather than at the fridge.
+            let hash = tag.hash.trim();
+            if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(ConfigError::Invalid(format!(
+                    "token {:?} needs a 64-character hex fingerprint; run `curfew tag` to make one",
+                    tag.id
+                )));
             }
         }
         // A schedule naming a profile that does not exist would start a session that enforces

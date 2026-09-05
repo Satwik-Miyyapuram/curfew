@@ -115,7 +115,8 @@ class SyncTest {
         phone.pass(onPhone, now + 1, emptyMap(), emptyMap())
 
         // The PC's user satisfied the lock there. The phone was given no such evidence.
-        onPc.endSession("pc-1", now + 2, listOf(Lock.DeviceCredential))
+        onPc.recordCredential("pc-1", now + 2)
+        onPc.endSession("pc-1", now + 2)
         pc.pass(onPc, now + 2, emptyMap(), emptyMap())
         carry(pc, phone, root)
         val pass = phone.pass(onPhone, now + 3, emptyMap(), emptyMap())

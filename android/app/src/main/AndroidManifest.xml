@@ -32,6 +32,14 @@
     <!-- Device credential is the strictest lock Curfew offers; there is deliberately no way past it. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!--
+      Reading a physical tag as a way out of a lock. Not required: the device may have no reader,
+      or a broken one, and a tag that can only be tapped would be no way out at all on such a
+      phone. What is on the tag can always be typed instead.
+    -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
     <!-- Calendar rules read events. Read-only, and never written back. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 

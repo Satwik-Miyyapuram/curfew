@@ -40,6 +40,10 @@ pub struct Pass {
     /// device's own events are not in here: it already has them, and taking its own snapshot back
     /// would make an event's id depend on whether sync happened to be running.
     pub calendar: Vec<CalendarEvent>,
+    /// Which devices have released which session, so a `Lock::PeerRelease` can be checked without
+    /// asking the network anything at the moment someone presses end. Keyed by session id, values
+    /// are device ids as `Lock::PeerRelease { device_id }` spells them.
+    pub released: BTreeMap<String, BTreeSet<String>>,
     /// Every emergency pass spent on any device, this one included. The caller adopts it whole:
     /// the quota is one ration shared between devices, not one each.
     pub passes: Passes,
@@ -59,6 +63,9 @@ pub struct Mirror {
     calendar: Option<(Vec<CalendarEvent>, Timestamp)>,
     /// How many pass-uses have already been written to the log, so one is announced once.
     passes: usize,
+    /// Sessions this device has already announced a release for. A release is said once; saying it
+    /// again would be harmless (the log unions them) but would grow the log for nothing.
+    released: BTreeSet<String>,
 }
 
 /// How long a published calendar snapshot stands before it is written again unchanged.
@@ -159,6 +166,26 @@ impl Mirror {
             wrote += 1;
         }
         self.passes = passes.used.len();
+        wrote
+    }
+
+    /// Announce the releases this device has agreed to give, for locks that name it.
+    ///
+    /// Only new ones are written. There is deliberately no way to un-announce: `Lock::PeerRelease`
+    /// is satisfied the moment the named device says so, and a release that could be withdrawn
+    /// would let one device re-lock another after the user had already been told they were free.
+    pub fn publish_releases(
+        &mut self,
+        shared: &Shared,
+        now: Timestamp,
+        releases: &BTreeSet<String>,
+    ) -> usize {
+        let mut wrote = 0;
+        for session in releases.difference(&self.released.clone()) {
+            shared.record(now, Op::Released { session: session.clone() });
+            self.released.insert(session.clone());
+            wrote += 1;
+        }
         wrote
     }
 
@@ -267,6 +294,13 @@ impl Mirror {
             still_locked: believed.still_locked,
             calendar,
             passes: believed.passes,
+            released: believed
+                .released
+                .into_iter()
+                .map(|(session, devices)| {
+                    (session, devices.iter().map(|d| d.as_str().to_string()).collect())
+                })
+                .collect(),
         }
     }
 
@@ -786,4 +820,58 @@ mod tests {
         assert_eq!(seen.passes, Passes::default());
         assert!(seen.passes.check(NOW + 1, &policy).is_ok());
     }
+
+    #[test]
+    fn a_release_given_here_reaches_the_device_holding_the_lock() {
+        let (mut phone, mut pc) = two();
+        let holder = pc.shared.identity.id().as_str().to_string();
+        phone.sessions.running.push(session(
+            "s1",
+            "deep-work",
+            LockSet::new([Lock::PeerRelease { device_id: holder.clone() }], None),
+        ));
+        phone.mirror.publish(&phone.shared, NOW, &phone.sessions, &phone.usage, &phone.launches);
+        carry(&phone, &pc);
+        pc.pass(NOW + 1);
+
+        let mut releases = BTreeSet::new();
+        releases.insert("s1".to_string());
+        assert_eq!(pc.mirror.publish_releases(&pc.shared, NOW + 2, &releases), 1);
+        carry(&pc, &phone);
+
+        let pass = phone.pass(NOW + 3);
+        assert_eq!(
+            pass.released.get("s1").map(|d| d.contains(&holder)),
+            Some(true),
+            "the phone did not hear the release the PC gave"
+        );
+    }
+
+    #[test]
+    fn the_same_release_is_only_ever_written_once() {
+        let (_phone, mut pc) = two();
+        let mut releases = BTreeSet::new();
+        releases.insert("s1".to_string());
+
+        assert_eq!(pc.mirror.publish_releases(&pc.shared, NOW, &releases), 1);
+        assert_eq!(pc.mirror.publish_releases(&pc.shared, NOW + 60, &releases), 0);
+
+        releases.insert("s2".to_string());
+        assert_eq!(pc.mirror.publish_releases(&pc.shared, NOW + 120, &releases), 1);
+    }
+
+    #[test]
+    fn a_release_outlives_the_session_it_opened() {
+        // The session ends, its entry is reaped, and the release stays in the log. A device that
+        // syncs a week later must not adopt the session back without also hearing it was released.
+        let (mut phone, mut pc) = two();
+        let mut releases = BTreeSet::new();
+        releases.insert("s1".to_string());
+        pc.mirror.publish_releases(&pc.shared, NOW, &releases);
+        carry(&pc, &phone);
+
+        let pass = phone.pass(NOW + HOUR * 24 * 7);
+        assert!(pass.released.contains_key("s1"));
+    }
+
 }

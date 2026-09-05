@@ -57,6 +57,9 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
         menu::Item::Emergency { id, .. } => {
             Some((Request::Emergency { id: id.clone() }, String::new()))
         }
+        menu::Item::PeerRelease { id, .. } => {
+            Some((Request::Release { id: id.clone() }, String::new()))
+        }
         menu::Item::Release { id, .. } => {
             Some((Request::RequestRelease { id: id.clone() }, String::new()))
         }

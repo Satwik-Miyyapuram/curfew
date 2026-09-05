@@ -63,6 +63,12 @@ class PolicyTest {
 
     private fun policy() = Policy.load(configToml)
 
+    /** A tag's contents, and the SHA-256 of them, which is all a config is ever allowed to hold. */
+    private companion object {
+        const val TAG = "curfew-tag-abcdefghijkmnopqrstuvwx"
+        const val FINGERPRINT = "783397333aa0e2e4413bca77c01aab62890f930f0e86fe80771a66453ac78b5b"
+    }
+
     private fun locked(profile: String, locks: List<Lock>, endsAt: Long?) =
         Session(
             id = "s1",
@@ -182,8 +188,231 @@ class PolicyTest {
     fun `the device credential the platform verified is what releases the lock`() {
         val p = policy()
         p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), null))
-        p.endSession("s1", friday0930, satisfied = listOf(Lock.DeviceCredential))
+        p.recordCredential("s1", friday0930)
+        p.endSession("s1", friday0930)
         assertTrue(p.activeProfiles(friday0930).isEmpty())
+    }
+
+    /**
+     * The other half of the same rule, and the reason the first half is worth anything.
+     *
+     * `endSession` is reachable from any code in this process. If naming a condition were enough to
+     * satisfy it, every lock in the app would be one method call from open, and the biometric prompt
+     * would be decoration.
+     */
+    @Test
+    fun `saying the credential was given does not give it`() {
+        val p = policy()
+        p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), null))
+        try {
+            p.endSession("s1", friday0930, satisfied = listOf(Lock.DeviceCredential))
+            fail("a claim is not a proof")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.DeviceCredential), (e.refusal as Refusal.Locked).missing)
+        }
+    }
+
+    /** Same again for the three conditions that are not the credential. */
+    @Test
+    fun `no unclaimable condition can be talked into being satisfied`() {
+        val unclaimable = listOf(
+            Lock.Token(id = "desk"),
+            Lock.RestartRequired,
+            Lock.PeerRelease(deviceId = "pc-1"),
+        )
+        for (lock in unclaimable) {
+            val p = policy()
+            p.startSession(locked("deep-work", listOf(lock), null))
+            try {
+                p.endSession("s1", friday0930, satisfied = listOf(lock))
+                fail("$lock was claimed into being satisfied")
+            } catch (e: Refused) {
+                assertEquals(listOf(lock), (e.refusal as Refusal.Locked).missing)
+            }
+        }
+    }
+
+    // --- physical tags ----------------------------------------------------------------------------
+
+    /**
+     * The tag config the tag tests share. Only the fingerprint is written down: the config file
+     * lives on disk next to the sessions it locks, and a config holding the tag would be the tag.
+     */
+    private val tagToml =
+        configToml + "\n\n[[tokens]]\nid = \"desk\"\nhash = \"" + FINGERPRINT + "\"\n"
+
+    @Test
+    fun `the right tag ends the session`() {
+        val p = Policy.load(tagToml)
+        p.startSession(locked("deep-work", listOf(Lock.Token(id = "desk")), null))
+        p.scanToken("s1", TAG, friday0930)
+        assertTrue(p.activeProfiles(friday0930).isEmpty())
+    }
+
+    /**
+     * A tag that is not this lock's tag is refused with exactly the words a tag that is not a
+     * Curfew tag at all gets, so tapping things cannot be used to find out which tags exist.
+     */
+    @Test
+    fun `a tag this lock does not name is refused, and says nothing about which would work`() {
+        val p = Policy.load(tagToml)
+        p.startSession(locked("deep-work", listOf(Lock.Token(id = "desk")), null))
+        try {
+            p.scanToken("s1", "some-other-tag", friday0930)
+            fail("the wrong tag opened it")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.Token(id = "desk")), (e.refusal as Refusal.Locked).missing)
+        }
+        assertEquals(listOf("deep-work"), p.activeProfiles(friday0930))
+    }
+
+    /** Two conditions, satisfied one at a time, a walk apart. Neither order is special. */
+    @Test
+    fun `a tag and a credential can be given one after the other`() {
+        val p = Policy.load(tagToml)
+        p.startSession(
+            locked("deep-work", listOf(Lock.Token(id = "desk"), Lock.DeviceCredential), null),
+        )
+        try {
+            p.scanToken("s1", TAG, friday0930)
+            fail("the credential is still missing")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.DeviceCredential), (e.refusal as Refusal.Locked).missing)
+        }
+        p.recordCredential("s1", friday0930 + 30)
+        p.endSession("s1", friday0930 + 30)
+        assertTrue(p.activeProfiles(friday0930).isEmpty())
+    }
+
+    /** A prompt answered this morning is not an open door tonight. */
+    @Test
+    fun `a proof goes stale rather than standing all day`() {
+        val p = policy()
+        p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), null))
+        p.recordCredential("s1", friday0930)
+        try {
+            p.endSession("s1", friday0930 + 3600)
+            fail("the proof should have gone stale")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.DeviceCredential), (e.refusal as Refusal.Locked).missing)
+        }
+    }
+
+    // --- restarts ---------------------------------------------------------------------------------
+
+    @Test
+    fun `a restart lock holds until the device is actually restarted`() {
+        val p = policy()
+        p.observeBoot(1_000)
+        p.startSession(locked("deep-work", listOf(Lock.RestartRequired), null))
+        p.observeBoot(1_060)
+        try {
+            p.endSession("s1", friday0930 + 60)
+            fail("nothing has restarted")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.RestartRequired), (e.refusal as Refusal.Locked).missing)
+        }
+
+        // Uptime going backwards is the restart: it is the one thing a user cannot fake from
+        // Settings, which a wall clock moved forward a year very much is.
+        p.observeBoot(30)
+        p.endSession("s1", friday0930 + 120)
+        assertTrue(p.activeProfiles(friday0930).isEmpty())
+    }
+
+    @Test
+    fun `a clock moved forward is not a restart`() {
+        val p = policy()
+        p.observeBoot(1_000)
+        p.startSession(locked("deep-work", listOf(Lock.RestartRequired), null))
+        p.observeBoot(1_010)
+        try {
+            p.endSession("s1", friday0930 + 400_000)
+            fail("a clock change is not a restart")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.RestartRequired), (e.refusal as Refusal.Locked).missing)
+        }
+    }
+
+    /** Relaunching the app is not a restart, which is the whole reason boots are written down. */
+    @Test
+    fun `boot bookkeeping survives the process and a relaunch still is not a restart`() {
+        val before = policy()
+        before.observeBoot(1_000)
+        before.startSession(locked("deep-work", listOf(Lock.RestartRequired), null))
+        val savedSessions = before.sessions()
+        val savedBoots = before.boots()
+
+        val after = policy()
+        after.restoreSessions(savedSessions)
+        after.restoreBoots(savedBoots)
+        after.observeBoot(1_050)
+        try {
+            after.endSession("s1", friday0930 + 50)
+            fail("a relaunch is not a restart")
+        } catch (e: Refused) {
+            assertEquals(listOf(Lock.RestartRequired), (e.refusal as Refusal.Locked).missing)
+        }
+    }
+
+    // --- peer release -----------------------------------------------------------------------------
+
+    @Test
+    fun `a peer lock naming this device is offered and then given`() {
+        val p = policy()
+        p.observeReleases("phone-1", emptyMap())
+        p.startSession(
+            locked("deep-work", listOf(Lock.PeerRelease(deviceId = "phone-1")), null),
+        )
+        assertEquals(listOf("s1"), p.releasable())
+        p.releasePeer("s1", friday0930)
+        assertEquals(setOf("s1"), p.releases())
+
+        // The session is already gone: when the device being asked is also the device holding the
+        // lock, the release satisfies it there and then, and there is nothing left to end.
+        assertTrue(p.activeProfiles(friday0930).isEmpty())
+        assertEquals(emptyList<String>(), p.releasable())
+    }
+
+    @Test
+    fun `a release from some other device does not open a lock naming this one`() {
+        val p = policy()
+        p.observeReleases("phone-1", mapOf("s1" to setOf("pc-9")))
+        p.startSession(
+            locked("deep-work", listOf(Lock.PeerRelease(deviceId = "phone-1")), null),
+        )
+        try {
+            p.endSession("s1", friday0930)
+            fail("the wrong device released it")
+        } catch (e: Refused) {
+            assertEquals(
+                listOf(Lock.PeerRelease(deviceId = "phone-1")),
+                (e.refusal as Refusal.Locked).missing,
+            )
+        }
+    }
+
+    /** The release usually arrives for a session this device is not running, and is still kept. */
+    @Test
+    fun `a release survives being written down and read back`() {
+        val before = policy()
+        before.observeReleases("phone-1", emptyMap())
+        before.releasePeer("nothing-here", friday0930)
+        val saved = before.releasesJson()
+
+        val after = policy()
+        after.restoreReleases(saved)
+        assertEquals(setOf("nothing-here"), after.releases())
+    }
+
+    /** What the UI stops asking for once the evidence is in. */
+    @Test
+    fun `proven says which conditions are already answered`() {
+        val p = policy()
+        p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), null))
+        assertTrue(p.proven("s1", friday0930).isEmpty())
+        p.recordCredential("s1", friday0930)
+        assertEquals(listOf(Lock.DeviceCredential), p.proven("s1", friday0930))
     }
 
     @Test

@@ -31,19 +31,23 @@ object Auth {
             BiometricManager.BIOMETRIC_SUCCESS
 
     /**
-     * Ask for the screen lock. [onResult] receives the locks that were actually proven — empty when
-     * the user cancelled, which the caller must treat as "not proven" rather than as an error.
+     * Ask for the screen lock. [onResult] receives whether the prompt actually succeeded; `false`
+     * for a cancellation, which the caller must treat as "not proven" rather than as an error.
+     *
+     * The result is a fact, not a [Lock], and on purpose: a caller holding `Lock.DeviceCredential`
+     * could hand it to the core whether or not the prompt ever ran. Success is reported to the core
+     * separately, by `recordCredential`, which is the only route by which it counts.
      */
     fun prove(
         activity: FragmentActivity,
         title: String,
         subtitle: String,
-        onResult: (List<Lock>) -> Unit,
+        onResult: (Boolean) -> Unit,
     ) {
         if (!isAvailable(activity)) {
             // No screen lock set on the device. Saying so is better than a prompt that cannot open:
             // the user's next step is to set one, and only they can do that.
-            onResult(emptyList())
+            onResult(false)
             return
         }
         val prompt = BiometricPrompt(
@@ -51,11 +55,11 @@ object Auth {
             ContextCompat.getMainExecutor(activity),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    onResult(listOf(Lock.DeviceCredential))
+                    onResult(true)
                 }
 
                 override fun onAuthenticationError(code: Int, message: CharSequence) {
-                    onResult(emptyList())
+                    onResult(false)
                 }
 
                 // A single failed attempt is not a decision; the prompt stays up and asks again.

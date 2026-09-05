@@ -24,7 +24,7 @@ use curfew_core::session::{Session, Sessions};
 use curfew_core::{CalendarEvent, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The hash that starts every author's chain.
 pub const GENESIS: [u8; 32] = [0; 32];
@@ -70,6 +70,15 @@ pub enum Op {
     /// ever put in here, so the log carries the meetings that matter to a block and not a
     /// transcript of someone's week.
     Calendar { events: Vec<CalendarEvent> },
+    /// "I, the device that signed this, release that session."
+    ///
+    /// The satisfying evidence for `Lock::PeerRelease { device_id }`, and the reason the entry says
+    /// only which session: *who* released it is the entry's author, which is signed, so a device
+    /// cannot release on another's behalf by writing a different name in the message. Grow-only,
+    /// like every other permission in the log — a release once given is not taken back, because a
+    /// peer who could withdraw one could hold a lock shut that the user was already promised out
+    /// of.
+    Released { session: String },
     /// An emergency pass was spent. Carried so the quota is one quota across every device rather
     /// than one per device, and so a phone kept offline for a week does not come back with a fresh
     /// allowance. Merging is union of timestamps, which cannot give a pass back.
@@ -147,6 +156,10 @@ pub struct Replay {
     /// resolve — the lock is doing its job — but the UI is owed an explanation for why the phone
     /// says one thing and the PC another.
     pub still_locked: Vec<String>,
+    /// Which devices have released which session, from `Op::Released`. Keyed by session, so the
+    /// evidence for a `Lock::PeerRelease` is a lookup rather than a scan of the whole log.
+    #[serde(default)]
+    pub released: BTreeMap<String, BTreeSet<DeviceId>>,
     /// Every emergency pass spent anywhere, so the ration is global. Defaulted rather than
     /// required, so a checkpoint written by an older build still loads.
     #[serde(default)]
@@ -403,6 +416,12 @@ fn apply(state: &mut Replay, entry: &Entry, now: Timestamp) {
         Op::Calendar { events } => {
             state.calendars.insert(entry.author.clone(), events.clone());
         }
+        // Kept even when no session by that id is running here yet: a release can legitimately
+        // arrive before the start it refers to, and dropping it would make the order two devices
+        // happened to sync in decide whether a lock opens.
+        Op::Released { session } => {
+            state.released.entry(session.clone()).or_default().insert(entry.author.clone());
+        }
         // Grow-only, and never trusted to be in the past: a device claiming a use far in the
         // future only ever spends more of its own quota, never less.
         Op::EmergencyUsed { at } => state.passes.record(*at),
@@ -461,6 +480,71 @@ mod tests {
         for signed in log_a.since(&log_b.heads()) {
             log_b.accept(&signed, peers_b).unwrap();
         }
+    }
+
+    #[test]
+    fn a_release_names_the_device_that_gave_it_without_saying_so() {
+        // The op carries no author field on purpose: the entry is signed, so a device that wrote
+        // one cannot put another device's name on it.
+        let p = paired();
+        let (mut on_pc, mut on_phone) = (Log::default(), Log::default());
+
+        on_pc.append(&p.pc, NOW, start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None));
+        on_pc.append(&p.pc, NOW + 60, Op::Released { session: "s1".into() });
+        exchange((&mut on_phone, &p.on_phone), (&mut on_pc, &p.on_pc));
+
+        let believed = on_phone.replay(NOW + HOUR);
+        assert_eq!(
+            believed.released.get("s1").map(|d| d.len()),
+            Some(1),
+            "the release did not arrive at the device holding the lock"
+        );
+        assert!(believed.released["s1"].contains(&p.pc.id()));
+    }
+
+    #[test]
+    fn a_release_for_a_session_nobody_here_has_heard_of_is_still_kept() {
+        // The lock the release opens is usually on the other device, so the entry routinely
+        // arrives before -- or instead of -- the session it names.
+        let p = paired();
+        let (mut on_pc, mut on_phone) = (Log::default(), Log::default());
+
+        on_pc.append(&p.pc, NOW, Op::Released { session: "never-seen".into() });
+        exchange((&mut on_phone, &p.on_phone), (&mut on_pc, &p.on_pc));
+
+        assert!(on_phone.replay(NOW + HOUR).released.contains_key("never-seen"));
+    }
+
+    #[test]
+    fn a_release_cannot_be_taken_back_by_saying_anything_afterwards() {
+        // There is no un-release op, and an End is only ever a request. Once a user has been told
+        // they are free, no later entry may shut the door again.
+        let p = paired();
+        let mut log = Log::default();
+
+        log.append(&p.pc, NOW, start("s1", [Lock::PeerRelease { device_id: p.pc.id().as_str().into() }], None));
+        log.append(&p.pc, NOW + 60, Op::Released { session: "s1".into() });
+        log.append(&p.pc, NOW + 120, Op::ReleaseRequested { session: "s1".into(), at: NOW + 120 });
+        log.append(&p.pc, NOW + 180, start("s1", [Lock::Confirm], None));
+
+        assert!(log.replay(NOW + HOUR).released["s1"].contains(&p.pc.id()));
+    }
+
+    #[test]
+    fn two_devices_releasing_the_same_session_both_count() {
+        // A lock may name more than one device. The set is a union, so the order the entries
+        // arrive in cannot decide which release survives.
+        let p = paired();
+        let (mut on_pc, mut on_phone) = (Log::default(), Log::default());
+
+        on_pc.append(&p.pc, NOW, Op::Released { session: "s1".into() });
+        on_phone.append(&p.phone, NOW, Op::Released { session: "s1".into() });
+        exchange((&mut on_phone, &p.on_phone), (&mut on_pc, &p.on_pc));
+
+        let here = on_pc.replay(NOW + HOUR).released["s1"].clone();
+        let there = on_phone.replay(NOW + HOUR).released["s1"].clone();
+        assert_eq!(here.len(), 2);
+        assert_eq!(here, there, "the two devices disagreed about who had released the session");
     }
 
     #[test]

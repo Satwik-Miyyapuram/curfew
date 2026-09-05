@@ -41,6 +41,17 @@ pub struct Tick {
     pub hosts_error: Option<String>,
 }
 
+/// Conditions a caller is allowed to assert for itself.
+///
+/// A confirmation dialog and a retyped passage happen entirely in the UI: there is no machine fact
+/// underneath them, so the process that showed them is the only possible witness and refusing its
+/// word would make those locks unusable rather than stronger. Everything else -- a password, a tag,
+/// a reboot, a peer -- is checked by the service, and is therefore never taken on a caller's say-so.
+fn claimable(lock: &curfew_core::Lock) -> bool {
+    use curfew_core::Lock;
+    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+}
+
 /// The service's state between passes.
 pub struct Enforcer {
     pub config: Config,
@@ -62,6 +73,24 @@ pub struct Enforcer {
     /// Emergency passes spent so far, on this device and on every device it has heard from. The
     /// quota is one quota, so this set is merged rather than owned.
     pub passes: curfew_core::Passes,
+    /// Which boot each running session was first seen in, so `Lock::RestartRequired` is answered
+    /// by a fact about the machine rather than by a caller saying it rebooted. Persisted.
+    pub boots: curfew_core::Boots,
+    /// This boot's id, and the counter that derives it from uptime. Both persisted: a machine
+    /// that forgot which boot it was in would answer a restart lock by guessing.
+    pub boot_id: u64,
+    pub boot_counter: curfew_core::BootCounter,
+    /// Conditions this device has actually checked recently -- a password Windows accepted, a tag
+    /// that matched. Deliberately not persisted: after a restart nothing is proven again.
+    pub proofs: curfew_core::Proofs,
+    /// Releases this device has given, for locks that name it. Published to the op-log by the
+    /// caller and persisted, so a release survives the service being restarted.
+    pub releases: BTreeSet<String>,
+    /// Releases every device has given, from the op-log. The evidence for `Lock::PeerRelease`.
+    pub released: BTreeMap<String, BTreeSet<String>>,
+    /// This device's own id in the op-log, once sync knows it. `None` on a machine that has never
+    /// paired, where no peer lock can name it anyway.
+    pub device_id: Option<String>,
     /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
     /// two countdowns racing each other would leave nobody able to say what is about to occur.
     pub freeze: Option<curfew_core::Countdown>,
@@ -89,11 +118,57 @@ impl Enforcer {
             last: Tick::default(),
             state_warning: None,
             passes: Default::default(),
+            boots: Default::default(),
+            boot_id: 0,
+            boot_counter: Default::default(),
+            proofs: Default::default(),
+            releases: BTreeSet::new(),
+            released: BTreeMap::new(),
+            device_id: None,
             freeze: None,
             gates: Default::default(),
             watch: Default::default(),
             counter: 0,
         }
+    }
+
+    /// Take a reading of the machine's uptime, which is what says whether it has been restarted.
+    ///
+    /// Called by the caller rather than from inside [`Enforcer::tick`] so that the one thing here
+    /// that depends on the real machine stays at the edge, where a test can hand it a number and a
+    /// reboot is two lines rather than a reboot.
+    pub fn observe_boot(&mut self, uptime: i64) {
+        self.boot_id = self.boot_counter.observe(uptime);
+    }
+
+    /// Everything this device can prove about a session's lock without being told.
+    ///
+    /// This is what separates a condition that is *checked* from one that is merely claimed. A
+    /// reboot is proven by the boot id; a peer release by a signed entry in the log; a password or
+    /// a tag by the check that was made when it was presented, for as long as that proof is fresh.
+    /// Nothing a caller says reaches this function.
+    pub fn proven(&self, id: &str, now: Timestamp) -> BTreeSet<curfew_core::Lock> {
+        let mut evidence = self.boots.evidence(id, self.boot_id);
+        evidence.extend(self.proofs.fresh(id, now));
+        for device in self.released.get(id).into_iter().flatten() {
+            evidence.insert(curfew_core::Lock::PeerRelease { device_id: device.clone() });
+        }
+        evidence
+    }
+
+    /// Sessions whose lock asks *this* device for the release.
+    pub fn releasable(&self) -> Vec<String> {
+        let Some(mine) = &self.device_id else { return Vec::new() };
+        self.sessions
+            .running
+            .iter()
+            .filter(|s| {
+                s.lock.conditions.iter().any(|lock| {
+                    matches!(lock, curfew_core::Lock::PeerRelease { device_id } if device_id == mine)
+                })
+            })
+            .map(|s| s.id.clone())
+            .collect()
     }
 
     /// The world as the core sees it at `now`.
@@ -174,6 +249,12 @@ impl Enforcer {
         // strengthened before anything asks whether it is over (design invariant 2).
         tick.ended = self.sessions.reap(now);
 
+        // Which boot each surviving session belongs to, and which proofs are still fresh. Done
+        // after the reap so a session that has just ended takes its bookkeeping with it.
+        self.boots.observe(self.boot_id, &self.sessions.running);
+        let running: Vec<String> = self.sessions.running.iter().map(|s| s.id.clone()).collect();
+        self.proofs.prune(now, &running);
+
         let state = self.state(now);
         tick.processes =
             enforce(now, &state, &self.config, processes, &mut self.gates, &mut self.watch);
@@ -207,6 +288,8 @@ impl Enforcer {
                 state_warning: self.state_warning.clone(),
                 passes_left: self.passes.remaining(now, &self.config.emergency),
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
+                releasable: self.releasable(),
+                released: self.releases.iter().cloned().collect(),
             }),
 
             Request::Start { profile, seconds, locks } => {
@@ -257,12 +340,21 @@ impl Enforcer {
                 Response::Ok
             }
 
+            // A caller may claim the conditions it is the only witness to -- a confirmation it
+            // showed, a passage it made the user retype -- and nothing else. Everything stronger is
+            // supplied by `proven`, which asks the machine rather than the caller. Without this
+            // filter, an `end` message listing `restart_required` as satisfied, typed into the pipe
+            // by hand, would be every lock's way out.
             Request::End { id, satisfied } => {
+                let mut satisfied: BTreeSet<curfew_core::Lock> =
+                    satisfied.into_iter().filter(claimable).collect();
+                satisfied.extend(self.proven(&id, now));
                 match self.sessions.end(&id, now, &satisfied) {
                     Ok(_) => {
                         // Give the machine back in the same breath rather than waiting for the next
                         // pass: a lock that has ended but whose sites still fail to resolve reads as
                         // a broken machine.
+                        self.proofs.forget(&id);
                         let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
                         Response::Ok
                     }
@@ -282,11 +374,12 @@ impl Enforcer {
                                 .into(),
                     };
                 }
-                // Only now, and only this condition. Proving ownership of the machine says nothing
-                // about a timer, a token or a peer, so those still have to be satisfied their own
-                // way.
-                let satisfied =
-                    std::collections::BTreeSet::from([curfew_core::Lock::DeviceCredential]);
+                // Only this condition is proved by a password. A timer, a tag or a peer still has
+                // to be satisfied its own way -- but the proof is written down for a couple of
+                // minutes, so a lock asking for two things can be satisfied by doing two things
+                // rather than being impossible to satisfy at all.
+                self.proofs.record(&id, curfew_core::Lock::DeviceCredential, now);
+                let satisfied = self.proven(&id, now);
                 match self.sessions.end(&id, now, &satisfied) {
                     Ok(_) => {
                         let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
@@ -294,6 +387,48 @@ impl Enforcer {
                     }
                     Err(refusal) => Response::Refused { refusal },
                 }
+            }
+
+            // The tag is checked here, against fingerprints, and the payload is not kept. A scan
+            // of something else is not told apart from a scan of a tag this lock does not name:
+            // both leave the lock shut, and neither is a way to enumerate the tags on the fridge.
+            Request::Token { id, payload } => {
+                match curfew_core::identify(&self.config.tokens, &payload) {
+                    None => Response::Error {
+                        detail: "That is not a tag this machine knows. The session is still locked."
+                            .into(),
+                    },
+                    Some(tag) => {
+                        self.proofs.record(&id, curfew_core::Lock::Token { id: tag }, now);
+                        let satisfied = self.proven(&id, now);
+                        match self.sessions.end(&id, now, &satisfied) {
+                            Ok(_) => {
+                                self.proofs.forget(&id);
+                                let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
+                                Response::Ok
+                            }
+                            Err(refusal) => Response::Refused { refusal },
+                        }
+                    }
+                }
+            }
+
+            // Recorded, never rescinded, and deliberately allowed for a session that is not running
+            // here: the lock this releases is usually on the *other* device, and asking this one to
+            // wait until it has heard of the session would make the button work only sometimes.
+            Request::Release { id } => {
+                self.releases.insert(id.clone());
+                // A peer lock naming this device is satisfied by this device saying so, so try the
+                // local end too: if the session is here and this was the last condition, it goes.
+                if let Some(mine) = self.device_id.clone() {
+                    self.released.entry(id.clone()).or_default().insert(mine);
+                    let satisfied = self.proven(&id, now);
+                    if self.sessions.end(&id, now, &satisfied).is_ok() {
+                        self.proofs.forget(&id);
+                        let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
+                    }
+                }
+                Response::Ok
             }
 
             // Never refused, and never checked against a lock: nothing has been started, so there is

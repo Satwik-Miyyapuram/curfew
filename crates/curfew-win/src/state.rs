@@ -24,6 +24,17 @@ pub struct Persisted {
     /// restart could forget would be no ration at all.
     #[serde(default)]
     pub passes: Passes,
+    /// Which boot each running session was first seen in, and this machine's own numbering of
+    /// its boots. Both persisted, because a restart-required lock whose evidence a restart erased
+    /// would be a lock that could never be satisfied.
+    #[serde(default)]
+    pub boots: curfew_core::Boots,
+    #[serde(default)]
+    pub boot_counter: curfew_core::BootCounter,
+    /// Releases this device has given for peer locks. Kept because a release is a promise made to
+    /// the other device, and a service restart must not take it back.
+    #[serde(default)]
+    pub releases: std::collections::BTreeSet<String>,
     /// When the last pass ran. Used to charge elapsed time honestly across a restart, and to notice
     /// that the machine was off — a gap is not usage.
     #[serde(default)]

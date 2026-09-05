@@ -82,6 +82,16 @@ mod sys {
         Some(Process { pid, exe: exe_of(pid)?, title: title_of(hwnd) })
     }
 
+    /// Seconds since this machine booted, from a counter the user cannot set.
+    ///
+    /// `GetTickCount64` is monotonic within a boot and starts again at zero after one, which is
+    /// exactly the property `curfew_core::BootCounter` needs. Reading the clock instead would make
+    /// changing the time look like a restart.
+    pub fn uptime_seconds() -> i64 {
+        // SAFETY: no arguments, no pointers, cannot fail.
+        (unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } / 1000) as i64
+    }
+
     fn exe_of(pid: u32) -> Option<String> {
         let mut system = sysinfo::System::new();
         system.refresh_processes(
@@ -105,6 +115,15 @@ mod sys {
     pub fn foreground() -> Option<Process> {
         None
     }
+
+    /// Uptime the tests can rely on: it never goes backwards, so a non-Windows build never invents
+    /// a reboot that did not happen.
+    pub fn uptime_seconds() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
 }
 
-pub use sys::{foreground, window_titles};
+pub use sys::{foreground, uptime_seconds, window_titles};

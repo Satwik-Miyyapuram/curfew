@@ -51,6 +51,16 @@ class CurfewRuntime internal constructor(
     /** What the UI shows: the strictest lock currently in force, merged across sessions. */
     val lock: StateFlow<LockSet> = _lock.asStateFlow()
 
+    private val _releasable = MutableStateFlow<List<String>>(emptyList())
+
+    /**
+     * Sessions whose lock names this device as the one that must let them out.
+     *
+     * Kept as a flow rather than asked for on demand because it changes when a *peer's* session
+     * arrives, not when anything happens here: the screen has to grow a button on its own.
+     */
+    val releasable: StateFlow<List<String>> = _releasable.asStateFlow()
+
     private val _profiles = MutableStateFlow<List<String>>(emptyList())
     val activeProfiles: StateFlow<List<String>> = _profiles.asStateFlow()
 
@@ -114,6 +124,47 @@ class CurfewRuntime internal constructor(
             audit(now, "session.ended", id)
             persist(now)
         }
+
+    /**
+     * Note that the device credential prompt has just succeeded for this session.
+     *
+     * Called from the UI the moment `BiometricPrompt` reports success, separately from ending, so
+     * a lock asking for a credential and a tag can be satisfied by doing both a short walk apart.
+     * The proof lasts a couple of minutes and never survives a restart.
+     */
+    suspend fun recordCredential(id: String, now: Long = clock.now()) = gate.withLock {
+        policy.recordCredential(id, now)
+    }
+
+    /**
+     * Present a physical tag, read over NFC or typed in.
+     *
+     * The payload is fingerprinted inside the core and dropped; it is never stored, never logged
+     * and never audited, because an audit row holding the tag would be the tag. Throws
+     * [dev.curfew.policy.Refused] when the lock still wants something — including when the tag is
+     * simply not the one it asked for, which is deliberately indistinguishable from a stranger.
+     */
+    suspend fun scanToken(id: String, payload: String, now: Long = clock.now()) = gate.withLock {
+        policy.scanToken(id, payload, now)
+        audit(now, "session.ended", id)
+        persist(now)
+    }
+
+    /**
+     * Give the release a peer's lock is waiting on this device for.
+     *
+     * Recorded even for a session this device has never heard of: the lock it opens is usually on
+     * the other device. It cannot be taken back, so the UI asks first.
+     */
+    suspend fun releasePeer(id: String, now: Long = clock.now()) = gate.withLock {
+        policy.releasePeer(id, now)
+        audit(now, "release.given", id)
+        db.state().put(StateRow(KEY_RELEASES, policy.releasesJson()))
+        persist(now)
+    }
+
+    /** Which of a session's conditions are already proved, so the UI stops asking for them. */
+    fun proven(id: String, now: Long = clock.now()): List<Lock> = policy.proven(id, now)
 
     suspend fun requestRelease(id: String, now: Long = clock.now()): Long = gate.withLock {
         val at = policy.requestRelease(id, now)
@@ -252,6 +303,12 @@ class CurfewRuntime internal constructor(
         // The clock witness is restored before anything is judged: a restart that reset the
         // baseline would hand an attacker exactly what moving the clock was meant to buy.
         db.state().get(KEY_CLOCK)?.let { runCatching { policy.restoreClock(it) } }
+        // Which boot each running session was first seen in. Without it a relaunch would look like
+        // the restart a lock asked for, and force-stopping the app would open every one of them.
+        db.state().get(KEY_BOOTS)?.let { runCatching { policy.restoreBoots(it) } }
+        db.state().get(KEY_RELEASES)?.let {
+            runCatching { policy.restoreReleases(it) }
+        }
         detectDowntime(now)
         refresh(now)
     }
@@ -282,7 +339,12 @@ class CurfewRuntime internal constructor(
      */
     suspend fun trustedNow(): Long {
         val verdict = policy.observeClock(clock.now(), clock.uptime(), clock.bootId())
+        // Taken from the same reading, and from uptime rather than the wall clock: uptime can only
+        // go backwards by rebooting, so a clock moved forward in Settings cannot be dressed up as
+        // the restart a lock asked for.
+        policy.observeBoot(clock.uptime())
         policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
+        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
         if (verdict.tampered) {
             _clockTamper.value = ClockTamper(
                 at = verdict.now,
@@ -355,12 +417,14 @@ class CurfewRuntime internal constructor(
     private suspend fun persist(now: Long) {
         db.state().put(StateRow(KEY_SESSIONS, Policy.json.encodeToString(Sessions.serializer(), policy.sessions())))
         db.state().put(StateRow(KEY_PASSES, Policy.json.encodeToString(Passes.serializer(), policy.passes())))
+        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
         refresh(now)
     }
 
     private fun refresh(now: Long) {
         _lock.value = policy.mergedLock(now)
         _profiles.value = policy.activeProfiles(now)
+        _releasable.value = policy.releasable()
         // The device-admin receiver has to answer the deactivation prompt synchronously, so what it
         // needs to know is written down here rather than looked up there.
         runCatching {
@@ -384,6 +448,8 @@ class CurfewRuntime internal constructor(
         private const val KEY_PASSES = "passes"
         private const val KEY_HEARTBEAT = "heartbeat"
         private const val KEY_CLOCK = "clock_witness"
+        private const val KEY_BOOTS = "boots"
+        private const val KEY_RELEASES = "releases"
 
         /**
          * How long a silence has to be before it is worth reporting. The service ticks every

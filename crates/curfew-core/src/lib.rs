@@ -3,6 +3,7 @@
 //!
 //! Nothing here reads a clock, a file or a device. `now` is always a parameter.
 
+pub mod boot;
 pub mod budget;
 pub mod clock;
 pub mod config;
@@ -10,10 +11,13 @@ pub mod emergency;
 pub mod engine;
 pub mod frozen;
 pub mod lock;
+pub mod proof;
 pub mod schedule;
 pub mod session;
 pub mod target;
+pub mod token;
 
+pub use boot::{BootCounter, Boots};
 pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use clock::{ClockWitness, Reading, Verdict};
 pub use config::{
@@ -23,11 +27,13 @@ pub use emergency::{EmergencyPolicy, Pass, PassRefusal, Passes};
 pub use engine::{decide, BlockReason, Decision, State};
 pub use frozen::{Countdown, Origin};
 pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
+pub use proof::{Proofs, PROOF_SECONDS};
 pub use schedule::{
     active_at, next_change_after, Activation, ActivationSource, CalendarEvent, CalendarSchedule,
     CalendarSource, EventMatcher, WeeklySchedule,
 };
 pub use session::{reconcile, Refusal, Session, SessionSource, Sessions};
+pub use token::{fingerprint, identify, Tag};
 pub use target::{domain_matches, glob_match, Observation, Target, Url};
 
 /// Seconds since the Unix epoch. Wall-clock, signed so arithmetic never wraps.

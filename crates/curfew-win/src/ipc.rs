@@ -50,6 +50,20 @@ pub enum Request {
         domain: String,
         password: String,
     },
+    /// End a session by presenting a physical tag: the payload of an NFC sticker or a QR code,
+    /// typed or pasted here.
+    ///
+    /// The payload is checked against the config's fingerprints by the service, for the same
+    /// reason [`Request::Unlock`] checks the password itself. A tag that is not one of the
+    /// configured ones is not an error message worth being precise about: it says the lock is
+    /// still shut, and nothing about which tags exist.
+    Token { id: String, payload: String },
+    /// "This device releases that session", for a `Lock::PeerRelease` naming this device.
+    ///
+    /// The release is announced through the op-log, where the signature makes the claim of
+    /// authorship real. It cannot be withdrawn: a release a peer could take back would let one
+    /// device shut a lock the user has already been told they are out of.
+    Release { id: String },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
     /// Spend an emergency pass on one session, ending it whatever its lock says.
@@ -151,6 +165,14 @@ pub struct Status {
     pub passes_left: u32,
     #[serde(default)]
     pub pass_refusal: Option<curfew_core::PassRefusal>,
+    /// Sessions whose lock names *this* device as the one that may release it, so the tray can
+    /// offer the button rather than the user having to know which device was named.
+    #[serde(default)]
+    pub releasable: Vec<String>,
+    /// Sessions this device has already released. Kept so the button becomes a sentence — the
+    /// release is given once and there is nothing further to press.
+    #[serde(default)]
+    pub released: Vec<String>,
 }
 
 /// The control channel's name. Namespaced, so on Windows this is a named pipe under

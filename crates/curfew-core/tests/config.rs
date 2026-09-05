@@ -228,3 +228,63 @@ action = { kind = "block" }
         assert!(config.set_blocked_apps("deep-work", &["  ".into()]).is_err());
     }
 }
+
+// --- physical tags ---
+//
+// The config carries fingerprints, never payloads: it is the document a user backs up, diffs and
+// syncs, and a tag written into it in full would be a tag anyone who reads the file already has.
+
+/// The commonest mistake is pasting the payload in, so the refusal has to be specific about it.
+#[test]
+fn a_token_hash_that_is_the_tag_itself_is_refused() {
+    let toml = "schema_version = 1\n[[tokens]]\nid = \"fridge\"\nhash = \"curfew-tag-abcdefgh\"\n";
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(m) if m.contains("64-character hex")),
+        "a payload was accepted where a fingerprint belongs: {err:?}"
+    );
+}
+
+#[test]
+fn a_token_with_no_id_is_refused_because_no_lock_could_ever_name_it() {
+    let toml = format!("schema_version = 1\n[[tokens]]\nid = \"\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n");
+    assert!(matches!(Config::from_toml(&toml), Err(ConfigError::Invalid(_))));
+}
+
+#[test]
+fn two_tokens_with_one_id_are_refused_rather_than_one_winning_quietly() {
+    let toml = format!(
+        "schema_version = 1\n\
+         [[tokens]]\nid = \"fridge\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+         [[tokens]]\nid = \"fridge\"\nhash = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"
+    );
+    let err = Config::from_toml(&toml).unwrap_err();
+    assert!(
+        matches!(&err, ConfigError::Invalid(m) if m.contains("duplicate token id")),
+        "one of two tags was dropped without a word: {err:?}"
+    );
+}
+
+#[test]
+fn a_fingerprint_typed_in_capitals_is_still_a_fingerprint() {
+    let toml = format!(
+        "schema_version = 1\n[[tokens]]\nid = \"fridge\"\nhash = \"{}\"\n",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_uppercase()
+    );
+    assert!(Config::from_toml(&toml).is_ok(), "a hash in capitals was refused");
+}
+
+/// Almost every config has no tags, and a token lock in one of them simply cannot be opened by a
+/// scan. That is the safe direction to fail in, so it must not be an error to have none.
+#[test]
+fn a_config_with_no_tokens_is_ordinary() {
+    assert!(Config::from_toml("schema_version = 1").unwrap().tokens.is_empty());
+}
+
+#[test]
+fn tokens_survive_a_round_trip_through_the_document() {
+    let toml = format!("schema_version = 1\n[[tokens]]\nid = \"fridge\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n");
+    let config = Config::from_toml(&toml).unwrap();
+    let back = Config::from_toml(&config.to_toml().unwrap()).unwrap();
+    assert_eq!(back.tokens, config.tokens);
+}

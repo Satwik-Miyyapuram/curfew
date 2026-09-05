@@ -64,6 +64,62 @@ pub struct Curfew {
     /// because the two are read together on every attempt to end a lock early, and because the
     /// ration must be as hard for Kotlin to edit as the sessions are.
     passes: RwLock<curfew_core::Passes>,
+    /// Which boot each running session was first seen in, so a restart lock is answered by a fact
+    /// about the device rather than by Kotlin saying it rebooted. Persisted with the sessions.
+    boots: RwLock<curfew_core::Boots>,
+    /// A boot number derived from uptime going backwards, never from the wall clock: a clock moved
+    /// forward a year must not read as a restart, or every restart lock would open with a setting.
+    boot_counter: RwLock<curfew_core::BootCounter>,
+    /// Conditions this device has actually checked in the last couple of minutes -- a credential
+    /// the platform prompt accepted, a tag that matched. Deliberately not persisted: after a
+    /// restart nothing is proven again.
+    proofs: RwLock<curfew_core::Proofs>,
+    /// Releases this device has given for locks that name it, to be published to the op-log, and
+    /// the releases every device has given, as read back from it.
+    releases: RwLock<BTreeSet<String>>,
+    released: RwLock<std::collections::BTreeMap<String, BTreeSet<String>>>,
+    /// This device's own id in the op-log, once sync knows it.
+    device_id: RwLock<Option<String>>,
+}
+
+/// Whether a condition is one the caller is the only witness to.
+///
+/// A timer, a confirmation and a challenge are satisfied inside the UI and nowhere else, so the UI
+/// is allowed to say it did them. Everything else is checked here against something the caller
+/// cannot fake, because `end_session` is reachable from any code in the app process -- and on a
+/// rooted device, from outside it.
+fn claimable(lock: &Lock) -> bool {
+    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+}
+
+impl Curfew {
+    /// Everything this device can prove about a session's lock without being told.
+    ///
+    /// A restart is proven by the boot id; a peer release by an entry in the signed op-log; a
+    /// credential or a tag by the check made when it was presented, for as long as that proof is
+    /// fresh. Nothing a caller says reaches this function.
+    fn proven(&self, id: &str, now: Timestamp) -> BTreeSet<Lock> {
+        let boot = self.boot_counter.read().expect("boot lock").boot_id();
+        let mut evidence = self.boots.read().expect("boots lock").evidence(id, boot);
+        evidence.extend(self.proofs.read().expect("proofs lock").fresh(id, now));
+        for device in self.released.read().expect("released lock").get(id).into_iter().flatten() {
+            evidence.insert(Lock::PeerRelease { device_id: device.clone() });
+        }
+        evidence
+    }
+
+    /// End a session with evidence already gathered, forgetting the proofs it used up.
+    fn finish(&self, id: &str, now: Timestamp, satisfied: &BTreeSet<Lock>) -> Result<(), CurfewError> {
+        match self.sessions.write().expect("sessions lock").end(id, now, satisfied) {
+            Ok(_) => {
+                self.proofs.write().expect("proofs lock").forget(id);
+                Ok(())
+            }
+            Err(refusal) => Err(CurfewError::Refused {
+                refusal: serde_json::to_string(&refusal).unwrap_or_else(|_| "{}".into()),
+            }),
+        }
+    }
 }
 
 #[uniffi::export]
@@ -79,6 +135,12 @@ impl Curfew {
             sessions: RwLock::new(Sessions::default()),
             clock: RwLock::new(None),
             passes: RwLock::new(curfew_core::Passes::default()),
+            boots: RwLock::new(curfew_core::Boots::default()),
+            boot_counter: RwLock::new(curfew_core::BootCounter::default()),
+            proofs: RwLock::new(curfew_core::Proofs::default()),
+            releases: RwLock::new(BTreeSet::new()),
+            released: RwLock::new(std::collections::BTreeMap::new()),
+            device_id: RwLock::new(None),
         }))
     }
 
@@ -151,22 +213,146 @@ impl Curfew {
         Ok(())
     }
 
-    /// End a session. `satisfied_json` is the evidence the platform collected -- for example
-    /// `[{"kind":"device_credential"}]` after `BiometricPrompt` returned success.
+    /// End a session. `satisfied_json` is what the caller witnessed -- for example
+    /// `[{"kind":"confirm"}]` after the user confirmed in a dialog.
+    ///
+    /// Only the conditions the caller can be the only witness to are taken from it. A credential,
+    /// a tag, a restart and a peer release are added by [`Self::proven`] from what this object
+    /// checked itself, so a caller that simply listed them all would end nothing.
     pub fn end_session(
         &self,
         id: String,
         now: Timestamp,
         satisfied_json: String,
     ) -> Result<(), CurfewError> {
-        let satisfied: BTreeSet<Lock> =
+        let claimed: BTreeSet<Lock> =
             serde_json::from_str(if satisfied_json.is_empty() { "[]" } else { &satisfied_json })
                 .map_err(payload)?;
-        self.sessions.write().expect("sessions lock").end(&id, now, &satisfied).map(|_| ()).map_err(
-            |refusal| CurfewError::Refused {
-                refusal: serde_json::to_string(&refusal).unwrap_or_else(|_| "{}".into()),
-            },
-        )
+        let mut satisfied: BTreeSet<Lock> = claimed.into_iter().filter(claimable).collect();
+        satisfied.extend(self.proven(&id, now));
+        self.finish(&id, now, &satisfied)
+    }
+
+    // --- evidence ---------------------------------------------------------------------------
+
+    /// Note that the device credential prompt has just succeeded for this session.
+    ///
+    /// Called by the platform *after* `BiometricPrompt` reports success, and separated from ending
+    /// so a lock that asks for a credential and a tag can be satisfied by doing both, a minute
+    /// apart, rather than being impossible to satisfy at all.
+    pub fn record_credential(&self, id: String, now: Timestamp) {
+        self.proofs.write().expect("proofs lock").record(&id, Lock::DeviceCredential, now);
+    }
+
+    /// Present a physical tag. The payload is fingerprinted and thrown away; only the id of the
+    /// tag it matched is kept, and only for as long as the proof is fresh.
+    ///
+    /// A scan of something unknown and a scan of a real tag this lock does not name are answered
+    /// the same way -- the session stays locked -- so scanning cannot be used to enumerate the
+    /// tags a config knows about.
+    pub fn scan_token(&self, id: String, payload: String, now: Timestamp) -> Result<(), CurfewError> {
+        let tag = {
+            let config = self.config.read().expect("config lock");
+            curfew_core::identify(&config.tokens, &payload)
+        };
+        // An unknown tag records nothing and then takes the ordinary path, so it is answered by
+        // the same refusal a real tag for another lock gets: the session is still locked, and the
+        // reply says nothing about which tags exist.
+        if let Some(tag) = tag {
+            self.proofs.write().expect("proofs lock").record(&id, Lock::Token { id: tag }, now);
+        }
+        let satisfied = self.proven(&id, now);
+        self.finish(&id, now, &satisfied)
+    }
+
+    /// Give the release a peer's lock is waiting on this device for.
+    ///
+    /// Recorded even when this device has never heard of the session: the lock it opens is usually
+    /// on the *other* device. There is no way to take one back -- a release that could be withdrawn
+    /// would let one device re-shut a lock the user had already been told they were out of.
+    pub fn release_peer(&self, id: String, now: Timestamp) {
+        self.releases.write().expect("releases lock").insert(id.clone());
+        let Some(mine) = self.device_id.read().expect("device lock").clone() else { return };
+        self.released.write().expect("released lock").entry(id.clone()).or_default().insert(mine);
+        let satisfied = self.proven(&id, now);
+        let _ = self.finish(&id, now, &satisfied);
+    }
+
+    /// Sessions whose lock asks *this* device for the release, for the button that gives it.
+    pub fn releasable(&self) -> Vec<String> {
+        let Some(mine) = self.device_id.read().expect("device lock").clone() else {
+            return Vec::new();
+        };
+        self.sessions
+            .read()
+            .expect("sessions lock")
+            .running
+            .iter()
+            .filter(|s| {
+                s.lock.conditions.iter().any(
+                    |lock| matches!(lock, Lock::PeerRelease { device_id } if *device_id == mine),
+                )
+            })
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
+    /// The releases this device has given, for the sync layer to publish.
+    pub fn releases_json(&self) -> Result<String, CurfewError> {
+        serde_json::to_string(&*self.releases.read().expect("releases lock")).map_err(payload)
+    }
+
+    /// Adopt the releases every device has given, as read back from the op-log, and the id this
+    /// device is known by there.
+    pub fn observe_releases(
+        &self,
+        device_id: String,
+        released_json: String,
+    ) -> Result<(), CurfewError> {
+        let released: std::collections::BTreeMap<String, BTreeSet<String>> =
+            serde_json::from_str(if released_json.is_empty() { "{}" } else { &released_json })
+                .map_err(payload)?;
+        *self.device_id.write().expect("device lock") = Some(device_id);
+        *self.released.write().expect("released lock") = released;
+        Ok(())
+    }
+
+    pub fn restore_releases(&self, releases_json: String) -> Result<(), CurfewError> {
+        let stored: BTreeSet<String> = serde_json::from_str(&releases_json).map_err(payload)?;
+        self.releases.write().expect("releases lock").extend(stored);
+        Ok(())
+    }
+
+    /// Take a reading of how long the device has been up, in seconds.
+    ///
+    /// Called on every pass and after every boot-completed broadcast. Uptime rather than the clock
+    /// on purpose: uptime can only go backwards by rebooting.
+    pub fn observe_boot(&self, uptime_seconds: i64) {
+        let boot = self.boot_counter.write().expect("boot lock").observe(uptime_seconds);
+        let sessions = self.sessions.read().expect("sessions lock");
+        self.boots.write().expect("boots lock").observe(boot, &sessions.running);
+    }
+
+    pub fn boots_json(&self) -> Result<String, CurfewError> {
+        serde_json::to_string(&(
+            &*self.boots.read().expect("boots lock"),
+            &*self.boot_counter.read().expect("boot lock"),
+        ))
+        .map_err(payload)
+    }
+
+    pub fn restore_boots(&self, boots_json: String) -> Result<(), CurfewError> {
+        let (boots, counter): (curfew_core::Boots, curfew_core::BootCounter) =
+            serde_json::from_str(&boots_json).map_err(payload)?;
+        *self.boots.write().expect("boots lock") = boots;
+        *self.boot_counter.write().expect("boot lock") = counter;
+        Ok(())
+    }
+
+    /// Which conditions of a session's lock this device can prove right now, as JSON, so the UI
+    /// can stop offering a button for something that is already satisfied.
+    pub fn proven_json(&self, id: String, now: Timestamp) -> Result<String, CurfewError> {
+        serde_json::to_string(&self.proven(&id, now)).map_err(payload)
     }
 
     // --- the escape hatch -------------------------------------------------------------------

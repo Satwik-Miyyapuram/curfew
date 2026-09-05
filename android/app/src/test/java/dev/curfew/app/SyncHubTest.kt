@@ -109,7 +109,8 @@ class SyncHubTest {
         phone.syncPass(now + 1)
 
         // The PC's user proved the lock there. The phone was handed no such proof.
-        pc.endSession("pc-1", listOf(Lock.DeviceCredential), now + 2)
+        pc.recordCredential("pc-1", now + 2)
+        pc.endSession("pc-1", now = now + 2)
         pc.syncPass(now + 2)
         carry(pcHub, phoneHub, root)
         val pass = phone.syncPass(now + 3)

@@ -161,6 +161,14 @@ data class Pass(
      * it already has them, untagged.
      */
     val calendar: List<CalendarEvent> = emptyList(),
+    /**
+     * Sessions whose lock names *this* device as the one that must let them out, and which this
+     * device has not released yet.
+     *
+     * Recomputed every pass, because adopting a peer's session is what makes such a lock appear
+     * here at all: the phone can be asked to release a lock it only just heard about.
+     */
+    val releasable: List<String> = emptyList(),
 )
 
 /**

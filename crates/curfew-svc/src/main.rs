@@ -28,6 +28,9 @@ curfew — distraction blocking that keeps its promises
   curfew end <id>                  end a session (refused if it is locked)
   curfew release <id>              start the 24-hour delayed release
   curfew emergency <id>            spend an emergency pass, if the ration allows one
+  curfew scan <id> <payload>       present a physical tag to end a session
+  curfew peer-release <id>         release a session whose lock names this device
+  curfew tag [payload]             print the config line for a tag (payload made up if omitted)
   curfew cancel                    call off a freeze that is counting down
   curfew confirm                   agree to a freeze another device asked for
   curfew reload                    re-read the config file
@@ -65,6 +68,9 @@ fn main() {
         "end" => end(&args[1..]),
         "release" => release(&args[1..]),
         "emergency" => emergency(&args[1..]),
+        "scan" => scan(&args[1..]),
+        "peer-release" => peer_release(&args[1..]),
+        "tag" => tag(&args[1..]),
         "reload" => simple(Request::Reload),
         "run" => run_in_console(),
         "watchdog" => {
@@ -376,6 +382,87 @@ fn emergency(args: &[String]) -> i32 {
         Ok(response) => report(response),
         Err(code) => code,
     }
+}
+
+/// Present a tag. The payload is whatever the sticker or the printed code says.
+///
+/// Passing it on the command line means it lands in the shell's history, which is a real
+/// weakness — a payload read out of `%HISTFILE%` is a tag that can be produced without walking to
+/// the fridge. It is accepted anyway because the alternative on a desktop with no NFC reader is no
+/// token locks at all, and because the honest place to say so is here, in the tool's own help.
+fn scan(args: &[String]) -> i32 {
+    let (Some(id), Some(payload)) = (args.first(), args.get(1)) else {
+        eprintln!("curfew: usage: curfew scan <id> <payload>");
+        return 2;
+    };
+    match ask(Request::Token { id: id.clone(), payload: payload.clone() }) {
+        Ok(response) => report(response),
+        Err(code) => code,
+    }
+}
+
+/// Give the release a peer lock on another device is waiting for.
+///
+/// There is no way to take one back, so this prints what it did rather than asking first: the
+/// confirmation belongs in the UI that offers the button, and a CLI that asked twice would be
+/// pretending the second answer could change something.
+fn peer_release(args: &[String]) -> i32 {
+    let Some(id) = args.first() else {
+        eprintln!("curfew: usage: curfew peer-release <id>");
+        return 2;
+    };
+    match ask(Request::Release { id: id.clone() }) {
+        Ok(response) => {
+            let code = report(response);
+            if code == 0 {
+                println!("Released. The other device will act on it within a few seconds.");
+            }
+            code
+        }
+        Err(code) => code,
+    }
+}
+
+/// Mint a tag, or fingerprint one that already exists.
+///
+/// Prints the payload to write to the sticker or the QR code *and* the config line, because those
+/// two have to be produced together and a user who is given only the hash has no way back to the
+/// thing it is a hash of. Runs entirely locally and needs no service.
+fn tag(args: &[String]) -> i32 {
+    let payload = match args.first() {
+        Some(given) => given.clone(),
+        None => mint(),
+    };
+    println!("Write this on the tag:
+  {payload}
+");
+    println!("Put this in curfew.toml:");
+    println!("  [[tokens]]");
+    println!("  id = \"fridge\"");
+    println!("  hash = \"{}\"", curfew_core::fingerprint(&payload));
+    println!("
+The payload is not stored anywhere. Lose the tag and the lock stays shut until");
+    println!("its time is up or the 24-hour release lands.");
+    0
+}
+
+/// A payload with no meaning and enough randomness that guessing it is not a strategy.
+fn mint() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    // Not a cryptographic generator, and it does not need to be one: the value never leaves this
+    // machine, is written to a physical object, and is only ever compared for equality. What it
+    // must not be is guessable from the config, and a hash never reveals it.
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let mut seed = (now.as_nanos() as u64) ^ (std::process::id() as u64).wrapping_mul(0x9e37_79b9);
+    let mut out = String::from("curfew-tag-");
+    for _ in 0..24 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let alphabet = b"abcdefghijkmnopqrstuvwxyz23456789";
+        out.push(alphabet[(seed % alphabet.len() as u64) as usize] as char);
+    }
+    out
 }
 
 fn release(args: &[String]) -> i32 {

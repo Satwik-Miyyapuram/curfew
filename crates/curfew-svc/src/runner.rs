@@ -95,6 +95,9 @@ pub fn build(
     enforcer.usage = persisted.usage;
     enforcer.launches = persisted.launches;
     enforcer.passes = persisted.passes;
+    enforcer.boots = persisted.boots;
+    enforcer.boot_counter = persisted.boot_counter;
+    enforcer.releases = persisted.releases;
     enforcer.config_path = Some(config_path.to_path_buf());
     enforcer.state_warning = warning;
     Ok(enforcer)
@@ -181,6 +184,9 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
         usage: enforcer.usage.clone(),
         launches: enforcer.launches.clone(),
         passes: enforcer.passes.clone(),
+        boots: enforcer.boots.clone(),
+        boot_counter: enforcer.boot_counter.clone(),
+        releases: enforcer.releases.clone(),
         last_tick: Some(last_tick),
     };
     if let Err(e) = state::save(state_path, &snapshot) {
@@ -308,6 +314,7 @@ pub fn run(
             let mut events = events;
             events.extend(peer_events.iter().cloned());
             events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
+            guard.observe_boot(curfew_win::windows::uptime_seconds());
             let tick = guard.tick(now, elapsed, &events, &SystemProcesses::default());
             if let Some(resolver) = &resolver {
                 resolver.set(tick.domains.clone());
@@ -321,9 +328,16 @@ pub fn run(
                 // the last two seconds is in the log the other device reads, and the ration this
                 // device then adopts already counts it.
                 let said_passes = mirror.publish_passes(node.shared(), now, &guard.passes);
+                // A release goes out before the merge comes back for the same reason a pass does:
+                // the device whose lock it satisfies should hear about it on its next pass, not on
+                // the one after.
+                let said_releases =
+                    mirror.publish_releases(node.shared(), now, &guard.releases.clone());
                 let Enforcer { sessions, usage, launches, .. } = &mut *guard;
                 let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
                 guard.passes = pass.passes.clone();
+                guard.released = pass.released.clone();
+                guard.device_id = node.shared().identity.id().as_str().to_string().into();
                 peer_events = pass.calendar.clone();
                 // Only the events some rule here would act on. A lock does not need to know the
                 // name of every meeting in someone's week to do its job, and the log is smaller and
@@ -336,7 +350,7 @@ pub fn run(
                     .cloned()
                     .collect();
                 let said = mirror.publish_calendar(node.shared(), now, &matched);
-                if pass.published + said + said_passes > 0 {
+                if pass.published + said + said_passes + said_releases > 0 {
                     node.push_all(now);
                     if let Err(e) = curfew_sync::store::save(root, node.shared()) {
                         eprintln!("curfew: could not save the sync log: {e}");

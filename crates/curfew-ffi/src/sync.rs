@@ -38,6 +38,9 @@ struct PassResult {
     /// Events the *other* devices' calendars hold, for this device's rules to act on. This is how a
     /// phone that was never given calendar permission still goes quiet during a meeting.
     calendar: Vec<CalendarEvent>,
+    /// Sessions this device is the named releaser for and has not yet released, so the UI can
+    /// offer the button. Recomputed every pass, because adoption is what makes a lock appear here.
+    releasable: Vec<String>,
 }
 
 /// Sync on this device: the log, the peers, and the node that carries them, if it is running.
@@ -270,6 +273,33 @@ impl Sync {
             )
         };
 
+        // Releases go out before the merge comes back too, and for the same reason: one given
+        // seconds ago must be in the log the peer reads on its very next pass, or the other device
+        // stays shut with the user standing in front of the one that said yes.
+        let said_releases = {
+            let releases = curfew.releases.read().expect("releases lock").clone();
+            self.mirror.lock().expect("the mirror lock is never poisoned").publish_releases(
+                &self.shared,
+                now,
+                &releases,
+            )
+        };
+
+        // What every device has released, as the log now has it. Adopted before `releasable` is
+        // read, so a lock that arrived in this same pass is already answerable.
+        {
+            let mut released = curfew.released.write().expect("released lock");
+            *released = pass
+                .released
+                .iter()
+                .map(|(session, devices)| {
+                    (session.clone(), devices.iter().cloned().collect())
+                })
+                .collect();
+            *curfew.device_id.write().expect("device lock") =
+                Some(self.shared.identity.id().as_str().to_string());
+        }
+
         // Only the events a rule on this device would act on are published. The log is encrypted
         // and goes nowhere but the user's own devices, but a lock does not need the name of every
         // meeting in someone's week to do its job.
@@ -288,7 +318,7 @@ impl Sync {
 
         *curfew.passes.write().expect("passes lock") = pass.passes.clone();
 
-        if pass.published + said + said_passes > 0 {
+        if pass.published + said + said_passes + said_releases > 0 {
             self.push_all(now);
         }
         self.save()?;
@@ -299,6 +329,7 @@ impl Sync {
             usage,
             launches,
             calendar: pass.calendar,
+            releasable: curfew.releasable(),
         })
         .map_err(payload)
     }
@@ -429,10 +460,10 @@ mod tests {
             .pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new())
             .unwrap();
 
-        // The PC releases it with the evidence its own user gave. The phone was given none.
-        pc_core
-            .end_session("pc-1".into(), NOW + 2, "[{\"kind\":\"device_credential\"}]".into())
-            .unwrap();
+        // The PC releases it with the evidence its own user gave: the credential prompt succeeded
+        // there, and nowhere else. The phone was given none.
+        pc_core.record_credential("pc-1".into(), NOW + 2);
+        pc_core.end_session("pc-1".into(), NOW + 2, String::new()).unwrap();
         pc.pass(pc_core, NOW + 2, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
         let result: serde_json::Value = serde_json::from_str(
@@ -635,4 +666,69 @@ mod tests {
 
         assert_eq!(result["calendar"].as_array().unwrap().len(), 0);
     }
+
+    /// The whole point of the peer lock: the phone is locked, and only the PC can let it out. The
+    /// user walks to the PC, presses the button there, and the phone opens on its next pass.
+    #[test]
+    fn a_lock_only_the_pc_can_open_is_opened_by_the_pc() {
+        let (phone, pc) = paired("release");
+        let (phone_core, pc_core) = (core(), core());
+
+        // The phone has to know the PC's id to name it, which is exactly what pairing gave it.
+        let pc_id = pc.device_id();
+        let locked = serde_json::to_string(&Session {
+            id: "p1".into(),
+            profile: "deep-work".into(),
+            source: SessionSource::Manual,
+            started_at: NOW,
+            lock: LockSet::new([Lock::PeerRelease { device_id: pc_id.clone() }], None),
+        })
+        .unwrap();
+        phone_core.start_session(locked).unwrap();
+        phone.pass(phone_core.clone(), NOW, String::new(), String::new(), String::new()).unwrap();
+        carry(&phone, &pc);
+
+        // The PC adopts the session and finds it is the device being asked.
+        let adopted: serde_json::Value = serde_json::from_str(
+            &pc.pass(pc_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(adopted["releasable"][0], "p1", "the PC was not offered the release");
+
+        pc_core.release_peer("p1".into(), NOW + 2);
+        pc.pass(pc_core, NOW + 2, String::new(), String::new(), String::new()).unwrap();
+        carry(&pc, &phone);
+        phone
+            .pass(phone_core.clone(), NOW + 3, String::new(), String::new(), String::new())
+            .unwrap();
+
+        phone_core.end_session("p1".into(), NOW + 4, String::new()).expect("the PC said yes");
+    }
+
+    /// Until it does. A peer lock is not a countdown, and the device it names not having answered
+    /// yet is the ordinary state of one.
+    #[test]
+    fn the_phone_stays_shut_until_the_pc_actually_answers() {
+        let (phone, pc) = paired("release-waiting");
+        let (phone_core, pc_core) = (core(), core());
+        let locked = serde_json::to_string(&Session {
+            id: "p1".into(),
+            profile: "deep-work".into(),
+            source: SessionSource::Manual,
+            started_at: NOW,
+            lock: LockSet::new([Lock::PeerRelease { device_id: pc.device_id() }], None),
+        })
+        .unwrap();
+        phone_core.start_session(locked).unwrap();
+        phone.pass(phone_core.clone(), NOW, String::new(), String::new(), String::new()).unwrap();
+        carry(&phone, &pc);
+        pc.pass(pc_core, NOW + 1, String::new(), String::new(), String::new()).unwrap();
+        carry(&pc, &phone);
+        phone
+            .pass(phone_core.clone(), NOW + 2, String::new(), String::new(), String::new())
+            .unwrap();
+
+        assert!(phone_core.end_session("p1".into(), NOW + 3, String::new()).is_err());
+    }
+
 }
