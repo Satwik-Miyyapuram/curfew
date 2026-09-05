@@ -2,6 +2,7 @@
 //! complete, diffable description of a user's setup (design invariant 4).
 
 use crate::budget::Refill;
+use crate::emergency::EmergencyPolicy;
 use crate::schedule::{CalendarSchedule, CalendarSource, WeeklySchedule};
 use crate::target::Target;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,9 @@ pub struct Config {
     /// Website blocking beyond the hosts file.
     #[serde(default)]
     pub resolver: Resolver,
+    /// The escape hatch, and how tightly it is rationed. Disabled unless the user asks for it.
+    #[serde(default)]
+    pub emergency: EmergencyPolicy,
 }
 
 /// The local DNS proxy, which is what makes a blocked domain cover its subdomains.
@@ -72,6 +76,7 @@ impl Default for Config {
             calendars: Vec::new(),
             calendar_sources: Vec::new(),
             resolver: Resolver::default(),
+            emergency: EmergencyPolicy::default(),
         }
     }
 }

@@ -342,7 +342,10 @@ pub fn upcoming(
     }
 
     out.sort_by(|a, b| {
-        a.start.cmp(&b.start).then_with(|| a.end.cmp(&b.end)).then_with(|| a.profile.cmp(&b.profile))
+        a.start
+            .cmp(&b.start)
+            .then_with(|| a.end.cmp(&b.end))
+            .then_with(|| a.profile.cmp(&b.profile))
     });
     out
 }

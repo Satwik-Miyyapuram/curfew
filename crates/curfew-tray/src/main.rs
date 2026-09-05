@@ -54,6 +54,9 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
         }
         menu::Item::CancelFreeze { .. } => Some((Request::CancelFreeze, String::new())),
         menu::Item::ConfirmFreeze { .. } => Some((Request::ConfirmFreeze, String::new())),
+        menu::Item::Emergency { id, .. } => {
+            Some((Request::Emergency { id: id.clone() }, String::new()))
+        }
         menu::Item::Release { id, .. } => {
             Some((Request::RequestRelease { id: id.clone() }, String::new()))
         }
@@ -73,6 +76,19 @@ pub fn describe(response: &Response) -> String {
         Response::Announced { countdown } => {
             curfew_core::frozen::warning(countdown, countdown.announced_at)
         }
+        Response::NoPass { refusal } => match refusal {
+            curfew_core::PassRefusal::Disabled => {
+                "Emergency passes are switched off in your rules.".to_string()
+            }
+            curfew_core::PassRefusal::QuotaSpent { next_at } => format!(
+                "No emergency passes left. The next one becomes available at {}.",
+                menu::when(*next_at)
+            ),
+            curfew_core::PassRefusal::CoolingDown { until } => format!(
+                "A pass was used recently. The next one can be spent at {}.",
+                menu::when(*until)
+            ),
+        },
         Response::Refused { refusal } => match refusal {
             curfew_core::Refusal::NotRunning => "That session has already ended.".to_string(),
             curfew_core::Refusal::Locked { delayed_release_at: Some(at), .. } => format!(

@@ -59,6 +59,9 @@ pub struct Enforcer {
     /// Set when the state file could not be read at startup: locks may have been lost, and the
     /// user is owed that fact.
     pub state_warning: Option<String>,
+    /// Emergency passes spent so far, on this device and on every device it has heard from. The
+    /// quota is one quota, so this set is merged rather than owned.
+    pub passes: curfew_core::Passes,
     /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
     /// two countdowns racing each other would leave nobody able to say what is about to occur.
     pub freeze: Option<curfew_core::Countdown>,
@@ -85,6 +88,7 @@ impl Enforcer {
             config_path: None,
             last: Tick::default(),
             state_warning: None,
+            passes: Default::default(),
             freeze: None,
             gates: Default::default(),
             watch: Default::default(),
@@ -201,6 +205,8 @@ impl Enforcer {
                 freeze: self.freeze.clone(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
+                passes_left: self.passes.remaining(now, &self.config.emergency),
+                pass_refusal: self.passes.check(now, &self.config.emergency).err(),
             }),
 
             Request::Start { profile, seconds, locks } => {
@@ -305,6 +311,24 @@ impl Enforcer {
                     Response::Announced { countdown: countdown.clone() }
                 }
             },
+
+            // Spend first, then end. A pass that was taken and then refused because the session
+            // had already finished is still a pass gone: the ration counts attempts to use the
+            // hatch, not successes, or a user could probe it for free.
+            Request::Emergency { id } => {
+                let pass = match self.passes.spend(now, &self.config.emergency) {
+                    Ok(pass) => pass,
+                    Err(refusal) => return Response::NoPass { refusal },
+                };
+                match self.sessions.end_with_pass(&id, now, pass) {
+                    Ok(_) => {
+                        // Same as an ordinary end: the machine comes back in the same breath.
+                        let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
+                        Response::Ok
+                    }
+                    Err(refusal) => Response::Refused { refusal },
+                }
+            }
 
             Request::RequestRelease { id } => match self.sessions.request_release(&id, now) {
                 Ok(at) => Response::Release { at },

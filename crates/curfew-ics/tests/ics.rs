@@ -24,9 +24,7 @@ fn utc(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> Timestamp {
 }
 
 fn calendar(body: &str) -> String {
-    format!(
-        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:Work\r\n{body}END:VCALENDAR\r\n"
-    )
+    format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-CALNAME:Work\r\n{body}END:VCALENDAR\r\n")
 }
 
 fn event(properties: &str) -> String {
@@ -49,7 +47,8 @@ fn a_single_timed_event_arrives_with_its_title_calendar_and_span() {
          DTSTART:20260904T090000Z\r\nDTEND:20260904T100000Z\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!(1, events.len());
     assert_eq!("Design review", events[0].title);
@@ -90,7 +89,8 @@ fn a_dated_event_with_no_end_lasts_the_whole_day() {
 fn a_duration_stands_in_for_a_missing_end() {
     let text = event("UID:e1\r\nSUMMARY:Standup\r\nDTSTART:20260904T090000Z\r\nDURATION:PT15M\r\n");
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!(utc(2026, 9, 4, 9, 15), events[0].end);
 }
@@ -102,7 +102,8 @@ fn a_transparent_event_is_not_busy() {
          DTSTART:20260904T090000Z\r\nDTEND:20260904T100000Z\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert!(!events[0].busy);
 }
@@ -114,7 +115,8 @@ fn categories_come_through_split_and_trimmed() {
          DTSTART:20260904T090000Z\r\nDTEND:20260904T100000Z\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!(vec!["Focus".to_string(), "Team".to_string()], events[0].categories);
 }
@@ -128,7 +130,8 @@ fn a_folded_line_is_put_back_together_before_it_is_read() {
          DTSTART:20260904T090000Z\r\nDTEND:20260904T100000Z\r\nEND:VEVENT\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!("Quarterly planning and roadmapreview", events[0].title);
 }
@@ -139,7 +142,8 @@ fn escaped_text_is_unescaped() {
         "UID:e1\r\nSUMMARY:Review\\, then lunch\r\nDTSTART:20260904T090000Z\r\nDTEND:20260904T100000Z\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!("Review, then lunch", events[0].title);
 }
@@ -184,7 +188,8 @@ fn a_weekly_meeting_keeps_its_local_time_across_the_autumn_clock_change() {
          DTEND;TZID=Europe/London:20261021T100000\r\nRRULE:FREQ=WEEKLY\r\n",
     );
 
-    let events = events_between(&text, at(2026, 10, 20, 0, 0), at(2026, 11, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 10, 20, 0, 0), at(2026, 11, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!(3, events.len());
     assert_eq!(utc(2026, 10, 21, 8, 0), events[0].start);
@@ -201,7 +206,8 @@ fn a_daily_meeting_keeps_its_local_time_across_the_spring_clock_change() {
          DTEND;TZID=Europe/London:20260327T091500\r\nRRULE:FREQ=DAILY\r\n",
     );
 
-    let events = events_between(&text, at(2026, 3, 27, 0, 0), at(2026, 3, 31, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 3, 27, 0, 0), at(2026, 3, 31, 0, 0), LONDON).unwrap();
 
     assert_eq!(utc(2026, 3, 27, 9, 0), events[0].start);
     assert_eq!(utc(2026, 3, 30, 8, 0), events.last().unwrap().start);
@@ -217,7 +223,8 @@ fn a_meeting_in_the_hour_that_does_not_exist_is_moved_forward_rather_than_droppe
          DTEND;TZID=Europe/London:20260328T023000\r\nRRULE:FREQ=DAILY\r\n",
     );
 
-    let events = events_between(&text, at(2026, 3, 28, 0, 0), at(2026, 3, 31, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 3, 28, 0, 0), at(2026, 3, 31, 0, 0), LONDON).unwrap();
 
     assert_eq!(3, events.len());
     assert!(events.iter().all(|e| e.end > e.start));
@@ -230,7 +237,8 @@ fn a_weekly_rule_with_byday_fires_on_the_days_it_names() {
          DTEND;TZID=Europe/London:20260907T080000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR\r\n",
     );
 
-    let events = events_between(&text, at(2026, 9, 7, 0, 0), at(2026, 9, 14, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 9, 7, 0, 0), at(2026, 9, 14, 0, 0), LONDON).unwrap();
 
     assert_eq!(3, events.len());
     assert_eq!(at(2026, 9, 7, 7, 0), events[0].start);
@@ -261,7 +269,8 @@ fn an_interval_skips_the_weeks_between() {
          DTEND;TZID=Europe/London:20260901T100000\r\nRRULE:FREQ=WEEKLY;INTERVAL=2\r\n",
     );
 
-    let events = events_between(&text, at(2026, 9, 1, 0, 0), at(2026, 10, 1, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 9, 1, 0, 0), at(2026, 10, 1, 0, 0), LONDON).unwrap();
 
     assert_eq!(3, events.len());
     assert_eq!(at(2026, 9, 15, 9, 0), events[1].start);
@@ -359,7 +368,8 @@ fn a_recurrence_curfew_cannot_expand_exactly_produces_nothing_rather_than_someth
          DTEND;TZID=Europe/London:20260925T100000\r\nRRULE:FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1\r\n",
     );
 
-    let events = events_between(&text, at(2026, 10, 1, 0, 0), at(2026, 12, 1, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 10, 1, 0, 0), at(2026, 12, 1, 0, 0), LONDON).unwrap();
 
     assert!(events.is_empty());
 }
@@ -371,7 +381,8 @@ fn a_rule_that_repeats_forever_is_bounded_by_the_window_not_by_the_rule() {
          DTEND;TZID=Europe/London:20260901T090100\r\nRRULE:FREQ=MINUTELY\r\n",
     );
 
-    let events = events_between(&text, at(2026, 9, 1, 9, 0), at(2026, 9, 1, 10, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, at(2026, 9, 1, 9, 0), at(2026, 9, 1, 10, 0), LONDON).unwrap();
 
     assert!(events.len() <= 61, "an unbounded rule produced {} occurrences", events.len());
 }
@@ -413,7 +424,8 @@ fn alarms_and_todos_are_not_read() {
          END:VALARM\r\nEND:VEVENT\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert_eq!(1, events.len());
     assert_eq!("Real meeting", events[0].title);
@@ -423,7 +435,8 @@ fn alarms_and_todos_are_not_read() {
 fn a_floating_time_is_read_in_the_timezone_the_policy_is_configured_with() {
     // Not the machine's timezone: a laptop that travels should keep blocking at the hours the user
     // set up, rather than following whatever the operating system decided the clock is now.
-    let text = event("UID:e1\r\nSUMMARY:Floating\r\nDTSTART:20260904T090000\r\nDTEND:20260904T100000\r\n");
+    let text =
+        event("UID:e1\r\nSUMMARY:Floating\r\nDTSTART:20260904T090000\r\nDTEND:20260904T100000\r\n");
 
     let events = events_between(&text, at(2026, 9, 4, 0, 0), at(2026, 9, 5, 0, 0), LONDON).unwrap();
 
@@ -436,7 +449,8 @@ fn an_event_with_no_end_before_its_start_never_lasts_negative_time() {
         "UID:e1\r\nSUMMARY:Corrupt\r\nDTSTART:20260904T100000Z\r\nDTEND:20260904T090000Z\r\n",
     );
 
-    let events = events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
+    let events =
+        events_between(&text, utc(2026, 9, 4, 0, 0), utc(2026, 9, 5, 0, 0), LONDON).unwrap();
 
     assert!(events.iter().all(|e| e.end >= e.start));
 }

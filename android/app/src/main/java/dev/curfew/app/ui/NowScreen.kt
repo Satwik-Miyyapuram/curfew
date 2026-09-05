@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.data.ClockTamper
 import dev.curfew.app.data.Downtime
 import dev.curfew.policy.Lock
+import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refusal
 import dev.curfew.policy.Session
 
@@ -50,6 +51,10 @@ fun NowScreen(model: CurfewViewModel) {
     // handed to the core together. The core is still the judge: it refuses if the set is short,
     // and the refusal dialog is what the user sees when it does.
     var pending by remember { mutableStateOf<PendingEnd?>(null) }
+
+    // Spending a pass is asked about first, and asked about here rather than in the view model:
+    // it takes something scarce, shared with every paired device, and impossible to give back.
+    var confirmingPass by remember { mutableStateOf<Session?>(null) }
 
     fun finish(session: Session, satisfied: List<Lock>) {
         pending = null
@@ -106,8 +111,11 @@ fun NowScreen(model: CurfewViewModel) {
                 SessionCard(
                     session = session,
                     now = state.now,
+                    passesLeft = state.passesLeft,
+                    passRefusal = state.passRefusal,
                     onEnd = { end(session) },
                     onRelease = { model.requestRelease(session) },
+                    onEmergency = { confirmingPass = session },
                 )
             }
             if (state.sessions.isEmpty()) {
@@ -116,6 +124,30 @@ fun NowScreen(model: CurfewViewModel) {
                 }
             }
         }
+    }
+
+    confirmingPass?.let { session ->
+        AlertDialog(
+            onDismissRequest = { confirmingPass = null },
+            title = { Text("Use an emergency pass?") },
+            text = {
+                Text(
+                    "This ends ${session.profile} now. It counts against your ration on every " +
+                        "paired device, it is written into your history, and it cannot be given " +
+                        "back.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = session
+                    confirmingPass = null
+                    model.spendPass(chosen)
+                }) { Text("Use one") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingPass = null }) { Text("Keep it") }
+            },
+        )
     }
 
     pending?.let { p ->
@@ -214,8 +246,11 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
 private fun SessionCard(
     session: Session,
     now: Long,
+    passesLeft: Int,
+    passRefusal: PassRefusal?,
     onEnd: () -> Unit,
     onRelease: () -> Unit,
+    onEmergency: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -249,6 +284,18 @@ private fun SessionCard(
                 )
             }
 
+            // Why the hatch is not on this card. Said only where someone would look for it, and
+            // never for a hatch nobody switched on: that one is not missing, it is unwanted.
+            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null &&
+                passRefusal !is PassRefusal.Disabled
+            ) {
+                Text(
+                    describePassRefusal(passRefusal, now),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+
             session.lock.delayedReleaseAt?.let { at ->
                 Text(
                     "A release you asked for lands ${relative(at, now)}.",
@@ -278,6 +325,18 @@ private fun SessionCard(
                             contentDescription = "Ask to end ${session.profile} in 24 hours"
                         },
                     ) { Text("Ask to end in 24 hours") }
+                }
+                // Offered only on a session nothing else here can end, and only when there is one
+                // to spend. Next to an unlocked session it would teach people to reach for the
+                // scarce thing first, which is exactly backwards.
+                if (session.lock.isLocked && passesLeft > 0) {
+                    TextButton(
+                        onClick = onEmergency,
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                "Use an emergency pass on ${session.profile}, $passesLeft left"
+                        },
+                    ) { Text("Emergency pass ($passesLeft)") }
                 }
             }
         }

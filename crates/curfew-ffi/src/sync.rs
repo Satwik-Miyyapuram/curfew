@@ -248,6 +248,17 @@ impl Sync {
         let seen: Vec<CalendarEvent> =
             serde_json::from_str(blank_to_array(&calendar_json)).map_err(payload)?;
 
+        // Passes go out before the merge comes back, so one spent here in the last few seconds is
+        // already in the log this device then adopts its ration from.
+        let said_passes = {
+            let passes = curfew.passes.read().expect("passes lock");
+            self.mirror.lock().expect("the mirror lock is never poisoned").publish_passes(
+                &self.shared,
+                now,
+                &passes,
+            )
+        };
+
         let pass = {
             let mut sessions = curfew.sessions.write().expect("sessions lock");
             self.mirror.lock().expect("the mirror lock is never poisoned").pass(
@@ -275,7 +286,9 @@ impl Sync {
             )
         };
 
-        if pass.published + said > 0 {
+        *curfew.passes.write().expect("passes lock") = pass.passes.clone();
+
+        if pass.published + said + said_passes > 0 {
             self.push_all(now);
         }
         self.save()?;
@@ -391,7 +404,9 @@ mod tests {
         pc.pass(pc_core, NOW, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
         let result: serde_json::Value = serde_json::from_str(
-            &phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
+            &phone
+                .pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new())
+                .unwrap(),
         )
         .unwrap();
 
@@ -410,7 +425,9 @@ mod tests {
         pc_core.start_session(session_json("pc-1")).unwrap();
         pc.pass(pc_core.clone(), NOW, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
-        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap();
+        phone
+            .pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new())
+            .unwrap();
 
         // The PC releases it with the evidence its own user gave. The phone was given none.
         pc_core
@@ -419,7 +436,9 @@ mod tests {
         pc.pass(pc_core, NOW + 2, String::new(), String::new(), String::new()).unwrap();
         carry(&pc, &phone);
         let result: serde_json::Value = serde_json::from_str(
-            &phone.pass(phone_core.clone(), NOW + 3, String::new(), String::new(), String::new()).unwrap(),
+            &phone
+                .pass(phone_core.clone(), NOW + 3, String::new(), String::new(), String::new())
+                .unwrap(),
         )
         .unwrap();
 
@@ -440,9 +459,10 @@ mod tests {
 
         phone.pass(core(), NOW, spent, String::new(), String::new()).unwrap();
         carry(&phone, &pc);
-        let result: serde_json::Value =
-            serde_json::from_str(&pc.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap())
-                .unwrap();
+        let result: serde_json::Value = serde_json::from_str(
+            &pc.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
+        )
+        .unwrap();
 
         let usage: BTreeMap<String, Consumption> =
             serde_json::from_value(result["usage"].clone()).unwrap();
@@ -459,7 +479,9 @@ mod tests {
         carry(&pc, &phone);
 
         let phone_core = core();
-        phone.pass(phone_core.clone(), NOW + 2, String::new(), String::new(), String::new()).unwrap();
+        phone
+            .pass(phone_core.clone(), NOW + 2, String::new(), String::new(), String::new())
+            .unwrap();
 
         let sessions: Sessions =
             serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
@@ -502,7 +524,9 @@ mod tests {
         pc.folder_pass(shared_folder.clone()).unwrap();
         phone.folder_pass(shared_folder).unwrap();
         let phone_core = core();
-        phone.pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new()).unwrap();
+        phone
+            .pass(phone_core.clone(), NOW + 1, String::new(), String::new(), String::new())
+            .unwrap();
 
         let sessions: Sessions =
             serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
@@ -548,14 +572,18 @@ mod tests {
         // The phone was never given calendar permission; the PC has the subscription. The phone is
         // still blocked during the meeting.
         let (phone, pc) = paired("calendar");
-        pc.pass(core_with_calendar_rule(), NOW, String::new(), String::new(), events_json("Design review", true))
-            .unwrap();
+        pc.pass(
+            core_with_calendar_rule(),
+            NOW,
+            String::new(),
+            String::new(),
+            events_json("Design review", true),
+        )
+        .unwrap();
         carry(&pc, &phone);
 
         let result: serde_json::Value = serde_json::from_str(
-            &phone
-                .pass(core(), NOW + 1, String::new(), String::new(), String::new())
-                .unwrap(),
+            &phone.pass(core(), NOW + 1, String::new(), String::new(), String::new()).unwrap(),
         )
         .unwrap();
 

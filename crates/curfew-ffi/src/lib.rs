@@ -37,6 +37,10 @@ pub enum CurfewError {
     /// UI can say exactly which conditions are still missing.
     #[error("refused: {refusal}")]
     Refused { refusal: String },
+    /// No emergency pass could be spent. `refusal` is the serialized `PassRefusal`, which carries
+    /// the time the next one becomes available -- the only part of the answer a user can act on.
+    #[error("no pass: {refusal}")]
+    NoPass { refusal: String },
 }
 
 fn payload<E: std::fmt::Display>(e: E) -> CurfewError {
@@ -56,6 +60,10 @@ pub struct Curfew {
     /// reason sessions are: the guarantee that a clock change cannot shorten a lock is only worth
     /// anything if there is exactly one place that decides what time it is.
     clock: RwLock<Option<ClockWitness>>,
+    /// Emergency passes already spent, here and on every paired device. Kept beside the sessions
+    /// because the two are read together on every attempt to end a lock early, and because the
+    /// ration must be as hard for Kotlin to edit as the sessions are.
+    passes: RwLock<curfew_core::Passes>,
 }
 
 #[uniffi::export]
@@ -70,6 +78,7 @@ impl Curfew {
             config: RwLock::new(config),
             sessions: RwLock::new(Sessions::default()),
             clock: RwLock::new(None),
+            passes: RwLock::new(curfew_core::Passes::default()),
         }))
     }
 
@@ -158,6 +167,65 @@ impl Curfew {
                 refusal: serde_json::to_string(&refusal).unwrap_or_else(|_| "{}".into()),
             },
         )
+    }
+
+    // --- the escape hatch -------------------------------------------------------------------
+
+    /// End a session by spending an emergency pass, when the config allows one and the ration
+    /// permits it now.
+    ///
+    /// The pass is taken before the session is looked at, so a pass spent on a session that has
+    /// already ended is still spent: the ration counts reaching for the hatch, not succeeding, or
+    /// a stale id would be a free way to probe how many are left.
+    ///
+    /// A refused pass comes back as [`CurfewError::NoPass`] with the reason as JSON, so the UI can
+    /// say *when* rather than only *no*.
+    pub fn spend_pass(&self, id: String, now: Timestamp) -> Result<(), CurfewError> {
+        let pass = {
+            let config = self.config.read().expect("config lock");
+            self.passes.write().expect("passes lock").spend(now, &config.emergency).map_err(
+                |refusal| CurfewError::NoPass {
+                    refusal: serde_json::to_string(&refusal).unwrap_or_else(|_| "{}".into()),
+                },
+            )?
+        };
+        self.sessions
+            .write()
+            .expect("sessions lock")
+            .end_with_pass(&id, now, pass)
+            .map(|_| ())
+            .map_err(|refusal| CurfewError::Refused {
+                refusal: serde_json::to_string(&refusal).unwrap_or_else(|_| "{}".into()),
+            })
+    }
+
+    /// How many passes could be spent inside the rolling window. Zero both when the hatch is off
+    /// and when it is empty; [`Self::pass_refusal_json`] tells the two apart.
+    pub fn passes_remaining(&self, now: Timestamp) -> u32 {
+        let config = self.config.read().expect("config lock");
+        self.passes.read().expect("passes lock").remaining(now, &config.emergency)
+    }
+
+    /// Why a pass cannot be spent right now, as JSON, or `None` when one can.
+    pub fn pass_refusal_json(&self, now: Timestamp) -> Result<Option<String>, CurfewError> {
+        let config = self.config.read().expect("config lock");
+        match self.passes.read().expect("passes lock").check(now, &config.emergency) {
+            Ok(()) => Ok(None),
+            Err(refusal) => serde_json::to_string(&refusal).map(Some).map_err(payload),
+        }
+    }
+
+    pub fn passes_json(&self) -> Result<String, CurfewError> {
+        serde_json::to_string(&*self.passes.read().expect("passes lock")).map_err(payload)
+    }
+
+    /// Restore the spent ration after a restart. Merged rather than replaced: a device that has
+    /// heard about a peer's pass since the file was written must not forget it by reading an older
+    /// copy of its own.
+    pub fn restore_passes(&self, passes_json: String) -> Result<(), CurfewError> {
+        let stored: curfew_core::Passes = serde_json::from_str(&passes_json).map_err(payload)?;
+        self.passes.write().expect("passes lock").merge(&stored);
+        Ok(())
     }
 
     /// Start the 24-hour delayed release, returning when it lands. Never movable later.

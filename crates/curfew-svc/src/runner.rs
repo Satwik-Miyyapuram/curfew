@@ -94,6 +94,7 @@ pub fn build(
     enforcer.sessions = persisted.sessions;
     enforcer.usage = persisted.usage;
     enforcer.launches = persisted.launches;
+    enforcer.passes = persisted.passes;
     enforcer.config_path = Some(config_path.to_path_buf());
     enforcer.state_warning = warning;
     Ok(enforcer)
@@ -179,6 +180,7 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
         sessions: enforcer.sessions.clone(),
         usage: enforcer.usage.clone(),
         launches: enforcer.launches.clone(),
+        passes: enforcer.passes.clone(),
         last_tick: Some(last_tick),
     };
     if let Err(e) = state::save(state_path, &snapshot) {
@@ -315,8 +317,13 @@ pub fn run(
             // seconds later, which is what keeps the five-second promise.
             if let Some((node, root)) = &sync {
                 let calendars = guard.config.calendars.clone();
+                // Passes go out before the merge comes back, so a pass spent on this device in
+                // the last two seconds is in the log the other device reads, and the ration this
+                // device then adopts already counts it.
+                let said_passes = mirror.publish_passes(node.shared(), now, &guard.passes);
                 let Enforcer { sessions, usage, launches, .. } = &mut *guard;
                 let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
+                guard.passes = pass.passes.clone();
                 peer_events = pass.calendar.clone();
                 // Only the events some rule here would act on. A lock does not need to know the
                 // name of every meeting in someone's week to do its job, and the log is smaller and
@@ -329,7 +336,7 @@ pub fn run(
                     .cloned()
                     .collect();
                 let said = mirror.publish_calendar(node.shared(), now, &matched);
-                if pass.published + said > 0 {
+                if pass.published + said + said_passes > 0 {
                     node.push_all(now);
                     if let Err(e) = curfew_sync::store::save(root, node.shared()) {
                         eprintln!("curfew: could not save the sync log: {e}");

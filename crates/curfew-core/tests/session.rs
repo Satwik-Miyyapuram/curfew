@@ -1,6 +1,7 @@
 //! Sessions and the promise a lock makes. Most of these tests are about ways *out* of a lock that
 //! must not exist.
 
+use curfew_core::emergency::{EmergencyPolicy, Passes};
 use curfew_core::schedule::{Activation, ActivationSource};
 use curfew_core::session::{reconcile, Refusal, Session, SessionSource, Sessions};
 use curfew_core::{Lock, LockSet, Timestamp, DELAYED_RELEASE_SECONDS};
@@ -278,4 +279,54 @@ fn an_activation_that_has_already_ended_starts_nothing() {
     });
     assert!(started.is_empty());
     assert!(s.running.is_empty());
+}
+
+// --- the escape hatch ----------------------------------------------------------------------------
+
+/// Spending a pass is how a real emergency gets out. It is the only thing that opens a lock whose
+/// conditions cannot be met, and the rationing that makes it safe lives in `emergency.rs`.
+#[test]
+fn an_emergency_pass_ends_a_session_no_evidence_could_have_ended() {
+    let policy = EmergencyPolicy { passes: 1, window_seconds: 7 * 86_400, cooldown_seconds: 3600 };
+    let mut passes = Passes::default();
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Token { id: "t1".into() }], None)));
+
+    // Without the token there is no way out at all.
+    assert!(matches!(s.end("a", NOW, &evidence(&[])), Err(Refusal::Locked { .. })));
+
+    let pass = passes.spend(NOW, &policy).expect("the configured pass is available");
+    let ended = s.end_with_pass("a", NOW, pass).expect("a spent pass ends the session");
+    assert_eq!(ended.profile, "deep-work");
+    assert!(s.running.is_empty());
+}
+
+/// One pass, one session. A bad evening must not become a general amnesty.
+#[test]
+fn a_pass_ends_one_session_and_leaves_the_others_exactly_as_locked() {
+    let policy = EmergencyPolicy { passes: 2, window_seconds: 7 * 86_400, cooldown_seconds: 0 };
+    let mut passes = Passes::default();
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Confirm], None)));
+    s.start(session("b", "evenings", LockSet::new([Lock::Confirm], None)));
+
+    let pass = passes.spend(NOW, &policy).expect("the first pass");
+    s.end_with_pass("a", NOW, pass).expect("the first session ends");
+
+    assert_eq!(s.running.len(), 1);
+    assert_eq!(s.running[0].id, "b");
+    assert!(s.running[0].lock.is_locked());
+}
+
+/// A pass is not a way to conjure a session out of nothing, and a wasted one is still spent —
+/// which is why the quota is recorded before the release is attempted, not after.
+#[test]
+fn a_pass_spent_on_a_session_that_is_not_running_is_refused_and_still_gone() {
+    let policy = EmergencyPolicy { passes: 1, window_seconds: 7 * 86_400, cooldown_seconds: 0 };
+    let mut passes = Passes::default();
+    let mut s = Sessions::default();
+
+    let pass = passes.spend(NOW, &policy).expect("the only pass");
+    assert_eq!(s.end_with_pass("nope", NOW, pass), Err(Refusal::NotRunning));
+    assert_eq!(passes.remaining(NOW, &policy), 0);
 }

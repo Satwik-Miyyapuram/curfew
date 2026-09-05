@@ -25,11 +25,7 @@ fn meeting() -> String {
 }
 
 fn source(id: &str, location: &str, refresh: u32) -> CalendarSource {
-    CalendarSource {
-        id: id.to_string(),
-        location: location.to_string(),
-        refresh_seconds: refresh,
-    }
+    CalendarSource { id: id.to_string(), location: location.to_string(), refresh_seconds: refresh }
 }
 
 fn dir(tag: &str) -> std::path::PathBuf {
@@ -76,7 +72,8 @@ fn a_subscription_that_parses_becomes_events() {
     let mut feeds = Feeds::new(dir("ok"));
     let fetcher = Scripted::always(Ok(meeting()));
 
-    let (events, outcomes) = feeds.events(NOW, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
+    let (events, outcomes) =
+        feeds.events(NOW, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
 
     assert_eq!(1, events.len());
     assert_eq!("Design review", events[0].title);
@@ -98,7 +95,10 @@ fn an_event_carries_the_source_it_came_from_in_its_id() {
     );
 
     assert_eq!(2, events.len());
-    assert_eq!(2, events.iter().map(|e| e.id.clone()).collect::<std::collections::BTreeSet<_>>().len());
+    assert_eq!(
+        2,
+        events.iter().map(|e| e.id.clone()).collect::<std::collections::BTreeSet<_>>().len()
+    );
     assert!(events.iter().any(|e| e.id.starts_with("work/")));
     assert!(events.iter().any(|e| e.id.starts_with("home/")));
 }
@@ -146,7 +146,8 @@ fn a_source_that_has_never_been_fetched_says_so_rather_than_pretending_to_be_emp
     let mut feeds = Feeds::new(dir("never"));
     let broken = Scripted::always(Err("no such file".to_string()));
 
-    let (events, outcomes) = feeds.events(NOW, &[source("work", "C:/nope.ics", 3600)], UTC, &broken);
+    let (events, outcomes) =
+        feeds.events(NOW, &[source("work", "C:/nope.ics", 3600)], UTC, &broken);
 
     assert!(events.is_empty());
     assert!(matches!(outcomes[0], Outcome::Failed { still_serving: false, .. }));
@@ -245,7 +246,10 @@ fn events_come_back_in_time_order_across_sources() {
         &fetcher,
     );
 
-    assert_eq!(vec!["Earlier", "Later"], events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>());
+    assert_eq!(
+        vec!["Earlier", "Later"],
+        events.iter().map(|e| e.title.as_str()).collect::<Vec<_>>()
+    );
 }
 
 #[test]

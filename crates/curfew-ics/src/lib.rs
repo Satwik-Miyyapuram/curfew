@@ -160,7 +160,9 @@ impl Component {
         self.properties
             .iter()
             .filter(|(name, _, _)| name == "CATEGORIES")
-            .flat_map(|(_, _, value)| unescape(value).split(',').map(str::to_string).collect::<Vec<_>>())
+            .flat_map(|(_, _, value)| {
+                unescape(value).split(',').map(str::to_string).collect::<Vec<_>>()
+            })
             .map(|c| c.trim().to_string())
             .filter(|c| !c.is_empty())
             .collect()
@@ -321,7 +323,9 @@ fn components(text: &str) -> Vec<Component> {
                 depth_inside_event = 0;
             }
             ("BEGIN", _) if current.is_some() => depth_inside_event += 1,
-            ("END", _) if current.is_some() => depth_inside_event = depth_inside_event.saturating_sub(1),
+            ("END", _) if current.is_some() => {
+                depth_inside_event = depth_inside_event.saturating_sub(1)
+            }
             _ => {
                 if depth_inside_event > 0 {
                     continue;
@@ -375,10 +379,7 @@ fn split_params(name_with_params: &str) -> (String, BTreeMap<String, String>) {
     let mut params = BTreeMap::new();
     for part in parts {
         if let Some((key, value)) = part.split_once('=') {
-            params.insert(
-                key.to_ascii_uppercase(),
-                value.trim_matches('"').to_string(),
-            );
+            params.insert(key.to_ascii_uppercase(), value.trim_matches('"').to_string());
         }
     }
     (name, params)
@@ -492,12 +493,16 @@ fn expand(rule: &str, first: Timestamp, until: Timestamp, zone: Tz) -> Vec<Times
     let frequency = parts.get("FREQ").map(String::as_str).unwrap_or("");
     let interval: i64 = parts.get("INTERVAL").and_then(|i| i.parse().ok()).unwrap_or(1).max(1);
     let count: Option<usize> = parts.get("COUNT").and_then(|c| c.parse().ok());
-    let end_by: Option<Timestamp> = parts.get("UNTIL").and_then(|u| {
-        parse_time(u, &BTreeMap::new(), zone)
-    });
+    let end_by: Option<Timestamp> =
+        parts.get("UNTIL").and_then(|u| parse_time(u, &BTreeMap::new(), zone));
     // Rules Curfew cannot expand exactly are not expanded at all: a block that fires on the wrong
     // day teaches the user to distrust the ones that fire on the right day.
-    if parts.keys().any(|k| matches!(k.as_str(), "BYSETPOS" | "BYWEEKNO" | "BYYEARDAY" | "BYHOUR" | "BYMINUTE" | "BYSECOND")) {
+    if parts.keys().any(|k| {
+        matches!(
+            k.as_str(),
+            "BYSETPOS" | "BYWEEKNO" | "BYYEARDAY" | "BYHOUR" | "BYMINUTE" | "BYSECOND"
+        )
+    }) {
         return Vec::new();
     }
     let by_day: Vec<chrono::Weekday> = parts
@@ -582,7 +587,9 @@ fn advance(
         chrono::LocalResult::Ambiguous(first, _) => Some(first),
         // A recurrence that lands in the hour a clock skips is moved forward rather than dropped;
         // the meeting still happens, and a missing block is the worse failure.
-        chrono::LocalResult::None => zone.from_local_datetime(&(next + Duration::hours(1))).single(),
+        chrono::LocalResult::None => {
+            zone.from_local_datetime(&(next + Duration::hours(1))).single()
+        }
     }
 }
 

@@ -1,6 +1,8 @@
 package dev.curfew.app
 
 import dev.curfew.policy.Lock
+import dev.curfew.policy.NoPass
+import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.LockSet
 import dev.curfew.policy.Refusal
 import dev.curfew.policy.Refused
@@ -177,4 +179,58 @@ class CurfewRuntimeTest {
 
         assertTrue(runtime.policy.sessions().running.isEmpty())
     }
+    // --- the escape hatch ---
+
+    private val hatchConfig = TestRuntime.CONFIG +
+        """
+
+[emergency]
+passes = 1
+window_seconds = 604800
+cooldown_seconds = 86400
+"""
+
+    @Test
+    fun `an emergency pass ends a locked session and is written down`() = runTest {
+        val runtime = TestRuntime.create(now, configToml = hatchConfig)
+        runtime.startSession(session(listOf(Lock.DeviceCredential)))
+
+        runtime.spendPass("s1", now + 60)
+
+        assertTrue(runtime.policy.sessions().running.isEmpty())
+        assertEquals(0, runtime.passesRemaining(now + 60))
+        assertTrue(runtime.db.audit().recent(20).any { it.kind == "pass.spent" })
+    }
+
+    @Test
+    fun `a spent pass survives a restart`() = runTest {
+        // Otherwise a force-stop is a week's worth of escape hatches for free.
+        val runtime = TestRuntime.create(now, configToml = hatchConfig)
+        runtime.startSession(session(listOf(Lock.DeviceCredential)))
+        runtime.spendPass("s1", now + 60)
+
+        val restarted = CurfewRuntimeFactory.reopen(runtime, now + 120)
+        restarted.restore(now + 120)
+
+        assertEquals(0, restarted.passesRemaining(now + 120))
+        assertEquals(
+            PassRefusal.CoolingDown(now + 60 + 86_400),
+            restarted.passRefusal(now + 120),
+        )
+    }
+
+    @Test
+    fun `a device with no hatch configured cannot spend one`() = runTest {
+        val runtime = TestRuntime.create(now)
+        runtime.startSession(session(listOf(Lock.DeviceCredential)))
+
+        try {
+            runtime.spendPass("s1", now + 60)
+            fail("a config that never offered a pass handed one out")
+        } catch (e: NoPass) {
+            assertEquals(PassRefusal.Disabled, e.refusal)
+        }
+        assertEquals(1, runtime.policy.sessions().running.size)
+    }
+
 }

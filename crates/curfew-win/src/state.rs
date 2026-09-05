@@ -5,7 +5,7 @@
 //! corruption would be an escape hatch, and it is written and read accordingly — atomically, with
 //! the previous good copy kept alongside, and never silently replaced by an empty one.
 
-use curfew_core::{Consumption, Launches, Sessions, Timestamp};
+use curfew_core::{Consumption, Launches, Passes, Sessions, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
@@ -20,6 +20,10 @@ pub struct Persisted {
     pub usage: BTreeMap<String, Consumption>,
     #[serde(default)]
     pub launches: BTreeMap<String, Launches>,
+    /// Emergency passes already spent. Persisted for the same reason sessions are: a ration a
+    /// restart could forget would be no ration at all.
+    #[serde(default)]
+    pub passes: Passes,
     /// When the last pass ran. Used to charge elapsed time honestly across a restart, and to notice
     /// that the machine was off — a gap is not usage.
     #[serde(default)]

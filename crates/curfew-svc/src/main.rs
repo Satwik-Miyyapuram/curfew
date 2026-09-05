@@ -27,6 +27,7 @@ curfew — distraction blocking that keeps its promises
   curfew start <profile> <minutes> [--credential]
   curfew end <id>                  end a session (refused if it is locked)
   curfew release <id>              start the 24-hour delayed release
+  curfew emergency <id>            spend an emergency pass, if the ration allows one
   curfew cancel                    call off a freeze that is counting down
   curfew confirm                   agree to a freeze another device asked for
   curfew reload                    re-read the config file
@@ -63,6 +64,7 @@ fn main() {
         "start" => start(&args[1..]),
         "end" => end(&args[1..]),
         "release" => release(&args[1..]),
+        "emergency" => emergency(&args[1..]),
         "reload" => simple(Request::Reload),
         "run" => run_in_console(),
         "watchdog" => {
@@ -211,7 +213,32 @@ fn report(response: Response) -> i32 {
             eprintln!("curfew: {detail}");
             1
         }
+        Response::NoPass { refusal } => {
+            println!("{}", describe_pass(&refusal));
+            1
+        }
         Response::Status(_) => 0,
+    }
+}
+
+/// Why no emergency pass was available, said as the reason rather than the enum.
+///
+/// The wording matters more here than anywhere else in the CLI: this is the message someone reads
+/// at the exact moment they most want a way out, so it says plainly that there is one, when, and
+/// that waiting is the whole mechanism rather than a bug.
+fn describe_pass(refusal: &curfew_core::PassRefusal) -> String {
+    use curfew_core::PassRefusal;
+    match refusal {
+        PassRefusal::Disabled => "Emergency passes are switched off. Turn them on in curfew.toml              under [emergency], and they will be available from then on — not retroactively."
+            .into(),
+        PassRefusal::QuotaSpent { next_at } => format!(
+            "No emergency passes left. The next one becomes available at {}.",
+            when(*next_at)
+        ),
+        PassRefusal::CoolingDown { until } => format!(
+            "A pass was used recently. The next one can be spent at {}.",
+            when(*until)
+        ),
     }
 }
 
@@ -331,6 +358,21 @@ fn end(args: &[String]) -> i32 {
     // the operating system's own prompt; a command line that could assert "the password was typed"
     // would be a hole, so it does not get to.
     match ask(Request::End { id: id.clone(), satisfied: BTreeSet::new() }) {
+        Ok(response) => report(response),
+        Err(code) => code,
+    }
+}
+
+/// Spend an emergency pass on one session.
+///
+/// Deliberately not called `end --force`: it is scarce, it is recorded, and it is shared with every
+/// paired device. Naming it after what it costs is the honest way to offer it.
+fn emergency(args: &[String]) -> i32 {
+    let Some(id) = args.first() else {
+        eprintln!("curfew: usage: curfew emergency <id>");
+        return 2;
+    };
+    match ask(Request::Emergency { id: id.clone() }) {
         Ok(response) => report(response),
         Err(code) => code,
     }

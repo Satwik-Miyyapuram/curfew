@@ -19,9 +19,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW,
     PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu,
-    TranslateMessage, HMENU, IDI_INFORMATION, MB_ICONINFORMATION, MB_OK, MF_GRAYED, MF_SEPARATOR,
-    MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP,
-    WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONINFORMATION, MB_ICONWARNING, MB_OK,
+    MB_YESNO, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP,
+    WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 /// The message the shell sends us when someone clicks the icon.
@@ -212,6 +212,7 @@ fn show_menu(window: HWND) {
             Item::End { label, .. }
             | Item::Unlock { label, .. }
             | Item::Release { label, .. }
+            | Item::Emergency { label, .. }
             | Item::CancelFreeze { label }
             | Item::ConfirmFreeze { label } => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide(label).as_ptr());
@@ -271,6 +272,31 @@ fn chosen(window: HWND, id: usize) {
             // Closing the prompt is not an attempt and gets no dialog: changing your mind is the
             // system working, not a failure to report.
             let Some((request, _)) = act(&item, credential) else { return };
+            match ask(&request) {
+                Ok(response) => say(window, &describe(&response)),
+                Err(detail) => say(window, &detail),
+            }
+            refresh_tooltip(window);
+        }
+        // Spending a pass is asked about first. It is the one item on this menu that consumes
+        // something scarce and shared, and a mis-click that burned a week's ration would be the
+        // kind of mistake the whole design exists to avoid.
+        Item::Emergency { .. } => {
+            let confirmed = unsafe {
+                MessageBoxW(
+                    window,
+                    wide(
+                        "Use an emergency pass? It ends this session now, it is counted against                          your ration on every paired device, and it cannot be given back.",
+                    )
+                    .as_ptr(),
+                    wide("Curfew").as_ptr(),
+                    MB_YESNO | MB_ICONWARNING,
+                ) == IDYES
+            };
+            if !confirmed {
+                return;
+            }
+            let Some((request, _)) = act(&item, None) else { return };
             match ask(&request) {
                 Ok(response) => say(window, &describe(&response)),
                 Err(detail) => say(window, &detail),

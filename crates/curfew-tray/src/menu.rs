@@ -21,6 +21,11 @@ pub enum Item {
         id: String,
         label: String,
     },
+    /// Spend an emergency pass on a session no evidence here can end.
+    Emergency {
+        id: String,
+        label: String,
+    },
     /// Start the 24-hour delayed release.
     Release {
         id: String,
@@ -124,6 +129,19 @@ pub fn menu(status: &Status) -> Vec<Item> {
             });
         }
 
+        // Offered only where it is the only way out, and only when there is one to spend. A hatch
+        // shown next to a session that can simply be ended would train people to reach for the
+        // scarce thing first.
+        if (credential || others) && status.passes_left > 0 {
+            items.push(Item::Emergency {
+                id: session.id.clone(),
+                label: format!(
+                    "Use an emergency pass on {} ({} left)",
+                    session.profile, status.passes_left
+                ),
+            });
+        }
+
         match session.lock.delayed_release_at {
             // Already running, and never offered twice: asking again cannot move it, so an item that
             // looked like it might would be a lie.
@@ -133,6 +151,19 @@ pub fn menu(status: &Status) -> Vec<Item> {
                 label: "Start the 24-hour release".to_string(),
             }),
             None => {}
+        }
+    }
+
+    // Why the hatch is not on the menu, said only when someone is actually locked and would look
+    // for it. A device with nothing running does not need to be told about a pass it does not need.
+    if !status.running.is_empty() {
+        match &status.pass_refusal {
+            Some(curfew_core::PassRefusal::QuotaSpent { next_at }) => items
+                .push(Item::Note(format!("    no emergency passes left until {}", when(*next_at)))),
+            Some(curfew_core::PassRefusal::CoolingDown { until }) => items
+                .push(Item::Note(format!("    next emergency pass available {}", when(*until)))),
+            // Disabled is not mentioned: a hatch nobody switched on is not missing.
+            _ => {}
         }
     }
 
@@ -232,6 +263,49 @@ mod tests {
 
     fn status(running: Vec<Session>) -> Status {
         Status { now: NOW, running, ..Default::default() }
+    }
+
+    #[test]
+    fn the_hatch_is_offered_only_where_it_is_the_only_way_out() {
+        let mut with_passes = status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        with_passes.passes_left = 2;
+        let items = menu(&with_passes);
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Emergency { .. })),
+            "a locked session with a ration left was offered no way to spend it"
+        );
+
+        // An expired timer can simply be ended. Offering a scarce pass next to the free way out
+        // would teach people to reach for the expensive one.
+        let mut endable = status(vec![session([Lock::Timer], Some(NOW - 1))]);
+        endable.passes_left = 2;
+        assert!(!menu(&endable).iter().any(|i| matches!(i, Item::Emergency { .. })));
+    }
+
+    #[test]
+    fn a_spent_ration_is_explained_rather_than_offered() {
+        let mut spent = status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        spent.passes_left = 0;
+        spent.pass_refusal = Some(curfew_core::PassRefusal::CoolingDown { until: NOW + 3600 });
+
+        let items = menu(&spent);
+
+        assert!(!items.iter().any(|i| matches!(i, Item::Emergency { .. })));
+        assert!(
+            items.iter().any(
+                |i| matches!(i, Item::Note(text) if text.contains("next emergency pass available"))
+            ),
+            "the menu went silent about a hatch that exists and is merely not ready"
+        );
+    }
+
+    #[test]
+    fn a_hatch_nobody_switched_on_is_never_mentioned() {
+        let mut off = status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        off.pass_refusal = Some(curfew_core::PassRefusal::Disabled);
+        assert!(!menu(&off)
+            .iter()
+            .any(|i| matches!(i, Item::Note(text) if text.contains("emergency"))));
     }
 
     #[test]

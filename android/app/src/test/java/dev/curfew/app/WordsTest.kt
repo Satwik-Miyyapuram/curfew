@@ -2,6 +2,8 @@ package dev.curfew.app
 
 import dev.curfew.app.block.BlockActivity
 import dev.curfew.app.ui.dayLabel
+import dev.curfew.app.ui.describePassRefusal
+import dev.curfew.policy.PassRefusal
 import dev.curfew.app.ui.describeLock
 import dev.curfew.app.ui.describeTarget
 import dev.curfew.app.ui.duration
@@ -129,6 +131,23 @@ class WordsTest {
         // And across a new year, where the day-of-year arithmetic would otherwise go backwards.
         val newYearsEve = at(2026, 12, 31, 23, 0)
         assertEquals("Tomorrow", dayLabel(at(2027, 1, 1, 9, 0), newYearsEve))
+    }
+
+    @Test
+    fun `a refused pass says when rather than only no`() {
+        val now = 1_788_510_600L
+
+        val spent = describePassRefusal(PassRefusal.QuotaSpent(now + 2 * 86_400), now)
+        assertTrue("a user cannot plan around a refusal with no time in it", spent.contains("in 48 hr"))
+
+        val cooling = describePassRefusal(PassRefusal.CoolingDown(now + 3600), now)
+        assertTrue(cooling.contains("in 1 hr"))
+
+        // The disabled case is the one with nothing to wait for, so it says so instead of
+        // implying a pass is on its way — and warns that switching it on will not help now.
+        val off = describePassRefusal(PassRefusal.Disabled, now)
+        assertTrue(off.contains("switched off"))
+        assertTrue(off.contains("not unlock"))
     }
 
 }

@@ -52,6 +52,12 @@ pub enum Request {
     },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
+    /// Spend an emergency pass on one session, ending it whatever its lock says.
+    ///
+    /// The rationing is the service's to enforce, not the caller's: a tray that decided for itself
+    /// whether a pass was available would be a tray that could decide there were more of them.
+    /// Refused with [`Response::NoPass`] when there is none to spend.
+    Emergency { id: String },
     /// Call off an announced freeze.
     ///
     /// This one message needs no lock satisfied and can never be refused on policy grounds, because
@@ -93,6 +99,12 @@ pub enum Response {
     Refused {
         refusal: Refusal,
     },
+    /// No emergency pass could be spent, and why — a disabled hatch, a spent quota, or a cooldown
+    /// with a time on it. Separate from [`Response::Refused`] because nothing about the session's
+    /// own lock was the problem.
+    NoPass {
+        refusal: curfew_core::PassRefusal,
+    },
     /// The answer to a [`Request::Check`].
     Verdict {
         blocked: bool,
@@ -132,6 +144,13 @@ pub struct Status {
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
     /// may have been lost.
     pub state_warning: Option<String>,
+    /// Emergency passes that could be spent right now, and why not when the answer is none. Both
+    /// on every status, so a UI never has to ask a second question to know whether to offer the
+    /// hatch or to explain its absence.
+    #[serde(default)]
+    pub passes_left: u32,
+    #[serde(default)]
+    pub pass_refusal: Option<curfew_core::PassRefusal>,
 }
 
 /// The control channel's name. Namespaced, so on Windows this is a named pipe under

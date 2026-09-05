@@ -145,6 +145,33 @@ impl Sessions {
         Ok(self.running.remove(index))
     }
 
+    /// End a session with a spent emergency pass, whatever its lock says.
+    ///
+    /// The pass is taken by value and dropped here, so one pass ends one session: the other
+    /// sessions running at the time stay exactly as locked as they were. This is still
+    /// [`Sessions::end`] underneath — the pass is presented as evidence for that session's own
+    /// conditions rather than as a way around the check — so invariant 2 survives the escape
+    /// hatch, and a caller cannot use this to end something that is not running.
+    ///
+    /// Spending the pass is the caller's job, and must happen before this: [`Passes::spend`] is
+    /// what enforces the quota, and it is deliberately not called from in here so the use is
+    /// recorded in the op-log whether or not the release that followed it succeeded.
+    ///
+    /// [`Passes::spend`]: crate::emergency::Passes::spend
+    pub fn end_with_pass(
+        &mut self,
+        id: &str,
+        now: Timestamp,
+        pass: crate::emergency::Pass,
+    ) -> Result<Session, Refusal> {
+        let _ = pass;
+        let Some(session) = self.running.iter().find(|s| s.id == id) else {
+            return Err(Refusal::NotRunning);
+        };
+        let satisfied = session.lock.conditions.clone();
+        self.end(id, now, &satisfied)
+    }
+
     /// Start the 24-hour delayed release on a session (GAPS D1). Idempotent, and never movable
     /// later — the guarantee lives in [`LockSet::request_release`].
     pub fn request_release(&mut self, id: &str, now: Timestamp) -> Result<Timestamp, Refusal> {

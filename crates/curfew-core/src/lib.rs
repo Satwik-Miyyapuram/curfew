@@ -6,6 +6,7 @@
 pub mod budget;
 pub mod clock;
 pub mod config;
+pub mod emergency;
 pub mod engine;
 pub mod frozen;
 pub mod lock;
@@ -18,6 +19,7 @@ pub use clock::{ClockWitness, Reading, Verdict};
 pub use config::{
     Action, Config, ConfigError, Platform, Profile, Resolver, Rule, CONFIG_SCHEMA_VERSION,
 };
+pub use emergency::{EmergencyPolicy, Pass, PassRefusal, Passes};
 pub use engine::{decide, BlockReason, Decision, State};
 pub use frozen::{Countdown, Origin};
 pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};

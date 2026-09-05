@@ -3,8 +3,8 @@
 use chrono::TimeZone;
 use chrono_tz::Tz;
 use curfew_core::schedule::{
-    active_at, next_change_after, upcoming, ActivationSource, CalendarEvent, CalendarSchedule, EventMatcher,
-    WeeklySchedule,
+    active_at, next_change_after, upcoming, ActivationSource, CalendarEvent, CalendarSchedule,
+    EventMatcher, WeeklySchedule,
 };
 use curfew_core::{Lock, Timestamp};
 
@@ -303,10 +303,7 @@ fn duration_is_measured_before_padding_not_after() {
     let schedule = CalendarSchedule {
         id: "long-meetings".into(),
         profile: "deep-work".into(),
-        matcher: EventMatcher {
-            min_duration_seconds: Some(60 * 60),
-            ..EventMatcher::default()
-        },
+        matcher: EventMatcher { min_duration_seconds: Some(60 * 60), ..EventMatcher::default() },
         pad_before_seconds: 30 * 60,
         pad_after_seconds: 30 * 60,
         locks: vec![],
@@ -363,7 +360,8 @@ fn tomorrow_is_shown_before_it_happens() {
 #[test]
 fn nothing_outside_the_window_is_previewed() {
     let friday_night = local(2026, 9, 4, 20, 0);
-    let ahead = upcoming(friday_night, friday_night + 3600, LONDON, &[weekday_mornings()], &[], &[]);
+    let ahead =
+        upcoming(friday_night, friday_night + 3600, LONDON, &[weekday_mornings()], &[], &[]);
 
     assert!(ahead.is_empty());
 }

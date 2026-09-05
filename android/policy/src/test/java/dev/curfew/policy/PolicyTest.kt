@@ -2,6 +2,7 @@ package dev.curfew.policy
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -403,6 +404,123 @@ class PolicyTest {
     @Test
     fun `the picker refuses a profile that does not exist rather than writing nothing`() {
         assertTrue(Policy.setBlockedApps(configToml, "nope", listOf("com.x")).isFailure)
+    }
+
+    // --- the escape hatch ---
+
+    private val hatchToml =
+        """
+        schema_version = 1
+        timezone = "Europe/London"
+
+        [emergency]
+        passes = 2
+        window_seconds = 604800
+        cooldown_seconds = 86400
+
+        [[profiles]]
+        id = "deep-work"
+        name = "Deep work"
+        """.trimIndent()
+
+    private fun hatched(): Policy = Policy.load(hatchToml)
+
+    private fun start(policy: Policy, id: String) {
+        policy.startSession(
+            Session(
+                id = id,
+                profile = "deep-work",
+                source = SessionSource.Manual,
+                startedAt = friday0930,
+                lock = LockSet(conditions = listOf(Lock.DeviceCredential), endsAt = null),
+            ),
+        )
+    }
+
+    @Test
+    fun `an emergency pass ends a session the screen lock was holding`() {
+        val policy = hatched()
+        start(policy, "s1")
+
+        policy.spendPass("s1", friday0930)
+
+        assertTrue(policy.sessions().running.isEmpty())
+        assertEquals(1, policy.passesRemaining(friday0930))
+        assertEquals(listOf(friday0930), policy.passes().used)
+    }
+
+    @Test
+    fun `a fresh install offers no pass at all`() {
+        val policy = policy()
+        start(policy, "s1")
+        try {
+            policy.spendPass("s1", friday0930)
+            fail("a config that never mentioned passes handed one out")
+        } catch (e: NoPass) {
+            assertEquals(PassRefusal.Disabled, e.refusal)
+        }
+        assertEquals(1, policy.sessions().running.size)
+    }
+
+    @Test
+    fun `a second pass inside the cooldown is refused and says when`() {
+        val policy = hatched()
+        start(policy, "s1")
+        policy.spendPass("s1", friday0930)
+        start(policy, "s2")
+
+        try {
+            policy.spendPass("s2", friday0930 + 60)
+            fail("the cooldown was not enforced")
+        } catch (e: NoPass) {
+            assertEquals(PassRefusal.CoolingDown(friday0930 + 86_400), e.refusal)
+        }
+        assertEquals(1, policy.sessions().running.size)
+    }
+
+    @Test
+    fun `the quota runs out and comes back a window later`() {
+        val policy = hatched()
+        start(policy, "s1")
+        policy.spendPass("s1", friday0930)
+        start(policy, "s2")
+        policy.spendPass("s2", friday0930 + 2 * 86_400)
+        start(policy, "s3")
+
+        try {
+            policy.spendPass("s3", friday0930 + 4 * 86_400)
+            fail("a third pass was handed out of a ration of two")
+        } catch (e: NoPass) {
+            assertEquals(PassRefusal.QuotaSpent(friday0930 + 604_800), e.refusal)
+        }
+        // And once the oldest use has aged out of the window, the hatch is open again.
+        assertEquals(1, policy.passesRemaining(friday0930 + 604_801))
+        assertNull(policy.passRefusal(friday0930 + 604_801))
+    }
+
+    @Test
+    fun `a restored ration is merged rather than replacing what we already heard`() {
+        val policy = hatched()
+        start(policy, "s1")
+        policy.spendPass("s1", friday0930)
+
+        // An older copy from storage, plus a use this device has not seen before.
+        policy.restorePasses(Passes(used = listOf(friday0930 - 86_400)))
+
+        assertEquals(listOf(friday0930 - 86_400, friday0930), policy.passes().used)
+        assertEquals(0, policy.passesRemaining(friday0930))
+    }
+
+    @Test
+    fun `a pass spent on a session that has already gone is still spent`() {
+        val policy = hatched()
+        try {
+            policy.spendPass("never-existed", friday0930)
+            fail("ending a session that is not running should still refuse")
+        } catch (e: Refused) {
+            assertEquals(Refusal.NotRunning, e.refusal)
+        }
+        assertEquals(1, policy.passesRemaining(friday0930))
     }
 
     @Test

@@ -19,6 +19,7 @@
 use crate::device::{DeviceId, Identity};
 use crate::pair::{Error as PairError, Peers};
 use curfew_core::budget::{Consumption, Launches};
+use curfew_core::emergency::Passes;
 use curfew_core::session::{Session, Sessions};
 use curfew_core::{CalendarEvent, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,10 @@ pub enum Op {
     /// ever put in here, so the log carries the meetings that matter to a block and not a
     /// transcript of someone's week.
     Calendar { events: Vec<CalendarEvent> },
+    /// An emergency pass was spent. Carried so the quota is one quota across every device rather
+    /// than one per device, and so a phone kept offline for a week does not come back with a fresh
+    /// allowance. Merging is union of timestamps, which cannot give a pass back.
+    EmergencyUsed { at: Timestamp },
 }
 
 /// An operation, with everything needed to place it in its author's chain.
@@ -142,6 +147,10 @@ pub struct Replay {
     /// resolve — the lock is doing its job — but the UI is owed an explanation for why the phone
     /// says one thing and the PC another.
     pub still_locked: Vec<String>,
+    /// Every emergency pass spent anywhere, so the ration is global. Defaulted rather than
+    /// required, so a checkpoint written by an older build still loads.
+    #[serde(default)]
+    pub passes: Passes,
 }
 
 /// Every entry this device holds, its own included.
@@ -394,6 +403,9 @@ fn apply(state: &mut Replay, entry: &Entry, now: Timestamp) {
         Op::Calendar { events } => {
             state.calendars.insert(entry.author.clone(), events.clone());
         }
+        // Grow-only, and never trusted to be in the past: a device claiming a use far in the
+        // future only ever spends more of its own quota, never less.
+        Op::EmergencyUsed { at } => state.passes.record(*at),
     }
 }
 

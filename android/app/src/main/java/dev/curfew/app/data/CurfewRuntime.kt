@@ -10,6 +10,8 @@ import dev.curfew.policy.Launches
 import dev.curfew.policy.Lock
 import dev.curfew.policy.LockSet
 import dev.curfew.policy.Observation
+import dev.curfew.policy.PassRefusal
+import dev.curfew.policy.Passes
 import dev.curfew.policy.Policy
 import dev.curfew.policy.Rollup
 import dev.curfew.policy.Session
@@ -120,6 +122,27 @@ class CurfewRuntime internal constructor(
         at
     }
 
+    /**
+     * End a session by spending an emergency pass.
+     *
+     * Throws [dev.curfew.policy.NoPass] when the ration says no. The pass is written down before
+     * the session is ended and persisted immediately afterwards either way, because a pass this
+     * device forgot is a pass the user gets back for free.
+     */
+    suspend fun spendPass(id: String, now: Long = clock.now()) = gate.withLock {
+        try {
+            policy.spendPass(id, now)
+            audit(now, "pass.spent", id)
+        } finally {
+            persist(now)
+        }
+    }
+
+    /** How many emergency passes are left, and why there are none when there are none. */
+    fun passesRemaining(now: Long = clock.now()): Int = policy.passesRemaining(now)
+
+    fun passRefusal(now: Long = clock.now()): PassRefusal? = policy.passRefusal(now)
+
     /** Replace the config. Running sessions are untouched — a settings edit is not a way out. */
     suspend fun setConfig(toml: String): Result<Unit> = gate.withLock {
         config.write(toml).onSuccess {
@@ -221,6 +244,11 @@ class CurfewRuntime internal constructor(
     /** Read sessions back after a reboot, a force-stop or an update. */
     suspend fun restore(now: Long = clock.now()) = gate.withLock {
         db.state().get(KEY_SESSIONS)?.let { policy.restoreSessions(Policy.json.decodeFromString(it)) }
+        // Merged, not replaced, and restored before anything can be spent: a ration a restart
+        // forgot would be a week's worth of escape hatches for the price of a force-stop.
+        db.state().get(KEY_PASSES)?.let {
+            runCatching { policy.restorePasses(Policy.json.decodeFromString(it)) }
+        }
         // The clock witness is restored before anything is judged: a restart that reset the
         // baseline would hand an attacker exactly what moving the clock was meant to buy.
         db.state().get(KEY_CLOCK)?.let { runCatching { policy.restoreClock(it) } }
@@ -326,6 +354,7 @@ class CurfewRuntime internal constructor(
 
     private suspend fun persist(now: Long) {
         db.state().put(StateRow(KEY_SESSIONS, Policy.json.encodeToString(Sessions.serializer(), policy.sessions())))
+        db.state().put(StateRow(KEY_PASSES, Policy.json.encodeToString(Passes.serializer(), policy.passes())))
         refresh(now)
     }
 
@@ -352,6 +381,7 @@ class CurfewRuntime internal constructor(
 
     companion object {
         private const val KEY_SESSIONS = "sessions"
+        private const val KEY_PASSES = "passes"
         private const val KEY_HEARTBEAT = "heartbeat"
         private const val KEY_CLOCK = "clock_witness"
 

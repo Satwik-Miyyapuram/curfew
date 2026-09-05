@@ -561,3 +561,135 @@ fn nothing_the_extension_can_say_ends_a_locked_session() {
         Response::Refused { .. }
     ));
 }
+
+// --- the escape hatch ---------------------------------------------------------------------------
+
+const HATCH: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[emergency]
+passes = 2
+window_seconds = 604800
+cooldown_seconds = 86400
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+"#;
+
+fn hatched(name: &str) -> Enforcer {
+    Enforcer::new(Config::from_toml(HATCH).unwrap(), dir(name).join("hosts"))
+}
+
+fn locked(e: &mut Enforcer) -> String {
+    e.handle(
+        NOW,
+        Request::Start {
+            profile: "deep-work".into(),
+            seconds: 999_999,
+            locks: vec![Lock::DeviceCredential],
+        },
+    );
+    e.sessions.running[0].id.clone()
+}
+
+#[test]
+fn an_emergency_pass_ends_a_session_no_password_was_typed_for() {
+    let mut e = hatched("pass");
+    let id = locked(&mut e);
+
+    assert_eq!(e.handle(NOW, Request::Emergency { id }), Response::Ok);
+    assert!(e.sessions.running.is_empty());
+    // And the blocks it was holding are gone with it, not left behind by a release that only
+    // touched the session list.
+    let hosts = std::fs::read_to_string(&e.hosts_path).unwrap_or_default();
+    assert!(!hosts.contains("reddit.com"));
+}
+
+#[test]
+fn a_pass_is_refused_when_the_rules_never_offered_one() {
+    let mut e = enforcer("no-hatch");
+    let id = locked(&mut e);
+
+    assert_eq!(
+        e.handle(NOW, Request::Emergency { id }),
+        Response::NoPass { refusal: curfew_core::PassRefusal::Disabled }
+    );
+    assert_eq!(e.sessions.running.len(), 1, "a refused pass ended a session anyway");
+}
+
+#[test]
+fn a_second_pass_inside_the_cooldown_is_refused_and_says_when() {
+    let mut e = hatched("cooldown");
+    let first = locked(&mut e);
+    e.handle(NOW, Request::Emergency { id: first });
+
+    let second = locked(&mut e);
+    assert_eq!(
+        e.handle(NOW + 60, Request::Emergency { id: second }),
+        Response::NoPass { refusal: curfew_core::PassRefusal::CoolingDown { until: NOW + 86400 } }
+    );
+    assert_eq!(e.sessions.running.len(), 1);
+}
+
+#[test]
+fn a_pass_spent_on_a_session_that_has_already_ended_is_still_spent() {
+    // The ration counts reaching for the hatch, not succeeding with it. Otherwise a stale id is a
+    // free probe of how many passes are left.
+    let mut e = hatched("stale");
+    let id = locked(&mut e);
+    e.handle(NOW, Request::Emergency { id: id.clone() });
+
+    assert_eq!(
+        e.handle(NOW + 1, Request::Emergency { id }),
+        Response::NoPass { refusal: curfew_core::PassRefusal::CoolingDown { until: NOW + 86400 } }
+    );
+    assert_eq!(e.passes.used.len(), 1);
+}
+
+#[test]
+fn the_status_says_how_many_passes_are_left_without_being_asked_twice() {
+    let mut e = hatched("status-passes");
+    let Response::Status(before) = e.handle(NOW, Request::Status) else { panic!("no status") };
+    assert_eq!(before.passes_left, 2);
+    assert_eq!(before.pass_refusal, None);
+
+    let id = locked(&mut e);
+    e.handle(NOW, Request::Emergency { id });
+
+    let Response::Status(after) = e.handle(NOW + 60, Request::Status) else { panic!("no status") };
+    assert_eq!(after.passes_left, 1);
+    assert_eq!(
+        after.pass_refusal,
+        Some(curfew_core::PassRefusal::CoolingDown { until: NOW + 86400 }),
+        "one left, but not right now — a status that said only the count would mislead"
+    );
+}
+
+#[test]
+fn passes_survive_a_restart_the_way_sessions_do() {
+    let path = dir("pass-state").join("state.json");
+    let mut e = hatched("pass-state");
+    let id = locked(&mut e);
+    e.handle(NOW, Request::Emergency { id });
+
+    save(
+        &path,
+        &Persisted {
+            sessions: e.sessions.clone(),
+            usage: Default::default(),
+            launches: Default::default(),
+            passes: e.passes.clone(),
+            last_tick: Some(NOW),
+        },
+    )
+    .unwrap();
+
+    let Loaded::Ok(back) = load(&path) else { panic!("the state did not come back") };
+    assert_eq!(back.passes, e.passes, "a restart handed back a fresh ration");
+}

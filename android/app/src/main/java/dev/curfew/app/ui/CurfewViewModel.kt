@@ -12,6 +12,8 @@ import dev.curfew.policy.Lock
 import dev.curfew.policy.Policy
 import dev.curfew.policy.ProfileName
 import dev.curfew.policy.LockSet
+import dev.curfew.policy.NoPass
+import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refused
 import dev.curfew.policy.Session
 import kotlinx.coroutines.delay
@@ -88,6 +90,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                 downtime = runtime.downtime.value,
                 clockTamper = runtime.clockTamper.value,
+                passesLeft = runCatching { runtime.passesRemaining(now) }.getOrDefault(0),
+                passRefusal = runCatching { runtime.passRefusal(now) }.getOrNull(),
                 sync = syncState(now, previous.sync),
                 loading = false,
             )
@@ -274,6 +278,27 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Spend an emergency pass on a session.
+     *
+     * The confirmation lives in the UI, not here: by the time this runs the pass is being spent,
+     * and it is spent whether or not the session was still there to end. That is deliberate — a
+     * ration that only counted successes could be probed for free with a stale id.
+     */
+    fun spendPass(session: Session) {
+        viewModelScope.launch {
+            try {
+                runtime.spendPass(session.id)
+                say("${session.profile} ended with an emergency pass.")
+            } catch (e: NoPass) {
+                say(describePassRefusal(e.refusal, runtime.clock.now()))
+            } catch (refused: Refused) {
+                _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
+            }
+            refresh()
+        }
+    }
+
     fun dismissRefusal() = _state.update { it.copy(refusal = null, refusedSession = null) }
 
     fun dismissMessage() = _state.update { it.copy(message = null) }
@@ -401,6 +426,9 @@ data class UiState(
     /** Sync as the devices screen shows it. Present even when nothing has been paired. */
     val sync: SyncState = SyncState(),
     val message: String? = null,
+    /** Emergency passes that could be spent right now, and why not when there are none. */
+    val passesLeft: Int = 0,
+    val passRefusal: PassRefusal? = null,
     val refusal: dev.curfew.policy.Refusal? = null,
     val refusedSession: String? = null,
 ) {

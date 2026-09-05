@@ -125,6 +125,46 @@ class SyncTest {
     }
 
     @Test
+    fun `an emergency pass spent on the PC is spent on the phone too`() {
+        val (phone, pc) = paired("ration")
+        val root = dir("ration-folder")
+        val hatch =
+            """
+            timezone = "UTC"
+
+            [emergency]
+            passes = 1
+            window_seconds = 604800
+            cooldown_seconds = 0
+
+            [[profiles]]
+            id = "deep-work"
+            name = "Deep work"
+            """.trimIndent()
+        val onPhone = Policy.load(hatch)
+        val onPc = Policy.load(hatch)
+        onPc.startSession(session("pc-1", listOf(Lock.DeviceCredential), null))
+        onPc.spendPass("pc-1", now)
+
+        pc.pass(onPc, now, emptyMap(), emptyMap())
+        carry(pc, phone, root)
+        phone.pass(onPhone, now + 1, emptyMap(), emptyMap())
+
+        assertEquals(
+            "the ration is one ration, not one per device",
+            0,
+            onPhone.passesRemaining(now + 1),
+        )
+        onPhone.startSession(session("phone-1", listOf(Lock.DeviceCredential), null))
+        try {
+            onPhone.spendPass("phone-1", now + 2)
+            org.junit.Assert.fail("the phone handed out a pass the PC had already spent")
+        } catch (e: NoPass) {
+            assertEquals(PassRefusal.QuotaSpent(now + 604_800), e.refusal)
+        }
+    }
+
+    @Test
     fun `time spent on one device counts against the budget on the other`() {
         val (phone, pc) = paired("budget")
         val root = dir("budget-folder")

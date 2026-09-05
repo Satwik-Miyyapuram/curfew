@@ -4,6 +4,7 @@ import dev.curfew.app.data.Downtime
 import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
+import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.SessionSource
 import java.text.DateFormat
 import java.util.Calendar
@@ -111,6 +112,23 @@ fun describeLock(lock: Lock): String = when (lock) {
     is Lock.PeerRelease -> "another of your devices to agree"
     is Lock.Token -> "the token you set aside"
     is Lock.RestartRequired -> "a restart of this device"
+}
+
+/**
+ * Why no emergency pass is available, said as a time rather than a refusal.
+ *
+ * This is read at the worst moment — someone locked out of something they need — so it never says
+ * only "no". Every answer but the disabled one carries a when, because a wait a person can plan
+ * around is a very different thing from a door that will not open.
+ */
+fun describePassRefusal(refusal: PassRefusal, now: Long): String = when (refusal) {
+    is PassRefusal.Disabled ->
+        "Emergency passes are switched off in your rules. Turning them on now will not unlock " +
+            "this session — they only count from when you enable them."
+    is PassRefusal.QuotaSpent ->
+        "No emergency passes left. The next one comes back ${relative(refusal.nextAt, now)}."
+    is PassRefusal.CoolingDown ->
+        "You used a pass recently. The next one can be spent ${relative(refusal.until, now)}."
 }
 
 /** Where a running session came from, so nothing appears to have started by itself. */

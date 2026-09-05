@@ -130,6 +130,41 @@ class Policy private constructor(private val inner: Curfew) {
             throw Refused(json.decodeFromString<Refusal>(e.refusal))
         }
 
+    // --- the escape hatch ---------------------------------------------------------------------
+
+    /**
+     * End a session by spending an emergency pass.
+     *
+     * Throws [NoPass] when the ration says no, carrying when the next one becomes available: the
+     * only part of that answer anybody can act on. Throws [Refused] when the pass was spent and the
+     * session was not there to end — the pass is gone either way, because a ration that only
+     * counted successes could be probed for free with a stale id.
+     */
+    fun spendPass(id: String, now: Long) {
+        try {
+            inner.spendPass(id, now)
+        } catch (e: CurfewException.NoPass) {
+            throw NoPass(json.decodeFromString<PassRefusal>(e.refusal))
+        } catch (e: CurfewException.Refused) {
+            throw Refused(json.decodeFromString<Refusal>(e.refusal))
+        }
+    }
+
+    /** How many passes could be spent inside the rolling window right now. */
+    fun passesRemaining(now: Long): Int = inner.passesRemaining(now).toInt()
+
+    /** Why a pass cannot be spent, or null when one can. */
+    fun passRefusal(now: Long): PassRefusal? =
+        inner.passRefusalJson(now)?.let { json.decodeFromString(it) }
+
+    fun passes(): Passes = json.decodeFromString(inner.passesJson())
+
+    /**
+     * Restore the spent ration from storage. Merged, never replaced: a pass heard from a peer since
+     * the file was written must not be forgotten by reading an older copy of our own.
+     */
+    fun restorePasses(passes: Passes) = inner.restorePasses(json.encodeToString(passes))
+
     /** Bring sessions into line with the schedules. Returns the ids of sessions it started. */
     fun reconcile(now: Long, events: List<CalendarEvent>, idSeed: String): List<String> =
         inner.reconcile(now, json.encodeToString(events), idSeed)
@@ -191,6 +226,9 @@ class Policy private constructor(private val inner: Curfew) {
 
 /** Thrown when the core refuses to end a session, carrying the reason it gave. */
 class Refused(val refusal: Refusal) : Exception(refusal.toString())
+
+/** Thrown when there was no emergency pass to spend, carrying why. */
+class NoPass(val refusal: PassRefusal) : Exception(refusal.toString())
 
 // --- the wire shapes -----------------------------------------------------------------------------
 //
@@ -362,6 +400,26 @@ sealed interface Refusal {
         @SerialName("ends_at") val endsAt: Long? = null,
         @SerialName("delayed_release_at") val delayedReleaseAt: Long? = null,
     ) : Refusal
+}
+
+/** Emergency passes already spent, as instants. Grow-only: merging can never give one back. */
+@Serializable
+data class Passes(val used: List<Long> = emptyList())
+
+@Serializable
+@OptIn(ExperimentalSerializationApi::class)
+@JsonClassDiscriminator("refusal")
+sealed interface PassRefusal {
+    /** The hatch was never switched on. Not a shortage — nothing to wait for. */
+    @Serializable @SerialName("disabled") data object Disabled : PassRefusal
+
+    @Serializable
+    @SerialName("quota_spent")
+    data class QuotaSpent(@SerialName("next_at") val nextAt: Long) : PassRefusal
+
+    @Serializable
+    @SerialName("cooling_down")
+    data class CoolingDown(val until: Long) : PassRefusal
 }
 
 @Serializable

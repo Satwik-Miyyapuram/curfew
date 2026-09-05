@@ -21,6 +21,7 @@
 use crate::node::Shared;
 use crate::oplog::Op;
 use curfew_core::budget::{Consumption, Launches};
+use curfew_core::emergency::Passes;
 use curfew_core::session::Sessions;
 use curfew_core::{CalendarEvent, Timestamp};
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +40,9 @@ pub struct Pass {
     /// device's own events are not in here: it already has them, and taking its own snapshot back
     /// would make an event's id depend on whether sync happened to be running.
     pub calendar: Vec<CalendarEvent>,
+    /// Every emergency pass spent on any device, this one included. The caller adopts it whole:
+    /// the quota is one ration shared between devices, not one each.
+    pub passes: Passes,
 }
 
 /// How much of the local state has already been written to the log.
@@ -53,6 +57,8 @@ pub struct Mirror {
     /// The calendar snapshot last written to the log, and when. Kept so an unchanged calendar is
     /// published once rather than every two seconds.
     calendar: Option<(Vec<CalendarEvent>, Timestamp)>,
+    /// How many pass-uses have already been written to the log, so one is announced once.
+    passes: usize,
 }
 
 /// How long a published calendar snapshot stands before it is written again unchanged.
@@ -137,6 +143,22 @@ impl Mirror {
             self.launches.insert(key.clone(), opened.at.len());
         }
 
+        wrote
+    }
+
+    /// Publish emergency passes spent here that the log has not been told about yet.
+    ///
+    /// Separate from [`Mirror::publish`] because a pass is spent by a person pressing a button and
+    /// not by the enforcement loop: it has to reach the other devices on the next pass whether or
+    /// not anything else changed, and it must be published before the session it released is,
+    /// so that a peer never sees the release without the use that paid for it.
+    pub fn publish_passes(&mut self, shared: &Shared, now: Timestamp, passes: &Passes) -> usize {
+        let mut wrote = 0;
+        for at in passes.used.iter().skip(self.passes) {
+            shared.record(now, Op::EmergencyUsed { at: *at });
+            wrote += 1;
+        }
+        self.passes = passes.used.len();
         wrote
     }
 
@@ -235,7 +257,17 @@ impl Mirror {
             .collect();
         calendar.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
 
-        Pass { published: 0, adopted, still_locked: believed.still_locked, calendar }
+        // Taken whole for the same reason usage is: after publishing, the log holds this device's
+        // own uses too, so the replay is the complete ration rather than half of it.
+        self.passes = believed.passes.used.len();
+
+        Pass {
+            published: 0,
+            adopted,
+            still_locked: believed.still_locked,
+            calendar,
+            passes: believed.passes,
+        }
     }
 
     /// One full pass: say what happened here, then take back what everyone knows.
@@ -260,6 +292,7 @@ mod tests {
     use crate::device::Identity;
     use crate::oplog::Log;
     use crate::pair::{Invite, Peers};
+    use curfew_core::emergency::{EmergencyPolicy, PassRefusal};
     use curfew_core::session::{Session, SessionSource};
     use curfew_core::{Lock, LockSet};
 
@@ -272,6 +305,7 @@ mod tests {
         sessions: Sessions,
         usage: BTreeMap<String, Consumption>,
         launches: BTreeMap<String, Launches>,
+        passes: Passes,
     }
 
     impl Device {
@@ -283,6 +317,14 @@ mod tests {
                 &mut self.usage,
                 &mut self.launches,
             )
+        }
+
+        /// Spend a pass here and let the mirror carry it, the way the service does.
+        fn spend(&mut self, now: Timestamp, policy: &EmergencyPolicy) -> Result<(), PassRefusal> {
+            let spent = self.passes.spend(now, policy)?;
+            assert_eq!(spent.at, now);
+            self.mirror.publish_passes(&self.shared, now, &self.passes);
+            Ok(())
         }
     }
 
@@ -298,6 +340,7 @@ mod tests {
             sessions: Sessions::default(),
             usage: BTreeMap::new(),
             launches: BTreeMap::new(),
+            passes: Passes::default(),
         };
         (device(phone, on_phone), device(pc, on_pc))
     }
@@ -550,7 +593,10 @@ mod tests {
         carry(&pc, &phone);
         let pass = phone.pass(NOW + 3);
 
-        assert_eq!(vec!["Review".to_string()], pass.calendar.iter().map(|e| e.title.clone()).collect::<Vec<_>>());
+        assert_eq!(
+            vec!["Review".to_string()],
+            pass.calendar.iter().map(|e| e.title.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -558,7 +604,9 @@ mod tests {
         let (mut phone, mut pc) = two();
         let identity = Identity::generate("laptop");
         let mut on_laptop = Peers::default();
-        on_laptop.accept(&identity, &Invite::new(&phone.shared.identity, NOW, [9; 16]), NOW).unwrap();
+        on_laptop
+            .accept(&identity, &Invite::new(&phone.shared.identity, NOW, [9; 16]), NOW)
+            .unwrap();
         phone
             .shared
             .peers
@@ -572,10 +620,15 @@ mod tests {
             sessions: Sessions::default(),
             usage: BTreeMap::new(),
             launches: BTreeMap::new(),
+            passes: Passes::default(),
         };
 
         pc.mirror.publish_calendar(&pc.shared, NOW, &[event("e1", "PC meeting", NOW + 600)]);
-        laptop.mirror.publish_calendar(&laptop.shared, NOW, &[event("e2", "Laptop meeting", NOW + 600)]);
+        laptop.mirror.publish_calendar(
+            &laptop.shared,
+            NOW,
+            &[event("e2", "Laptop meeting", NOW + 600)],
+        );
         carry(&pc, &phone);
         carry(&laptop, &phone);
         phone.pass(NOW + 1);
@@ -634,11 +687,103 @@ mod tests {
             sessions: Sessions::default(),
             usage: BTreeMap::new(),
             launches: BTreeMap::new(),
+            passes: Passes::default(),
         };
         let mut stranger = stranger;
         stranger.mirror.publish_calendar(&stranger.shared, NOW, &[event("e1", "Lunch", NOW + 600)]);
         carry(&stranger, &phone);
 
         assert!(phone.pass(NOW + 1).calendar.is_empty());
+    }
+
+    // --- the shared ration ---------------------------------------------------------------------
+
+    fn rationed(passes: u32, cooldown: u32) -> EmergencyPolicy {
+        EmergencyPolicy { passes, window_seconds: 7 * 24 * HOUR as u32, cooldown_seconds: cooldown }
+    }
+
+    /// The point of syncing passes at all: the quota is one ration for the person, not one per
+    /// device they happen to own.
+    #[test]
+    fn a_pass_spent_on_one_device_is_spent_on_the_other() {
+        let policy = rationed(1, 0);
+        let (mut phone, mut pc) = two();
+
+        phone.spend(NOW, &policy).expect("the phone has the only pass");
+        carry(&phone, &pc);
+        let seen = pc.pass(NOW + 1);
+
+        pc.passes = seen.passes;
+        assert_eq!(pc.passes.remaining(NOW + 1, &policy), 0);
+        assert!(matches!(pc.passes.check(NOW + 1, &policy), Err(PassRefusal::QuotaSpent { .. })));
+    }
+
+    /// Buying a second phone must not buy a second allowance, even when the two are spent at the
+    /// same instant on devices that have not spoken yet.
+    #[test]
+    fn two_devices_spending_at_once_do_not_produce_two_rations() {
+        let policy = rationed(2, 0);
+        let (mut phone, mut pc) = two();
+        phone.spend(NOW, &policy).expect("phone");
+        pc.spend(NOW + 30, &policy).expect("pc");
+
+        carry(&phone, &pc);
+        carry(&pc, &phone);
+        let here = phone.pass(NOW + 60);
+        let there = pc.pass(NOW + 60);
+
+        assert_eq!(here.passes, there.passes);
+        assert_eq!(here.passes.used.len(), 2);
+        assert_eq!(here.passes.remaining(NOW + 60, &policy), 0);
+    }
+
+    #[test]
+    fn a_pass_is_announced_once_rather_than_every_pass() {
+        let policy = rationed(2, 0);
+        let (mut phone, mut pc) = two();
+        phone.spend(NOW, &policy).expect("the pass");
+
+        // Nothing else has happened here, so a second pass of the mirror writes nothing at all.
+        assert_eq!(phone.pass(NOW + 2).published, 0);
+        assert_eq!(phone.pass(NOW + 4).published, 0);
+
+        carry(&phone, &pc);
+        assert_eq!(pc.pass(NOW + 6).passes.used, vec![NOW]);
+    }
+
+    /// Going quiet is not a way to earn passes back.
+    #[test]
+    fn a_device_that_was_offline_adopts_the_ration_it_missed() {
+        let policy = rationed(1, 0);
+        let (mut phone, mut pc) = two();
+        phone.spend(NOW, &policy).expect("spent while the pc was away");
+
+        // The pc believes it still has its pass, right up until it hears otherwise.
+        assert!(pc.passes.check(NOW + HOUR, &policy).is_ok());
+        carry(&phone, &pc);
+        pc.passes = pc.pass(NOW + HOUR).passes;
+        assert!(pc.passes.check(NOW + HOUR, &policy).is_err());
+    }
+
+    #[test]
+    fn a_stranger_s_pass_use_is_never_absorbed() {
+        // Anyone can shout an entry at a device. A pass-use is a claim that someone's ration is
+        // gone, so an unpaired device saying it must change nothing here.
+        let policy = rationed(1, 0);
+        let (mut phone, _pc) = two();
+        let stranger = Device {
+            shared: Shared::new(Identity::generate("stranger"), Peers::default(), Log::default()),
+            mirror: Mirror::default(),
+            sessions: Sessions::default(),
+            usage: BTreeMap::new(),
+            launches: BTreeMap::new(),
+            passes: Passes::default(),
+        };
+        stranger.shared.record(NOW, Op::EmergencyUsed { at: NOW });
+
+        carry(&stranger, &phone);
+        let seen = phone.pass(NOW + 1);
+        assert_eq!(seen.passes, Passes::default());
+        assert!(seen.passes.check(NOW + 1, &policy).is_ok());
     }
 }
