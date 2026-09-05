@@ -17,5 +17,7 @@
 //!   block, lift one, or read what is being blocked (GAPS C5).
 pub mod device;
 pub mod envelope;
+pub mod folder;
 pub mod oplog;
 pub mod pair;
+pub mod wire;
