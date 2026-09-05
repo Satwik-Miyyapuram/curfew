@@ -81,9 +81,160 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                 downtime = runtime.downtime.value,
                 clockTamper = runtime.clockTamper.value,
+                sync = syncState(now, previous.sync),
                 loading = false,
             )
         }
+    }
+
+    // --- sync -----------------------------------------------------------------------------------
+
+    /** The invite or reply waiting on the user to say that the two phrases matched. */
+    private var pending: String? = null
+
+    private fun syncState(now: Long, previous: SyncState): SyncState {
+        val hub = runtime.sync ?: return SyncState(offering = previous.offering)
+        return SyncState(
+            available = true,
+            running = hub.isRunning(),
+            deviceId = runCatching { hub.deviceId }.getOrDefault(""),
+            fingerprint = runCatching { hub.fingerprint }.getOrDefault(""),
+            peers = hub.peers.value,
+            nearby = hub.nearby(now).toSet(),
+            stillLocked = hub.stillLocked.value,
+            complaints = hub.complaints,
+            error = hub.lastError.value,
+            offering = previous.offering,
+        )
+    }
+
+    /**
+     * Start pairing from this device: show an invite for the other one to read.
+     *
+     * No phrase yet. It covers both devices keys and this one has not seen the others, so it
+     * appears once the reply is entered — which is also the first moment a person could compare
+     * two screens.
+     */
+    fun offerPairing() {
+        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        runCatching { hub.sync.invite(runtime.clock.now()) }
+            .onSuccess { json ->
+                pending = null
+                _state.update { it.copy(sync = it.sync.copy(offering = Offer(json, ""))) }
+            }
+            .onFailure { say(it.message ?: "That invite could not be made.") }
+    }
+
+    /**
+     * Answer an invite shown by another device.
+     *
+     * Produces this device reply and the phrase together. Nothing here can check that the other
+     * screen shows the same six digits — that is the user job, and it is the whole reason the
+     * phrase exists, so [confirmPairing] is deliberately a separate press.
+     */
+    fun answerPairing(inviteJson: String) {
+        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val invite = inviteJson.trim()
+        runCatching { Offer(hub.sync.replyTo(invite), hub.sync.phrase(invite), isReply = true) }
+            .onSuccess { offer ->
+                pending = invite
+                _state.update { it.copy(sync = it.sync.copy(offering = offer)) }
+            }
+            .onFailure { say("That is not a Curfew invite.") }
+    }
+
+    /** Read back the reply from the invited device, so this side can show its phrase too. */
+    fun readReply(replyJson: String) {
+        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val reply = replyJson.trim()
+        runCatching { hub.sync.phrase(reply) }
+            .onSuccess { phrase ->
+                pending = reply
+                _state.update {
+                    it.copy(sync = it.sync.copy(offering = Offer(reply, phrase, isReply = true)))
+                }
+            }
+            .onFailure { say("That is not a Curfew reply.") }
+    }
+
+    /** Pair, now that the person has said the two phrases matched. */
+    fun confirmPairing() {
+        val hub = runtime.sync ?: return
+        val invite = pending ?: return say("Read the other device code first.")
+        viewModelScope.launch {
+            runCatching { hub.sync.accept(invite, runtime.clock.now()) }
+                .onSuccess {
+                    hub.save()
+                    hub.refreshPeers()
+                    pending = null
+                    _state.update { it.copy(sync = it.sync.copy(offering = null)) }
+                    say("Paired.")
+                }
+                .onFailure { say(it.message ?: "That pairing could not be completed.") }
+            refresh()
+        }
+    }
+
+    fun cancelPairing() {
+        pending = null
+        _state.update { it.copy(sync = it.sync.copy(offering = null)) }
+    }
+
+    /**
+     * Remove a device.
+     *
+     * Immediate, local, and needing nothing from the device being removed, because a phone that has
+     * been lost cannot agree to its own removal. It does not end anything that device started here:
+     * a lock is a promise whoever asked for it, and forgetting a device is not evidence that the
+     * block is over.
+     */
+    fun revokeDevice(deviceId: String) {
+        val hub = runtime.sync ?: return
+        viewModelScope.launch {
+            runCatching { hub.sync.revoke(deviceId, runtime.clock.now()) }
+                .onSuccess {
+                    hub.save()
+                    hub.refreshPeers()
+                    say("That device will be ignored from now on.")
+                }
+                .onFailure { say(it.message ?: "That device could not be removed.") }
+            refresh()
+        }
+    }
+
+    /** Sync now rather than at the next tick, for someone watching two screens at once. */
+    fun syncNow() {
+        viewModelScope.launch {
+            val pass = runtime.syncPass()
+            when {
+                pass == null -> say("Sync is not running on this device.")
+                pass.adopted.isNotEmpty() ->
+                    say("Took up ${pass.adopted.size} block(s) from another device.")
+                else -> say("Up to date.")
+            }
+            refresh()
+        }
+    }
+
+    /** Exchange through a folder both devices can see, for devices never on one network. */
+    fun folderPass(root: String) {
+        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        viewModelScope.launch {
+            runCatching { hub.sync.folderPass(root.trim()) }
+                .onSuccess { pass ->
+                    hub.save()
+                    say("Took in ${pass.accepted} update(s), left ${pass.written} behind.")
+                    runtime.syncPass()
+                }
+                .onFailure { say(it.message ?: "That folder could not be used.") }
+            refresh()
+        }
+    }
+
+    /** Acknowledge the "your other device says this is over" notice. */
+    fun dismissStillLocked() {
+        runtime.sync?.forget(state.value.sync.stillLocked)
+        _state.update { it.copy(sync = it.sync.copy(stillLocked = emptyList())) }
     }
 
     // --- the things a user can actually do -------------------------------------------------------
@@ -229,9 +380,43 @@ data class UiState(
     val downtime: Downtime? = null,
     /** A clock change that was refused, until the user has seen it. */
     val clockTamper: dev.curfew.app.data.ClockTamper? = null,
+    /** Sync as the devices screen shows it. Present even when nothing has been paired. */
+    val sync: SyncState = SyncState(),
     val message: String? = null,
     val refusal: dev.curfew.policy.Refusal? = null,
     val refusedSession: String? = null,
 ) {
     val isEnforcing: Boolean get() = sessions.isNotEmpty()
 }
+
+/**
+ * What the devices screen knows.
+ *
+ * [stillLocked] is the one field here that is not housekeeping: it names sessions another device
+ * has ended and this one is still holding, which is the moment a user is most likely to conclude
+ * that sync is broken. It is shown, with its reason, rather than hidden.
+ */
+data class SyncState(
+    val available: Boolean = false,
+    val running: Boolean = false,
+    val deviceId: String = "",
+    val fingerprint: String = "",
+    val peers: List<dev.curfew.policy.Peer> = emptyList(),
+    val nearby: Set<String> = emptySet(),
+    val stillLocked: List<String> = emptyList(),
+    val complaints: List<String> = emptyList(),
+    val error: String? = null,
+    /** The invite or reply currently on screen, and the phrase that goes with it. */
+    val offering: Offer? = null,
+) {
+    val active: List<dev.curfew.policy.Peer> get() = peers.filter { it.isActive }
+}
+
+/**
+ * Something to put in front of the other device: the JSON for the QR code, and the six digits.
+ *
+ * [phrase] is empty on the first half of the ceremony, when this device has offered an invite and
+ * has not yet seen the other device keys. There is nothing to compare until both sides are known,
+ * and showing a number that only covers one of them would teach the user to ignore it.
+ */
+data class Offer(val json: String, val phrase: String, val isReply: Boolean = false)

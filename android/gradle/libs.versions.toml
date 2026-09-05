@@ -4,6 +4,8 @@ kotlin = "2.0.21"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 activityCompose = "1.9.3"
+# QR generation only. Apache-2.0, pure Java, no network and no Play Services.
+zxing = "3.5.3"
 composeBom = "2024.12.01"
 navigation = "2.8.5"
 room = "2.6.1"
@@ -23,6 +25,7 @@ turbine = "1.2.0"
 serialization = "1.7.3"
 
 [libraries]
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycle" }

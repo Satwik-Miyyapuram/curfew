@@ -67,6 +67,16 @@ class Policy private constructor(private val inner: Curfew) {
     }
 
     /** The config as the core would write it back: canonical, and safe to diff. */
+    /**
+     * The core object itself, for [Sync], which hands it to the mirror.
+     *
+     * Deliberately the only way out of this class. Sync needs the core to be able to *start* a
+     * session a peer began, and it must not be able to reach in and write a weaker lock: handing
+     * over the object rather than the sessions keeps every change on the far side going through
+     * the same door a button press does.
+     */
+    internal fun core(): Curfew = inner
+
     fun configToml(): String = inner.configToml()
 
     /**

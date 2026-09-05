@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -63,6 +64,7 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
     Schedule("schedule", "Schedule", Icons.Filled.DateRange),
     Apps("apps", "Apps", Icons.Filled.Lock),
     Usage("usage", "Usage", Icons.AutoMirrored.Filled.List),
+    Devices("devices", "Devices", Icons.Filled.Share),
     Health("health", "Health", Icons.Filled.Settings),
 }
 
@@ -105,6 +107,7 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
             composable(Tab.Schedule.route) { ScheduleScreen(model) }
             composable(Tab.Apps.route) { AppPickerScreen(model) }
             composable(Tab.Usage.route) { UsageScreen(model) }
+            composable(Tab.Devices.route) { DevicesScreen(model) }
             composable(Tab.Health.route) { HealthScreen(model) }
         }
     }

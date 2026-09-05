@@ -140,6 +140,59 @@ class CurfewRuntime internal constructor(
     fun calendarEvents(now: Long = clock.now()): List<CalendarEvent> =
         calendar.events(now - CalendarReader.WINDOW_SECONDS, now + CalendarReader.WINDOW_SECONDS)
 
+    // --- sync --------------------------------------------------------------------------------------
+
+    private var hub: SyncHub? = null
+
+    /** Sync, once it has been opened. Null on a device where opening the store failed. */
+    val sync: SyncHub? get() = hub
+
+    fun attachSync(hub: SyncHub) {
+        this.hub = hub
+    }
+
+    /**
+     * One sync pass: publish what this device is enforcing, adopt what the others are, and store
+     * the budgets the log says are now shared.
+     *
+     * Held under [gate] like every other session write, because adoption starts sessions: a peer's
+     * news arriving is a change to what is running here, and there is exactly one writer of that.
+     *
+     * The budgets come back and are written as they are. Rows are keyed by target and instant, so a
+     * slice this device already had is replaced by an identical one and a slice that happened on
+     * the PC is added once — an hour spent on one device cannot be spent again on the other.
+     */
+    suspend fun syncPass(now: Long = clock.now()): dev.curfew.policy.Pass? {
+        val hub = hub ?: return null
+        val before = usage(now)
+        val pass = gate.withLock {
+            val pass = runCatching {
+                hub.sync.pass(policy, now, before.usage, before.launches)
+            }.getOrElse {
+                audit(now, "sync.failed", it.message.orEmpty())
+                return@withLock null
+            }
+            for ((target, spent) in pass.usage) {
+                for (rollup in spent.rollups) {
+                    db.usage().addUsage(UsageRow(target = target, at = rollup.at, seconds = rollup.seconds))
+                }
+            }
+            for ((target, opened) in pass.launches) {
+                for (at in opened.opens) db.usage().addLaunch(LaunchRow(target = target, at = at))
+            }
+            for (id in pass.adopted) audit(now, "sync.adopted", id)
+            for (id in pass.stillLocked) audit(now, "sync.refused", id)
+            persist(now)
+            pass
+        } ?: return null
+        hub.record(pass)
+        if (pass.published > 0) {
+            hub.push(now)
+            hub.save()
+        }
+        return pass
+    }
+
     // --- persistence -------------------------------------------------------------------------------
 
     /** Read sessions back after a reboot, a force-stop or an update. */

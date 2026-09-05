@@ -38,9 +38,28 @@ class EnforcementService : Service() {
         startForeground(NOTIFICATION_ID, notification(running = false))
         loop = runtime.scope.launch {
             runtime.restore()
+            startSync()
             tick()
         }
     }
+
+    /**
+     * Bring sync up, if the device has any.
+     *
+     * Attached here rather than in the application object because the node holds sockets, and the
+     * process that is allowed to hold sockets for a long time is this one. A device that has never
+     * been paired still opens its store: it costs one file, and it means the pairing screen has an
+     * identity to show without any ceremony first.
+     */
+    private fun startSync() {
+        val hub = runtime.sync ?: dev.curfew.app.data.SyncHub.create(this, deviceName())?.also {
+            runtime.attachSync(it)
+        } ?: return
+        hub.start()
+    }
+
+    /** What this device calls itself to its peers. Advisory: nothing is ever decided from it. */
+    private fun deviceName(): String = android.os.Build.MODEL ?: "Android"
 
     /**
      * The heartbeat.
@@ -60,6 +79,9 @@ class EnforcementService : Service() {
             // Written after reconciling, so the recorded time is one Curfew was demonstrably
             // enforcing at, rather than one it merely woke up at.
             runtime.heartbeat(now)
+            // After reconciling and before the next sleep: what the schedules just decided is
+            // published, and anything a peer decided is adopted, in one pass under the same lock.
+            runtime.syncPass(now)
             ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
             updateNotification()
             // If the fallback detector is in use, this is also when the foreground app is sampled.
@@ -99,6 +121,7 @@ class EnforcementService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runtime.sync?.stop()
         loop?.cancel()
         super.onDestroy()
     }

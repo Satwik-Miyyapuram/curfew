@@ -60,9 +60,9 @@ Windows account, with no Curfew-held password anywhere.
 - [x] Signed encrypted op-log, rollups + checkpoint compaction (GAPS C4)
 - [x] LAN transport (signed multicast beacons + TCP; mDNS and QUIC dropped, reasons in `lan.rs`)
 - [x] Shared-folder transport: immutable segments, concurrent writers (GAPS C5) — latency UI pending
-- [ ] Bluetooth / QR beam fallback
-- [x] Session mirroring: start on PC, phone blocks; budgets shared across devices (Windows service wired; Android app pending)
-- [ ] Conflict UI
+- [x] QR pairing: codes generated on-device (zxing, no network); Bluetooth beam still open
+- [x] Session mirroring: start on PC, phone blocks; budgets shared across devices (Windows service and Android app both wired)
+- [x] Conflict UI: the Devices screen names every session a peer ended that is still locked here, with the reason
 
 **Exit criteria:** merging any two lock states never produces a weaker lock (property test); a
 session started on the PC blocks the phone within 5s on LAN; killing either device mid-sync leaves

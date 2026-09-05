@@ -36,6 +36,16 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      Sync talks to the user's own devices on the local network and to nothing else. There is no
+      server, no account and no analytics: the only bytes that leave the device are signed,
+      encrypted op-log entries addressed to a device the user paired by hand. Multicast is what
+      finds a paired device on the same Wi-Fi without asking anyone on the internet.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
