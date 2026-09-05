@@ -1,0 +1,28 @@
+[package]
+name = "curfew-tray"
+description = "The Curfew tray icon: what is running, and the only prompt that can unlock it"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "curfew-tray"
+path = "src/main.rs"
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
+curfew-win = { path = "../curfew-win" }
+chrono = { workspace = true, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security_Credentials",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

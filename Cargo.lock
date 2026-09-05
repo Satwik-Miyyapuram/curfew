@@ -332,6 +332,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "curfew-tray"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "curfew-core",
+ "curfew-win",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "curfew-win"
 version = "0.0.1"
 dependencies = [
