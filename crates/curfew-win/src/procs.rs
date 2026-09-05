@@ -48,6 +48,14 @@ pub trait Processes {
     /// touch (another user's, or a protected one) is a fact about the machine, not a bug, and the
     /// caller reports it rather than retrying forever.
     fn terminate(&self, pid: u32) -> bool;
+    /// The window the user is actually looking at, when that is knowable.
+    ///
+    /// Defaulted rather than required: budgets are charged against it, and a platform that cannot
+    /// answer should charge nothing rather than guess. Guessing here spends someone's allowance on
+    /// an app they were not using.
+    fn foreground(&self) -> Option<Process> {
+        None
+    }
 }
 
 /// Decide about every running process, without touching any of them.

@@ -8,6 +8,8 @@
 pub mod blocked;
 pub mod hosts;
 pub mod procs;
+pub mod tick;
 
 pub use blocked::blocked_domains;
 pub use procs::{enforce, verdicts, Outcome, Process, Processes, Verdict};
+pub use tick::{Enforcer, Tick};
