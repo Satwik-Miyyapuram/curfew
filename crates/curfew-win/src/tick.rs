@@ -11,6 +11,7 @@
 
 use crate::blocked::blocked_domains;
 use crate::hosts;
+use crate::ipc::{Request, Response, Status};
 use crate::procs::{enforce, Outcome, Process, Processes};
 use curfew_core::engine::charged_keys;
 use curfew_core::{
@@ -47,6 +48,15 @@ pub struct Enforcer {
     pub launches: BTreeMap<String, Launches>,
     /// Where the hosts file is. A field rather than a constant so tests never touch the real one.
     pub hosts_path: PathBuf,
+    /// Where the config was read from, so a reload knows what to re-read. `None` when it was
+    /// handed in directly, as the tests do.
+    pub config_path: Option<PathBuf>,
+    /// What the last pass did, so a status request is answered from fact rather than by running
+    /// enforcement again on the caller's schedule.
+    pub last: Tick,
+    /// Set when the state file could not be read at startup: locks may have been lost, and the
+    /// user is owed that fact.
+    pub state_warning: Option<String>,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -60,6 +70,9 @@ impl Enforcer {
             usage: BTreeMap::new(),
             launches: BTreeMap::new(),
             hosts_path,
+            config_path: None,
+            last: Tick::default(),
+            state_warning: None,
             counter: 0,
         }
     }
@@ -128,7 +141,95 @@ impl Enforcer {
         if let Err(e) = hosts::apply(&self.hosts_path, &tick.domains) {
             tick.hosts_error = Some(e.to_string());
         }
+        self.last = tick.clone();
         tick
+    }
+
+    /// Answer one control message.
+    ///
+    /// This is a privilege boundary: the service runs as SYSTEM and the caller does not. Every
+    /// answer here therefore goes through the core rather than around it — in particular
+    /// [`Request::End`] re-checks the lock, because a caller saying it satisfied a condition is not
+    /// evidence that it did.
+    pub fn handle(&mut self, now: Timestamp, request: Request) -> Response {
+        match request {
+            Request::Status => Response::Status(Status {
+                now,
+                running: self.sessions.running.clone(),
+                blocked_domains: self.last.domains.clone(),
+                failing: self.last.processes.failed.clone(),
+                hosts_error: self.last.hosts_error.clone(),
+                state_warning: self.state_warning.clone(),
+            }),
+
+            Request::Start { profile, seconds, locks } => {
+                if !self.config.profiles.iter().any(|p| p.id == profile) {
+                    return Response::Error { detail: format!("no profile named {profile}") };
+                }
+                self.counter += 1;
+                let counter = self.counter;
+                // Merged rather than replaced: starting a session on a profile that already has one
+                // may only ever add conditions or push the end time out (invariant 2). Asking for a
+                // ten-minute block while a two-hour one is running is not a way to get ten minutes.
+                let requested = curfew_core::LockSet::new(locks, Some(now + i64::from(seconds)));
+                let lock = match self.sessions.for_profile(&profile) {
+                    Some(existing) => existing.lock.merge(&requested),
+                    None => requested,
+                };
+                let id = self
+                    .sessions
+                    .for_profile(&profile)
+                    .map(|s| s.id.clone())
+                    .unwrap_or_else(|| format!("win-{now}-{profile}-{counter}"));
+                self.sessions.start(Session {
+                    id,
+                    profile,
+                    source: curfew_core::SessionSource::Manual,
+                    started_at: now,
+                    lock,
+                });
+                Response::Ok
+            }
+
+            Request::End { id, satisfied } => {
+                match self.sessions.end(&id, now, &satisfied) {
+                    Ok(_) => {
+                        // Give the machine back in the same breath rather than waiting for the next
+                        // pass: a lock that has ended but whose sites still fail to resolve reads as
+                        // a broken machine.
+                        let _ = hosts::apply(&self.hosts_path, &self.last_domains(now));
+                        Response::Ok
+                    }
+                    Err(refusal) => Response::Refused { refusal },
+                }
+            }
+
+            Request::RequestRelease { id } => match self.sessions.request_release(&id, now) {
+                Ok(at) => Response::Release { at },
+                Err(refusal) => Response::Refused { refusal },
+            },
+
+            Request::Reload => match &self.config_path {
+                None => Response::Error { detail: "no config path is configured".into() },
+                Some(path) => match std::fs::read_to_string(path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|text| Config::from_toml(&text).map_err(|e| e.to_string()))
+                {
+                    // A config that no longer parses changes nothing. The running locks stay as
+                    // they are: an unparseable file must not be a way out either.
+                    Err(detail) => Response::Error { detail },
+                    Ok(config) => {
+                        self.config = config;
+                        Response::Ok
+                    }
+                },
+            },
+        }
+    }
+
+    /// The domains blocked by whatever is running right now, without running a whole pass.
+    fn last_domains(&self, now: Timestamp) -> BTreeSet<String> {
+        blocked_domains(now, &self.state(now), &self.config)
     }
 
     /// Give the machine back: no hosts entries, nothing enforced. Called when the service stops
