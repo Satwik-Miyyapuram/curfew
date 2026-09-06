@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/curfew-core", "crates/curfew-cli", "crates/curfew-ics", "crates/curfew-ffi", "crates/curfew-sync", "crates/curfew-win", "crates/curfew-svc", "crates/curfew-tray"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.82"
 license = "AGPL-3.0-or-later"

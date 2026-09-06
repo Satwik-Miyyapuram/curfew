@@ -107,13 +107,17 @@ moving the system clock does not release anything; a reboot resumes enforcement 
 disabling the browser extension during a locked session is detected and reported.
 
 ## Phase 6 — Release
-- [ ] Widgets, quick tiles, CLI, webhooks on session start/end
+- [x] Home-screen widget and quick-settings tile (report-only: neither can end a session, because
+      a lock two taps from a tile is not a lock), and the `curfew` command line
+- [ ] Webhooks on session start/end
 - [x] Stats: streaks, trends, CSV/JSON export (`curfew_core::stats`, shared by both platforms;
       Usage tab bars and export, `curfew stats [--days n] [--csv/--json]` on the PC)
-- [ ] Themes, externalized strings
+- [x] Themes (Material You dynamic colour, light and dark)
+- [ ] Externalized strings for translation
 - [x] GitHub Pages site (one static file, no trackers) and GitHub Releases for both platforms —
       Windows zips and an unsigned APK, each with a checksum
-- [ ] F-Droid; winget/scoop
+- [ ] F-Droid; winget/scoop submission (the manifests themselves are generated per release by
+      `packaging/manifests.py`)
 - [x] Threat-model summary and an explicit "this is not parental-control software" statement, in
       the README and on the site (GAPS D3)
 

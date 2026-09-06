@@ -391,14 +391,14 @@ dependencies = [
 
 [[package]]
 name = "curfew-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "curfew-core",
 ]
 
 [[package]]
 name = "curfew-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-ffi"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "curfew-core",
  "curfew-sync",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-ics"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-svc"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "curfew-cli",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-sync"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
  "curfew-core",
@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-tray"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "curfew-core",
@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "curfew-win"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono-tz",
  "curfew-core",

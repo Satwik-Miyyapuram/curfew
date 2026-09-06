@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-REPO = "curfew/curfew"
+REPO = "Satwik-Miyyapuram/curfew"
 ARCHES = {"x64": "x64", "arm64": "arm64"}
 
 
