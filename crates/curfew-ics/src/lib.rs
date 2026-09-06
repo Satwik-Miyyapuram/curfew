@@ -102,7 +102,7 @@ pub fn events_between(
         }
     }
 
-    out.sort_by(|a, b| (a.start, a.id.clone()).cmp(&(b.start, b.id.clone())));
+    out.sort_by_key(|a| (a.start, a.id.clone()));
     out.dedup_by(|a, b| a.id == b.id);
     Ok(out)
 }

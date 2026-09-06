@@ -98,7 +98,10 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum Response {
-    Status(Status),
+    /// Boxed: a status carries the whole visible world — every running session, every schedule
+    /// due, every warning — and it is one of a dozen variants the rest of which are a word and a
+    /// timestamp. Without the box every response everywhere would be as large as the largest.
+    Status(Box<Status>),
     Ok,
     /// Release lands at this instant, and not before.
     Release {

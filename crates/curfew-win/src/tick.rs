@@ -352,7 +352,7 @@ impl Enforcer {
     /// evidence that it did.
     pub fn handle(&mut self, now: Timestamp, request: Request) -> Response {
         match request {
-            Request::Status => Response::Status(Status {
+            Request::Status => Response::Status(Box::new(Status {
                 now,
                 running: self.sessions.running.clone(),
                 blocked_domains: self.last.domains.clone(),
@@ -367,7 +367,7 @@ impl Enforcer {
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
                 released: self.releases.iter().cloned().collect(),
-            }),
+            })),
 
             Request::Start { profile, seconds, locks } => {
                 if !self.config.profiles.iter().any(|p| p.id == profile) {

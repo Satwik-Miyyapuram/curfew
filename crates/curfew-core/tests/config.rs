@@ -247,17 +247,15 @@ fn a_token_hash_that_is_the_tag_itself_is_refused() {
 
 #[test]
 fn a_token_with_no_id_is_refused_because_no_lock_could_ever_name_it() {
-    let toml = format!("schema_version = 1\n[[tokens]]\nid = \"\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n");
+    let toml = "schema_version = 1\n[[tokens]]\nid = \"\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n".to_string();
     assert!(matches!(Config::from_toml(&toml), Err(ConfigError::Invalid(_))));
 }
 
 #[test]
 fn two_tokens_with_one_id_are_refused_rather_than_one_winning_quietly() {
-    let toml = format!(
-        "schema_version = 1\n\
+    let toml = "schema_version = 1\n\
          [[tokens]]\nid = \"fridge\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-         [[tokens]]\nid = \"fridge\"\nhash = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"
-    );
+         [[tokens]]\nid = \"fridge\"\nhash = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n".to_string();
     let err = Config::from_toml(&toml).unwrap_err();
     assert!(
         matches!(&err, ConfigError::Invalid(m) if m.contains("duplicate token id")),
@@ -283,7 +281,7 @@ fn a_config_with_no_tokens_is_ordinary() {
 
 #[test]
 fn tokens_survive_a_round_trip_through_the_document() {
-    let toml = format!("schema_version = 1\n[[tokens]]\nid = \"fridge\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n");
+    let toml = "schema_version = 1\n[[tokens]]\nid = \"fridge\"\nhash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n".to_string();
     let config = Config::from_toml(&toml).unwrap();
     let back = Config::from_toml(&config.to_toml().unwrap()).unwrap();
     assert_eq!(back.tokens, config.tokens);
