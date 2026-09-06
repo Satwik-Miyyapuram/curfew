@@ -8,6 +8,15 @@
 <!--
   One file, no build step, no fonts or scripts from anywhere else.
 
+  Served straight from this branch: GitHub Pages is pointed at main /docs, so publishing the site
+  is nothing but committing this file. There is no workflow between the commit and the page, which
+  means no Actions minutes, no billing state, and no generator whose version can rot — the hosting
+  plan is meant to have nothing in it that can expire (GAPS D6), and a CI job that must succeed is
+  something that can expire.
+
+  A fork should change the eight github.com/Satwik-Miyyapuram/curfew links below to its own, and
+  point its own Pages at main /docs.
+
   A page for a tool whose whole claim is that nothing about you leaves your devices should not
   itself hand your IP address to a font host on load. It is also why there is no analytics tag:
   the honest version of "no telemetry" includes the website.
@@ -98,8 +107,8 @@
   </p>
 
   <div class="buttons">
-    <a class="button primary" href="https://github.com/__REPO__/releases">Download</a>
-    <a class="button" href="https://github.com/__REPO__">Source on GitHub</a>
+    <a class="button primary" href="https://github.com/Satwik-Miyyapuram/curfew/releases">Download</a>
+    <a class="button" href="https://github.com/Satwik-Miyyapuram/curfew">Source on GitHub</a>
   </div>
 
   <h2>What it does</h2>
@@ -144,7 +153,7 @@
   </div>
 
   <h2>Getting started</h2>
-  <p>Grab a build from <a href="https://github.com/__REPO__/releases">Releases</a>. Windows ships as
+  <p>Grab a build from <a href="https://github.com/Satwik-Miyyapuram/curfew/releases">Releases</a>. Windows ships as
     a zip with a <code>curfew.exe</code> that is both the service and the command line; Android
     ships as an unsigned APK, which you can also build yourself.</p>
 
@@ -170,11 +179,11 @@ curfew add-window curfew.toml --id mornings --profile deep-work --from 09:00 --t
 
   <h2>Read further</h2>
   <ul>
-    <li><a href="https://github.com/__REPO__/blob/main/docs/ARCHITECTURE.md">Architecture</a> — the
+    <li><a href="https://github.com/Satwik-Miyyapuram/curfew/blob/main/docs/ARCHITECTURE.md">Architecture</a> — the
       invariants, the rule engine, the sync protocol, and the threat model</li>
-    <li><a href="https://github.com/__REPO__/blob/main/docs/DECISIONS.md">Decisions</a> — what was
+    <li><a href="https://github.com/Satwik-Miyyapuram/curfew/blob/main/docs/DECISIONS.md">Decisions</a> — what was
       chosen, and what was rejected and why</li>
-    <li><a href="https://github.com/__REPO__/blob/main/docs/GAPS.md">Gaps</a> — the open problems,
+    <li><a href="https://github.com/Satwik-Miyyapuram/curfew/blob/main/docs/GAPS.md">Gaps</a> — the open problems,
       listed honestly</li>
   </ul>
 
