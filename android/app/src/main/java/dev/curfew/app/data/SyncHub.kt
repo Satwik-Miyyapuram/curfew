@@ -35,6 +35,25 @@ class SyncHub private constructor(
      */
     val stillLocked: StateFlow<List<String>> = _stillLocked.asStateFlow()
 
+    private val _running = MutableStateFlow(false)
+
+    /**
+     * Whether the node is up, as last observed by the sync loop.
+     *
+     * Cached rather than asked, and this is the whole point of the class right now: asking takes
+     * the node's lock inside the core, and that lock is held for as long as a pass takes — measured
+     * on this device at fifty-two seconds. The UI refreshes once a second, so a UI that asked
+     * directly spent a minute in every minute unable to redraw: a profile saved and did not appear,
+     * a permission was granted and the screen went on denying it, a session ended and went on
+     * looking live. Nothing on a screen is worth blocking for, so nothing on a screen asks.
+     */
+    val running: StateFlow<Boolean> = _running.asStateFlow()
+
+    private val _nearby = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Peers heard from recently, as last observed by the sync loop. Cached, for the reason above. */
+    val nearby: StateFlow<Set<String>> = _nearby.asStateFlow()
+
     private val _lastError = MutableStateFlow<String?>(null)
 
     /** The last thing that went wrong, for the health screen. Null when sync is behaving. */
@@ -64,17 +83,32 @@ class SyncHub private constructor(
         runCatching { multicast?.acquire() }
         attempt("start") { sync.startNode() }
         refreshPeers()
+        _running.value = isRunning()
     }
 
     fun stop() {
         runCatching { sync.stopNode() }
         runCatching { if (multicast?.isHeld == true) multicast.release() }
+        _running.value = false
+        _nearby.value = emptySet()
     }
 
-    fun isRunning(): Boolean = runCatching { sync.isRunning() }.getOrDefault(false)
+    /**
+     * Read what the screens show about sync, on the thread that is allowed to wait for it.
+     *
+     * Called from the sync loop and from nowhere else. Both calls below take the node's lock, so
+     * this is exactly the work that must not happen on the UI's refresh: it is done once a minute
+     * where waiting costs nothing, and the results sit in [running] and [nearby] to be read for
+     * free.
+     */
+    fun observe(now: Long) {
+        _running.value = isRunning()
+        _nearby.value = runCatching { sync.nearby(now) }.getOrDefault(emptyList()).toSet()
+        refreshPeers()
+    }
 
-    /** Peers heard from on this network recently, by id. */
-    fun nearby(now: Long): List<String> = runCatching { sync.nearby(now) }.getOrDefault(emptyList())
+    /** Blocking. Only ever called from the sync loop — the UI reads [running]. */
+    fun isRunning(): Boolean = runCatching { sync.isRunning() }.getOrDefault(false)
 
     fun refreshPeers() {
         runCatching { sync.peers() }.onSuccess { _peers.value = it }

@@ -32,6 +32,7 @@ class EnforcementService : Service() {
     private lateinit var runtime: CurfewRuntime
     private var loop: Job? = null
     private var sync: Job? = null
+    private var watch: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -46,6 +47,14 @@ class EnforcementService : Service() {
         // the tick loop behind it and meant nothing was enforced at all. Sync is the feature that
         // may fail; enforcement is the promise that may not, so the promise does not wait on it.
         sync = runtime.scope.launch(kotlinx.coroutines.Dispatchers.IO) { syncLoop() }
+        // The notification, the widget and the tile follow what is being enforced rather than
+        // waiting for the next tick. Ending a session updates `activeProfiles` the moment the core
+        // accepts it, but until this the three surfaces that tell the user whether a block is on
+        // went on saying it was for up to thirty seconds — which is exactly long enough to read as
+        // the End button having done nothing.
+        watch = runtime.scope.launch {
+            runtime.activeProfiles.collect { updateNotification() }
+        }
     }
 
     /**
@@ -62,7 +71,12 @@ class EnforcementService : Service() {
         runCatching { startSync() }
         while (runtime.scope.isActive) {
             // Its own clock reading, since the tick's is not shared any more.
-            runCatching { runtime.syncPass(runtime.trustedNow()) }
+            val now = runtime.trustedNow()
+            runCatching { runtime.syncPass(now) }
+            // Whatever the devices screen shows about sync is read here and cached, because both
+            // of those calls take the node's lock. Done after the pass rather than before it, so
+            // what lands in the flows is the state the pass left behind.
+            runCatching { runtime.sync?.observe(now) }
             delay(SYNC_MILLIS)
         }
     }
@@ -159,6 +173,7 @@ class EnforcementService : Service() {
 
     override fun onDestroy() {
         runtime.sync?.stop()
+        watch?.cancel()
         sync?.cancel()
         loop?.cancel()
         super.onDestroy()

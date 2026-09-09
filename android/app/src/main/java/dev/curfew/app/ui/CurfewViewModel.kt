@@ -136,13 +136,19 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun syncState(now: Long, previous: SyncState): SyncState {
         val hub = runtime.sync ?: return SyncState(offering = previous.offering)
+        // Every field is read from memory. Nothing here may cross into the sync node: `isRunning`
+        // and `nearby` used to, and both take a lock the core holds for as long as a pass takes —
+        // fifty-two seconds, measured. This function runs inside the once-a-second refresh, so
+        // that lock was the reason a saved profile did not appear, a granted permission went on
+        // being denied, and an ended session went on looking live. The sync loop observes those
+        // two on its own thread now and leaves the answers in flows.
         return SyncState(
             available = true,
-            running = hub.isRunning(),
+            running = hub.running.value,
             deviceId = runCatching { hub.deviceId }.getOrDefault(""),
             fingerprint = runCatching { hub.fingerprint }.getOrDefault(""),
             peers = hub.peers.value,
-            nearby = hub.nearby(now).toSet(),
+            nearby = hub.nearby.value,
             stillLocked = hub.stillLocked.value,
             complaints = hub.complaints,
             error = hub.lastError.value,

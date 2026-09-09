@@ -167,6 +167,10 @@ class CurfewRuntime internal constructor(
         gate.withLock {
             policy.endSession(id, now, satisfied)
             audit(now, "session.ended", id)
+            // No reconcile here, deliberately. It would see the schedule still matching and start
+            // the session straight back up — spending an emergency pass to be blocked again one
+            // millisecond later. What the device enforces is read from `activeProfiles`, which
+            // `persist` refreshes below, so ending takes effect at once without restarting.
             persist(now)
         }
 
