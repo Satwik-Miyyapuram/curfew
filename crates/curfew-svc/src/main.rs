@@ -63,7 +63,7 @@ curfew — distraction blocking that keeps its promises
   curfew remove <config.toml> <id> remove a profile, window, rule or subscription
                                    (run any of these with no arguments for their flags)
   curfew upcoming <config.toml> [--hours <n>]
-                                   what the next day and a half will block, and why
+                                   what the hours ahead will block, and why (default 36)
   curfew stats <config.toml> [--days <n>] [--csv | --json]
                                    days blocked, streaks and totals
 
@@ -363,8 +363,16 @@ fn upcoming(args: &[String]) -> i32 {
     let mut feeds =
         curfew_win::calendar::Feeds::new(state::default_path().with_file_name("calendars"));
     feeds.restore(&config.calendar_sources);
-    let (events, outcomes) =
-        feeds.events(now, &config.calendar_sources, zone, &feeds::Subscriptions::default());
+    // Asked for the same reach the preview is about to print. The enforcement loop keeps the
+    // narrow window; a timeline that stopped at a day and a half while still listing weekly
+    // windows beyond it would show a free afternoon that is not free.
+    let (events, outcomes) = feeds.events_ahead(
+        now,
+        hours * 3_600,
+        &config.calendar_sources,
+        zone,
+        &feeds::Subscriptions::default(),
+    );
     for outcome in outcomes {
         if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } = outcome {
             eprintln!(

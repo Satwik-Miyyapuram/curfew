@@ -303,3 +303,50 @@ fn webcal_is_a_subscription_and_is_fetched_over_https() {
     assert_eq!("C:/cal.ics", as_http("C:/cal.ics"));
     assert!(!is_url("C:/cal.ics"));
 }
+
+// --- how far ahead a caller can see ------------------------------------------------------------
+
+#[test]
+fn the_default_window_stops_where_enforcement_stops() {
+    // Sixty hours out. The enforcement loop has no use for it and does not collect it.
+    let mut feeds = Feeds::new(dir("horizon-default"));
+    let far = ics("Sunday standup", "20260906T210000Z", "20260906T220000Z");
+    let fetcher = Scripted::always(Ok(far));
+
+    let (events, _) = feeds.events(NOW, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
+
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
+fn a_preview_asked_for_a_week_is_given_a_week() {
+    // The bug this pins: `upcoming --hours 72` honoured the hours for weekly windows and silently
+    // truncated calendar events at thirty-six, so a busy Sunday read as a free one.
+    let mut feeds = Feeds::new(dir("horizon-wide"));
+    let far = ics("Sunday standup", "20260906T210000Z", "20260906T220000Z");
+    let fetcher = Scripted::always(Ok(far));
+
+    let (events, _) = feeds.events_ahead(
+        NOW,
+        72 * 3_600,
+        &[source("work", "https://cal/x.ics", 3600)],
+        UTC,
+        &fetcher,
+    );
+
+    assert_eq!(1, events.len(), "{events:?}");
+    assert_eq!("Sunday standup", events[0].title);
+}
+
+#[test]
+fn asking_for_less_than_enforcement_needs_does_not_narrow_the_window() {
+    // `--hours 1` is a question about the next hour, not permission to collect less than the
+    // enforcement loop relies on; the two share one cache, and a narrowed read would poison it.
+    let mut feeds = Feeds::new(dir("horizon-narrow"));
+    let fetcher = Scripted::always(Ok(meeting()));
+
+    let (events, _) =
+        feeds.events_ahead(NOW, 3_600, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
+
+    assert_eq!(1, events.len(), "{events:?}");
+}

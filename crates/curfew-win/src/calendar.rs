@@ -139,6 +139,25 @@ impl Feeds {
         zone: chrono_tz::Tz,
         fetcher: &impl Fetch,
     ) -> (Vec<CalendarEvent>, Vec<Outcome>) {
+        self.events_ahead(now, WINDOW_SECONDS, sources, zone, fetcher)
+    }
+
+    /// The same, for a caller that has to see further than enforcement does.
+    ///
+    /// `upcoming` is the one such caller: it is asked for a timeline of up to two weeks, and a
+    /// preview that stopped answering after a day and a half while still listing weekly windows
+    /// past it would be wrong in the most misleading direction — it would show a quiet Friday that
+    /// is not quiet. Enforcement keeps the narrow window; nothing is cached differently, because
+    /// the reach only changes which events are read back out of the document already on disk.
+    pub fn events_ahead(
+        &mut self,
+        now: Timestamp,
+        ahead_seconds: i64,
+        sources: &[CalendarSource],
+        zone: chrono_tz::Tz,
+        fetcher: &impl Fetch,
+    ) -> (Vec<CalendarEvent>, Vec<Outcome>) {
+        let ahead = ahead_seconds.max(WINDOW_SECONDS);
         let mut events = Vec::new();
         let mut outcomes = Vec::new();
 
@@ -176,7 +195,7 @@ impl Feeds {
             let found = curfew_ics::events_between(
                 &cached.text,
                 now - WINDOW_SECONDS,
-                now + WINDOW_SECONDS,
+                now + ahead,
                 zone,
             )
             .unwrap_or_default();
