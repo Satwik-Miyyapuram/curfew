@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.policy.Action
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import dev.curfew.policy.WeeklySchedule
@@ -112,58 +113,124 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         }
 
         Gap(22.dp)
-        SectionLabel("Starts because of")
-        Gap(9.dp)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            windows.forEach { window ->
-                Pill(summarise(window), tint = Palette.Accent)
-            }
-            Pill(
-                text = "+ Add",
-                tint = if (name.isBlank()) Palette.Dim else Palette.Accent,
-                onClick = {
-                    if (name.isBlank()) {
-                        model.say("Give it a name first.")
-                        return@Pill
+        Title("When should it run?", size = 20)
+        Gap(6.dp)
+        Sub(
+            "Pick as many as you like. They stack \u2014 a calendar rule and a nightly schedule " +
+                "can both switch the same profile on.",
+        )
+        Gap(12.dp)
+
+        // Read back from the config rather than from a wizard's own memory: a trigger is chosen
+        // because something in curfew.toml says so, which is the only version of "chosen" that
+        // survives leaving the screen.
+        val budgeted = remember(profileId, state.configToml) {
+            model.rulesBeyondApps(profileId).any { it.action is Action.Budget }
+        }
+        val fromCalendar = state.calendarRules.any { it.profile == profileId }
+        val triggers = listOf(
+            Trigger(
+                glyph = "\uD83D\uDD01",
+                tint = Palette.Accent,
+                title = "A repeating schedule",
+                example = "Weeknights 21:00 to midnight, every Mon\u2013Fri.",
+                chosen = windows.isNotEmpty(),
+            ),
+            Trigger(
+                glyph = "\u23F1",
+                tint = Palette.Live,
+                title = "A timer I start myself",
+                example = "Tap once, block for 90 minutes. Nothing scheduled.",
+                // Always true: a timer needs no setting up, it is the Now tab's button.
+                chosen = true,
+            ),
+            Trigger(
+                glyph = "\uD83D\uDCC5",
+                tint = Palette.Ok,
+                title = "Anything in my calendar",
+                example = "Events whose title contains \u2018lecture\u2019.",
+                chosen = fromCalendar,
+            ),
+            Trigger(
+                glyph = "\u23F3",
+                tint = Palette.Bad,
+                title = "A daily budget",
+                example = "Half an hour of socials a day, then they close.",
+                chosen = budgeted,
+            ),
+            Trigger(
+                glyph = "\u221E",
+                tint = Palette.Muted,
+                title = "Always on",
+                example = "Never unblocked, unless you spend a pass.",
+                chosen = windows.any { it.days.size == 7 },
+            ),
+        )
+
+        DCardFlush {
+            triggers.forEachIndexed { index, trigger ->
+                if (index > 0) Rule()
+                TriggerRow(trigger) {
+                    when (trigger.title) {
+                        "A repeating schedule" -> {
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else {
+                                model.saveProfileWithWindow(
+                                    profileId,
+                                    name.trim(),
+                                    WeeklySchedule(
+                                        // Minted from the clock so two windows added in the same
+                                        // session cannot collide, and never shown.
+                                        id = "w-${state.now}",
+                                        profile = profileId,
+                                        // A weeknight evening: the commonest thing anyone sets up,
+                                        // and every part of it is a control on the card below.
+                                        // Monday is 0 and Sunday is 6, the way the core counts
+                                        // days from Monday. Numbering these from 1 made every
+                                        // Sunday window invalid.
+                                        days = listOf(0, 1, 2, 3, 4),
+                                        startMinute = 21 * 60,
+                                        // Midnight at the far end is 0, not 1440: the core reads
+                                        // an end at or before the start as "the next day", and
+                                        // refuses any minute outside the day itself.
+                                        endMinute = 0,
+                                        locks = listOf(Lock.Confirm),
+                                    ),
+                                )
+                            }
+                        }
+                        "A timer I start myself" ->
+                            model.say(
+                                "Nothing to set up. Start one from the Now tab whenever you want.",
+                            )
+                        "Anything in my calendar" ->
+                            model.say(
+                                "Pick the events from the Events tab \u2014 they can point at " +
+                                    "this profile.",
+                            )
+                        "A daily budget" ->
+                            model.say(
+                                "Budgets live in the rules for now. Add one under this profile " +
+                                    "in the config.",
+                            )
+                        else ->
+                            model.say(
+                                "Add a window covering the whole week to leave it always on.",
+                            )
                     }
-                    model.saveProfileWithWindow(
-                        profileId,
-                        name.trim(),
-                        WeeklySchedule(
-                            // Minted from the clock so two windows added in the same session
-                            // cannot collide, and never shown.
-                            id = "w-${state.now}",
-                            profile = profileId,
-                            // A weeknight evening: the commonest thing anyone sets up, and every
-                            // part of it is a control on the card that appears.
-                            // Monday is 0 and Sunday is 6, the way the core counts days from
-                            // Monday. Numbering these from 1 made every Sunday window invalid.
-                            days = listOf(0, 1, 2, 3, 4),
-                            startMinute = 21 * 60,
-                            // Midnight at the far end is 0, not 1440: the core reads an end at or
-                            // before the start as "the next day", and refuses any minute outside
-                            // the day itself.
-                            endMinute = 0,
-                            locks = listOf(Lock.Confirm),
-                        ),
-                    )
-                },
-            )
+                }
+            }
         }
 
-        if (windows.isEmpty()) {
-            Gap(10.dp)
-            Text(
-                "Nothing starts it yet. Add a window, or leave it and start it by hand with a " +
-                    "timer whenever you want.",
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                color = Palette.Muted,
-            )
-        }
+        Gap(10.dp)
+        Text(
+            "${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the " +
+                "block ends when the last one is done.",
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = Palette.Dim,
+        )
 
         windows.forEach { window ->
             Gap(12.dp)
@@ -421,4 +488,76 @@ private fun Nudge(glyph: String, description: String, accent: Boolean, onClick: 
             color = if (accent) Palette.Ink else Palette.Muted,
         )
     }
+}
+
+/** One thing that can switch a profile on, as the canvas lists them. */
+private data class Trigger(
+    val glyph: String,
+    val tint: androidx.compose.ui.graphics.Color,
+    val title: String,
+    val example: String,
+    val chosen: Boolean,
+)
+
+/**
+ * A trigger, with a tick when it is already set up and a chevron when it is not.
+ *
+ * The example line under each title is doing the real work: "a calendar rule" means nothing until
+ * it is spelled as an event whose title contains a word, and a list of five abstractions is how a
+ * setup screen gets skipped.
+ */
+@Composable
+private fun TriggerRow(trigger: Trigger, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(trigger.tint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(trigger.glyph, fontSize = 17.sp)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                trigger.title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.Text,
+            )
+            Text(
+                trigger.example,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = Palette.Muted,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Text(
+            if (trigger.chosen) "\u2713" else "\u203A",
+            fontSize = if (trigger.chosen) 15.sp else 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (trigger.chosen) Palette.Ok else Palette.Dim,
+        )
+    }
+}
+
+/** "Two chosen." \u2014 the count as a word, because a digit here reads like a setting. */
+private fun chosenWord(count: Int): String {
+    val word = when (count) {
+        0 -> "Nothing"
+        1 -> "One"
+        2 -> "Two"
+        3 -> "Three"
+        4 -> "Four"
+        else -> "Five"
+    }
+    return if (count == 0) "$word chosen yet." else "$word chosen."
 }
