@@ -162,6 +162,10 @@ fn run_decide(path: &str, profile: &str, target: &str, rest: &[&str]) -> Result<
     Ok(())
 }
 
+/// The target kinds `decide` understands, written the way an error message needs them.
+const KINDS: &str =
+    "Kinds: app, exe, title, domain (or site), url, path, notif — or `device` on its own for the whole phone.";
+
 /// Parse a `kind:value` target into what the engine sees, the platform it implies, and the
 /// [`Target`] whose key names its budget (so `--used` can be attributed to the right ledger).
 fn parse_target(spec: &str) -> Result<(Observation, Platform, Option<Target>), String> {
@@ -172,7 +176,16 @@ fn parse_target(spec: &str) -> Result<(Observation, Platform, Option<Target>), S
             Some(Target::WholeDevice),
         ));
     }
-    let (kind, value) = spec.split_once(':').ok_or("target must look like app:com.example")?;
+    let (kind, value) = spec.split_once(':').ok_or_else(|| {
+        // Naming one of seven kinds sent people away thinking `decide` only understood apps. A
+        // bare word with a dot in it is almost always a site someone forgot to prefix, so say so
+        // rather than making them read the whole list to find the one they wanted.
+        if spec.contains('.') && !spec.contains(' ') {
+            format!("target must say what {spec:?} is: domain:{spec} for a site, exe:{spec} for a program. {KINDS}")
+        } else {
+            format!("target must look like kind:value. {KINDS}")
+        }
+    })?;
     let out = match kind {
         "app" => (
             Observation::App { package: value.into(), screen: None },
@@ -189,7 +202,9 @@ fn parse_target(spec: &str) -> Result<(Observation, Platform, Option<Target>), S
             Platform::Windows,
             None,
         ),
-        "domain" => (
+        // `curfew block` spells this `--site`, so `decide` answers to both rather than making
+        // someone learn that one command's word for a website is not the other's.
+        "domain" | "site" => (
             Observation::Web { url: Url::parse(&format!("https://{value}/")) },
             Platform::Browser,
             Some(Target::Domain { domain: value.into() }),
@@ -205,7 +220,7 @@ fn parse_target(spec: &str) -> Result<(Observation, Platform, Option<Target>), S
             Platform::Android,
             Some(Target::NotificationSource { package: value.into() }),
         ),
-        other => return Err(format!("unknown target kind {other:?}")),
+        other => return Err(format!("unknown target kind {other:?}. {KINDS}")),
     };
     Ok(out)
 }
@@ -215,4 +230,44 @@ fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_target;
+
+    #[test]
+    fn a_target_with_no_kind_is_told_which_kind_it_probably_meant() {
+        // The old message named `app:` alone, which read as the only thing `decide` understood.
+        let complaint = parse_target("reddit.com").unwrap_err();
+
+        assert!(complaint.contains("domain:reddit.com"), "{complaint}");
+        assert!(complaint.contains("exe:reddit.com"), "{complaint}");
+    }
+
+    #[test]
+    fn a_target_that_is_not_a_forgotten_domain_still_gets_the_list() {
+        let complaint = parse_target("some thing").unwrap_err();
+
+        assert!(complaint.contains("kind:value"), "{complaint}");
+        assert!(complaint.contains("notif"), "{complaint}");
+    }
+
+    #[test]
+    fn an_unknown_kind_says_what_the_known_ones_are() {
+        let complaint = parse_target("website:reddit.com").unwrap_err();
+
+        assert!(complaint.contains("\"website\""), "{complaint}");
+        assert!(complaint.contains("domain"), "{complaint}");
+    }
+
+    #[test]
+    fn site_and_domain_are_the_same_target() {
+        // `curfew block` spells it `--site`; nobody should have to learn two words for a website.
+        let (_, _, site) = parse_target("site:reddit.com").unwrap();
+        let (_, _, domain) = parse_target("domain:reddit.com").unwrap();
+
+        assert_eq!(domain, site);
+        assert!(site.is_some());
+    }
 }
