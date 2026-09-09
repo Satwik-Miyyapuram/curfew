@@ -1,26 +1,22 @@
 package dev.curfew.app.ui
 
 import android.Manifest
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,12 +24,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.CalendarEvent
@@ -47,6 +52,10 @@ import dev.curfew.policy.CalendarSchedule
  * a rule that works look identical that way, and the failure is silent — the meeting arrives and
  * nothing is blocked. Here the events are listed as they actually are, each one says whether a rule
  * already catches it, and "Block this" builds the rule from the event rather than from a guess.
+ *
+ * The search box highlights what it matched inside each title, and counts how many of the events it
+ * kept. That is the whole point of typing here: the user is not looking for one meeting, they are
+ * checking what a word like "lect" would catch if they made it a rule.
  *
  * Curfew reads calendars and never writes them, so nothing on this screen changes the calendar.
  */
@@ -74,15 +83,14 @@ fun CalendarScreen(model: CurfewViewModel) {
     val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text(
-                "Your calendar",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { heading() },
-            )
+            Column {
+                Gap(14.dp)
+                Title("Pick from your calendar", size = 24)
+            }
         }
 
         // Nothing is claimed before the first refresh has run. Every field below still holds its
@@ -90,24 +98,21 @@ fun CalendarScreen(model: CurfewViewModel) {
         // start spent a moment insisting the permission was missing on a device that had granted
         // it, which reads as the feature being broken rather than as the app still looking.
         if (state.loading) {
-            item {
-                Text(
-                    "Reading your calendar…",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+            item { Text("Reading your calendar…", fontSize = 14.sp, color = Palette.Muted) }
             return@LazyColumn
         }
 
         if (!state.calendarGranted) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         "Curfew cannot see your calendar yet, so no meeting can start a block.",
-                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp,
+                        color = Palette.Muted,
                     )
-                    Button(onClick = { requestRuntimePermission(context, Manifest.permission.READ_CALENDAR) }) {
-                        Text("Allow calendar access")
+                    PrimaryButton("Allow calendar access") {
+                        requestRuntimePermission(context, Manifest.permission.READ_CALENDAR)
                     }
                 }
             }
@@ -117,15 +122,11 @@ fun CalendarScreen(model: CurfewViewModel) {
         item {
             // Filters as it is typed: there is no search button, because the list is small enough
             // that a round trip through a button would only be a way to get it wrong.
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search events") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().semantics {
-                    contentDescription = "Search your calendar events"
-                },
+            SearchRow(
+                query = query,
+                kept = shown.size,
+                total = state.calendarEvents.size,
+                onChange = { query = it },
             )
         }
 
@@ -134,12 +135,14 @@ fun CalendarScreen(model: CurfewViewModel) {
                 Text(
                     "Nothing in the next day and a half. Curfew only reads a narrow window around " +
                         "now, because that is all a rule can act on.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                    color = Palette.Muted,
                 )
             }
         } else if (shown.isEmpty()) {
             item {
-                Text("No event matches “$query”.", style = MaterialTheme.typography.bodyMedium)
+                Text("No event matches “$query”.", fontSize = 14.sp, color = Palette.Muted)
             }
         }
 
@@ -149,14 +152,14 @@ fun CalendarScreen(model: CurfewViewModel) {
         // recomposition in an order the list does not promise.
         items(rows(shown, state.now), key = { it.key }) { row ->
             when (row) {
-                is CalendarRow.Day -> Text(
-                    row.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 6.dp).semantics { heading() },
-                )
+                is CalendarRow.Day -> Column {
+                    Gap(6.dp)
+                    Box(Modifier.semantics { heading() }) { SectionLabel(row.label) }
+                }
 
                 is CalendarRow.Event -> EventCard(
                     event = row.event,
+                    highlight = query.trim(),
                     blockedBy = caught[row.event.id]?.let { names[it] ?: it },
                     canBlock = state.profiles.isNotEmpty(),
                     onBlock = { blocking = row.event },
@@ -164,15 +167,19 @@ fun CalendarScreen(model: CurfewViewModel) {
             }
         }
 
-        if (state.profiles.isEmpty() && !state.loading) {
+        if (state.profiles.isEmpty()) {
             item {
                 Text(
-                    "Add a profile on the Schedule tab first — a calendar rule has to say " +
-                        "which one it runs.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Add a profile on the Plan tab first — a calendar rule has to say which one " +
+                        "it runs.",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = Palette.Dim,
                 )
             }
         }
+
+        item { Gap(8.dp) }
     }
 
     blocking?.let { event ->
@@ -190,75 +197,145 @@ fun CalendarScreen(model: CurfewViewModel) {
     }
 }
 
+/** The search field, with the count of what it kept where a submit button would otherwise be. */
+@Composable
+private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Surface)
+            .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("⌕", fontSize = 17.sp, color = Palette.Muted)
+        Box(Modifier.weight(1f)) {
+            BasicTextField(
+                value = query,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 15.sp, color = Palette.Text),
+                cursorBrush = SolidColor(Palette.Accent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Search your calendar events" },
+            )
+            if (query.isEmpty()) {
+                Text("Search your events", fontSize = 15.sp, color = Palette.Dim)
+            }
+        }
+        if (query.isNotBlank()) {
+            Text("$kept of $total", fontSize = 12.sp, color = Palette.Dim)
+        }
+    }
+}
+
 /** One event, and the plain answer to "will this block anything?". */
 @Composable
 private fun EventCard(
     event: CalendarEvent,
+    highlight: String,
     blockedBy: String?,
     canBlock: Boolean,
     onBlock: () -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (blockedBy != null) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-        ),
+    // A caught event is outlined and faintly filled in the accent rather than given a different
+    // background colour: the card must still read as the same kind of thing as the ones around it,
+    // with one of them marked.
+    val tinted = blockedBy != null
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CardRadius))
+            .background(if (tinted) Palette.Accent.copy(alpha = 0.07f) else Palette.Surface)
+            .border(
+                1.dp,
+                if (tinted) Palette.Accent.copy(alpha = 0.5f) else Palette.Line,
+                RoundedCornerShape(Dsn.CardRadius),
+            )
+            .padding(horizontal = 16.dp, vertical = 15.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                event.title.ifBlank { "(untitled)" },
-                style = MaterialTheme.typography.titleMedium,
+                marked(event.title.ifBlank { "(untitled)" }, highlight),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 20.sp,
+                color = Palette.Text,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
             Text(
-                if (event.allDay) "All day" else "${clockTime(event.start)} – ${clockTime(event.end)}",
-                style = MaterialTheme.typography.bodyMedium,
+                if (event.allDay) "All day" else clockTime(event.start),
+                fontSize = 13.sp,
+                color = Palette.Muted,
+                maxLines = 1,
             )
-            val where = listOfNotNull(
-                event.calendar.takeIf { it.isNotBlank() },
-                event.location.takeIf { it.isNotBlank() },
-            ).joinToString(" · ")
-            if (where.isNotEmpty()) {
-                Text(where, style = MaterialTheme.typography.bodySmall)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (blockedBy != null) {
-                    AssistChip(
-                        onClick = {},
-                        enabled = false,
-                        label = { Text("Blocks $blockedBy") },
-                        colors = AssistChipDefaults.assistChipColors(),
-                    )
-                } else {
-                    Text("Nothing blocked", style = MaterialTheme.typography.bodySmall)
-                }
-                TextButton(
-                    onClick = onBlock,
-                    enabled = canBlock,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Block during ${event.title}"
-                    },
-                ) { Text(if (blockedBy != null) "Add another rule" else "Block this") }
-            }
-            if (!event.busy) {
-                Text(
-                    "Marked free in your calendar.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
         }
+
+        val where = listOfNotNull(
+            event.calendar.takeIf { it.isNotBlank() },
+            event.location.takeIf { it.isNotBlank() } ?: "no location",
+        ).joinToString(" · ")
+        Text(where, fontSize = 12.sp, color = Palette.Dim, modifier = Modifier.padding(top = 5.dp))
+
+        if (!event.busy) {
+            Text(
+                "Marked free in your calendar",
+                fontSize = 12.sp,
+                color = Palette.Dim,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+
+        Gap(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (blockedBy != null) {
+                Pill("Blocks $blockedBy", tint = Palette.Accent)
+            } else {
+                Text("Nothing blocked", fontSize = 13.sp, color = Palette.Dim)
+            }
+            Text(
+                if (blockedBy != null) "Change" else "Block this",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (canBlock) Palette.Accent else Palette.Dim,
+                modifier = Modifier
+                    .clickable(enabled = canBlock, onClick = onBlock)
+                    .semantics { contentDescription = "Block during ${event.title}" },
+            )
+        }
+    }
+}
+
+/**
+ * [title] with whatever the search matched drawn on the accent.
+ *
+ * The highlight is the answer to the question the search box is really being asked: not "where is
+ * this meeting" but "what would this word catch". Seeing `lect` light up inside *Lecture* and
+ * inside *collect* is how a user finds out their rule is wider than they meant.
+ */
+private fun marked(title: String, needle: String): AnnotatedString {
+    if (needle.isBlank()) return AnnotatedString(title)
+    val at = title.indexOf(needle, ignoreCase = true)
+    if (at < 0) return AnnotatedString(title)
+    return buildAnnotatedString {
+        append(title.substring(0, at))
+        withStyle(SpanStyle(background = Palette.Accent.copy(alpha = 0.3f))) {
+            append(title.substring(at, at + needle.length))
+        }
+        append(title.substring(at + needle.length))
     }
 }
 
