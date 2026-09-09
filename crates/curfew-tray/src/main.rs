@@ -9,6 +9,11 @@
 //! It is not required. Curfew enforces with the tray closed, and the menu says so.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
+// Off Windows there is no shell to call any of this: `main` prints a line and stops. The pure
+// halves — the menu model, the overlay wording, the credential prompt — are still compiled and
+// still tested there, because they are the parts worth testing and a Linux runner is where the
+// tests are cheapest to run. Unused-on-Linux is therefore the intended state, not an oversight.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 mod menu;
 mod overlay;
