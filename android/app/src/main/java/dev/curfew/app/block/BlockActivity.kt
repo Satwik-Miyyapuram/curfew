@@ -6,10 +6,18 @@ import android.os.Bundle
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -19,16 +27,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.curfew
 import dev.curfew.app.ui.CurfewTheme
+import dev.curfew.app.ui.Palette
 import kotlinx.coroutines.delay
 
 /**
@@ -117,6 +134,18 @@ class BlockActivity : ComponentActivity() {
     }
 }
 
+/**
+ * What the user actually sees when a blocked app opens.
+ *
+ * It names the app rather than its package, says which profile is running and until when, and
+ * counts the time down — because "blocked" without an end is indistinguishable from broken, and a
+ * user who cannot tell how long this lasts goes looking for a way out instead of waiting.
+ *
+ * The only button leaves. There is no "unblock" here on purpose: ending a session happens in
+ * Curfew's own UI, where the lock the user asked for is enforced. The emergency pass is named but
+ * not offered as a button — it is spent deliberately, from inside the app, not from the screen a
+ * frustrated thumb is already on.
+ */
 @Composable
 private fun BlockScreen(
     target: String,
@@ -124,23 +153,129 @@ private fun BlockScreen(
     explanation: String,
     onClose: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val lock by context.curfew.lock.collectAsStateWithLifecycle()
+    val endsAt = lock.endsAt
+    val name = remember(target) { appLabel(context, target) }
+    val passes = remember(lock) { runCatching { context.curfew.passesRemaining() }.getOrDefault(0) }
+
+    var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
+    LaunchedEffect(endsAt) {
+        while (endsAt != null) {
+            now = System.currentTimeMillis() / 1000
+            delay(1000)
+        }
+    }
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Palette.Ink)
+            .padding(horizontal = 34.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Blocked by Curfew", style = MaterialTheme.typography.headlineMedium)
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(RoundedCornerShape(32.dp))
+                .background(Palette.Live.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("🔒", fontSize = 36.sp)
+        }
+
+        Spacer(Modifier.height(28.dp))
         Text(
-            explanation,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(top = 12.dp),
+            "$name is blocked",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.5).sp,
+            color = Palette.Text,
+            textAlign = TextAlign.Center,
         )
+
+        Spacer(Modifier.height(12.dp))
         Text(
-            target,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp),
+            reasonLine(profile, explanation, endsAt),
+            fontSize = 15.sp,
+            lineHeight = 23.sp,
+            color = Palette.Muted,
+            textAlign = TextAlign.Center,
         )
-        Button(onClick = onClose, modifier = Modifier.padding(top = 32.dp)) { Text("Close") }
+
+        if (endsAt != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                countdown(endsAt - now),
+                fontSize = 44.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-1.5).sp,
+                color = Palette.Live,
+                // The number changes every second; a screen reader is told the block and its end
+                // once, not sixty times a minute.
+                modifier = Modifier.semantics { contentDescription = "" },
+            )
+        }
+
+        Spacer(Modifier.height(34.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Palette.Raised)
+                .clickable(onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Back to my home screen",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.Text,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(
+            if (passes > 0) {
+                "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
+            } else {
+                "No emergency pass left this month"
+            },
+            fontSize = 13.sp,
+            color = Palette.Dim,
+        )
+    }
+}
+
+/** The app's own name, falling back to whatever the rule matched on. */
+private fun appLabel(context: Context, target: String): String = runCatching {
+    val pm = context.packageManager
+    pm.getApplicationLabel(pm.getApplicationInfo(target, 0)).toString()
+}.getOrDefault(target)
+
+/** One sentence: which profile, until when, and why it is running. */
+private fun reasonLine(profile: String, explanation: String, endsAt: Long?): String {
+    if (profile.isBlank()) return explanation
+    val until = endsAt?.let { " until ${clockAt(it)}" }.orEmpty()
+    return "$profile is running$until. $explanation"
+}
+
+private fun clockAt(epochSeconds: Long): String {
+    val time = java.time.Instant.ofEpochSecond(epochSeconds)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toLocalTime()
+    return "%02d:%02d".format(time.hour, time.minute)
+}
+
+/** "1:12" for an hour and twelve minutes; "4:09" for four minutes and nine seconds under an hour. */
+private fun countdown(secondsLeft: Long): String {
+    val left = secondsLeft.coerceAtLeast(0)
+    return if (left >= 3600) {
+        "%d:%02d".format(left / 3600, (left % 3600) / 60)
+    } else {
+        "%d:%02d".format(left / 60, left % 60)
     }
 }
 
