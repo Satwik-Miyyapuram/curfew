@@ -22,6 +22,7 @@ fn weekday_mornings() -> WeeklySchedule {
         start_minute: 9 * 60,
         end_minute: 12 * 60,
         locks: vec![Lock::Timer],
+        enabled: true,
     }
 }
 
@@ -33,6 +34,7 @@ fn overnight() -> WeeklySchedule {
         start_minute: 23 * 60,
         end_minute: 7 * 60,
         locks: vec![Lock::DeviceCredential],
+        enabled: true,
     }
 }
 
@@ -115,6 +117,7 @@ fn a_window_starting_in_the_lost_hour_still_opens() {
         start_minute: 90, // 01:30, which does not exist that day
         end_minute: 4 * 60,
         locks: vec![],
+        enabled: true,
     };
     assert!(w.active_at(local(2026, 3, 29, 3, 0), LONDON).is_some());
 }
@@ -136,6 +139,7 @@ fn focus_schedule() -> CalendarSchedule {
         pad_before_seconds: 300,
         pad_after_seconds: 0,
         locks: vec![Lock::Confirm],
+        enabled: true,
     }
 }
 
@@ -183,6 +187,7 @@ fn an_empty_matcher_matches_every_event() {
         pad_before_seconds: 0,
         pad_after_seconds: 0,
         locks: vec![],
+        enabled: true,
     };
     let mut free = event("e1", "anything", start, start + 60);
     free.busy = false;
@@ -307,6 +312,7 @@ fn duration_is_measured_before_padding_not_after() {
         pad_before_seconds: 30 * 60,
         pad_after_seconds: 30 * 60,
         locks: vec![],
+        enabled: true,
     };
     let half_hour = event("e1", "Standup", 1_788_510_600, 1_788_510_600 + 30 * 60);
 
@@ -333,6 +339,7 @@ fn everything() -> CalendarSchedule {
         pad_before_seconds: 0,
         pad_after_seconds: 0,
         locks: vec![Lock::Timer],
+        enabled: true,
     }
 }
 
@@ -440,4 +447,36 @@ fn a_backwards_window_previews_nothing() {
     let friday = local(2026, 9, 4, 12, 0);
 
     assert!(upcoming(friday, friday - 3600, LONDON, &[weekday_mornings()], &[], &[]).is_empty());
+}
+
+#[test]
+fn a_paused_window_does_nothing_at_all() {
+    let mut w = weekday_mornings();
+    w.enabled = false;
+    let monday = local(2024, 6, 3, 10, 0);
+    assert!(active_at(monday, LONDON, &[w.clone()], &[], &[]).is_empty());
+    assert!(upcoming(monday, monday + 7 * 86_400, LONDON, &[w.clone()], &[], &[]).is_empty());
+    // Nor may it wake the platform: an alarm for a window that will not run is a wakeup spent on
+    // nothing, and on Android that is a real cost.
+    assert_eq!(next_change_after(monday, LONDON, &[w], &[], &[]), None);
+}
+
+#[test]
+fn a_paused_calendar_rule_matches_nothing() {
+    let mut schedule = focus_schedule();
+    schedule.enabled = false;
+    let start = local(2024, 6, 3, 10, 0);
+    let events = vec![event("e1", "Focus block", start, start + 3_600)];
+    assert!(schedule.activations(&events).is_empty());
+}
+
+#[test]
+fn a_schedule_written_before_pausing_existed_still_runs() {
+    // The flag defaults to true on the way in, so upgrading the app cannot silently switch every
+    // existing window off.
+    let w: WeeklySchedule = serde_json::from_str(
+        r#"{"id":"w","profile":"p","days":[0],"start_minute":540,"end_minute":720}"#,
+    )
+    .expect("a window without the field is still a window");
+    assert!(w.enabled);
 }

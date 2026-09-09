@@ -656,6 +656,13 @@ data class WeeklySchedule(
     @SerialName("start_minute") val startMinute: Int,
     @SerialName("end_minute") val endMinute: Int,
     val locks: List<Lock> = emptyList(),
+    /**
+     * Whether the window runs at all.
+     *
+     * Pausing is not deleting: "not this week" is a thing people mean often, and a tool without
+     * somewhere to put it makes them delete the window and rebuild it later from memory.
+     */
+    val enabled: Boolean = true,
 )
 
 /** A rule that runs a profile for as long as a matching calendar event does, plus its padding. */
@@ -668,6 +675,8 @@ data class CalendarSchedule(
     @SerialName("pad_before_seconds") val padBeforeSeconds: Int = 0,
     @SerialName("pad_after_seconds") val padAfterSeconds: Int = 0,
     val locks: List<Lock> = emptyList(),
+    /** Whether the rule runs at all. See [WeeklySchedule.enabled]. */
+    val enabled: Boolean = true,
 )
 
 /** All of these must match. An empty matcher matches every event on every calendar. */

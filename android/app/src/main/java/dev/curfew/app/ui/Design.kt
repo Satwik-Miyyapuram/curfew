@@ -234,6 +234,7 @@ fun PrimaryButton(
 fun GhostButton(
     text: String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     colour: Color = Palette.Text,
     onClick: () -> Unit,
 ) {
@@ -243,10 +244,17 @@ fun GhostButton(
             .height(Dsn.GhostHeight)
             .clip(RoundedCornerShape(Dsn.CtlRadius))
             .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colour)
+        Text(
+            text,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            // A control that cannot do anything says so by looking like it, rather than by
+            // silently swallowing the tap.
+            color = if (enabled) colour else Palette.Dim,
+        )
     }
 }
 

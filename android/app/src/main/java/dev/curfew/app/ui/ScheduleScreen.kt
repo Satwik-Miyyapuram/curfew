@@ -1,16 +1,23 @@
+// combinedClickable is how a row carries both "open this" and "remove this" without a second
+// control taking up space in every row. It is experimental only in the sense that its signature
+// may change; the gesture itself is the platform's oldest one.
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package dev.curfew.app.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -21,34 +28,36 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.ProfileName
 import dev.curfew.policy.WeeklySchedule
 
 /**
- * What is going to happen, and the rules that decide it.
+ * Everything that can start a block, as one list.
  *
- * The timeline comes first because the honest question about a scheduling tool is "what is this
- * going to do to me later today?", and that has to be answerable without reading a config. The
- * config itself is below it, as text.
+ * The old version of this screen was four stacked sections — a timeline, profiles, weekly windows,
+ * calendar rules — each with its own heading and its own Add button, which asked the user to hold
+ * the app's data model in their head before they could answer "what is going to happen to me?".
+ * The canvas answers that with a single card: one row per thing that can switch the phone off,
+ * whatever kind of thing it is, each with the profile it runs, when it runs, and a switch.
  *
- * Below it are the schedules themselves, as forms: a weekly window is "these days, between these
- * two times", and a calendar rule is "whatever my calendar calls a meeting". Neither should require
- * learning a file format.
+ * The switch is the point of the redesign. Pausing a window is not deleting it — "not this week"
+ * is a thing people mean constantly, and an app with nowhere to put it teaches them to delete the
+ * window and rebuild it later from memory, usually wrong.
  *
- * The TOML editor stays underneath, and is not a fallback for the forms: the config is the thing a
- * user backs up, diffs and carries between devices, and hiding it would make the file a mystery to
- * the person who owns it. Both paths write through the same core validation, so neither can leave
- * the device unprotected.
+ * Tapping a row opens it; holding one offers to remove it. The config text itself stays, in Power
+ * mode only, because the file is the thing a user backs up and carries between devices and hiding
+ * it would make their own document a mystery to them.
  */
 @Composable
 fun ScheduleScreen(
@@ -57,17 +66,18 @@ fun ScheduleScreen(
     onEditProfile: (String) -> Unit = {},
 ) {
     val state by model.state.collectAsStateWithLifecycle()
+    val mode by model.mode.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(state.configToml) }
     var editing by remember { mutableStateOf(false) }
 
     // Which form is open, if any. `Editing(null)` is a new schedule; a value is an edit of that
-    // one. Held here rather than in the cards so only one form can be open at a time.
+    // one. Held here rather than in the rows so only one form can be open at a time.
     var weeklyForm by remember { mutableStateOf<Editing<WeeklySchedule>?>(null) }
     var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
     var removing by remember { mutableStateOf<Removal?>(null) }
     var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
 
-    // Schedules point at a profile by id; every card says the name instead. A card headed
+    // Schedules point at a profile by id; every row says the name instead. A row headed
     // "socials-diet" is the config talking, not the app.
     val names = state.profiles.associate { it.id to it.name }
 
@@ -100,209 +110,199 @@ fun ScheduleScreen(
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        // Marked as headings so a screen reader can jump between the timeline and the rules
-        // instead of swiping through every card in between.
-        Text(
-            "Coming up",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.semantics { heading() },
-        )
+    val running = state.weekly.count { it.enabled } + state.calendarRules.count { it.enabled }
+    val fromCalendar = state.calendarRules.count { it.enabled }
 
-        // Not before the first refresh: see CalendarScreen. An empty list is a claim that nothing is
-        // scheduled, and until the config has been read it is a claim the app cannot make.
-        if (state.upcoming.isEmpty() && !state.loading) {
-            Text(
-                "Nothing is scheduled. Add a profile with a schedule below and it will appear here.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    Screen(spacing = 0.dp) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Title("Plan")
+                Sub(summarise(running, fromCalendar, state.profiles.isEmpty(), state.loading))
+            }
+            // The one accent-filled control on the screen, because adding a profile is the one
+            // thing a user with nothing set up has to do next.
+            Box(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(Dsn.CtlRadius))
+                    .background(Palette.Accent)
+                    .combinedClickable(onClickLabel = "Add a profile", onClick = onNewProfile),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+            }
         }
-        // Grouped by day so a block tomorrow morning can never be read as one this evening. The
-        // list is a preview, not a promise about the past: anything that has already ended is
-        // dropped before it reaches here.
-        // The same two lookups the Calendar tab does, and for the same reason: a profile answers to
-        // an id in the config and a name on screen, and a calendar activation carries the provider's
-        // row id rather than the name of the meeting. Both read as gibberish if shown raw.
-        val names = state.profiles.associate { it.id to it.name }
-        val titles = state.calendarEvents.associate { it.id to it.title }
-        var day: String? = null
-        state.upcoming.forEach { activation ->
-            val label = dayLabel(activation.start, state.now)
-            if (label != day) {
-                day = label
+
+        Gap(22.dp)
+
+        if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
+            DCard {
                 Text(
-                    label,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 4.dp).semantics { heading() },
+                    if (state.profiles.isEmpty()) {
+                        "Nothing can start a block yet. Make a profile first — a profile is the " +
+                            "set of things to switch off — then say when it should run."
+                    } else {
+                        "Nothing starts on its own yet. Add a weekly window for the same time " +
+                            "every week, or a calendar rule that follows your meetings."
+                    },
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Palette.Muted,
                 )
             }
-            Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        names[activation.profile] ?: activation.profile,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        "${clockTime(activation.start)} – ${clockTime(activation.end)} · " +
-                            describeSource(activation.source, titles),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Text(
-                        if (activation.start > state.now) {
-                            "Starts ${relative(activation.start, state.now)}"
-                        } else {
-                            "Running, ends ${relative(activation.end, state.now)}"
+        } else {
+            DCardFlush {
+                var first = true
+                state.weekly.forEach { window ->
+                    if (!first) Rule()
+                    first = false
+                    TriggerRow(
+                        name = names[window.profile] ?: window.profile,
+                        note = describeWindow(window),
+                        tint = Palette.Live,
+                        enabled = window.enabled,
+                        onToggle = { model.saveWeekly(window.copy(enabled = it)) },
+                        onOpen = { weeklyForm = Editing(window) },
+                        onRemove = {
+                            removing = Removal(window.id, describeWindow(window), weekly = true)
                         },
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 6.dp),
                     )
-                    if (activation.locks.isNotEmpty()) {
-                        Text(
-                            // Said in the future tense for a block that has not begun: the whole
-                            // point of a preview is to let someone decide before the lock exists.
-                            (if (activation.start > state.now) "Will lock: needs " else "Locked: needs ") +
-                                activation.locks.joinToString(", ") { describeLock(it) } + ".",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
+                }
+                state.calendarRules.forEach { rule ->
+                    if (!first) Rule()
+                    first = false
+                    TriggerRow(
+                        name = names[rule.profile] ?: rule.profile,
+                        note = "From your calendar · " + describeMatcher(rule.matcher),
+                        tint = Palette.Accent,
+                        enabled = rule.enabled,
+                        onToggle = { model.saveCalendarRule(rule.copy(enabled = it)) },
+                        onOpen = { calendarForm = Editing(rule) },
+                        onRemove = {
+                            removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
+                        },
+                    )
                 }
             }
         }
 
-        Text(
-            "Profiles",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-        )
-        if (state.profiles.isEmpty() && !state.loading) {
-            // The gap a fresh install falls into: every schedule names a profile, and the app
-            // picker fills one, so with none defined neither screen can do anything at all.
-            Text(
-                "No profiles yet. A profile is a named set of things to block \u2014 add one, then " +
-                    "choose its apps under Apps and say when it runs above.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        state.profiles.forEach { profile ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(profile.name, style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Everything about a profile now lives on one screen, so this opens that rather
-                        // than a rename box: a name was never the only thing anyone came here to change.
-                        TextButton(onClick = { onEditProfile(profile.id) }) { Text("Edit") }
-                        TextButton(onClick = { removingProfile = profile }) { Text("Remove") }
-                    }
-                }
+        Gap(12.dp)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GhostButton("Add a window", Modifier.weight(1f), enabled = state.profiles.isNotEmpty()) {
+                weeklyForm = Editing(null)
             }
+            GhostButton(
+                "From calendar",
+                Modifier.weight(1f),
+                enabled = state.profiles.isNotEmpty(),
+            ) { calendarForm = Editing(null) }
         }
-        // A new profile is a whole screen now, not a dialog with an id field in it: naming it,
-        // colouring it, saying when it runs and how hard it is to leave do not fit in a two-field
-        // box, and the id that box asked for was never the user's business.
-        Button(onClick = onNewProfile) { Text("Add a profile") }
 
-        Text(
-            "Weekly windows",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-        )
-        if (state.weekly.isEmpty()) {
+        Gap(18.dp)
+        // The status line the canvas ends on: whether the calendar half of the plan can actually
+        // happen. It is the one dependency on this screen that lives outside the app.
+        DCard(padding = 16.dp) {
             Text(
-                "No weekly windows. Add one to block a profile at the same time every week.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        state.weekly.forEach { window ->
-            WeeklyCard(
-                window = window,
-                profile = names[window.profile] ?: window.profile,
-                onEdit = { weeklyForm = Editing(window) },
-                onDelete = { removing = Removal(window.id, describeWindow(window), weekly = true) },
-            )
-        }
-        Button(
-            onClick = { weeklyForm = Editing(null) },
-            enabled = state.profiles.isNotEmpty(),
-        ) { Text("Add a window") }
-
-        Text(
-            "From your calendar",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-        )
-        if (state.calendarRules.isEmpty()) {
-            Text(
-                "No calendar rules. Add one to block a profile for as long as a meeting lasts.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        state.calendarRules.forEach { rule ->
-            CalendarRuleCard(
-                rule = rule,
-                profile = names[rule.profile] ?: rule.profile,
-                onEdit = { calendarForm = Editing(rule) },
-                onDelete = {
-                    removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
+                if (state.calendarGranted) {
+                    "Your calendar is connected. New events matching a rule block automatically."
+                } else {
+                    "Your calendar is not connected, so calendar rules will not start anything. " +
+                        "Connect it under Settings."
                 },
-            )
-        }
-        Button(
-            onClick = { calendarForm = Editing(null) },
-            enabled = state.profiles.isNotEmpty(),
-        ) { Text("Add a calendar rule") }
-        // A schedule has to name a profile that exists, so the buttons above are dead until one
-        // does. Said plainly rather than left as a greyed-out button with no explanation.
-        if (state.profiles.isEmpty() && !state.loading) {
-            Text(
-                "Add a profile above first \u2014 a schedule has to say which one it runs.",
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                color = if (state.calendarGranted) Palette.Muted else Palette.Bad,
             )
         }
 
-        Text(
-            "Rules",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 8.dp).semantics { heading() },
-        )
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it; editing = true },
-            modifier = Modifier.fillMaxWidth(),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            label = { Text("curfew.toml") },
-            minLines = 8,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(
-                onClick = { model.saveConfig(draft); editing = false },
-                enabled = editing && draft != state.configToml,
-            ) {
-                Text("Save")
+        if (state.profiles.isNotEmpty()) {
+            Gap(22.dp)
+            SectionLabel("Profiles")
+            Gap(10.dp)
+            DCardFlush {
+                state.profiles.forEachIndexed { index, profile ->
+                    if (index > 0) Rule()
+                    val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = { onEditProfile(profile.id) },
+                                onLongClick = { removingProfile = profile },
+                                onClickLabel = "Edit ${profile.name}",
+                                onLongClickLabel = "Remove ${profile.name}",
+                            )
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                    ) {
+                        Glyph(tint, size = 38.dp) {
+                            Text(
+                                profile.name.take(1).uppercase(),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = tint,
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                profile.name,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                countWindows(state.weekly, state.calendarRules, profile.id),
+                                fontSize = 12.sp,
+                                color = Palette.Muted,
+                            )
+                        }
+                    }
+                }
             }
-            TextButton(
-                onClick = { draft = state.configToml; editing = false },
-                enabled = editing,
-            ) {
-                Text("Discard")
-            }
-            // Import and export are how a config moves between devices before sync exists — and
-            // how it stays the user's own document afterwards. Both go through the system file
-            // picker, so Curfew needs no storage permission to do it.
-            TextButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import") }
-            TextButton(onClick = { exportFile.launch("curfew.toml") }) { Text("Export") }
         }
-        Text(
-            "Saving does not end a session that is already running. A lock you asked for is not " +
-                "something a settings edit can undo.",
-            style = MaterialTheme.typography.bodySmall,
-        )
+
+        // Power only, and last: the file is for the person who wants the file. In Simple mode the
+        // same document is still exportable from Settings, so nothing becomes unreachable.
+        if (mode.isPower) {
+            Gap(22.dp)
+            SectionLabel("curfew.toml")
+            Gap(10.dp)
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it; editing = true },
+                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                minLines = 8,
+            )
+            Gap(8.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = { model.saveConfig(draft); editing = false },
+                    enabled = editing && draft != state.configToml,
+                ) { Text("Save") }
+                TextButton(
+                    onClick = { draft = state.configToml; editing = false },
+                    enabled = editing,
+                ) { Text("Discard") }
+                // Import and export are how a config moves between devices before sync exists —
+                // and how it stays the user's own document afterwards. Both go through the system
+                // file picker, so Curfew needs no storage permission to do it.
+                TextButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import") }
+                TextButton(onClick = { exportFile.launch("curfew.toml") }) { Text("Export") }
+            }
+            Gap(6.dp)
+            Text(
+                "Saving does not end a session that is already running. A lock you asked for is " +
+                    "not something a settings edit can undo.",
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = Palette.Muted,
+            )
+        }
     }
 
     removingProfile?.let { profile ->
@@ -355,8 +355,8 @@ fun ScheduleScreen(
     }
 
     // Removal is confirmed because it is the one edit here that cannot be undone by pressing the
-    // same button again, and because what it does *not* do \u2014 end a session already running
-    // \u2014 is the thing people expect it to.
+    // same control again, and because what it does *not* do — end a session already running — is
+    // the thing people expect it to.
     removing?.let { target ->
         AlertDialog(
             onDismissRequest = { removing = null },
@@ -364,15 +364,18 @@ fun ScheduleScreen(
             text = {
                 Text(
                     target.description + "\n\nIt will stop starting sessions. A session it has " +
-                        "already started keeps running until its own lock lets it go.",
+                        "already started keeps running until its own lock lets it go. If you only " +
+                        "want it off for a while, use the switch instead.",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val chosen = target
+                    val chosen = removing
                     removing = null
-                    if (chosen.weekly) model.deleteWeekly(chosen.id)
-                    else model.deleteCalendarRule(chosen.id)
+                    if (chosen != null) {
+                        if (chosen.weekly) model.deleteWeekly(chosen.id)
+                        else model.deleteCalendarRule(chosen.id)
+                    }
                 }) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep it") } },
@@ -380,8 +383,84 @@ fun ScheduleScreen(
     }
 }
 
+/**
+ * One thing that can start a block.
+ *
+ * A paused row is dimmed rather than hidden or moved to the bottom: it is still part of the plan,
+ * and a user who paused something last week has to be able to find it in the place they left it.
+ */
+@Composable
+private fun TriggerRow(
+    name: String,
+    note: String,
+    tint: androidx.compose.ui.graphics.Color,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onOpen,
+                onLongClick = onRemove,
+                onClickLabel = "Edit this trigger",
+                onLongClickLabel = "Remove this trigger",
+            )
+            .padding(Dsn.CardPad)
+            .alpha(if (enabled) 1f else 0.55f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        val glyphTint = if (enabled) tint else Palette.Muted
+        Glyph(glyphTint) {
+            Text(
+                name.take(1).uppercase(),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = glyphTint,
+            )
+        }
+        Column(Modifier.weight(1f)) {
+            Text(name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+            Text(
+                if (enabled) note else "$note · paused",
+                fontSize = 13.sp,
+                color = Palette.Muted,
+            )
+        }
+        Switch(enabled, onToggle)
+    }
+}
 
+/** The subtitle under "Plan": what the list below adds up to, in one sentence. */
+private fun summarise(running: Int, fromCalendar: Int, noProfiles: Boolean, loading: Boolean): String {
+    if (loading) return "Reading your plan…"
+    if (noProfiles) return "Nothing set up yet."
+    if (running == 0) return "Nothing runs on its own right now."
+    val blocks = if (running == 1) "One block." else "$running blocks."
+    return when (fromCalendar) {
+        0 -> blocks
+        1 -> "$blocks One comes from your calendar."
+        running -> "$blocks All from your calendar."
+        else -> "$blocks $fromCalendar come from your calendar."
+    }
+}
 
+/** What a profile is attached to, said as a count rather than as a list of ids. */
+private fun countWindows(
+    weekly: List<WeeklySchedule>,
+    rules: List<CalendarSchedule>,
+    profile: String,
+): String {
+    val count = weekly.count { it.profile == profile } + rules.count { it.profile == profile }
+    return when (count) {
+        0 -> "nothing starts it yet"
+        1 -> "1 thing starts it"
+        else -> "$count things start it"
+    }
+}
 
 /**
  * A form that is open, over a schedule being edited or nothing for a new one.

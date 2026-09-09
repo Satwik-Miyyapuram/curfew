@@ -339,6 +339,8 @@ internal fun WeeklyDialog(
                             startMinute = startMinutes ?: 0,
                             endMinute = endMinutes ?: 0,
                             locks = locks,
+                            // Editing a paused window must not quietly switch it back on.
+                            enabled = existing?.enabled ?: true,
                         ),
                     )
                 },
@@ -474,6 +476,8 @@ internal fun CalendarDialog(
                             padBeforeSeconds = (beforeMinutes ?: 0) * 60,
                             padAfterSeconds = (afterMinutes ?: 0) * 60,
                             locks = locks,
+                            // Editing a paused rule must not quietly switch it back on.
+                            enabled = existing?.enabled ?: true,
                         ),
                     )
                 },

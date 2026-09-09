@@ -31,6 +31,19 @@ pub struct WeeklySchedule {
     /// Conditions guarding the session this window starts.
     #[serde(default)]
     pub locks: Vec<Lock>,
+    /// Whether the window runs at all.
+    ///
+    /// Pausing a window is not the same as deleting it: "not this week" is a thing people mean
+    /// often, and without somewhere to put it they delete the window and rebuild it from memory
+    /// later, usually wrong. It defaults to true so every config written before this field
+    /// existed keeps running exactly as it did.
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+}
+
+/// Serde's default for the `enabled` fields: an absent flag means the schedule runs.
+fn enabled_by_default() -> bool {
+    true
 }
 
 /// A calendar event as the platform read it. Times are absolute instants; an all-day event is
@@ -104,6 +117,9 @@ pub struct CalendarSchedule {
     pub pad_after_seconds: u32,
     #[serde(default)]
     pub locks: Vec<Lock>,
+    /// Whether the rule runs at all. See [`WeeklySchedule::enabled`].
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -232,6 +248,9 @@ impl WeeklySchedule {
     }
 
     fn runs_on(&self, date: NaiveDate) -> bool {
+        if !self.enabled {
+            return false;
+        }
         let weekday = date.weekday().num_days_from_monday() as u8;
         self.days.is_empty() || self.days.contains(&weekday)
     }
@@ -251,6 +270,9 @@ impl CalendarSchedule {
     /// Every activation this schedule produces from a snapshot, whether or not it covers `now`.
     /// Used both for enforcement and for the preview timeline.
     pub fn activations(&self, events: &[CalendarEvent]) -> Vec<Activation> {
+        if !self.enabled {
+            return Vec::new();
+        }
         events
             .iter()
             .filter(|e| self.matcher.matches(e))

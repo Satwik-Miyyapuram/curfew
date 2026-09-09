@@ -256,6 +256,7 @@ fn a_calendar_event_starts_a_session_the_same_way_a_weekly_window_does() {
         locks: vec![Lock::Timer],
         pad_before_seconds: 0,
         pad_after_seconds: 0,
+        enabled: true,
     }];
     let mut enforcer = Enforcer::new(config, std::env::temp_dir().join("curfew-tick-cal-hosts"));
     let table = Fake::new(vec![proc(1, "steam.exe")]);

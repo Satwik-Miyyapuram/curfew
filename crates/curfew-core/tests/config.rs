@@ -299,6 +299,7 @@ fn window(id: &str, profile: &str) -> WeeklySchedule {
         start_minute: 9 * 60,
         end_minute: 17 * 60,
         locks: Vec::new(),
+        enabled: true,
     }
 }
 
@@ -310,6 +311,7 @@ fn rule(id: &str, profile: &str) -> CalendarSchedule {
         pad_before_seconds: 60,
         pad_after_seconds: 0,
         locks: Vec::new(),
+        enabled: true,
     }
 }
 

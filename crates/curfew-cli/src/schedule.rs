@@ -396,6 +396,8 @@ fn add_window(path: &str, args: &[&str]) -> Result<(), String> {
         start_minute: minutes(flags.required("from")?)?,
         end_minute: minutes(flags.required("to")?)?,
         locks: locks(&flags)?,
+        // Made from the command line, so it runs; pausing is a later edit.
+        enabled: true,
     };
 
     let mut cfg = load(path)?;
@@ -460,6 +462,8 @@ fn add_calendar(path: &str, args: &[&str]) -> Result<(), String> {
         pad_before_seconds: minutes_flag(&flags, "pad-before")?.unwrap_or(0) * 60,
         pad_after_seconds: minutes_flag(&flags, "pad-after")?.unwrap_or(0) * 60,
         locks: locks(&flags)?,
+        // Made from the command line, so it runs; pausing is a later edit.
+        enabled: true,
     };
 
     let mut cfg = load(path)?;
