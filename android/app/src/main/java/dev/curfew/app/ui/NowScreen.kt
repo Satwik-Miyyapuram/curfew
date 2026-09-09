@@ -28,6 +28,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -137,6 +147,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             items(state.sessions, key = { it.id }) { session ->
                 SessionCard(
                     session = session,
+                    name = state.profiles.firstOrNull { it.id == session.profile }?.name
+                        ?: session.profile,
                     now = state.now,
                     passesLeft = state.passesLeft,
                     passRefusal = state.passRefusal,
@@ -319,6 +331,7 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
 @Composable
 private fun SessionCard(
     session: Session,
+    name: String,
     now: Long,
     passesLeft: Int,
     passRefusal: PassRefusal?,
@@ -327,19 +340,62 @@ private fun SessionCard(
     onEmergency: () -> Unit,
     onPresentTag: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Palette.Surface),
+    ) {
+        Column(
+            modifier = Modifier
+                // A running block is the one state in this app that should look like something is
+                // happening. A flat card with a coloured edge said it the way a table row says it;
+                // the amber it warms towards is the same amber the notification and the tile use,
+                // so the colour means one thing everywhere.
+                .background(
+                    Brush.linearGradient(
+                        0f to Palette.Live.copy(alpha = 0.16f),
+                        0.45f to Palette.Live.copy(alpha = 0.04f),
+                        1f to Palette.Surface,
+                    ),
+                )
+                .padding(16.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Palette.Live)
+                        .border(4.dp, Palette.Live.copy(alpha = 0.18f), CircleShape),
+                )
+                Text(
+                    "ENFORCING",
+                    style = MaterialTheme.typography.labelSmall,
+                    letterSpacing = 1.4.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.Live,
+                )
+            }
             Text(
-                session.profile,
-                style = MaterialTheme.typography.titleMedium,
+                // The name, never the id. Which profile is running is the user's own word for it.
+                name,
+                style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.semantics { heading() },
             )
-            Text(describeSource(session.source), style = MaterialTheme.typography.bodySmall)
+            Text(
+                describeSource(session.source),
+                style = MaterialTheme.typography.bodySmall,
+                color = Palette.Muted,
+            )
 
             session.lock.endsAt?.let { endsAt ->
                 Text(
                     "Ends ${relative(endsAt, now)} (${clockTime(endsAt)})",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Palette.Live,
                     modifier = Modifier
                         .padding(top = 8.dp)
                         // Screen readers should hear the whole sentence, not a bare clock time.

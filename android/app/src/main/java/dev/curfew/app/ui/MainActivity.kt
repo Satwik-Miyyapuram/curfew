@@ -152,7 +152,11 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
         ) {
             composable(Tab.Now.route) { NowScreen(model, onStartTimer = { go(Routes.TIMER) }) }
             composable(Tab.Schedule.route) {
-                ScheduleScreen(model, onNewProfile = { go(Routes.PROFILE_NEW) })
+                ScheduleScreen(
+                    model,
+                    onNewProfile = { go(Routes.PROFILE_NEW) },
+                    onEditProfile = { go(Routes.profile(it)) },
+                )
             }
             composable(Tab.Apps.route) { AppPickerScreen(model) }
             composable(Tab.Settings.route) { SettingsScreen(model, onOpen = ::go) }

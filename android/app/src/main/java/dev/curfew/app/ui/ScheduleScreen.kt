@@ -51,7 +51,11 @@ import dev.curfew.policy.WeeklySchedule
  * the device unprotected.
  */
 @Composable
-fun ScheduleScreen(model: CurfewViewModel, onNewProfile: () -> Unit = {}) {
+fun ScheduleScreen(
+    model: CurfewViewModel,
+    onNewProfile: () -> Unit = {},
+    onEditProfile: (String) -> Unit = {},
+) {
     val state by model.state.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(state.configToml) }
     var editing by remember { mutableStateOf(false) }
@@ -186,7 +190,9 @@ fun ScheduleScreen(model: CurfewViewModel, onNewProfile: () -> Unit = {}) {
                     Text(profile.name, style = MaterialTheme.typography.titleMedium)
                     Text(profile.id, style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { profileForm = Editing(profile) }) { Text("Rename") }
+                        // Everything about a profile now lives on one screen, so this opens that rather
+                        // than a rename box: a name was never the only thing anyone came here to change.
+                        TextButton(onClick = { onEditProfile(profile.id) }) { Text("Edit") }
                         TextButton(onClick = { removingProfile = profile }) { Text("Remove") }
                     }
                 }
