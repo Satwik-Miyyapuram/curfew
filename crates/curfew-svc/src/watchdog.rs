@@ -19,6 +19,11 @@ use std::time::Duration;
 pub const POLL: Duration = Duration::from_secs(3);
 
 /// What the watchdog can see about the service.
+///
+/// Off Windows `sys::look` can only answer `Gone`, so in a build with the tests compiled out
+/// nothing constructs the other two. They are still the shape of the decision — the tests
+/// below walk every pair — so the variants stay and the lint is told why.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Seen {
     /// The service exists and is running. Nothing to do.
