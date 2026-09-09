@@ -479,6 +479,23 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Create or rename a profile and give it a window, in that order, in one coroutine.
+     *
+     * Two separate calls raced: each launches its own coroutine, and a window naming a profile the
+     * core has not seen yet is refused. Doing both here means the window is only ever written after
+     * the profile it names exists, and one failure message is shown instead of two.
+     */
+    fun saveProfileWithWindow(id: String, name: String, window: WeeklySchedule) {
+        viewModelScope.launch {
+            runtime.saveProfile(id, name)
+                .mapCatching { runtime.saveWeekly(window).getOrThrow() }
+                .onSuccess { say("Saved.") }
+                .onFailure { say(it.message ?: "That window could not be saved.") }
+            refresh()
+        }
+    }
+
     fun deleteProfile(id: String) {
         viewModelScope.launch {
             runtime.deleteProfile(id)

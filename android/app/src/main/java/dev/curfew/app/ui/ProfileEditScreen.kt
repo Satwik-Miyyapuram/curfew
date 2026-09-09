@@ -3,27 +3,25 @@ package dev.curfew.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,8 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,11 +40,13 @@ import dev.curfew.policy.Lock
 import dev.curfew.policy.WeeklySchedule
 
 private val DAYS = listOf("M", "T", "W", "T", "F", "S", "S")
+
+/** Starting points, as the canvas spells them: an emoji and a word, not a template menu. */
 private val PRESETS = listOf(
-    "Study" to "Study",
-    "Sleep" to "Sleep",
-    "Socials diet" to "Socials diet",
-    "Weekend" to "Weekend",
+    "📚" to "Study",
+    "🌙" to "Sleep",
+    "📱" to "Socials diet",
+    "🏠" to "Weekend",
 )
 
 /**
@@ -65,52 +65,108 @@ private val PRESETS = listOf(
 @Composable
 fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
-    val existing = state.profiles.firstOrNull { it.id == id }
-    var name by remember(id) { mutableStateOf(existing?.name.orEmpty()) }
 
-    // The id is minted from the name the first time and never shown or changed afterwards: renaming
-    // a profile must not orphan the schedules pointing at it.
+    // Matched on the minted id as well as the routed one, so the screen stops calling itself
+    // "New profile" the moment the first save lands and starts editing what it just created.
+    var name by remember(id) { mutableStateOf("") }
+    val existing = state.profiles.firstOrNull { it.id == (id ?: slug(name)) }
+
+    LaunchedEffect(existing?.id) {
+        if (name.isBlank()) existing?.let { name = it.name }
+    }
+
+    // The id is minted from the name the first time and never shown or changed afterwards:
+    // renaming a profile must not orphan the schedules pointing at it.
     val profileId = id ?: slug(name)
     val windows = state.weekly.filter { it.profile == profileId }
+    val tint = Palette.ProfileColours[
+        state.profiles.indexOfFirst { it.id == profileId }
+            .coerceAtLeast(0) % Palette.ProfileColours.size,
+    ]
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text(
-            if (existing == null) "New profile" else existing.name,
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.semantics { heading() },
-        )
-
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("What should we call it?") },
-            supportingText = { Text("A name you would say out loud.") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    Screen(spacing = 0.dp) {
+        BackRow(if (existing == null) "New profile" else existing.name, onDone)
 
         if (existing == null) {
-            Text("Or start from one of these", style = MaterialTheme.typography.labelSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PRESETS.forEach { (label, value) ->
-                    Chip(label, selected = name == value, onClick = { name = value })
+            Gap(10.dp)
+            Title("What should we call this one?", size = 26)
+            Gap(6.dp)
+            Sub("A name you would say out loud. You can change it whenever.")
+        }
+
+        Gap(20.dp)
+        NameField(name, tint) { name = it }
+
+        if (existing == null) {
+            Gap(22.dp)
+            SectionLabel("Or start from one of these")
+            Gap(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PRESETS.forEach { (emoji, value) ->
+                    Pill("$emoji $value", selected = name == value, onClick = { name = value })
                 }
             }
         }
 
-        Text("When it runs", style = MaterialTheme.typography.labelSmall)
+        Gap(22.dp)
+        SectionLabel("Starts because of")
+        Gap(9.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            windows.forEach { window ->
+                Pill(summarise(window), tint = Palette.Accent)
+            }
+            Pill(
+                text = "+ Add",
+                tint = if (name.isBlank()) Palette.Dim else Palette.Accent,
+                onClick = {
+                    if (name.isBlank()) {
+                        model.say("Give it a name first.")
+                        return@Pill
+                    }
+                    model.saveProfileWithWindow(
+                        profileId,
+                        name.trim(),
+                        WeeklySchedule(
+                            // Minted from the clock so two windows added in the same session
+                            // cannot collide, and never shown.
+                            id = "w-${state.now}",
+                            profile = profileId,
+                            // A weeknight evening: the commonest thing anyone sets up, and every
+                            // part of it is a control on the card that appears.
+                            // Monday is 0 and Sunday is 6, the way the core counts days from
+                            // Monday. Numbering these from 1 made every Sunday window invalid.
+                            days = listOf(0, 1, 2, 3, 4),
+                            startMinute = 21 * 60,
+                            // Midnight at the far end is 0, not 1440: the core reads an end at or
+                            // before the start as "the next day", and refuses any minute outside
+                            // the day itself.
+                            endMinute = 0,
+                            locks = listOf(Lock.Confirm),
+                        ),
+                    )
+                },
+            )
+        }
+
         if (windows.isEmpty()) {
+            Gap(10.dp)
             Text(
-                "Nothing starts it yet. Add a window below, or leave it and start it by hand " +
-                    "with a timer whenever you want.",
-                style = MaterialTheme.typography.bodyMedium,
+                "Nothing starts it yet. Add a window, or leave it and start it by hand with a " +
+                    "timer whenever you want.",
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
                 color = Palette.Muted,
             )
         }
+
         windows.forEach { window ->
+            Gap(12.dp)
             WindowCard(
                 window = window,
                 onChange = { model.saveWeekly(it) },
@@ -118,60 +174,97 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             )
         }
 
-        OutlinedButton(
-            onClick = {
-                if (name.isBlank()) {
-                    model.say("Give it a name first.")
-                    return@OutlinedButton
-                }
-                model.saveProfile(profileId, name.trim())
-                model.saveWeekly(
-                    WeeklySchedule(
-                        // Minted from the clock so two windows added in the same session cannot
-                        // collide, and never shown.
-                        id = "w-${state.now}",
-                        profile = profileId,
-                        // A weeknight evening: the commonest thing anyone sets up, and every part
-                        // of it is a control on the card that appears.
-                        days = listOf(1, 2, 3, 4, 5),
-                        startMinute = 21 * 60,
-                        endMinute = 24 * 60,
-                        locks = listOf(Lock.Confirm),
-                    ),
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Add a window")
-        }
-
+        Gap(18.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (existing != null) {
-                OutlinedButton(
-                    onClick = {
-                        model.deleteProfile(existing.id)
-                        onDone()
-                    },
+                GhostButton(
+                    text = "Delete",
                     modifier = Modifier.weight(1f),
+                    colour = Palette.Bad,
                 ) {
-                    Text("Delete", color = Palette.Bad)
+                    model.deleteProfile(existing.id)
+                    onDone()
                 }
             }
-            Button(
-                onClick = {
-                    if (name.isBlank()) {
-                        model.say("Give it a name first.")
-                        return@Button
-                    }
-                    model.saveProfile(profileId, name.trim())
-                    onDone()
-                },
+            PrimaryButton(
+                text = "Save",
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Save")
+                if (name.isBlank()) {
+                    model.say("Give it a name first.")
+                    return@PrimaryButton
+                }
+                model.saveProfile(profileId, name.trim())
+                onDone()
             }
         }
     }
+
+    // Whatever the core said. This screen used to swallow it, which is how "Add a window" could
+    // fail silently and leave a profile with no schedule and no explanation.
+    state.message?.let { message ->
+        AlertDialog(
+            onDismissRequest = model::dismissMessage,
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
+        )
+    }
+}
+
+/**
+ * The name, as the largest editable thing on the screen.
+ *
+ * Drawn rather than themed because a Material text field brings a floating label, a filled
+ * container and its own idea of a focus colour, none of which belong on a card whose whole point
+ * is that it looks like the profile it is about to become.
+ */
+@Composable
+private fun NameField(
+    value: String,
+    tint: androidx.compose.ui.graphics.Color,
+    onChange: (String) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(RoundedCornerShape(Dsn.CardRadius))
+            .background(Palette.Surface)
+            .border(
+                1.dp,
+                if (value.isBlank()) Palette.Line else tint,
+                RoundedCornerShape(Dsn.CardRadius),
+            )
+            .padding(horizontal = Dsn.CardPad),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (value.isEmpty()) {
+            Text("Name it", fontSize = 19.sp, color = Palette.Dim)
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                fontSize = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.Text,
+            ),
+            cursorBrush = SolidColor(tint),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** "Mon–Fri 21:00 → midnight", the way the pill on the canvas says it. */
+private fun summarise(window: WeeklySchedule): String {
+    val days = when {
+        window.days == listOf(0, 1, 2, 3, 4) -> "Mon–Fri"
+        window.days == listOf(5, 6) -> "Weekend"
+        window.days.size == 7 -> "Every day"
+        else -> window.days.joinToString("") { DAYS.getOrElse(it) { "?" } }
+    }
+    return "$days ${clock(window.startMinute)} → ${clock(window.endMinute)}"
 }
 
 /**
@@ -187,60 +280,68 @@ private fun WindowCard(
     onChange: (WeeklySchedule) -> Unit,
     onRemove: () -> Unit,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = Palette.Surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                DAYS.forEachIndexed { index, letter ->
-                    // Monday is 1 in the config, and Sunday is 7 — the ISO numbering the core
-                    // uses, kept out of the user's way.
-                    val day = index + 1
-                    val on = day in window.days
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (on) Palette.Accent else Palette.Raised)
-                            .clickable {
-                                val days = if (on) window.days - day else window.days + day
-                                onChange(window.copy(days = days.sorted()))
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            letter,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = if (on) Palette.Ink else Palette.Muted,
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(color = Palette.Line)
-
-            MinuteRow("Starts", window.startMinute) { onChange(window.copy(startMinute = it)) }
-            MinuteRow("Ends", window.endMinute) { onChange(window.copy(endMinute = it)) }
-
-            HorizontalDivider(color = Palette.Line)
-
-            Text("Getting out early", style = MaterialTheme.typography.labelSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                strengths().forEach { (label, lock) ->
-                    Chip(
-                        label,
-                        selected = window.locks.firstOrNull() == lock,
-                        onClick = { onChange(window.copy(locks = listOfNotNull(lock))) },
+    DCard {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            DAYS.forEachIndexed { index, letter ->
+                // Monday is 1 in the config, and Sunday is 7 — the ISO numbering the core uses,
+                // kept out of the user's way.
+                val day = index
+                val on = day in window.days
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (on) Palette.Accent else Palette.Raised)
+                        .clickable {
+                            val days = if (on) window.days - day else window.days + day
+                            onChange(window.copy(days = days.sorted()))
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        letter,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = if (on) Palette.Ink else Palette.Muted,
                     )
                 }
             }
-
-            Text(
-                "Remove this window",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Palette.Bad,
-                modifier = Modifier.clickable(onClick = onRemove),
-            )
         }
+
+        Gap(14.dp)
+        Rule()
+        Gap(14.dp)
+
+        MinuteRow("Starts", window.startMinute) { onChange(window.copy(startMinute = it)) }
+        Gap(10.dp)
+        MinuteRow("Ends", window.endMinute) { onChange(window.copy(endMinute = it)) }
+
+        Gap(14.dp)
+        Rule()
+        Gap(14.dp)
+
+        SectionLabel("How hard is it to get out")
+        Gap(9.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            strengths().forEach { (label, lock) ->
+                Pill(
+                    label,
+                    selected = window.locks.firstOrNull() == lock,
+                    onClick = { onChange(window.copy(locks = listOfNotNull(lock))) },
+                )
+            }
+        }
+
+        Gap(14.dp)
+        Text(
+            "Remove this window",
+            fontSize = 13.sp,
+            color = Palette.Bad,
+            modifier = Modifier.clickable(onClick = onRemove),
+        )
     }
 }
 
@@ -254,29 +355,49 @@ private fun strengths(): List<Pair<String, Lock?>> = listOf(
 
 @Composable
 private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, fontSize = 15.sp, color = Palette.Text, modifier = Modifier.weight(1f))
+        // The stepper from the canvas: a raised tray holding minus, the value, and an accented
+        // plus. The tray is what makes the two glyphs read as one control rather than two buttons.
         Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(11.dp))
+                .background(Palette.Raised)
+                .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Nudge("−", "fifteen minutes earlier") {
-                onChange(((minute - 15) + 24 * 60) % (24 * 60 + 1))
+            Nudge("−", "fifteen minutes earlier", accent = false) {
+                onChange(((minute - 15) + 24 * 60) % (24 * 60))
             }
             Text(
                 clock(minute),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 6.dp),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Palette.Text,
+                modifier = Modifier.width(62.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-            Nudge("+", "fifteen minutes later") { onChange((minute + 15).coerceAtMost(24 * 60)) }
+            Nudge("+", "fifteen minutes later", accent = true) {
+                onChange((minute + 15) % (24 * 60))
+            }
         }
     }
 }
 
-/** Minutes past midnight as a clock face. 1440 is midnight at the far end, not 24:00. */
+/**
+ * Minutes past midnight as a clock face.
+ *
+ * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far
+ * end of an evening window rather than the start of one, and a window that ends at or before it
+ * starts is the core's own way of saying "and on into tomorrow".
+ */
 private fun clock(minute: Int): String {
-    val m = minute.coerceIn(0, 24 * 60)
-    if (m == 24 * 60) return "midnight"
+    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
+    if (m == 0) return "midnight"
     return "%02d:%02d".format(m / 60, m % 60)
 }
 
@@ -284,38 +405,20 @@ private fun slug(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "profile" }
 
 @Composable
-private fun Nudge(glyph: String, description: String, onClick: () -> Unit) {
+private fun Nudge(glyph: String, description: String, accent: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Raised)
+            .size(30.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (accent) Palette.Accent else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(glyph, fontSize = 17.sp, color = Palette.Text)
-    }
-}
-
-@Composable
-private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (selected) Palette.Accent else Palette.Raised)
-            .border(
-                1.dp,
-                if (selected) Palette.Accent else Palette.Line,
-                RoundedCornerShape(999.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 7.dp),
-    ) {
         Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) Palette.Ink else Palette.Muted,
+            glyph,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (accent) Palette.Ink else Palette.Muted,
         )
     }
 }

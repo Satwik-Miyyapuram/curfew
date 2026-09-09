@@ -106,73 +106,115 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text(
-            if (state.isEnforcing) "Curfew is enforcing" else "Nothing is running",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(
-            if (state.isEnforcing) {
-                "${state.sessions.size} session${if (state.sessions.size == 1) "" else "s"} active."
-            } else {
-                "No profile is active. Schedules will start one when their time comes."
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+    val live = state.sessions.firstOrNull()
+    val liveName = live?.let { session ->
+        state.profiles.firstOrNull { it.id == session.profile }?.name ?: session.profile
+    }
 
-        // The one thing this screen could not do before: start a block because the user decided to,
-        // rather than because a schedule said so. It sits above the session list because that is
-        // where a user looks when the answer is "nothing is running" and they wanted otherwise.
-        Button(
-            onClick = onStartTimer,
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        ) {
-            Text("Start a block now")
+    Screen(spacing = 0.dp) {
+        if (live != null) {
+            // Amber is reserved for this: a block is running right now. It appears above the
+            // heading because the state of the phone is the first thing this screen is for.
+            Pill("Blocking now", tint = Palette.Live)
+            Gap(14.dp)
+            Title(liveName.orEmpty())
+            Sub(describeSource(live.source))
+        } else {
+            Title("Nothing is blocked" + '\n' + "right now.")
+            Sub(
+                if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
+                    "Nothing is set to start on its own. Start a block by hand whenever you want."
+                } else {
+                    "Curfew is watching your schedule. It will start one when its time comes."
+                },
+            )
+        }
+
+        Gap(if (live == null) 26.dp else 22.dp)
+
+        DCard(padding = 22.dp) {
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                if (live != null) {
+                    val endsAt = live.lock.endsAt
+                    Dial(
+                        fraction = remaining(live, state.now),
+                        diameter = 196.dp,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            DialNumber(endsAt?.let { countdown(it, state.now) } ?: "—")
+                            Text(
+                                endsAt?.let { "left · ends ${clockOf(it)}" } ?: "no end time",
+                                fontSize = 14.sp,
+                                color = Palette.Muted,
+                            )
+                        }
+                    }
+                } else {
+                    Dial(fraction = 0f, diameter = 186.dp, stroke = 10.dp) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text("Next up", fontSize = 15.sp, color = Palette.Muted)
+                            Text(
+                                nextStart(state.weekly) ?: "—",
+                                fontSize = 34.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-1).sp,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                nextNote(state.weekly, state.profiles.associate { it.id to it.name }),
+                                fontSize = 13.sp,
+                                color = Palette.Dim,
+                            )
+                        }
+                    }
+                    PrimaryButton("Start a block now", onClick = onStartTimer)
+                }
+            }
         }
 
         state.downtime?.let { downtime ->
+            Gap(14.dp)
             DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
         }
 
         state.clockTamper?.let { tamper ->
+            Gap(14.dp)
             ClockTamperBanner(tamper = tamper, onDismiss = model::dismissClockTamper)
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(state.sessions, key = { it.id }) { session ->
-                SessionCard(
-                    session = session,
-                    name = state.profiles.firstOrNull { it.id == session.profile }?.name
-                        ?: session.profile,
-                    now = state.now,
-                    passesLeft = state.passesLeft,
-                    passRefusal = state.passRefusal,
-                    onEnd = { end(session) },
-                    onRelease = { model.requestRelease(session) },
-                    onEmergency = { confirmingPass = session },
-                    onPresentTag = { presenting = session },
-                )
-            }
-            // Sessions another device is waiting on this one for. Usually not in the list above:
-            // the lock is over there, and this device is only the key.
-            if (state.releasable.isNotEmpty()) {
-                item {
-                    ReleaseCard(
-                        sessions = state.releasable,
-                        onRelease = { confirmingRelease = it },
-                    )
-                }
-            }
-            if (state.sessions.isEmpty()) {
-                item {
-                    TextButton(onClick = model::reconcileNow) { Text("Check the schedules now") }
-                }
-            }
+        state.sessions.forEach { session ->
+            Gap(14.dp)
+            SessionCard(
+                session = session,
+                name = state.profiles.firstOrNull { it.id == session.profile }?.name
+                    ?: session.profile,
+                now = state.now,
+                passesLeft = state.passesLeft,
+                passRefusal = state.passRefusal,
+                onEnd = { end(session) },
+                onRelease = { model.requestRelease(session) },
+                onEmergency = { confirmingPass = session },
+                onPresentTag = { presenting = session },
+            )
+        }
+
+        // Sessions another device is waiting on this one for. Usually not in the list above: the
+        // lock is over there, and this device is only the key.
+        if (state.releasable.isNotEmpty()) {
+            Gap(14.dp)
+            ReleaseCard(sessions = state.releasable, onRelease = { confirmingRelease = it })
+        }
+
+        if (state.sessions.isEmpty()) {
+            Gap(14.dp)
+            GhostButton("Check the schedules now", colour = Palette.Muted, onClick = model::reconcileNow)
         }
     }
 
@@ -628,3 +670,56 @@ private data class PendingEnd(
     val lock: Lock.Challenge,
     val challenge: Challenge,
 )
+
+/**
+ * How much of a running block is left, as a fraction of the whole of it.
+ *
+ * A session with no end time draws a full ring rather than an empty one: it is not almost over,
+ * it is indefinite, and an empty ring would read as "nearly done".
+ */
+private fun remaining(session: Session, now: Long): Float {
+    val ends = session.lock.endsAt ?: return 1f
+    val started = session.startedAt
+    val whole = (ends - started).coerceAtLeast(1)
+    return ((ends - now).toFloat() / whole.toFloat()).coerceIn(0f, 1f)
+}
+
+/** "1:12", the way a clock left-of-the-colon counts down. Seconds only under a minute. */
+private fun countdown(endsAt: Long, now: Long): String {
+    val left = ((endsAt - now) / 1000).coerceAtLeast(0)
+    val hours = left / 3600
+    val minutes = (left % 3600) / 60
+    return when {
+        hours > 0 -> "$hours:%02d".format(minutes)
+        minutes > 0 -> "${minutes}m"
+        else -> "${left}s"
+    }
+}
+
+/** An epoch millisecond as a wall clock, in whatever zone the phone is in. */
+private fun clockOf(epochMillis: Long): String {
+    val time = java.time.Instant.ofEpochMilli(epochMillis)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toLocalTime()
+    return "%02d:%02d".format(time.hour, time.minute)
+}
+
+/** The earliest start among the weekly windows, as a clock face, or null when there are none. */
+private fun nextStart(weekly: List<dev.curfew.policy.WeeklySchedule>): String? =
+    weekly.minByOrNull { it.startMinute }
+        ?.let { "%02d:%02d".format(it.startMinute / 60, it.startMinute % 60) }
+
+/** "Deep work · 2h" under the next start, or the reason there is nothing to say. */
+private fun nextNote(
+    weekly: List<dev.curfew.policy.WeeklySchedule>,
+    names: Map<String, String>,
+): String {
+    val next = weekly.minByOrNull { it.startMinute } ?: return "nothing scheduled"
+    val length = (next.endMinute - next.startMinute).coerceAtLeast(0)
+    val spelled = when {
+        length >= 60 && length % 60 == 0 -> "${length / 60}h"
+        length >= 60 -> "${length / 60}h ${length % 60}m"
+        else -> "${length}m"
+    }
+    return "${names[next.profile] ?: next.profile} · $spelled"
+}

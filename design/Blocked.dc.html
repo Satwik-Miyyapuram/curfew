@@ -1,0 +1,48 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:22px; --r-ctl:14px;
+ --f:-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+}
+body{width:390px;height:844px;background:var(--bg);color:var(--tx);font-family:var(--f);
+ -webkit-font-smoothing:antialiased;overflow:hidden;position:relative}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600;color:var(--tx);letter-spacing:.2px}
+.body{padding:0 20px;height:calc(844px - 44px - 86px);overflow:hidden}
+h1{font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1.15}
+.sub{font-size:14px;color:var(--mut);line-height:1.45;margin-top:6px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:18px}
+.lbl{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
+.btn{height:52px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:16px;font-weight:650;display:flex;align-items:center;justify-content:center;border:none;width:100%;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
+.tabs{position:absolute;bottom:0;left:0;right:0;height:86px;background:rgba(13,16,22,.92);border-top:1px solid var(--line);display:flex;align-items:flex-start;padding:12px 8px 0}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dim);font-size:11px;font-weight:600}
+.tab.on{color:var(--tx)}
+.tab .ic{width:26px;height:26px;display:grid;place-items:center}
+.tab.on .ic{background:var(--sur2);border-radius:9px;width:44px;height:30px}
+svg{display:block}
+</style>
+<div class="status"><span>9:41</span><span style="display:flex;gap:6px;align-items:center;color:var(--mut);font-size:11px">
+<svg width="16" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+<svg width="24" height="12" viewBox="0 0 26 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3.5"/><rect x="2.5" y="2.5" width="14" height="7" rx="2" fill="currentColor"/><path d="M24 4.5v3" stroke-width="2" stroke-linecap="round"/></svg></span></div>
+
+<div class="body" style="height:calc(844px - 44px);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 34px">
+  <div style="width:96px;height:96px;border-radius:32px;background:rgba(242,166,90,.12);display:grid;place-items:center">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#F2A65A" stroke-width="1.7"><rect x="4" y="10" width="16" height="10" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+  </div>
+  <div style="height:28px"></div>
+  <div style="font-size:26px;font-weight:700;letter-spacing:-.5px">Instagram is blocked</div>
+  <div style="height:12px"></div>
+  <div style="font-size:15px;color:var(--mut);line-height:1.55">Deep work is running until <b style="color:var(--tx)">22:00</b>, because your calendar says Graph Machine Learning.</div>
+  <div style="height:10px"></div>
+  <div style="font-size:44px;font-weight:700;letter-spacing:-1.5px;color:var(--live);font-variant-numeric:tabular-nums">1:12</div>
+  <div style="height:34px"></div>
+  <button class="btn" style="background:var(--sur2);color:var(--tx)">Back to my home screen</button>
+  <div style="height:12px"></div>
+  <div style="font-size:13px;color:var(--dim)">Emergency pass &middot; 2 left this month</div>
+</div>

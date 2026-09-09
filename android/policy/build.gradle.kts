@@ -84,12 +84,31 @@ fun cargoEnv(spec: org.gradle.process.ProcessForkOptions) {
     androidNdkDir()?.let { spec.environment("ANDROID_NDK_HOME", it.absolutePath) }
 }
 
-/** The newest installed NDK, or null when the build is running without one. */
+/**
+ * The newest usable installed NDK, or null when the build is running without one.
+ *
+ * "Usable" is doing real work here. A cancelled or half-finished SDK Manager download leaves the
+ * version directory behind with nothing in it, and because that stub usually carries the highest
+ * version number it is exactly the one a "newest wins" rule picks — the build then fails with
+ * `Error detecting NDK version`, naming a path that plainly exists. `source.properties` is the
+ * file the NDK's own version detection reads, so its presence is the same question the toolchain
+ * is about to ask.
+ *
+ * Ordering is by version component, not by string: 9.x sorts above 27.x alphabetically.
+ */
 fun androidNdkDir(): File? {
     System.getenv("ANDROID_NDK_HOME")?.let { return File(it) }
     val sdk = android.sdkDirectory
     val ndks = File(sdk, "ndk").listFiles()?.filter { it.isDirectory }.orEmpty()
-    return ndks.maxByOrNull { it.name }
+    return ndks
+        .filter { File(it, "source.properties").isFile }
+        .maxWithOrNull(
+            compareBy { dir ->
+                dir.name.split(".").map { it.toIntOrNull() ?: 0 }
+                    .let { parts -> (0..2).map { parts.getOrElse(it) { 0 } } }
+                    .fold(0L) { acc, part -> acc * 1_000_000 + part }
+            },
+        )
 }
 
 val cargoBuild by tasks.registering(Exec::class) {

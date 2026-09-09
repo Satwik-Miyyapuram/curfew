@@ -1,0 +1,54 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:22px; --r-ctl:14px;
+ --f:-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+}
+body{width:390px;height:844px;background:var(--bg);color:var(--tx);font-family:var(--f);
+ -webkit-font-smoothing:antialiased;overflow:hidden;position:relative}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600;color:var(--tx);letter-spacing:.2px}
+.body{padding:0 20px;height:calc(844px - 44px - 86px);overflow:hidden}
+h1{font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1.15}
+.sub{font-size:14px;color:var(--mut);line-height:1.45;margin-top:6px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:18px}
+.lbl{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
+.btn{height:52px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:16px;font-weight:650;display:flex;align-items:center;justify-content:center;border:none;width:100%;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
+.tabs{position:absolute;bottom:0;left:0;right:0;height:86px;background:rgba(13,16,22,.92);border-top:1px solid var(--line);display:flex;align-items:flex-start;padding:12px 8px 0}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dim);font-size:11px;font-weight:600}
+.tab.on{color:var(--tx)}
+.tab .ic{width:26px;height:26px;display:grid;place-items:center}
+.tab.on .ic{background:var(--sur2);border-radius:9px;width:44px;height:30px}
+svg{display:block}
+</style>
+<div class="status"><span>9:41</span><span style="display:flex;gap:6px;align-items:center;color:var(--mut);font-size:11px">
+<svg width="16" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+<svg width="24" height="12" viewBox="0 0 26 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3.5"/><rect x="2.5" y="2.5" width="14" height="7" rx="2" fill="currentColor"/><path d="M24 4.5v3" stroke-width="2" stroke-linecap="round"/></svg></span></div>
+
+<div class="body">
+
+<div style="display:flex;align-items:center;gap:14px;height:44px">
+  <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#EDF1F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  <div style="font-size:16px;font-weight:650">Thesis writing</div>
+</div>
+
+  <div style="height:10px"></div>
+  <h1 style="font-size:26px">When should<br>it run?</h1>
+  <div class="sub">Pick as many as you like. They stack &mdash; a calendar rule and a nightly schedule can both switch the same profile on.</div>
+
+  <div style="height:20px"></div>
+  <div class="card" style="padding:0;overflow:hidden">
+<div style="padding:15px 16px;display:flex;gap:13px;align-items:center;border-bottom:1px solid var(--line)"><div style="width:40px;height:40px;border-radius:13px;background:#7C9CF522;border:1px solid #7C9CF555;display:grid;place-items:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#7C9CF5" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M3 12h18M3 19h12"/></svg></div><div style="flex:1"><div style="font-size:15px;font-weight:650">A repeating schedule</div><div style="font-size:12px;color:var(--mut);margin-top:3px;line-height:1.4">Weeknights 21:00 to midnight, every Mon&ndash;Fri.</div></div><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7C9CF5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M20 6L9 17l-5-5"/></svg></div><div style="padding:15px 16px;display:flex;gap:13px;align-items:center;border-bottom:1px solid var(--line)"><div style="width:40px;height:40px;border-radius:13px;background:#F2A65A22;border:1px solid #F2A65A55;display:grid;place-items:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#F2A65A" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5V12l3 2"/></svg></div><div style="flex:1"><div style="font-size:15px;font-weight:650">A timer I start myself</div><div style="font-size:12px;color:var(--mut);margin-top:3px;line-height:1.4">Tap once, block for 90 minutes. Nothing scheduled.</div></div><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2A65A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M20 6L9 17l-5-5"/></svg></div><div style="padding:15px 16px;display:flex;gap:13px;align-items:center;border-bottom:1px solid var(--line)"><div style="width:40px;height:40px;border-radius:13px;background:var(--sur2);border:1px solid var(--line);display:grid;place-items:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#5FD3A6" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v16H3zM8 3v4M16 3v4"/></svg></div><div style="flex:1"><div style="font-size:15px;font-weight:650">Anything in my calendar</div><div style="font-size:12px;color:var(--mut);margin-top:3px;line-height:1.4">Events whose title contains &ldquo;lecture&rdquo;.</div></div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5D6879" stroke-width="2" stroke-linecap="round" style="flex:none"><path d="M9 6l6 6-6 6"/></svg></div><div style="padding:15px 16px;display:flex;gap:13px;align-items:center;border-bottom:1px solid var(--line)"><div style="width:40px;height:40px;border-radius:13px;background:var(--sur2);border:1px solid var(--line);display:grid;place-items:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#E17BA8" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 100-18 9 9 0 000 18zM12 12l4-2"/></svg></div><div style="flex:1"><div style="font-size:15px;font-weight:650">A daily budget</div><div style="font-size:12px;color:var(--mut);margin-top:3px;line-height:1.4">Half an hour of socials a day, then they close.</div></div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5D6879" stroke-width="2" stroke-linecap="round" style="flex:none"><path d="M9 6l6 6-6 6"/></svg></div><div style="padding:15px 16px;display:flex;gap:13px;align-items:center;"><div style="width:40px;height:40px;border-radius:13px;background:var(--sur2);border:1px solid var(--line);display:grid;place-items:center;flex:none"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#8D9AAC" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg></div><div style="flex:1"><div style="font-size:15px;font-weight:650">Always on</div><div style="font-size:12px;color:var(--mut);margin-top:3px;line-height:1.4">Never unblocked, unless you spend a pass.</div></div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5D6879" stroke-width="2" stroke-linecap="round" style="flex:none"><path d="M9 6l6 6-6 6"/></svg></div>
+  </div>
+
+  <div style="height:16px"></div>
+  <div style="font-size:12px;color:var(--dim);line-height:1.5">Two chosen. Whichever starts first wins, and the block ends when the last one is done.</div>
+  <div style="height:14px"></div>
+  <button class="btn">Set up the schedule</button>
+</div>

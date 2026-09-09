@@ -1,0 +1,121 @@
+{
+ "artboards": [
+  {
+   "file": "Main.dc.html",
+   "x": 0,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Live.dc.html",
+   "x": 490,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "TodayPower.dc.html",
+   "x": 980,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Plan.dc.html",
+   "x": 1470,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Events.dc.html",
+   "x": 1960,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Apps.dc.html",
+   "x": 0,
+   "y": 1000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Blocked.dc.html",
+   "x": 980,
+   "y": 1000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Sites.dc.html",
+   "x": 490,
+   "y": 1000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Settings.dc.html",
+   "x": 1470,
+   "y": 1000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "System.dc.html",
+   "x": 1960,
+   "y": 1000,
+   "w": 820,
+   "h": 1020
+  },
+  {
+   "file": "ProfileNew.dc.html",
+   "x": 0,
+   "y": 2000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Triggers.dc.html",
+   "x": 490,
+   "y": 2000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Timer.dc.html",
+   "x": 980,
+   "y": 2000,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "ProfileEdit.dc.html",
+   "x": 1470,
+   "y": 2000,
+   "w": 390,
+   "h": 844
+  }
+ ],
+ "annotations": [
+  {
+   "id": "brief",
+   "x": 0,
+   "y": -180,
+   "w": 300,
+   "text": "Simple mode: 4 tabs, plain words. Power mode: 7 tabs, exact numbers, rule syntax. One toggle in Settings."
+  },
+  {
+   "id": "profiles",
+   "x": 0,
+   "y": 1900,
+   "w": 330,
+   "text": "Profiles: named, coloured, never an id. A profile can start from a schedule, a timer you tap, a calendar rule, a daily budget, or always. Every fixed number is a stepper."
+  }
+ ],
+ "launch": {
+  "view": "canvas"
+ }
+}

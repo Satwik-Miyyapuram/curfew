@@ -1,0 +1,79 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:22px; --r-ctl:14px;
+ --f:-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+}
+body{width:390px;height:844px;background:var(--bg);color:var(--tx);font-family:var(--f);
+ -webkit-font-smoothing:antialiased;overflow:hidden;position:relative}
+.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:13px;font-weight:600;color:var(--tx);letter-spacing:.2px}
+.body{padding:0 20px;height:calc(844px - 44px - 86px);overflow:hidden}
+h1{font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:1.15}
+.sub{font-size:14px;color:var(--mut);line-height:1.45;margin-top:6px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:18px}
+.lbl{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
+.btn{height:52px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:16px;font-weight:650;display:flex;align-items:center;justify-content:center;border:none;width:100%;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
+.tabs{position:absolute;bottom:0;left:0;right:0;height:86px;background:rgba(13,16,22,.92);border-top:1px solid var(--line);display:flex;align-items:flex-start;padding:12px 8px 0}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dim);font-size:11px;font-weight:600}
+.tab.on{color:var(--tx)}
+.tab .ic{width:26px;height:26px;display:grid;place-items:center}
+.tab.on .ic{background:var(--sur2);border-radius:9px;width:44px;height:30px}
+svg{display:block}
+</style>
+<div class="status"><span>9:41</span><span style="display:flex;gap:6px;align-items:center;color:var(--mut);font-size:11px">
+<svg width="16" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+<svg width="24" height="12" viewBox="0 0 26 12" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="21" height="11" rx="3.5"/><rect x="2.5" y="2.5" width="14" height="7" rx="2" fill="currentColor"/><path d="M24 4.5v3" stroke-width="2" stroke-linecap="round"/></svg></span></div>
+
+<div style="padding:32px 34px;width:820px;height:1020px;overflow:hidden">
+  <div style="font-size:13px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim)">Curfew &mdash; reinvented</div>
+  <div style="height:10px"></div>
+  <div style="font-size:34px;font-weight:700;letter-spacing:-.8px">Calm dark, one accent, one promise per screen</div>
+  <div style="height:26px"></div>
+
+  <div style="display:flex;gap:12px">
+<div style="flex:1"><div style="height:74px;border-radius:16px;background:#0D1016;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">bg</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#0D1016</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#161B23;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">surface</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#161B23</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#1D242E;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">raised</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#1D242E</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#2A3341;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">line</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#2A3341</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#7C9CF5;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">accent</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#7C9CF5</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#F2A65A;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">live</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#F2A65A</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#5FD3A6;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">ok</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#5FD3A6</div></div><div style="flex:1"><div style="height:74px;border-radius:16px;background:#F27272;border:1px solid var(--line)"></div><div style="font-size:12px;font-weight:650;margin-top:8px">stop</div><div style="font-size:11px;color:var(--dim);font-family:ui-monospace,monospace">#F27272</div></div>
+  </div>
+
+  <div style="height:34px"></div>
+  <div style="display:flex;gap:26px">
+    <div style="flex:1">
+      <div class="lbl">Type</div><div style="height:12px"></div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-.6px">Display 28/700</div>
+      <div style="font-size:16px;font-weight:650;margin-top:12px">Title 16/650</div>
+      <div style="font-size:15px;margin-top:10px">Body 15/400 &mdash; sentences, not labels.</div>
+      <div style="font-size:13px;color:var(--mut);margin-top:10px">Secondary 13/400 in muted</div>
+      <div class="lbl" style="margin-top:12px">Overline 11/700 tracked</div>
+      <div style="font-size:15px;font-family:ui-monospace,monospace;margin-top:12px">Mono 15 &mdash; 1:12:04, curfew.toml</div>
+    </div>
+    <div style="flex:1">
+      <div class="lbl">Rules</div><div style="height:12px"></div>
+      <ul style="font-size:14px;color:var(--mut);line-height:1.75;padding-left:18px">
+        <li>Cards 22px radius, controls 14px, pills 999px.</li>
+        <li>20px page gutter, 10px between cards, 18px inside them.</li>
+        <li>Amber means a block is live. Blue means you can touch it. Nothing else is coloured.</li>
+        <li>No id ever reaches the screen &mdash; profiles and events show their names.</li>
+        <li>Every empty state says what happens next, never just &ldquo;nothing here&rdquo;.</li>
+        <li>Simple hides tabs, not powers: every Power screen is reachable from Settings.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="height:30px"></div>
+  <div class="lbl">Navigation &mdash; simple (4) vs power (7)</div>
+  <div style="height:12px"></div>
+  <div style="display:flex;gap:16px">
+    <div style="flex:1;background:var(--sur);border:1px solid var(--line);border-radius:18px;padding:14px 8px;display:flex">
+<div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--tx)">Today</div><div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--dim)">Plan</div><div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--dim)">Apps</div><div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:var(--dim)">Settings</div>
+    </div>
+    <div style="flex:1;background:var(--sur);border:1px solid var(--line);border-radius:18px;padding:14px 6px;display:flex">
+<div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--tx)">Now</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Plan</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Events</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Apps</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Usage</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Sync</div><div style="flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim)">Health</div>
+    </div>
+  </div>
+</div>
