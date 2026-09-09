@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import dev.curfew.policy.Rule
 import dev.curfew.policy.Target
 import dev.curfew.policy.label
@@ -22,6 +21,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/** The two halves of "what does this profile block", each reachable without a scroll. */
+private enum class Pane { Apps, Sites }
 
 /**
  * Choosing apps without writing TOML.
@@ -66,6 +71,10 @@ fun AppPickerScreen(model: CurfewViewModel) {
     var checked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
+    // Which half of "what does this profile block" is on screen. Both used to live in one scroll,
+    // which meant the site list started wherever two hundred apps ended — a scroll to nowhere for
+    // the shorter and more often edited of the two lists.
+    var pane by remember { mutableStateOf(Pane.Apps) }
     // A profile the user asked to switch to while holding unsaved ticks, waiting on an answer.
     var switchingTo by remember { mutableStateOf<String?>(null) }
 
@@ -125,16 +134,36 @@ fun AppPickerScreen(model: CurfewViewModel) {
             }
         }
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = { Text("Search") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            Pane.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = pane == option,
+                    onClick = { pane = option },
+                    shape = SegmentedButtonDefaults.itemShape(index, Pane.entries.size),
+                    label = {
+                        Text(
+                            when (option) {
+                                Pane.Apps -> "Apps ${checked.size}"
+                                Pane.Sites -> "Websites ${beyondApps.size}"
+                            },
+                        )
+                    },
+                )
+            }
+        }
+
+        if (pane == Pane.Apps) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = { Text("Search") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+        }
 
         LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
-            items(visible, key = { it.packageName }) { app ->
+            if (pane == Pane.Apps) items(visible, key = { it.packageName }) { app ->
                 val isChecked = app.packageName in checked
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -163,16 +192,7 @@ fun AppPickerScreen(model: CurfewViewModel) {
                 }
             }
 
-            // Everything the profile blocks that is not an app, in the same scroll as the apps,
-            // because "what does this profile block" is one question and two lists that scroll
-            // separately read as two answers.
-            item {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                Text(
-                    "Sites and words",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.semantics { heading() },
-                )
+            if (pane == Pane.Sites) item {
                 if (beyondApps.isEmpty()) {
                     Text(
                         "Nothing yet. A site blocks it and its subdomains; a word blocks anything " +
@@ -183,7 +203,7 @@ fun AppPickerScreen(model: CurfewViewModel) {
                 }
             }
 
-            items(beyondApps, key = { it.target.label() + it.platforms }) { rule ->
+            if (pane == Pane.Sites) items(beyondApps, key = { it.target.label() + it.platforms }) { rule ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -203,7 +223,7 @@ fun AppPickerScreen(model: CurfewViewModel) {
                 }
             }
 
-            item {
+            if (pane == Pane.Sites) item {
                 TextButton(onClick = { adding = true }, enabled = current != null) {
                     Text("Block a site or word")
                 }
@@ -240,13 +260,15 @@ fun AppPickerScreen(model: CurfewViewModel) {
             )
         }
 
-        Text(
+        if (pane == Pane.Apps) Text(
             "Saving rewrites curfew.toml, which drops any comments you have written in it. " +
                 "Rules that are not a plain app block — budgets, delays, launch limits — are left " +
                 "alone.",
             style = MaterialTheme.typography.bodySmall,
         )
-        Row(
+        // Sites save the moment they are added or removed; only the app ticks are a batch, so the
+        // save bar belongs to that half alone rather than sitting greyed out under the other.
+        if (pane == Pane.Apps) Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
