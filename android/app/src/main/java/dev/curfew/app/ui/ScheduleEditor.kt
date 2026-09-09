@@ -130,10 +130,15 @@ internal fun describePadding(beforeSeconds: Int, afterSeconds: Int): String? {
 }
 
 @Composable
-internal fun WeeklyCard(window: WeeklySchedule, onEdit: () -> Unit, onDelete: () -> Unit) {
+internal fun WeeklyCard(
+    window: WeeklySchedule,
+    profile: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(window.profile, style = MaterialTheme.typography.titleMedium)
+            Text(profile, style = MaterialTheme.typography.titleMedium)
             Text(describeWindow(window), style = MaterialTheme.typography.bodyMedium)
             if (window.locks.isNotEmpty()) {
                 Text(
@@ -161,10 +166,15 @@ internal fun WeeklyCard(window: WeeklySchedule, onEdit: () -> Unit, onDelete: ()
 }
 
 @Composable
-internal fun CalendarRuleCard(rule: CalendarSchedule, onEdit: () -> Unit, onDelete: () -> Unit) {
+internal fun CalendarRuleCard(
+    rule: CalendarSchedule,
+    profile: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(rule.profile, style = MaterialTheme.typography.titleMedium)
+            Text(profile, style = MaterialTheme.typography.titleMedium)
             Text(describeMatcher(rule.matcher), style = MaterialTheme.typography.bodyMedium)
             describePadding(rule.padBeforeSeconds, rule.padAfterSeconds)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall)

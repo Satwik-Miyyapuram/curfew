@@ -65,8 +65,11 @@ fun ScheduleScreen(
     var weeklyForm by remember { mutableStateOf<Editing<WeeklySchedule>?>(null) }
     var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
     var removing by remember { mutableStateOf<Removal?>(null) }
-    var profileForm by remember { mutableStateOf<Editing<ProfileName>?>(null) }
     var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
+
+    // Schedules point at a profile by id; every card says the name instead. A card headed
+    // "socials-diet" is the config talking, not the app.
+    val names = state.profiles.associate { it.id to it.name }
 
     // Adopt the saved config whenever it changes underneath an untouched editor, so the text does
     // not silently go stale — but never overwrite an edit in progress.
@@ -188,7 +191,6 @@ fun ScheduleScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(profile.name, style = MaterialTheme.typography.titleMedium)
-                    Text(profile.id, style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         // Everything about a profile now lives on one screen, so this opens that rather
                         // than a rename box: a name was never the only thing anyone came here to change.
@@ -217,6 +219,7 @@ fun ScheduleScreen(
         state.weekly.forEach { window ->
             WeeklyCard(
                 window = window,
+                profile = names[window.profile] ?: window.profile,
                 onEdit = { weeklyForm = Editing(window) },
                 onDelete = { removing = Removal(window.id, describeWindow(window), weekly = true) },
             )
@@ -240,6 +243,7 @@ fun ScheduleScreen(
         state.calendarRules.forEach { rule ->
             CalendarRuleCard(
                 rule = rule,
+                profile = names[rule.profile] ?: rule.profile,
                 onEdit = { calendarForm = Editing(rule) },
                 onDelete = {
                     removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
@@ -298,17 +302,6 @@ fun ScheduleScreen(
             "Saving does not end a session that is already running. A lock you asked for is not " +
                 "something a settings edit can undo.",
             style = MaterialTheme.typography.bodySmall,
-        )
-    }
-
-    profileForm?.let { form ->
-        ProfileDialog(
-            existing = form.value,
-            onDismiss = { profileForm = null },
-            onSave = { id, name ->
-                profileForm = null
-                model.saveProfile(id, name)
-            },
         )
     }
 
@@ -388,65 +381,6 @@ fun ScheduleScreen(
 }
 
 
-/**
- * Name a profile.
- *
- * Two fields, because a profile is only a name until the app picker fills it: the id is what the
- * config and every schedule refer to, and the name is what the screens show. The id is fixed once
- * it exists \u2014 changing it would orphan every schedule naming it, which the core would refuse
- * anyway, so the field is simply not offered on a rename.
- */
-@Composable
-private fun ProfileDialog(
-    existing: ProfileName?,
-    onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
-) {
-    var id by remember { mutableStateOf(existing?.id ?: "") }
-    var name by remember { mutableStateOf(existing?.name ?: "") }
-    // An id is not something most people want to invent twice, so the name follows it until the
-    // name is touched.
-    var namedByHand by remember { mutableStateOf(existing != null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "New profile" else "Rename profile") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (existing == null) {
-                    OutlinedTextField(
-                        value = id,
-                        onValueChange = {
-                            id = it
-                            if (!namedByHand) name = it
-                        },
-                        label = { Text("id") },
-                        singleLine = true,
-                    )
-                }
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it; namedByHand = true },
-                    label = { Text("Name") },
-                    singleLine = true,
-                )
-                Text(
-                    "What it blocks is chosen under Apps. When it runs is set above.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                // Both blank fields are refused by the core too; the button is disabled so the
-                // refusal never has to be shown for something the form can see.
-                enabled = id.isNotBlank() && name.isNotBlank(),
-                onClick = { onSave(id.trim(), name.trim()) },
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
 
 
 /**
