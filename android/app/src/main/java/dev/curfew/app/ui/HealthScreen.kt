@@ -1,148 +1,200 @@
 package dev.curfew.app.ui
 
 import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Whether Curfew is actually working, said without euphemism.
  *
  * A blocker that has quietly stopped enforcing is worse than no blocker, because the user is still
- * relying on it. So this screen leads with the plain answer, lists every permission with what is
- * lost while it is missing, and never phrases a missing permission as a feature the user might
- * enjoy turning on.
+ * relying on it. So this screen leads with the plain answer — one sentence, coloured only when
+ * something is wrong — lists every permission with what is lost while it is missing, and never
+ * phrases a missing permission as a feature the user might enjoy turning on.
+ *
+ * It is drawn in the canvas's own vocabulary rather than in Material defaults, because a screen
+ * that looks like a different app is a screen the user reads as a system dialog and dismisses.
  */
 @Composable
 fun HealthScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val missingRequired = state.grants.filter { it.grant.required && !it.granted }
+    val fine = missingRequired.isEmpty()
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Column {
-                Text(
-                    if (missingRequired.isEmpty()) "Curfew can enforce" else "Curfew cannot enforce",
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Text(
-                    if (missingRequired.isEmpty()) {
-                        "Everything it needs to block an app is in place."
-                    } else {
-                        "Nothing is being blocked. " +
-                            missingRequired.joinToString(" ") { it.grant.cost }
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
+    Screen(spacing = 0.dp) {
+        Title(if (fine) "Curfew can enforce" else "Curfew cannot enforce", size = 26)
+        Gap(8.dp)
+        Text(
+            if (fine) {
+                "Everything it needs to block an app is in place."
+            } else {
+                "Nothing is being blocked. " + missingRequired.joinToString(" ") { it.grant.cost }
+            },
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
+            // The only coloured sentence on the screen, and only when it means something is not
+            // happening right now.
+            color = if (fine) Palette.Muted else Palette.Bad,
+        )
 
         if (state.restrictedSettings) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+            Gap(16.dp)
+            DCard {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Bad)
+                    Column {
                         Text(
                             "Android is blocking the accessibility switch",
-                            style = MaterialTheme.typography.titleMedium,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Palette.Text,
                         )
                         Text(
                             RestrictedSettings.INSTRUCTIONS,
-                            style = MaterialTheme.typography.bodyMedium,
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            color = Palette.Muted,
                             modifier = Modifier.padding(top = 6.dp),
                         )
-                        TextButton(onClick = {
-                            context.startActivity(
-                                RestrictedSettings.appInfoIntent(context)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                            )
-                        }) {
-                            Text("Open App info")
-                        }
                     }
+                }
+                Gap(12.dp)
+                GhostButton(text = "Open App info") {
+                    context.startActivity(
+                        RestrictedSettings.appInfoIntent(context)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
                 }
             }
         }
 
-        items(state.grants, key = { it.grant.name }) { entry ->
-            // The whole card is read as one thing: a screen reader user should hear the
-            // permission, whether it is held, and what is lost without it as a single sentence,
-            // rather than swiping through four fragments to assemble it.
-            Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(entry.grant.title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (entry.granted) "Granted" else "Not granted",
-                        style = MaterialTheme.typography.labelLarge,
-                    )
+        Gap(18.dp)
+        SectionLabel("Every permission, and what it buys")
+        Gap(10.dp)
+        DCardFlush {
+            state.grants.forEachIndexed { index, entry ->
+                if (index > 0) Rule()
+                // The whole row is read as one thing: a screen reader user should hear the
+                // permission, whether it is held, and what is lost without it as a single
+                // sentence, rather than swiping through four fragments to assemble it.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 17.dp, vertical = 15.dp)
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = if (entry.granted) {
+                                "${entry.grant.title}, allowed. ${entry.grant.because}"
+                            } else {
+                                "${entry.grant.title}, not allowed. ${entry.grant.because} " +
+                                    "Without it: ${entry.grant.cost}"
+                            }
+                        },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            if (entry.granted) "✓" else "!",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (entry.granted) Palette.Ok else Palette.Bad,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            entry.grant.title,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Palette.Text,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (!entry.granted) {
+                            Grant {
+                                val permission = entry.grant.runtimePermission()
+                                val settings = entry.grant.settingsIntent(context)
+                                when {
+                                    permission != null ->
+                                        requestRuntimePermission(context, permission)
+                                    settings != null -> context.startActivity(
+                                        settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Text(
                         entry.grant.because,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 6.dp),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(top = 6.dp, start = 30.dp),
                     )
                     if (!entry.granted) {
                         Text(
                             "Without it: ${entry.grant.cost}",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 4.dp),
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            color = Palette.Bad,
+                            modifier = Modifier.padding(top = 4.dp, start = 30.dp),
                         )
-                        TextButton(onClick = {
-                            val permission = entry.grant.runtimePermission()
-                            val settings = entry.grant.settingsIntent(context)
-                            when {
-                                permission != null -> requestRuntimePermission(context, permission)
-                                settings != null ->
-                                    context.startActivity(
-                                        settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                    )
-                            }
-                        }, modifier = Modifier.semantics {
-                            contentDescription = "Grant ${entry.grant.title}"
-                        }) {
-                            Text("Grant")
-                        }
                     }
                 }
             }
         }
 
-        item {
-            Text(
-                "Curfew has no internet permission at all, so nothing it records can leave this " +
-                    "device even if it wanted to. Its database is encrypted with a key held by " +
-                    "this device's keystore.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+        Gap(18.dp)
+        DCard(padding = 16.dp) {
+            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                Text("⛨", fontSize = 17.sp, color = Palette.Muted)
+                Text(
+                    "Curfew has no internet permission at all, so nothing it records can leave " +
+                        "this device even if it wanted to. Its database is encrypted with a key " +
+                        "held by this device's keystore.",
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = Palette.Muted,
+                )
+            }
         }
+        Gap(8.dp)
+    }
+}
+
+/** The one action on a row: the system page for exactly this permission. */
+@Composable
+private fun Grant(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Palette.Accent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Allow", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
     }
 }
