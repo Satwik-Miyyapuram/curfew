@@ -3,6 +3,7 @@ package dev.curfew.app.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,10 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,7 +25,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.Stats
 
@@ -53,91 +53,133 @@ fun UsageScreen(model: CurfewViewModel) {
     ) { uri -> if (uri != null) model.exportStats(uri, asCsv = false) }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item {
-            Text(
-                "The last two weeks",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { heading() },
-            )
+            Gap(14.dp)
+            Title("Where your time went", size = 26)
+            Gap(16.dp)
         }
-        item { StreakSummary(state.stats) }
-        item { DayBars(state.stats) }
         item {
+            DCard {
+                StreakSummary(state.stats)
+                Gap(14.dp)
+                DayBars(state.stats)
+            }
+            Gap(10.dp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // The summary, and only the summary. The log it was built from stays here.
-                TextButton(onClick = { exportCsv.launch("curfew-stats.csv") }) { Text("Export CSV") }
-                TextButton(onClick = { exportJson.launch("curfew-stats.json") }) { Text("Export JSON") }
+                ExportPill("Export CSV", tint = Palette.Accent) { exportCsv.launch("curfew-stats.csv") }
+                ExportPill("Export JSON", tint = Palette.Accent) { exportJson.launch("curfew-stats.json") }
             }
-        }
-
-        item {
-            Text(
-                "Today",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.semantics { heading() },
-            )
+            Gap(20.dp)
+            SectionLabel("Today")
+            Gap(10.dp)
         }
 
         if (state.spentSeconds.isEmpty()) {
             item {
                 Text(
                     "Nothing counted yet. Time is only measured for targets a budget or a launch " +
-                        "limit actually covers — Curfew does not keep a record of everything you open.",
-                    style = MaterialTheme.typography.bodyMedium,
+                        "limit actually covers — Curfew does not keep a record of everything you " +
+                        "open.",
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = Palette.Muted,
                 )
             }
         }
 
         items(state.spentSeconds, key = { it.first }) { (key, seconds) ->
             val opens = state.launchCounts[key] ?: 0
-            Column(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-                Text(describeTarget(key), style = MaterialTheme.typography.titleSmall)
-                LinearProgressIndicator(
-                    progress = { if (busiest > 0) seconds.toFloat() / busiest else 0f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        // The bar is decoration over a number that is already read out; giving it
-                        // its own description would make a screen reader say everything twice.
-                        .semantics {
-                            contentDescription = "${describeTarget(key)}: ${duration(seconds)}"
-                        },
-                )
-                Text(
-                    duration(seconds) + if (opens > 0) " · opened $opens times" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            DCard(modifier = Modifier.padding(bottom = 8.dp), padding = 14.dp) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+                        contentDescription = "${describeTarget(key)}: ${duration(seconds)}"
+                    },
+                ) {
+                    Text(
+                        describeTarget(key),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                    )
+                    // A bar rather than a progress indicator: this is a share of the busiest
+                    // thing today, not a task on its way to finishing.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .padding(top = 0.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Palette.Raised),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(
+                                    if (busiest > 0) seconds.toFloat() / busiest else 0f,
+                                )
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Palette.Accent),
+                        )
+                    }
+                    Text(
+                        duration(seconds) + if (opens > 0) " · opened $opens times" else "",
+                        fontSize = 12.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
         }
 
         item {
-            Text(
-                "What Curfew did",
-                style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.padding(top = 16.dp).semantics { heading() },
-            )
-        }
-        item {
+            Gap(12.dp)
+            SectionLabel("What Curfew did")
+            Gap(6.dp)
             Text(
                 "Kept on this device for 30 days, then deleted.",
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.sp,
+                color = Palette.Dim,
             )
+            Gap(10.dp)
         }
         items(state.audit, key = { it.id }) { row ->
             // One entry, one thing to hear: the sentence and the time it happened.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp)
+                    .padding(bottom = 12.dp)
                     .semantics(mergeDescendants = true) {},
             ) {
-                Text(describeAudit(row.kind, row.detail), style = MaterialTheme.typography.bodyMedium)
-                Text(dateTime(row.at), style = MaterialTheme.typography.bodySmall)
+                Text(
+                    describeAudit(row.kind, row.detail),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = Palette.Text,
+                )
+                Text(dateTime(row.at), fontSize = 12.sp, color = Palette.Dim)
             }
         }
+        item { Gap(Dsn.BottomRoom) }
+    }
+}
+
+/** The two export buttons, as pills. */
+@Composable
+private fun ExportPill(text: String, tint: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Palette.Raised)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tint)
     }
 }
 
@@ -157,19 +199,29 @@ private fun StreakSummary(stats: Stats) {
                 1 -> "One day in a row."
                 else -> "${stats.currentStreak} days in a row."
             },
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.4).sp,
+            color = Palette.Text,
+            modifier = Modifier.semantics { heading() },
         )
         Text(
             "Best so far: ${stats.longestStreak}. " +
                 "In total, ${duration(stats.totalBlockedSeconds.toInt())} across " +
                 "${stats.totalSessions} session${if (stats.totalSessions == 1) "" else "s"}.",
-            style = MaterialTheme.typography.bodySmall,
+            fontSize = 13.sp,
+            lineHeight = 20.sp,
+            color = Palette.Muted,
+            modifier = Modifier.padding(top = 6.dp),
         )
         if (stats.currentStreak > 0 && stats.days.lastOrNull()?.sessions == 0) {
             // Said out loud so a streak that looks a day short does not read as a bug.
             Text(
                 "Today has not finished, so it does not count against you yet.",
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = Palette.Dim,
+                modifier = Modifier.padding(top = 4.dp),
             )
         }
     }
@@ -203,11 +255,8 @@ private fun DayBars(stats: Stats) {
                         // A day with a session but almost no time still gets a visible mark: it
                         // counted towards the streak, so it should be on the chart.
                         .fillMaxHeight(if (day.sessions > 0) maxOf(fraction, 0.06f) else 0.02f)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            if (day.sessions > 0) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                        ),
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (day.sessions > 0) Palette.Accent else Palette.Line),
                 )
             }
         }
