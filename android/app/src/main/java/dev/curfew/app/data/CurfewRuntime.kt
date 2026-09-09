@@ -631,6 +631,7 @@ class CurfewRuntime internal constructor(
          * encryption-at-rest for the policy logic to get wrong.
          */
         fun create(context: Context, clock: Clock = Clock.System): CurfewRuntime {
+            loadSqlCipher()
             val config = ConfigStore(File(context.filesDir, "curfew.toml"))
             val db = Room.databaseBuilder(context, CurfewDatabase::class.java, "curfew.db")
                 .openHelperFactory(SupportOpenHelperFactory(DatabaseKey.passphrase(context)))
@@ -640,6 +641,28 @@ class CurfewRuntime internal constructor(
             val policy = runCatching { Policy.load(config.read()) }
                 .getOrElse { Policy.load(ConfigStore(File(context.filesDir, "unused")).read()) }
             return CurfewRuntime(context.applicationContext, policy, config, db, clock)
+        }
+
+        /** Whether the native library has already been asked for; `System.loadLibrary` is cheap to
+         * repeat but the flag keeps the intent legible. */
+        @Volatile
+        private var sqlCipherLoaded = false
+
+        /**
+         * Bring SQLCipher's native library in before anything opens the database.
+         *
+         * `sqlcipher-android` does not load it for you — the artifact that did, and its
+         * `SQLiteDatabase.loadLibs(context)`, is a different one. Without this the first query
+         * throws `UnsatisfiedLinkError` from a worker thread, which on a phone means the app dies
+         * on launch with no screen ever drawn. No JVM test can catch it: the tests build their own
+         * runtime over an unencrypted in-memory database precisely because this library is not
+         * there on a JVM run, so the one code path that needs it is the one path they never take.
+         */
+        @Synchronized
+        private fun loadSqlCipher() {
+            if (sqlCipherLoaded) return
+            System.loadLibrary("sqlcipher")
+            sqlCipherLoaded = true
         }
     }
 }

@@ -22,6 +22,8 @@ import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refused
 import dev.curfew.policy.Session
 import dev.curfew.policy.Stats
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,54 +60,65 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Re-read everything the screens show. Cheap enough to do on a timer; see above. */
+    /**
+     * Re-read everything the screens show.
+     *
+     * Off the main thread, every bit of it. `viewModelScope` is `Dispatchers.Main.immediate`, and
+     * everything called below blocks: the config reads hit the filesystem, the audit read hits the
+     * database, and `nearby` crosses into the sync node, where it waits on the same lock the
+     * discovery thread holds while it is talking to the network. On a phone that showed up as a
+     * ten-second freeze and an ANR the first time a real device had a peer to look for. None of it
+     * touches a view; `_state` is a `MutableStateFlow`, which is safe to update from any thread.
+     */
     suspend fun refresh() {
-        val now = runtime.clock.now()
-        val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
-        val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
-        val activations = runCatching { runtime.policy.activations(now, events) }
-            .getOrDefault(emptyList())
-        // Everything the rules will do between now and this time tomorrow, whether or not it has
-        // started. The window is deliberately longer than a day so "tomorrow morning" is on screen
-        // late tonight, which is exactly when someone checks whether they can stay up.
-        val upcoming = runCatching { runtime.policy.upcoming(now, now + PREVIEW_SECONDS, events) }
-            .getOrDefault(emptyList())
-            .filter { it.end > now }
-        val usage = runCatching { runtime.usage(now) }.getOrNull()
-        val spent = usage?.usage.orEmpty()
-            .mapValues { (_, consumption) -> consumption.rollups.sumOf { it.seconds } }
-            .toList()
-            .sortedByDescending { it.second }
-        val opens = usage?.launches.orEmpty().mapValues { (_, l) -> l.opens.size }
+        withContext(Dispatchers.Default) {
+            val now = runtime.clock.now()
+            val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
+            val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
+            val activations = runCatching { runtime.policy.activations(now, events) }
+                .getOrDefault(emptyList())
+            // Everything the rules will do between now and this time tomorrow, whether or not it has
+            // started. The window is deliberately longer than a day so "tomorrow morning" is on screen
+            // late tonight, which is exactly when someone checks whether they can stay up.
+            val upcoming = runCatching { runtime.policy.upcoming(now, now + PREVIEW_SECONDS, events) }
+                .getOrDefault(emptyList())
+                .filter { it.end > now }
+            val usage = runCatching { runtime.usage(now) }.getOrNull()
+            val spent = usage?.usage.orEmpty()
+                .mapValues { (_, consumption) -> consumption.rollups.sumOf { it.seconds } }
+                .toList()
+                .sortedByDescending { it.second }
+            val opens = usage?.launches.orEmpty().mapValues { (_, l) -> l.opens.size }
 
-        _state.update { previous ->
-            previous.copy(
-                now = now,
-                lock = runtime.lock.value,
-                sessions = sessions,
-                activeProfiles = runtime.activeProfiles.value,
-                activations = activations.sortedBy { it.start },
-                upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
-                spentSeconds = spent,
-                launchCounts = opens,
-                configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
-                weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
-                calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
-                profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
-                    .getOrDefault(emptyList()),
-                audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
-                    .getOrDefault(emptyList()),
-                stats = runCatching { runtime.stats(now = now) }.getOrDefault(Stats()),
-                grants = grantStates(getApplication()),
-                restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
-                downtime = runtime.downtime.value,
-                clockTamper = runtime.clockTamper.value,
-                releasable = runtime.releasable.value,
-                passesLeft = runCatching { runtime.passesRemaining(now) }.getOrDefault(0),
-                passRefusal = runCatching { runtime.passRefusal(now) }.getOrNull(),
-                sync = syncState(now, previous.sync),
-                loading = false,
-            )
+            _state.update { previous ->
+                previous.copy(
+                    now = now,
+                    lock = runtime.lock.value,
+                    sessions = sessions,
+                    activeProfiles = runtime.activeProfiles.value,
+                    activations = activations.sortedBy { it.start },
+                    upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
+                    spentSeconds = spent,
+                    launchCounts = opens,
+                    configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
+                    weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
+                    calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
+                    profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
+                        .getOrDefault(emptyList()),
+                    audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
+                        .getOrDefault(emptyList()),
+                    stats = runCatching { runtime.stats(now = now) }.getOrDefault(Stats()),
+                    grants = grantStates(getApplication()),
+                    restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
+                    downtime = runtime.downtime.value,
+                    clockTamper = runtime.clockTamper.value,
+                    releasable = runtime.releasable.value,
+                    passesLeft = runCatching { runtime.passesRemaining(now) }.getOrDefault(0),
+                    passRefusal = runCatching { runtime.passRefusal(now) }.getOrNull(),
+                    sync = syncState(now, previous.sync),
+                    loading = false,
+                )
+            }
         }
     }
 
