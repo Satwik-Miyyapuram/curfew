@@ -8,6 +8,11 @@
 mod feeds;
 mod host;
 mod runner;
+// The service control manager and the watchdog that watches it are Windows and nothing else.
+// Every caller of either is already behind the same gate, so this costs no `cfg` at the call
+// sites; without it a Linux build tries to compile against `windows-service`, which that build
+// does not and cannot have.
+#[cfg(windows)]
 mod service;
 #[cfg(windows)]
 mod watchdog;
