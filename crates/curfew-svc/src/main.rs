@@ -8,18 +8,21 @@
 mod feeds;
 mod host;
 mod runner;
-// The service control manager and the watchdog that watches it are Windows and nothing else.
-// Every caller of either is already behind the same gate, so this costs no `cfg` at the call
-// sites; without it a Linux build tries to compile against `windows-service`, which that build
-// does not and cannot have.
+// The service control manager is Windows and nothing else, and every caller of `service` is
+// already behind the same gate, so this costs no `cfg` at the call sites; without it a Linux
+// build reaches for `windows-service`, which that build does not and cannot have. The watchdog
+// is not in the same position: it carries its own non-Windows `sys` and is called from the
+// enforcement loop, which is built everywhere.
 #[cfg(windows)]
 mod service;
-#[cfg(windows)]
 mod watchdog;
 
 use chrono::TimeZone as _;
 use curfew_win::ipc::{Request, Response};
-use curfew_win::{hosts, state};
+// `hosts` is given back only by the uninstaller, which exists on Windows alone.
+#[cfg(windows)]
+use curfew_win::hosts;
+use curfew_win::state;
 use std::collections::BTreeSet;
 
 /// The service the watchdog looks after. Named here rather than imported from `service`, which is
