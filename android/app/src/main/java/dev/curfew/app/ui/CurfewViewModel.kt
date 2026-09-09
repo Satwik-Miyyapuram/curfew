@@ -23,6 +23,7 @@ import dev.curfew.policy.NoPass
 import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refused
 import dev.curfew.policy.Session
+import dev.curfew.policy.SessionSource
 import dev.curfew.policy.Stats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,6 +46,13 @@ import kotlinx.serialization.json.Json
 class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     private val runtime: CurfewRuntime = app.curfew
+
+    private val modes = UiModeStore(app)
+
+    /** Simple or Power. See [UiModeStore] for why it lives outside the policy database. */
+    val mode: StateFlow<Mode> = modes.mode
+
+    fun setMode(mode: Mode) = modes.set(mode)
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -432,6 +440,36 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * The edit that has to come first on a fresh install: everything else on this screen asks for a
      * profile by name.
      */
+    /**
+     * Block right now, for a while, because the user said so.
+     *
+     * The one path into a session that no schedule and no calendar knows about. Curfew was built
+     * around things that arrive on their own -- a lecture, a weeknight -- and that left out the
+     * commonest intention of all: *not for the next ninety minutes*. A timer is a manual session
+     * with an end time and, if the user asked for one, the same lock a scheduled block would get.
+     *
+     * The lock is the user's choice at the moment they start it and not a setting they have to
+     * find first, because the honest answer to "how hard should this be to undo" changes between
+     * a study hour and a night off.
+     */
+    fun startTimer(profile: String, seconds: Int, locks: List<Lock> = emptyList()) {
+        viewModelScope.launch {
+            val now = runtime.clock.now()
+            val session = Session(
+                // Distinct from a reconciled session's id, which is minted from the activation, so
+                // a timer and a schedule for the same profile can never collide.
+                id = "timer-$now",
+                profile = profile,
+                source = SessionSource.Manual,
+                startedAt = now,
+                lock = LockSet(conditions = locks, endsAt = now + seconds),
+            )
+            runCatching { runtime.startSession(session) }
+                .onFailure { say(it.message ?: "That could not be started.") }
+            refresh()
+        }
+    }
+
     fun saveProfile(id: String, name: String, description: String = "") {
         viewModelScope.launch {
             runtime.saveProfile(id, name, description)

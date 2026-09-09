@@ -51,7 +51,7 @@ import dev.curfew.policy.WeeklySchedule
  * the device unprotected.
  */
 @Composable
-fun ScheduleScreen(model: CurfewViewModel) {
+fun ScheduleScreen(model: CurfewViewModel, onNewProfile: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(state.configToml) }
     var editing by remember { mutableStateOf(false) }
@@ -192,7 +192,10 @@ fun ScheduleScreen(model: CurfewViewModel) {
                 }
             }
         }
-        Button(onClick = { profileForm = Editing(null) }) { Text("Add a profile") }
+        // A new profile is a whole screen now, not a dialog with an id field in it: naming it,
+        // colouring it, saying when it runs and how hard it is to leave do not fit in a two-field
+        // box, and the id that box asked for was never the user's business.
+        Button(onClick = onNewProfile) { Text("Add a profile") }
 
         Text(
             "Weekly windows",

@@ -46,7 +46,7 @@ import dev.curfew.policy.Session
  * satisfy it. Nothing here decides on the core's behalf.
  */
 @Composable
-fun NowScreen(model: CurfewViewModel) {
+fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? FragmentActivity
 
@@ -111,6 +111,16 @@ fun NowScreen(model: CurfewViewModel) {
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 4.dp),
         )
+
+        // The one thing this screen could not do before: start a block because the user decided to,
+        // rather than because a schedule said so. It sits above the session list because that is
+        // where a user looks when the answer is "nothing is running" and they wanted otherwise.
+        Button(
+            onClick = onStartTimer,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        ) {
+            Text("Start a block now")
+        }
 
         state.downtime?.let { downtime ->
             DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
