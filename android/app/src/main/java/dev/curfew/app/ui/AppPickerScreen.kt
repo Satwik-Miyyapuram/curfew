@@ -1,29 +1,25 @@
 package dev.curfew.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
-import dev.curfew.policy.Rule
-import dev.curfew.policy.Target
-import dev.curfew.policy.label
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,12 +31,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.policy.Rule
+import dev.curfew.policy.Target
+import dev.curfew.policy.label
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -48,14 +54,22 @@ import kotlinx.coroutines.withContext
 private enum class Pane { Apps, Sites }
 
 /**
- * Choosing apps without writing TOML.
+ * What a profile switches off: its apps, and its websites.
  *
- * The picker owns exactly one kind of rule — "block this app while the profile is running" — and
- * says so, because a picker that silently rewrote a budget the user had hand-written would make the
- * file untrustworthy. Below it, "Sites and words" writes the other plain blocks a phone can state:
- * a domain, an address, a word, a window title. Anything with a shape a form cannot express — a
- * budget, a launch limit, a delay — is listed there but edited in the config editor, which remains
- * the complete interface.
+ * Two things the canvas insists on, and the old screen got wrong.
+ *
+ * **The lists belong to the profile, not to the app.** The profile chips sit at the very top, and
+ * the count under them says what the *other* profiles hold, so it is obvious at a glance that
+ * these really are separate sets rather than one list with a filter over it.
+ *
+ * **Apps and websites are two tabs, not one scroll.** Websites used to start wherever two hundred
+ * installed apps ended, which made the shorter and more often edited of the two lists the harder
+ * one to reach.
+ *
+ * Every switch here saves the moment it is touched. The previous version collected ticks and
+ * offered a Save button, which meant the screen could show one thing while the config said
+ * another, and switching profiles mid-edit needed a dialog to ask about work the user did not know
+ * they had. A block that a user can see is on, is on.
  */
 @Composable
 fun AppPickerScreen(model: CurfewViewModel) {
@@ -68,222 +82,339 @@ fun AppPickerScreen(model: CurfewViewModel) {
     }
 
     var profile by remember { mutableStateOf<String?>(null) }
-    var checked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
-    // Which half of "what does this profile block" is on screen. Both used to live in one scroll,
-    // which meant the site list started wherever two hundred apps ended — a scroll to nowhere for
-    // the shorter and more often edited of the two lists.
     var pane by remember { mutableStateOf(Pane.Apps) }
-    // A profile the user asked to switch to while holding unsaved ticks, waiting on an answer.
-    var switchingTo by remember { mutableStateOf<String?>(null) }
 
-    // Default to the first profile, and re-read the ticks whenever the chosen profile changes or
-    // the config is edited elsewhere.
-    LaunchedEffect(state.profiles, profile, state.configToml) {
-        val chosen = profile ?: state.profiles.firstOrNull()?.id
-        if (chosen != profile) profile = chosen
-        if (chosen != null) checked = model.blockedApps(chosen).toSet()
+    LaunchedEffect(state.profiles, profile) {
+        if (profile == null || state.profiles.none { it.id == profile }) {
+            profile = state.profiles.firstOrNull()?.id
+        }
     }
 
     val current = profile
-    val saved = current?.let { model.blockedApps(it).toSet() } ?: emptySet()
-    val dirty = current != null && checked != saved
+    // Re-read on every config change, so a switch flipped here is reflected without a refresh and
+    // an edit made on another screen cannot leave this one lying.
+    val blocked = remember(current, state.configToml) {
+        current?.let { model.blockedApps(it).toSet() }.orEmpty()
+    }
+    val sites = remember(current, state.configToml) {
+        current?.let { model.rulesBeyondApps(it) }.orEmpty()
+    }
+    val counts = remember(state.profiles, state.configToml) {
+        state.profiles.associate { it.id to model.blockedApps(it.id).size }
+    }
+    val siteCounts = remember(state.profiles, state.configToml) {
+        state.profiles.associate { it.id to model.rulesBeyondApps(it.id).size }
+    }
+
     // Blocked apps first, then the rest, each half alphabetical. What a profile blocks is the
     // answer this screen exists to give, and it should not be somewhere down a list of two hundred.
     val visible = apps
         .filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
-        .sortedWith(compareBy({ it.packageName !in checked }, { it.label.lowercase() }))
-    // How many apps each profile blocks, so the chips show that the sets really are separate.
-    val counts = remember(state.profiles, state.configToml) {
-        state.profiles.associate { it.id to model.blockedApps(it.id).size }
-    }
-    // Re-read on every config change, so a rule removed here disappears without a manual refresh.
-    val beyondApps = remember(current, state.configToml) {
-        current?.let { model.rulesBeyondApps(it) }.orEmpty()
-    }
+        .sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text(
-            "Apps to block",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.semantics { heading() },
-        )
-
-        if (state.profiles.isEmpty() && !state.loading) {
-            Text(
-                "There are no profiles yet. Add one under Schedule and it will appear here.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
+    if (state.profiles.isEmpty() && !state.loading) {
+        Screen {
+            Title("Nothing to block yet")
+            Sub(
+                "Blocking belongs to a profile — a named set of apps and sites. Make one on the " +
+                    "Plan tab and it will appear here.",
             )
-            return@Column
         }
+        return
+    }
 
+    Screen(spacing = 0.dp) {
+        SectionLabel("Blocked by this profile")
+        Gap(8.dp)
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             state.profiles.forEach { p ->
-                FilterChip(
-                    selected = current == p.id,
-                    // Switching away with unsaved ticks used to drop them silently, because the
-                    // effect above re-reads the config for the newly chosen profile. Ask instead.
-                    onClick = { if (dirty && p.id != current) switchingTo = p.id else profile = p.id },
-                    label = { Text("${p.name} · ${counts[p.id] ?: 0}") },
-                )
+                Pill(p.name, selected = current == p.id, onClick = { profile = p.id })
             }
         }
+        Gap(7.dp)
+        Text(
+            othersHold(state.profiles.filter { it.id != current }, counts, siteCounts),
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = Palette.Dim,
+        )
 
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            Pane.entries.forEachIndexed { index, option ->
-                SegmentedButton(
-                    selected = pane == option,
-                    onClick = { pane = option },
-                    shape = SegmentedButtonDefaults.itemShape(index, Pane.entries.size),
-                    label = {
-                        Text(
-                            when (option) {
-                                Pane.Apps -> "Apps ${checked.size}"
-                                Pane.Sites -> "Websites ${beyondApps.size}"
-                            },
-                        )
-                    },
-                )
-            }
-        }
+        Gap(16.dp)
+        PaneTabs(
+            pane = pane,
+            apps = blocked.size,
+            sites = sites.size,
+            onChange = { pane = it },
+        )
+        Gap(14.dp)
 
         if (pane == Pane.Apps) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-        }
-
-        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp)) {
-            if (pane == Pane.Apps) items(visible, key = { it.packageName }) { app ->
-                val isChecked = app.packageName in checked
+            SearchField(query) { query = it }
+            Gap(10.dp)
+            DCardFlush {
+                visible.take(APP_LIMIT).forEachIndexed { index, app ->
+                    if (index > 0) Rule()
+                    val on = app.packageName in blocked
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 13.dp)
+                            .semantics(mergeDescendants = true) {
+                                contentDescription =
+                                    if (on) "${app.label}, blocked" else "${app.label}, allowed"
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                    ) {
+                        AppIcon(app.packageName, modifier = Modifier.size(36.dp))
+                        Text(
+                            app.label,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Palette.Text,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(on) { wanted ->
+                            val id = current ?: return@Switch
+                            val next =
+                                if (wanted) blocked + app.packageName else blocked - app.packageName
+                            model.setBlockedApps(id, next.toList())
+                        }
+                    }
+                }
+                if (visible.isEmpty()) {
+                    Text(
+                        if (query.isBlank()) "Reading your apps…" else "No app matches “$query”.",
+                        fontSize = 13.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+            if (visible.size > APP_LIMIT) {
+                Gap(10.dp)
+                Text(
+                    "${visible.size - APP_LIMIT} more. Search to narrow the list.",
+                    fontSize = 12.sp,
+                    color = Palette.Dim,
+                )
+            }
+        } else {
+            DCardFlush {
+                sites.forEachIndexed { index, rule ->
+                    if (index > 0) Rule()
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(Palette.Raised),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(glyphFor(rule.target), fontSize = 15.sp)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                rule.target.label(),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Palette.Text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(describeRule(rule), fontSize = 12.sp, color = Palette.Dim)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(
+                                    onClickLabel = "Stop blocking ${rule.target.label()}",
+                                ) { current?.let { model.deleteRule(it, rule.target) } },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("✕", fontSize = 15.sp, color = Palette.Dim)
+                        }
+                    }
+                }
+                if (sites.isEmpty()) {
+                    Text(
+                        "Nothing yet. A site blocks it and everything under it; a word blocks " +
+                            "anything whose address or title contains it.",
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+            Gap(12.dp)
+            // Styled as an empty field rather than as a button, because what it opens asks for a
+            // line of text and this is where that line will end up.
+            DCard(padding = 0.dp) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            checked = if (isChecked) checked - app.packageName
-                            else checked + app.packageName
-                        }
-                        .padding(vertical = 4.dp)
-                        .semantics(mergeDescendants = true) {
-                            contentDescription =
-                                if (isChecked) "${app.label}, blocked" else "${app.label}, allowed"
-                        },
-                ) {
-                    Checkbox(checked = isChecked, onCheckedChange = null)
-                    AppIcon(
-                        app.packageName,
-                        modifier = Modifier.padding(start = 8.dp).size(32.dp),
-                    )
-                    Text(
-                        app.label,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(start = 12.dp),
-                    )
-                }
-            }
-
-            if (pane == Pane.Sites) item {
-                if (beyondApps.isEmpty()) {
-                    Text(
-                        "Nothing yet. A site blocks it and its subdomains; a word blocks anything " +
-                            "whose title or address contains it.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-            }
-
-            if (pane == Pane.Sites) items(beyondApps, key = { it.target.label() + it.platforms }) { rule ->
-                Row(
+                        .height(48.dp)
+                        .clickable(enabled = current != null) { adding = true }
+                        .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(rule.target.label(), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            describeRule(rule),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    TextButton(
-                        onClick = { current?.let { model.deleteRule(it, rule.target) } },
-                    ) {
-                        Text("Remove")
-                    }
-                }
-            }
-
-            if (pane == Pane.Sites) item {
-                TextButton(onClick = { adding = true }, enabled = current != null) {
-                    Text("Block a site or word")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-
-        switchingTo?.let { target ->
-            AlertDialog(
-                onDismissRequest = { switchingTo = null },
-                title = { Text("Unsaved changes") },
-                text = {
+                    Text("+", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Palette.Accent)
                     Text(
-                        "The ticks for this profile have not been saved. Switching profiles now " +
-                            "discards them.",
+                        "Address, pattern or word…",
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Palette.Muted,
                     )
-                },
-                confirmButton = {
-                    Button(onClick = { profile = target; switchingTo = null }) { Text("Discard") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { switchingTo = null }) { Text("Stay here") }
-                },
-            )
+                }
+            }
         }
 
-        if (adding && current != null) {
-            BlockDialog(
-                onDismiss = { adding = false },
-                onSave = { target ->
-                    adding = false
-                    model.saveRule(current, Rule(target = target))
-                },
-            )
-        }
-
-        if (pane == Pane.Apps) Text(
-            "Saving rewrites curfew.toml, which drops any comments you have written in it. " +
-                "Rules that are not a plain app block — budgets, delays, launch limits — are left " +
-                "alone.",
-            style = MaterialTheme.typography.bodySmall,
+        Gap(16.dp)
+        Text(
+            "Changes apply the next time ${nameOf(state, current)} starts — never to a block " +
+                "already running.",
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = Palette.Dim,
         )
-        // Sites save the moment they are added or removed; only the app ticks are a batch, so the
-        // save bar belongs to that half alone rather than sitting greyed out under the other.
-        if (pane == Pane.Apps) Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(
-                onClick = { current?.let { model.setBlockedApps(it, checked.toList()) } },
-                enabled = dirty,
-            ) {
-                Text("Save")
-            }
-            TextButton(onClick = { checked = saved }, enabled = dirty) {
-                Text("Discard")
-            }
+    }
+
+    if (adding && current != null) {
+        BlockDialog(
+            onDismiss = { adding = false },
+            onSave = { target ->
+                adding = false
+                model.saveRule(current, Rule(target = target))
+            },
+        )
+    }
+}
+
+/** How many rows the app list draws before it asks the user to search instead. */
+private const val APP_LIMIT = 60
+
+/**
+ * The Apps / Websites switch.
+ *
+ * A tray with the selected half filled, rather than Material's segmented buttons: the canvas puts
+ * the count inside each half, and the count is the reason the control is worth its height — it
+ * says what is in the tab you are not looking at.
+ */
+@Composable
+private fun PaneTabs(pane: Pane, apps: Int, sites: Int, onChange: (Pane) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Raised)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PaneTab("Apps", apps, pane == Pane.Apps, Modifier.weight(1f)) { onChange(Pane.Apps) }
+        PaneTab("Websites", sites, pane == Pane.Sites, Modifier.weight(1f)) { onChange(Pane.Sites) }
+    }
+}
+
+@Composable
+private fun PaneTab(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) Palette.Accent else Color.Transparent)
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
+    ) {
+        Text(
+            label,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            color = if (selected) Palette.Ink else Palette.Muted,
+        )
+        Text(
+            count.toString(),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (selected) Palette.Ink.copy(alpha = 0.62f) else Palette.Dim,
+        )
+    }
+}
+
+/** The search box, in the app's own shape rather than Material's. */
+@Composable
+private fun SearchField(value: String, onChange: (String) -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Raised)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = TextStyle(fontSize = 15.sp, color = Palette.Text),
+            cursorBrush = SolidColor(Palette.Accent),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (value.isEmpty()) {
+            Text("Search your apps", fontSize = 15.sp, color = Palette.Dim)
         }
     }
 }
+
+/** The line under the profile chips: what the sets you are *not* looking at hold. */
+private fun othersHold(
+    others: List<dev.curfew.policy.ProfileName>,
+    apps: Map<String, Int>,
+    sites: Map<String, Int>,
+): String {
+    val head = "Each profile keeps its own apps and its own websites."
+    val other = others.firstOrNull() ?: return head
+    val a = apps[other.id] ?: 0
+    val s = sites[other.id] ?: 0
+    val more = if (others.size > 1) " and ${others.size - 1} more" else ""
+    return "$head ${other.name} blocks ${count(a, "app")} and ${count(s, "site")}$more."
+}
+
+private fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
+
+private fun nameOf(state: UiState, id: String?): String =
+    state.profiles.firstOrNull { it.id == id }?.name ?: "this profile"
+
+/** A glyph standing for the kind of thing a rule aims at, since a website has no icon to show. */
+private fun glyphFor(target: Target): String = when (target) {
+    is Target.Domain -> "🌐"
+    is Target.Url -> "*"
+    is Target.Keyword -> "⌗"
+    else -> "▢"
+}
+
 /** What a rule does and where, for one line under its target. */
 private fun describeRule(rule: Rule): String {
     val where = if (rule.platforms.isEmpty()) {
@@ -339,7 +470,7 @@ private fun BlockDialog(onDismiss: () -> Unit, onSave: (Target) -> Unit) {
                                 "Address" -> "*://*/watch*"
                                 "Word" -> "gambling"
                                 else -> "* - YouTube*"
-                            }
+                            },
                         )
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
