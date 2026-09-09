@@ -313,7 +313,8 @@ fn the_default_window_stops_where_enforcement_stops() {
     let far = ics("Sunday standup", "20260906T210000Z", "20260906T220000Z");
     let fetcher = Scripted::always(Ok(far));
 
-    let (events, _) = feeds.events(NOW, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
+    let (events, _) =
+        feeds.events(NOW, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
 
     assert!(events.is_empty(), "{events:?}");
 }

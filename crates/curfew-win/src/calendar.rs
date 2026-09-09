@@ -192,13 +192,9 @@ impl Feeds {
             }
 
             let Some(cached) = self.cache.get(&source.id) else { continue };
-            let found = curfew_ics::events_between(
-                &cached.text,
-                now - WINDOW_SECONDS,
-                now + ahead,
-                zone,
-            )
-            .unwrap_or_default();
+            let found =
+                curfew_ics::events_between(&cached.text, now - WINDOW_SECONDS, now + ahead, zone)
+                    .unwrap_or_default();
 
             if !outcomes.iter().any(|o| matches!(o, Outcome::Failed { id, .. } if id == &source.id))
             {
