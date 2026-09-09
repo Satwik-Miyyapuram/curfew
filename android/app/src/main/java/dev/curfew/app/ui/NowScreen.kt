@@ -58,6 +58,7 @@ import dev.curfew.policy.Session
 @Composable
 fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
+    val mode by model.mode.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? FragmentActivity
 
     // The conditions this screen can satisfy are gathered one at a time, in a fixed order, and
@@ -215,6 +216,77 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         if (state.sessions.isEmpty()) {
             Gap(14.dp)
             GhostButton("Check the schedules now", colour = Palette.Muted, onClick = model::reconcileNow)
+        }
+
+        // Power mode adds the timeline. Simple mode deliberately does not have it: "something will
+        // start later" is the whole of what a simple user needs, and a list of the next four
+        // activations with their exact windows is the kind of detail that makes a calm screen look
+        // like a control panel.
+        if (mode.isPower) {
+            Gap(20.dp)
+            SectionLabel("Upcoming · next 24h")
+            Gap(10.dp)
+            val soon = state.upcoming
+                .filter { it.start > state.now }
+                .sortedBy { it.start }
+                .take(4)
+            DCardFlush {
+                if (soon.isEmpty()) {
+                    Text(
+                        "Nothing scheduled in the next day.",
+                        fontSize = 13.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(Dsn.CardPad),
+                    )
+                }
+                soon.forEachIndexed { index, activation ->
+                    if (index > 0) Rule()
+                    val name = state.profiles.firstOrNull { it.id == activation.profile }?.name
+                        ?: activation.profile
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                name,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                describeSource(activation.source),
+                                fontSize = 12.sp,
+                                color = Palette.Dim,
+                            )
+                        }
+                        Text(
+                            "${clockOf(activation.start)}–${clockOf(activation.end)}",
+                            fontSize = 13.sp,
+                            color = Palette.Muted,
+                        )
+                    }
+                }
+            }
+
+            Gap(12.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill(
+                    if (state.downtime == null) "Ticks on time" else "Missed a stretch",
+                    tint = if (state.downtime == null) Palette.Ok else Palette.Live,
+                )
+                Pill(
+                    when (state.sync.active.size) {
+                        0 -> "No peers"
+                        1 -> "1 peer"
+                        else -> "${state.sync.active.size} peers"
+                    },
+                )
+                Pill("${state.audit.size} logged")
+            }
         }
     }
 
