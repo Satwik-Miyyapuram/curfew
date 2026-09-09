@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -59,13 +61,28 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Now("now", "Now", Icons.Filled.CheckCircle),
-    Schedule("schedule", "Schedule", Icons.Filled.DateRange),
-    Apps("apps", "Apps", Icons.Filled.Lock),
-    Usage("usage", "Usage", Icons.AutoMirrored.Filled.List),
-    Devices("devices", "Devices", Icons.Filled.Share),
-    Health("health", "Health", Icons.Filled.Settings),
+/**
+ * A destination in the bottom bar.
+ *
+ * Two names, because the bar has room for one word and a screen reader has room for a sentence.
+ * [short] is what fits under an icon on a phone showing seven of them — anything longer came back
+ * as "Sche…", "Cale…", "Devic…", a row of words with their ends cut off, which is worse than
+ * icons alone. [label] is the full name, and it is what the icon is described as, so shortening
+ * the visible one costs nothing.
+ */
+private enum class Tab(
+    val route: String,
+    val label: String,
+    val short: String,
+    val icon: ImageVector,
+) {
+    Now("now", "Now", "Now", Icons.Filled.CheckCircle),
+    Schedule("schedule", "Schedule", "Rules", Icons.Filled.Edit),
+    Calendar("calendar", "Calendar", "Events", Icons.Filled.DateRange),
+    Apps("apps", "Apps", "Apps", Icons.Filled.Lock),
+    Usage("usage", "Usage", "Usage", Icons.AutoMirrored.Filled.List),
+    Devices("devices", "Devices", "Sync", Icons.Filled.Share),
+    Health("health", "Health", "Health", Icons.Filled.Settings),
 }
 
 @Composable
@@ -89,10 +106,23 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                                 restoreState = true
                             }
                         },
-                        // Null on purpose: the label beside it carries the name, and a described
-                        // icon would make a screen reader say every tab twice.
-                        icon = { Icon(tab.icon, contentDescription = null) },
-                        label = { Text(tab.label) },
+                        // Named here rather than left to the label: an unselected tab shows no
+                        // label at all, so the icon is the only thing a screen reader could read.
+                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        // Only the selected tab is named. Seven labels do not fit across a phone:
+                        // left to wrap they broke as "Schedul/e", and forced onto one line they
+                        // came out as "Sche…", "Calen…", "Devic…" — a row of words with their
+                        // ends cut off, which is worse than icons alone. The selected one has the
+                        // room to be spelled out, and the icons stay described for screen readers.
+                        alwaysShowLabel = false,
+                        label = {
+                            Text(
+                                tab.short,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                     )
                 }
             }
@@ -105,6 +135,7 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
         ) {
             composable(Tab.Now.route) { NowScreen(model) }
             composable(Tab.Schedule.route) { ScheduleScreen(model) }
+            composable(Tab.Calendar.route) { CalendarScreen(model) }
             composable(Tab.Apps.route) { AppPickerScreen(model) }
             composable(Tab.Usage.route) { UsageScreen(model) }
             composable(Tab.Devices.route) { DevicesScreen(model) }

@@ -6,9 +6,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.curfew.app.data.AuditRow
 import dev.curfew.app.data.CurfewRuntime
+import dev.curfew.app.data.CalendarReader
 import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
 import dev.curfew.policy.Activation
+import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.Lock
 import dev.curfew.policy.WeeklySchedule
@@ -103,6 +105,11 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
                     weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
                     calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
+                    // Anything that has not finished yet, soonest first. Events already over are
+                    // dropped rather than greyed out: the list exists to be pointed at, and a
+                    // finished meeting is not something a new rule can usefully be built from.
+                    calendarEvents = events.filter { it.end > now }.sortedBy { it.start },
+                    calendarGranted = CalendarReader(getApplication()).hasPermission(),
                     profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
                         .getOrDefault(emptyList()),
                     audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
@@ -619,6 +626,16 @@ data class UiState(
     /** The weekly windows and calendar rules, as the schedule editor lists them. */
     val weekly: List<WeeklySchedule> = emptyList(),
     val calendarRules: List<CalendarSchedule> = emptyList(),
+    /**
+     * The device's own calendar entries for the window Curfew reads, soonest first.
+     *
+     * On screen so that a calendar rule can be made by pointing at a real meeting instead of
+     * guessing at a wildcard: a rule written blind against a title that does not exist is a rule
+     * that silently never fires, and the user has no way to tell that from a rule that works.
+     */
+    val calendarEvents: List<CalendarEvent> = emptyList(),
+    /** False when Curfew has no calendar permission, which makes [calendarEvents] meaningless. */
+    val calendarGranted: Boolean = false,
     val profiles: List<ProfileName> = emptyList(),
     val audit: List<AuditRow> = emptyList(),
     /** Days blocked, streaks and totals over the last fortnight. */

@@ -138,10 +138,19 @@ fun describeSource(source: SessionSource): String = when (source) {
     is SessionSource.Calendar -> "from the calendar: ${source.event}"
 }
 
-fun describeSource(source: ActivationSource): String = when (source) {
-    is ActivationSource.Weekly -> source.schedule
-    is ActivationSource.Calendar -> source.event
-}
+/**
+ * Where an activation came from, in the words the user would use for it.
+ *
+ * [titles] maps calendar event ids to their names, and it matters more than it looks: an id here is
+ * something like `5552:1788984000`, which is the calendar provider's row and instant and means
+ * nothing at all to the person reading it. When the event is not in the window Curfew reads, the id
+ * is still shown — a name that cannot be found is not a reason to say nothing about the source.
+ */
+fun describeSource(source: ActivationSource, titles: Map<String, String> = emptyMap()): String =
+    when (source) {
+        is ActivationSource.Weekly -> source.schedule
+        is ActivationSource.Calendar -> titles[source.event] ?: source.event
+    }
 
 /**
  * A gap, said plainly enough that a user can decide whether it mattered.

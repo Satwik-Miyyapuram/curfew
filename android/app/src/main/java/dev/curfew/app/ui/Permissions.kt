@@ -1,6 +1,9 @@
 package dev.curfew.app.ui
 
 import android.Manifest
+import androidx.core.app.ActivityCompat
+import android.content.ContextWrapper
+import android.app.Activity
 import android.app.AlarmManager
 import android.content.ComponentName
 import android.content.Context
@@ -245,4 +248,32 @@ object RestrictedSettings {
             "the switch greyed out without saying why. To allow it: open App info, tap the three " +
             "dots in the top corner, choose \"Allow restricted settings\", then come back and turn " +
             "the accessibility service on."
+}
+
+/**
+ * Ask for a runtime permission, without going through the activity result registry.
+ *
+ * [MainActivity] is a `FragmentActivity`, which androidx.biometric requires. `FragmentActivity`
+ * makes `requestPermissions` final and rejects any request code that does not fit in sixteen bits,
+ * while the result registry generates codes far above that — so `ActivityResultContracts
+ * .RequestPermission` throws `IllegalArgumentException: Can only use lower 16 bits for requestCode`
+ * the moment the user taps Grant, and the app dies on the screen whose whole job is to fix
+ * permissions. A fixed small code is accepted by both.
+ *
+ * Nothing reads the result: every screen that asks re-reads the real grant state on its next
+ * refresh, which is the only answer that cannot go stale.
+ */
+fun requestRuntimePermission(context: Context, permission: String) {
+    val activity = context.findActivity() ?: return
+    ActivityCompat.requestPermissions(activity, arrayOf(permission), PERMISSION_REQUEST_CODE)
+}
+
+/** The one code Curfew asks with. Small enough for `FragmentActivity`, and never read back. */
+private const val PERMISSION_REQUEST_CODE = 0x0C0F
+
+/** The activity behind a composable's context, through however many `ContextWrapper`s. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

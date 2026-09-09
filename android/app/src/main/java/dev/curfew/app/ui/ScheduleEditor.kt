@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.EventMatcher
 import dev.curfew.policy.Lock
@@ -350,10 +351,18 @@ internal fun CalendarDialog(
     now: Long,
     onDismiss: () -> Unit,
     onSave: (CalendarSchedule) -> Unit,
+    prefill: CalendarEvent? = null,
 ) {
     var profile by remember { mutableStateOf(existing?.profile ?: profiles.firstOrNull()?.id ?: "") }
-    var title by remember { mutableStateOf(existing?.matcher?.title.orEmpty()) }
-    var calendar by remember { mutableStateOf(existing?.matcher?.calendar.orEmpty()) }
+    // An event picked from the calendar fills the matcher in from what that event actually says.
+    // Its exact title, not a wildcard around it: the user pointed at one meeting, and widening
+    // that into a pattern behind their back would block things they never chose.
+    var title by remember {
+        mutableStateOf(existing?.matcher?.title ?: prefill?.title.orEmpty())
+    }
+    var calendar by remember {
+        mutableStateOf(existing?.matcher?.calendar ?: prefill?.calendar.orEmpty())
+    }
     var location by remember { mutableStateOf(existing?.matcher?.location.orEmpty()) }
     var busyOnly by remember { mutableStateOf(existing?.matcher?.busyOnly ?: false) }
     var before by remember { mutableStateOf(((existing?.padBeforeSeconds ?: 0) / 60).toString()) }

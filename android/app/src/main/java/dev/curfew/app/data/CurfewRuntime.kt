@@ -401,8 +401,14 @@ class CurfewRuntime internal constructor(
      * One sync pass: publish what this device is enforcing, adopt what the others are, and store
      * the budgets the log says are now shared.
      *
-     * Held under [gate] like every other session write, because adoption starts sessions: a peer's
-     * news arriving is a change to what is running here, and there is exactly one writer of that.
+     * The pass itself runs outside [gate], and this is deliberate. It is the one call in the app
+     * that can block for a minute: measured on this device at thirteen, forty-seven and fifty-two
+     * seconds for a single pass, against twenty-three milliseconds for everything after it. Held
+     * under the gate, that is a minute in which [reconcile] cannot run, which would make a schedule
+     * start late by however long the network felt like taking — enforcement waiting on the one
+     * feature allowed to fail. It does not need the gate: adoption starts sessions inside the core,
+     * under the core's own writer lock, which is the real serialization point. What comes back is
+     * then written under the gate like any other session write.
      *
      * The budgets come back and are written as they are. Rows are keyed by target and instant, so a
      * slice this device already had is replaced by an identical one and a slice that happened on
@@ -414,13 +420,13 @@ class CurfewRuntime internal constructor(
         // Only this device's own events are published; the peers' are merged in for enforcement
         // only, so a calendar cannot be echoed back and forth between two devices.
         val seen = runCatching { localCalendarEvents(now) }.getOrDefault(emptyList())
-        val pass = gate.withLock {
-            val pass = runCatching {
-                hub.sync.pass(policy, now, before.usage, before.launches, seen)
-            }.getOrElse {
-                audit(now, "sync.failed", it.message.orEmpty())
-                return@withLock null
-            }
+        val pass = runCatching {
+            hub.sync.pass(policy, now, before.usage, before.launches, seen)
+        }.getOrElse {
+            gate.withLock { audit(now, "sync.failed", it.message.orEmpty()) }
+            return null
+        }
+        gate.withLock {
             for ((target, spent) in pass.usage) {
                 for (rollup in spent.rollups) {
                     db.usage().addUsage(UsageRow(target = target, at = rollup.at, seconds = rollup.seconds))
@@ -432,8 +438,7 @@ class CurfewRuntime internal constructor(
             for (id in pass.adopted) audit(now, "sync.adopted", id)
             for (id in pass.stillLocked) audit(now, "sync.refused", id)
             persist(now)
-            pass
-        } ?: return null
+        }
         peerEvents = pass.calendar
         hub.record(pass)
         if (pass.published > 0) {

@@ -105,7 +105,9 @@ fun ScheduleScreen(model: CurfewViewModel) {
             modifier = Modifier.semantics { heading() },
         )
 
-        if (state.upcoming.isEmpty()) {
+        // Not before the first refresh: see CalendarScreen. An empty list is a claim that nothing is
+        // scheduled, and until the config has been read it is a claim the app cannot make.
+        if (state.upcoming.isEmpty() && !state.loading) {
             Text(
                 "Nothing is scheduled. Add a profile with a schedule below and it will appear here.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -114,6 +116,11 @@ fun ScheduleScreen(model: CurfewViewModel) {
         // Grouped by day so a block tomorrow morning can never be read as one this evening. The
         // list is a preview, not a promise about the past: anything that has already ended is
         // dropped before it reaches here.
+        // The same two lookups the Calendar tab does, and for the same reason: a profile answers to
+        // an id in the config and a name on screen, and a calendar activation carries the provider's
+        // row id rather than the name of the meeting. Both read as gibberish if shown raw.
+        val names = state.profiles.associate { it.id to it.name }
+        val titles = state.calendarEvents.associate { it.id to it.title }
         var day: String? = null
         state.upcoming.forEach { activation ->
             val label = dayLabel(activation.start, state.now)
@@ -127,10 +134,13 @@ fun ScheduleScreen(model: CurfewViewModel) {
             }
             Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(activation.profile, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        names[activation.profile] ?: activation.profile,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                     Text(
                         "${clockTime(activation.start)} – ${clockTime(activation.end)} · " +
-                            describeSource(activation.source),
+                            describeSource(activation.source, titles),
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
@@ -161,7 +171,7 @@ fun ScheduleScreen(model: CurfewViewModel) {
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(top = 8.dp).semantics { heading() },
         )
-        if (state.profiles.isEmpty()) {
+        if (state.profiles.isEmpty() && !state.loading) {
             // The gap a fresh install falls into: every schedule names a profile, and the app
             // picker fills one, so with none defined neither screen can do anything at all.
             Text(
@@ -233,7 +243,7 @@ fun ScheduleScreen(model: CurfewViewModel) {
         ) { Text("Add a calendar rule") }
         // A schedule has to name a profile that exists, so the buttons above are dead until one
         // does. Said plainly rather than left as a greyed-out button with no explanation.
-        if (state.profiles.isEmpty()) {
+        if (state.profiles.isEmpty() && !state.loading) {
             Text(
                 "Add a profile above first \u2014 a schedule has to say which one it runs.",
                 style = MaterialTheme.typography.bodySmall,

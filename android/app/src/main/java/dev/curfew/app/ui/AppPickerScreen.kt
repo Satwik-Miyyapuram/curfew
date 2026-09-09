@@ -3,6 +3,7 @@ package dev.curfew.app.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import dev.curfew.policy.Rule
@@ -27,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +39,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Choosing apps without writing TOML.
@@ -52,12 +56,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun AppPickerScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val apps = remember { installedApps(context) }
+    // Read off the main thread: the launcher query walks every installed package, which on a full
+    // phone is long enough to drop frames if it happens while composing.
+    val apps by produceState(initialValue = emptyList<InstalledApp>()) {
+        value = withContext(Dispatchers.IO) { installedApps(context) }
+    }
 
     var profile by remember { mutableStateOf<String?>(null) }
     var checked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
+    // A profile the user asked to switch to while holding unsaved ticks, waiting on an answer.
+    var switchingTo by remember { mutableStateOf<String?>(null) }
 
     // Default to the first profile, and re-read the ticks whenever the chosen profile changes or
     // the config is edited elsewhere.
@@ -68,8 +78,17 @@ fun AppPickerScreen(model: CurfewViewModel) {
     }
 
     val current = profile
-    val visible = apps.filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
     val saved = current?.let { model.blockedApps(it).toSet() } ?: emptySet()
+    val dirty = current != null && checked != saved
+    // Blocked apps first, then the rest, each half alphabetical. What a profile blocks is the
+    // answer this screen exists to give, and it should not be somewhere down a list of two hundred.
+    val visible = apps
+        .filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
+        .sortedWith(compareBy({ it.packageName !in checked }, { it.label.lowercase() }))
+    // How many apps each profile blocks, so the chips show that the sets really are separate.
+    val counts = remember(state.profiles, state.configToml) {
+        state.profiles.associate { it.id to model.blockedApps(it.id).size }
+    }
     // Re-read on every config change, so a rule removed here disappears without a manual refresh.
     val beyondApps = remember(current, state.configToml) {
         current?.let { model.rulesBeyondApps(it) }.orEmpty()
@@ -82,7 +101,7 @@ fun AppPickerScreen(model: CurfewViewModel) {
             modifier = Modifier.semantics { heading() },
         )
 
-        if (state.profiles.isEmpty()) {
+        if (state.profiles.isEmpty() && !state.loading) {
             Text(
                 "There are no profiles yet. Add one under Schedule and it will appear here.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -98,8 +117,10 @@ fun AppPickerScreen(model: CurfewViewModel) {
             state.profiles.forEach { p ->
                 FilterChip(
                     selected = current == p.id,
-                    onClick = { profile = p.id },
-                    label = { Text(p.name) },
+                    // Switching away with unsaved ticks used to drop them silently, because the
+                    // effect above re-reads the config for the newly chosen profile. Ask instead.
+                    onClick = { if (dirty && p.id != current) switchingTo = p.id else profile = p.id },
+                    label = { Text("${p.name} · ${counts[p.id] ?: 0}") },
                 )
             }
         }
@@ -130,6 +151,10 @@ fun AppPickerScreen(model: CurfewViewModel) {
                         },
                 ) {
                     Checkbox(checked = isChecked, onCheckedChange = null)
+                    AppIcon(
+                        app.packageName,
+                        modifier = Modifier.padding(start = 8.dp).size(32.dp),
+                    )
                     Text(
                         app.label,
                         style = MaterialTheme.typography.bodyLarge,
@@ -186,6 +211,25 @@ fun AppPickerScreen(model: CurfewViewModel) {
             }
         }
 
+        switchingTo?.let { target ->
+            AlertDialog(
+                onDismissRequest = { switchingTo = null },
+                title = { Text("Unsaved changes") },
+                text = {
+                    Text(
+                        "The ticks for this profile have not been saved. Switching profiles now " +
+                            "discards them.",
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = { profile = target; switchingTo = null }) { Text("Discard") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { switchingTo = null }) { Text("Stay here") }
+                },
+            )
+        }
+
         if (adding && current != null) {
             BlockDialog(
                 onDismiss = { adding = false },
@@ -208,11 +252,11 @@ fun AppPickerScreen(model: CurfewViewModel) {
         ) {
             Button(
                 onClick = { current?.let { model.setBlockedApps(it, checked.toList()) } },
-                enabled = current != null && checked != saved,
+                enabled = dirty,
             ) {
                 Text("Save")
             }
-            TextButton(onClick = { checked = saved }, enabled = checked != saved) {
+            TextButton(onClick = { checked = saved }, enabled = dirty) {
                 Text("Discard")
             }
         }

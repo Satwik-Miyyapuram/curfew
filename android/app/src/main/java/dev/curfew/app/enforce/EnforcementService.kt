@@ -31,6 +31,7 @@ class EnforcementService : Service() {
 
     private lateinit var runtime: CurfewRuntime
     private var loop: Job? = null
+    private var sync: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,18 +39,41 @@ class EnforcementService : Service() {
         startForeground(NOTIFICATION_ID, notification(running = false))
         loop = runtime.scope.launch {
             runtime.restore()
-            startSync()
             tick()
+        }
+        // Beside enforcement, never in front of it. Bringing the sync node up opens sockets and
+        // takes a multicast lock, and on this device that call did not come back — which stalled
+        // the tick loop behind it and meant nothing was enforced at all. Sync is the feature that
+        // may fail; enforcement is the promise that may not, so the promise does not wait on it.
+        sync = runtime.scope.launch(kotlinx.coroutines.Dispatchers.IO) { syncLoop() }
+    }
+
+    /**
+     * Sync, on its own thread, forever.
+     *
+     * Every call into the sync node blocks: bringing it up opens sockets and takes a multicast
+     * lock, and a pass talks to peers that may simply not answer — measured here at forty-seven
+     * seconds for a single pass on a network with none. A `withTimeout` cannot help, because the
+     * blocking is inside the FFI call and there is no suspension point to cancel at. So sync gets
+     * its own coroutine on the IO dispatcher and enforcement never waits on it: the tick loop is
+     * the promise the app makes, and it now runs on time whatever the network is doing.
+     */
+    private suspend fun syncLoop() {
+        runCatching { startSync() }
+        while (runtime.scope.isActive) {
+            // Its own clock reading, since the tick's is not shared any more.
+            runCatching { runtime.syncPass(runtime.trustedNow()) }
+            delay(SYNC_MILLIS)
         }
     }
 
     /**
      * Bring sync up, if the device has any.
      *
-     * Attached here rather than in the application object because the node holds sockets, and the
-     * process that is allowed to hold sockets for a long time is this one. A device that has never
-     * been paired still opens its store: it costs one file, and it means the pairing screen has an
-     * identity to show without any ceremony first.
+     * Attached to this service rather than to the application object because the node holds
+     * sockets, and the process that is allowed to hold sockets for a long time is this one. A
+     * device that has never been paired still opens its store: it costs one file, and it means the
+     * pairing screen has an identity to show without any ceremony first.
      */
     private fun startSync() {
         val hub = runtime.sync ?: dev.curfew.app.data.SyncHub.create(this, deviceName())?.also {
@@ -70,7 +94,18 @@ class EnforcementService : Service() {
      * rather than a whole session.
      */
     private suspend fun tick() {
+        var previous = 0L
         while (runtime.scope.isActive) {
+            // A tick that arrives late is a block that starts late, and until this line there was
+            // nothing anywhere that said so: sync once held the session gate across a call measured
+            // at fifty-two seconds, and the only symptom was a schedule quietly starting a minute
+            // after its time. Warned about rather than counted, because the cause is always
+            // something holding the loop up, and the log is where that gets found.
+            val woke = android.os.SystemClock.elapsedRealtime()
+            if (previous != 0L && woke - previous > POLL_MILLIS * 2) {
+                android.util.Log.w(TAG, "enforcement ran ${woke - previous - POLL_MILLIS}ms late")
+            }
+            previous = woke
             // Trusted time, not the wall clock: a device whose clock was moved forward must not
             // be able to reconcile a lock away, and this loop is the thing that would do it.
             val now = runtime.trustedNow()
@@ -79,9 +114,6 @@ class EnforcementService : Service() {
             // Written after reconciling, so the recorded time is one Curfew was demonstrably
             // enforcing at, rather than one it merely woke up at.
             runtime.heartbeat(now)
-            // After reconciling and before the next sleep: what the schedules just decided is
-            // published, and anything a peer decided is adopted, in one pass under the same lock.
-            runtime.syncPass(now)
             ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
             updateNotification()
             // If the fallback detector is in use, this is also when the foreground app is sampled.
@@ -127,6 +159,7 @@ class EnforcementService : Service() {
 
     override fun onDestroy() {
         runtime.sync?.stop()
+        sync?.cancel()
         loop?.cancel()
         super.onDestroy()
     }
@@ -141,8 +174,11 @@ class EnforcementService : Service() {
     }
 
     companion object {
+        private const val TAG = "Curfew"
         private const val NOTIFICATION_ID = 1
         private const val POLL_MILLIS = 30_000L
+        /** How often peers are talked to. Slower than enforcement: nothing waits on it. */
+        private const val SYNC_MILLIS = 60_000L
 
         fun start(context: Context) {
             val intent = Intent(context, EnforcementService::class.java)
@@ -155,8 +191,11 @@ class EnforcementService : Service() {
 
         fun enforcer(context: Context): Enforcer =
             shared ?: synchronized(this) {
-                shared ?: Enforcer(context.curfew, AndroidActions(context.applicationContext))
-                    .also { shared = it }
+                shared ?: Enforcer(
+                    context.curfew,
+                    AndroidActions(context.applicationContext),
+                    context.packageName,
+                ).also { shared = it }
             }
     }
 }
@@ -165,7 +204,12 @@ class EnforcementService : Service() {
 class AndroidActions(private val context: Context) : Enforcer.Actions {
 
     override fun block(target: String, reason: BlockReason) {
-        context.startActivity(BlockActivity.intent(context, target, reason))
+        // A background activity start is refused on modern Android unless the app is allowed to
+        // draw over other apps, and the refusal is silent from in here. Caught and logged so that
+        // a block that never appears leaves a trace pointing at the permission, rather than
+        // looking like a scheduling bug.
+        runCatching { context.startActivity(BlockActivity.intent(context, target, reason)) }
+            .onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
     }
 
     override fun delay(target: String, seconds: Int) {

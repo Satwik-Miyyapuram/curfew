@@ -16,6 +16,11 @@ import dev.curfew.policy.Observation
 class Enforcer(
     private val runtime: CurfewRuntime,
     private val actions: Actions,
+    /**
+     * Curfew's own package, which enforcement always leaves alone. Passed in rather than read from
+     * a context so this class stays free of Android types; empty in a test that does not care.
+     */
+    private val selfPackage: String = "",
 ) {
     /** What the enforcer is allowed to do to the world outside it. */
     interface Actions {
@@ -49,6 +54,15 @@ class Enforcer(
             if (runtime.decide(observation, now) == Decision.Mute) {
                 actions.muteNotification(observation.`package`)
             }
+            return
+        }
+        // Curfew's own screens are never blocked. Otherwise a rule broad enough to catch this
+        // package — "block everything", a wildcard, an app list built from the launcher — puts the
+        // block screen over the settings that would let the user fix it, and the block screen's own
+        // relaunch keeps it there. The lock is still a promise: nothing here ends a session, it
+        // only refuses to point the enforcement at the one app that has to stay reachable.
+        if (observation is Observation.App && observation.`package` == selfPackage) {
+            actions.allow("app:${observation.`package`}")
             return
         }
         val target = identity(observation)

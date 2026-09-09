@@ -1,8 +1,6 @@
 package dev.curfew.app.ui
 
 import android.content.Intent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,10 +35,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun HealthScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val requestPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { /* The next refresh reads the real state; the result itself adds nothing. */ }
-
     val missingRequired = state.grants.filter { it.grant.required && !it.granted }
 
     LazyColumn(
@@ -125,7 +119,7 @@ fun HealthScreen(model: CurfewViewModel) {
                             val permission = entry.grant.runtimePermission()
                             val settings = entry.grant.settingsIntent(context)
                             when {
-                                permission != null -> requestPermission.launch(permission)
+                                permission != null -> requestRuntimePermission(context, permission)
                                 settings != null ->
                                     context.startActivity(
                                         settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
