@@ -1,0 +1,19 @@
+# Cargo settings for this workspace. One entry, and it exists to stop Windows asking for an
+# administrator on every test run.
+#
+# Every `cargo test` compiles a *new* executable with a new content hash, and an unsigned executable
+# that binds `0.0.0.0` is, to Windows Defender Firewall, a brand new program asking to accept
+# connections: one UAC-backed prompt per run, and a leftover firewall rule per prompt (this machine
+# had accumulated thirty-eight of them, one per test binary, all pointing at files that no longer
+# exist). None of the tests need the network. Two nodes talking over loopback prove exactly what two
+# nodes talking over the LAN would.
+#
+# `curfew-sync` already reads this variable at every binding site; what was missing was somewhere to
+# set it for the crates that reach those sites only as a dependency, where its own `cfg!(test)` is
+# false. Cargo applies `[env]` to what it runs — `cargo test`, `cargo run` — and not to an installed
+# copy, so the service that a user actually installs still syncs over the LAN normally.
+#
+# It is not forced, so a real LAN test can override it for one command:
+#   CURFEW_LAN_LOOPBACK=0 cargo run -p curfew-svc -- run
+[env]
+CURFEW_LAN_LOOPBACK = "1"
