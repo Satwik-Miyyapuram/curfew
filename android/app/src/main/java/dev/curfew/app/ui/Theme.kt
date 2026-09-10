@@ -65,6 +65,13 @@ private val scheme = darkColorScheme(
     outlineVariant = Palette.Line,
     error = Palette.Bad,
     onError = Palette.Ink,
+    // The containers Material draws dialogs and sheets on. Translucent on purpose: a dialog is a
+    // pane laid over the page, the same material as the nav bar, and an opaque slab in the middle
+    // of a screen is what made the app read as flat cards on a flat ground.
+    surfaceContainer = Palette.Raised.copy(alpha = 0.93f),
+    surfaceContainerLow = Palette.Surface.copy(alpha = 0.93f),
+    surfaceContainerHigh = Palette.Raised.copy(alpha = 0.94f),
+    surfaceContainerHighest = Palette.Line.copy(alpha = 0.94f),
 )
 
 /**

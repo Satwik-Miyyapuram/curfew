@@ -7,6 +7,7 @@ import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -178,7 +181,13 @@ private fun BlockScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Palette.Ink)
+            // Not flat ink: a ground that warms towards the amber the app uses for "running", so
+            // the block screen belongs to the same world as the dial that started it.
+            .background(
+                Brush.verticalGradient(
+                    listOf(Palette.Ink, Palette.Surface, Palette.Live.copy(alpha = 0.07f)),
+                ),
+            )
             .padding(horizontal = 34.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -187,7 +196,8 @@ private fun BlockScreen(
             modifier = Modifier
                 .size(96.dp)
                 .clip(RoundedCornerShape(32.dp))
-                .background(Palette.Live.copy(alpha = 0.12f)),
+                .background(Palette.Live.copy(alpha = 0.12f))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(32.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Text("🔒", fontSize = 36.sp)
@@ -231,8 +241,15 @@ private fun BlockScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Palette.Raised)
+                .clip(RoundedCornerShape(16.dp))
+                // The same pane of glass as the nav bar: translucent ground, lit top edge.
+                .background(Palette.Raised.copy(alpha = 0.88f))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.White.copy(alpha = 0.07f), Color.Transparent),
+                    ),
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                 .clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
