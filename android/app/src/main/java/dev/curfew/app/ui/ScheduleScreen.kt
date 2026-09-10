@@ -44,21 +44,28 @@ import dev.curfew.policy.ProfileName
 import dev.curfew.policy.WeeklySchedule
 
 /**
- * Everything that can start a block, as one list.
+ * The plan: one card per profile, and under it every reason that profile turns on.
  *
- * The old version of this screen was four stacked sections — a timeline, profiles, weekly windows,
- * calendar rules — each with its own heading and its own Add button, which asked the user to hold
- * the app's data model in their head before they could answer "what is going to happen to me?".
- * The canvas answers that with a single card: one row per thing that can switch the phone off,
- * whatever kind of thing it is, each with the profile it runs, when it runs, and a switch.
+ * This screen has been two wrong shapes already. First four stacked sections — a timeline,
+ * profiles, weekly windows, calendar rules — which asked the user to hold the app's data model
+ * in their head before they could answer "what is going to happen to me?". Then one flat list of
+ * everything that could start a block, which answered that question but lost the one people asked
+ * next: a profile can be started by a schedule *and* by four meetings, and a flat list scattered
+ * those five rows down the page with the profile's name repeated on every one of them.
  *
- * The switch is the point of the redesign. Pausing a window is not deleting it — "not this week"
- * is a thing people mean constantly, and an app with nowhere to put it teaches them to delete the
- * window and rebuild it later from memory, usually wrong.
+ * So the profile is the card, and the things that start it are rows inside it. The card names what
+ * the profile takes away ("2 apps · 1 site · 1h a day"), each calendar rule shows the real
+ * events it has caught in the next week, and the sub-line counts both numbers — how many
+ * profiles, and how many things can start one.
  *
- * Tapping a row opens it; holding one offers to remove it. The config text itself stays, in Power
- * mode only, because the file is the thing a user backs up and carries between devices and hiding
- * it would make their own document a mystery to them.
+ * The switches stay, at both levels. Pausing is not deleting — "not this week" is a thing people
+ * mean constantly, and an app with nowhere to put it teaches them to delete the window and rebuild
+ * it later from memory, usually wrong. The card's switch is the profile's whole plan; a row's is
+ * that one reason for it.
+ *
+ * Tapping a card opens the profile; holding one offers to remove it. The config text itself stays,
+ * in Power mode only, because the file is the thing a user backs up and carries between devices and
+ * hiding it would make their own document a mystery to them.
  */
 @Composable
 fun ScheduleScreen(
@@ -81,10 +88,6 @@ fun ScheduleScreen(
     // Which profile is picking meetings, if any. The picker is the same sheet the profile screen
     // opens, so an event chosen from either place is the same rule written the same way.
     var picking by remember { mutableStateOf<ProfileName?>(null) }
-
-    // Schedules point at a profile by id; every row says the name instead. A row headed
-    // "socials-diet" is the config talking, not the app.
-    val names = state.profiles.associate { it.id to it.name }
 
     // Adopt the saved config whenever it changes underneath an untouched editor, so the text does
     // not silently go stale — but never overwrite an edit in progress.
@@ -122,7 +125,14 @@ fun ScheduleScreen(
         Row(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
                 Title("Plan")
-                Sub(summarise(running, fromCalendar, state.profiles.isEmpty(), state.loading))
+                Sub(
+                    summarise(
+                        profiles = state.profiles.size,
+                        triggers = running,
+                        fromCalendar = fromCalendar,
+                        loading = state.loading,
+                    ),
+                )
             }
             // The one accent-filled control on the screen, because adding a profile is the one
             // thing a user with nothing set up has to do next.
@@ -213,8 +223,8 @@ fun ScheduleScreen(
                 windows.forEach { window ->
                     Rule()
                     TriggerRow(
-                        title = describeWindow(window).substringBefore(" \u00B7 "),
-                        note = describeWindow(window),
+                        title = describeDays(window.days),
+                        note = describeWindow(window).substringAfter(" \u00B7 "),
                         tint = Palette.Live,
                         enabled = window.enabled,
                         onToggle = { model.saveWeekly(window.copy(enabled = it)) },
@@ -561,32 +571,33 @@ private fun matches(rule: CalendarSchedule, event: CalendarEvent): Boolean {
 }
 
 /** The subtitle under "Plan": what the list below adds up to, in one sentence. */
-private fun summarise(running: Int, fromCalendar: Int, noProfiles: Boolean, loading: Boolean): String {
-    if (loading) return "Reading your plan…"
-    if (noProfiles) return "Nothing set up yet."
-    if (running == 0) return "Nothing runs on its own right now."
-    val blocks = if (running == 1) "One block." else "$running blocks."
-    return when (fromCalendar) {
-        0 -> blocks
-        1 -> "$blocks One comes from your calendar."
-        running -> "$blocks All from your calendar."
-        else -> "$blocks $fromCalendar come from your calendar."
+/**
+ * The line under the title, counted the way the page is now laid out.
+ *
+ * It used to count blocks, which was the flat list talking: the page showed one card per rule, so
+ * "four blocks" matched what was on screen. The page shows profiles now, each with its reasons
+ * nested inside, so the honest summary is both numbers \u2014 how many profiles, and how many
+ * things can start one.
+ */
+private fun summarise(profiles: Int, triggers: Int, fromCalendar: Int, loading: Boolean): String {
+    if (loading) return "Reading your plan\u2026"
+    if (profiles == 0) return "Nothing set up yet."
+    val who = if (profiles == 1) "One profile." else "$profiles profiles."
+    if (triggers == 0) return "$who Nothing starts them on its own yet."
+    val what = if (triggers == 1) {
+        "One thing can start it."
+    } else {
+        "$triggers things can start them."
     }
+    val calendar = when {
+        fromCalendar == 0 -> ""
+        fromCalendar == triggers -> " All from your calendar."
+        fromCalendar == 1 -> " One from your calendar."
+        else -> " $fromCalendar from your calendar."
+    }
+    return "$who $what$calendar"
 }
 
-/** What a profile is attached to, said as a count rather than as a list of ids. */
-private fun countWindows(
-    weekly: List<WeeklySchedule>,
-    rules: List<CalendarSchedule>,
-    profile: String,
-): String {
-    val count = weekly.count { it.profile == profile } + rules.count { it.profile == profile }
-    return when (count) {
-        0 -> "nothing starts it yet"
-        1 -> "1 thing starts it"
-        else -> "$count things start it"
-    }
-}
 
 /**
  * A form that is open, over a schedule being edited or nothing for a new one.
