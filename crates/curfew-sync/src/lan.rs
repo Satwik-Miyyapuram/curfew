@@ -241,6 +241,11 @@ pub fn serve(
 /// in progress — must not fight over the port, and a device that cannot hear beacons is a device
 /// that silently stops syncing.
 pub fn beacon_socket() -> io::Result<UdpSocket> {
+    if loopback_only() {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
+        socket.set_read_timeout(Some(Duration::from_millis(500)))?;
+        return Ok(socket);
+    }
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, BEACON_PORT))?;
     socket.join_multicast_v4(&GROUP, &Ipv4Addr::UNSPECIFIED)?;
     socket.set_read_timeout(Some(Duration::from_millis(500)))?;
@@ -287,7 +292,24 @@ pub fn overhear(
 /// Bind the port peers connect to. Port zero: the operating system picks, and the beacon carries
 /// whatever it picked, so nothing has to be reserved or configured.
 pub fn listen() -> io::Result<TcpListener> {
-    TcpListener::bind((IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+    let host = if loopback_only() { Ipv4Addr::LOCALHOST } else { Ipv4Addr::UNSPECIFIED };
+    TcpListener::bind((IpAddr::V4(host), 0))
+}
+
+/// Whether this process must keep off the network entirely: `CURFEW_LAN_LOOPBACK=1`.
+///
+/// Test binaries are the reason this exists. Every `cargo test` run compiles a *new* executable
+/// with a new content hash, and a new unsigned executable that binds `0.0.0.0` is a new Windows
+/// Defender Firewall prompt — one per run, each needing an administrator, none of which the tests
+/// need at all: two nodes talking over the loopback interface prove exactly what two nodes talking
+/// over the LAN would. So the harness sets this and nothing leaves the machine.
+///
+/// It is read here rather than passed in because it has to reach every binding site in every crate
+/// that starts a node, including the ones a test only reaches indirectly.
+/// This crate's own tests never touch the network, so they never have to ask for it; another
+/// crate's tests set the variable, because there this crate is an ordinary dependency.
+fn loopback_only() -> bool {
+    cfg!(test) || std::env::var("CURFEW_LAN_LOOPBACK").is_ok_and(|value| value == "1")
 }
 
 /// Connect to a peer that was heard from, with timeouts set so a device that has left the network

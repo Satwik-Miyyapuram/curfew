@@ -369,6 +369,18 @@ mod tests {
     const NOW: Timestamp = 1_788_510_600;
     const HOUR: Timestamp = 3600;
 
+    /// Keep the test binary off the network.
+    ///
+    /// Every `cargo test` run builds a new executable with a new hash, and a new unsigned
+    /// executable binding `0.0.0.0` is one more Windows Defender Firewall prompt asking an
+    /// administrator to allow something the tests never needed: two nodes over loopback prove what
+    /// two nodes over the LAN would. Set before any node starts, and set by every test that starts
+    /// one, because the order tests run in is not ours to choose.
+    fn stay_local() {
+        // SAFETY: set to the same value from every test, before any thread of ours reads it.
+        unsafe { std::env::set_var("CURFEW_LAN_LOOPBACK", "1") };
+    }
+
     fn dir(tag: &str) -> String {
         let path = std::env::temp_dir().join("curfew-ffi-sync").join(format!(
             "{}-{tag}-{:?}",
@@ -426,6 +438,7 @@ mod tests {
 
     #[test]
     fn a_lock_started_on_one_device_is_held_by_the_other() {
+        stay_local();
         let (phone, pc) = paired("held");
         let (phone_core, pc_core) = (core(), core());
         pc_core.start_session(session_json("pc-1")).unwrap();
@@ -447,6 +460,7 @@ mod tests {
 
     #[test]
     fn a_phone_cannot_be_talked_out_of_a_lock_by_a_peer() {
+        stay_local();
         // The other half of invariant 2 as the app sees it: the PC saying "it is over" is a
         // request, and the phone's own lock is what answers it.
         let (phone, pc) = paired("refuse");
@@ -479,6 +493,7 @@ mod tests {
 
     #[test]
     fn a_budget_is_shared_rather_than_handed_out_twice() {
+        stay_local();
         let (phone, pc) = paired("budget");
         let spent = serde_json::to_string(&BTreeMap::from([(
             "com.instagram.android".to_string(),
@@ -500,6 +515,7 @@ mod tests {
 
     #[test]
     fn a_revoked_device_is_ignored_from_then_on() {
+        stay_local();
         let (phone, pc) = paired("revoked");
         let pc_core = core();
         phone.revoke(pc.device_id(), NOW).unwrap();
@@ -519,6 +535,7 @@ mod tests {
 
     #[test]
     fn everything_survives_the_app_being_killed() {
+        stay_local();
         let (phone_dir, pc_dir) = (dir("restart-phone"), dir("restart-pc"));
         let phone = Sync::open(phone_dir.clone(), "phone".into()).unwrap();
         let pc = Sync::open(pc_dir, "pc".into()).unwrap();
@@ -543,6 +560,7 @@ mod tests {
 
     #[test]
     fn a_shared_folder_carries_a_lock_between_two_devices() {
+        stay_local();
         let (phone, pc) = paired("folder");
         let shared_folder = dir("folder-root");
         std::fs::create_dir_all(&shared_folder).unwrap();
@@ -564,6 +582,7 @@ mod tests {
 
     #[test]
     fn the_node_starts_and_stops_without_ceremony() {
+        stay_local();
         let (phone, _) = paired("node");
         phone.start_node().unwrap();
         phone.start_node().unwrap();
@@ -598,6 +617,7 @@ mod tests {
 
     #[test]
     fn a_meeting_only_one_device_can_see_reaches_the_other() {
+        stay_local();
         // The phone was never given calendar permission; the PC has the subscription. The phone is
         // still blocked during the meeting.
         let (phone, pc) = paired("calendar");
@@ -626,6 +646,7 @@ mod tests {
 
     #[test]
     fn a_meeting_no_rule_here_cares_about_is_not_published() {
+        stay_local();
         // Minimal disclosure: the log carries the meetings that drive a block, not a transcript of
         // someone's week.
         let (phone, pc) = paired("calendar-quiet");
@@ -649,6 +670,7 @@ mod tests {
 
     #[test]
     fn a_device_does_not_take_its_own_calendar_back() {
+        stay_local();
         let (_phone, pc) = paired("calendar-own");
         let result: serde_json::Value = serde_json::from_str(
             &pc.pass(
@@ -669,6 +691,7 @@ mod tests {
     /// user walks to the PC, presses the button there, and the phone opens on its next pass.
     #[test]
     fn a_lock_only_the_pc_can_open_is_opened_by_the_pc() {
+        stay_local();
         let (phone, pc) = paired("release");
         let (phone_core, pc_core) = (core(), core());
 
@@ -708,6 +731,7 @@ mod tests {
     /// yet is the ordinary state of one.
     #[test]
     fn the_phone_stays_shut_until_the_pc_actually_answers() {
+        stay_local();
         let (phone, pc) = paired("release-waiting");
         let (phone_core, pc_core) = (core(), core());
         let locked = serde_json::to_string(&Session {

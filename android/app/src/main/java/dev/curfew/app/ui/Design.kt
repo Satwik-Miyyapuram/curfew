@@ -442,11 +442,7 @@ fun DragDial(
                 ) { change, _ ->
                     change.consume()
                     val now = angleOf(change.position - centre)
-                    // The shortest way round from the last sample. Anything larger than half a
-                    // turn between two frames is the seam at twelve o'clock, not a real jump.
-                    var delta = now - last
-                    if (delta > 180f) delta -= 360f
-                    if (delta < -180f) delta += 360f
+                    val delta = shortestTurn(last, now)
                     last = now
                     val before = live.roundToInt()
                     live = (live + delta / 360f * perTurn).coerceIn(1f, max.toFloat())
@@ -503,8 +499,23 @@ fun DragDial(
     }
 }
 
+/**
+ * The turn from [from] to [to], in degrees, taking the short way round.
+ *
+ * Two samples a frame apart are never more than a few degrees apart in reality, so anything that
+ * looks like more than half a turn is the seam at twelve o'clock being crossed, not a thumb that
+ * teleported. Reading it literally there would jump the timer by most of an hour in the wrong
+ * direction every time a drag passed the top of the dial, which is the one place a drag passes.
+ */
+internal fun shortestTurn(from: Float, to: Float): Float {
+    var delta = to - from
+    if (delta > 180f) delta -= 360f
+    if (delta < -180f) delta += 360f
+    return delta
+}
+
 /** Where a point sits around the centre, in degrees clockwise from twelve o'clock. */
-private fun angleOf(offset: androidx.compose.ui.geometry.Offset): Float {
+internal fun angleOf(offset: androidx.compose.ui.geometry.Offset): Float {
     val degrees = Math.toDegrees(kotlin.math.atan2(offset.y.toDouble(), offset.x.toDouble())).toFloat()
     return (degrees + 90f + 360f) % 360f
 }
