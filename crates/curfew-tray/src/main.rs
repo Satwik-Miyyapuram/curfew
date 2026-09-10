@@ -26,13 +26,42 @@ use curfew_win::ipc::{self, Request, Response};
 
 /// Ask the service, turning an unreachable service into a sentence rather than a silence.
 pub fn ask(request: &Request) -> Result<Response, String> {
-    ipc::ask(request).map_err(|e| {
-        format!(
-            "Could not reach the Curfew service ({e}).\n\n\
-             It may not be installed yet, or it may have been stopped. Blocks are not being \
-             enforced while this is true."
-        )
-    })
+    ipc::ask(request).map_err(|e| unreachable_service(e.kind(), &e.to_string()))
+}
+
+/// What to say when the service does not answer.
+///
+/// The old wording was one sentence for every failure and it was wrong in the commonest case: the
+/// pipe is missing because nobody has run `curfew install` yet, which is not a fault to report but
+/// a step to take. Ending on a raw `os error 2` and then offering two guesses left the reader with
+/// a number and nothing to do. Kept out of the Win32 layer so the wording can be read and tested.
+pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
+    match kind {
+        // No pipe at all: the service has never been registered on this machine, or has been
+        // removed. There is exactly one thing to do about it, so the dialog says that thing.
+        std::io::ErrorKind::NotFound => "Curfew is not installed as a service on this PC yet, so \
+             nothing is being blocked.\n\n\
+             To install it, open Windows Terminal or PowerShell as an administrator and run:\n\n\
+             \x20   curfew install\n\n\
+             Windows asks for administrator once, because a service any user could stop would not \
+             be much of a lock. The tray cannot do it for you, for the same reason.\n\n\
+             To try Curfew without installing anything, run `curfew run` in an ordinary terminal \
+             and leave it open: it enforces for as long as it is running."
+            .to_string(),
+        // The pipe is there but shut to this account. Nothing to install, so nothing to instruct.
+        std::io::ErrorKind::PermissionDenied => "Windows refused this program access to the \
+             Curfew service.\n\n\
+             That usually means the service is running for a different user account. Blocks are \
+             not being enforced for you while this is true."
+            .to_string(),
+        _ => format!(
+            "The Curfew service is installed but did not answer, so blocks are not being enforced \
+             right now.\n\n\
+             It may be starting or stopping; opening this menu again in a moment is worth a try. \
+             If it stays this way, run `curfew install` again from an administrator terminal.\n\n\
+             Windows said: {detail}"
+        ),
+    }
 }
 
 /// Turn one menu item into the message it means, and the sentence to show afterwards.
@@ -130,6 +159,27 @@ fn main() {
 mod tests {
     use super::*;
     use curfew_core::Refusal;
+
+    /// The dialog a first-run user actually sees. It has to name the step, not the errno: the
+    /// version that said "os error 2" and "it may not be installed yet" was a screenshot someone
+    /// had to ask about.
+    #[test]
+    fn a_missing_service_is_told_how_to_install_it_and_never_shown_the_errno() {
+        let text = unreachable_service(std::io::ErrorKind::NotFound, "os error 2");
+        assert!(text.contains("curfew install"), "no step to take: {text}");
+        assert!(text.contains("administrator"), "does not say why it needs one: {text}");
+        assert!(text.contains("curfew run"), "no way to try it without installing: {text}");
+        assert!(!text.contains("os error"), "the errno leaked into the dialog: {text}");
+    }
+
+    /// Every other failure keeps the detail, because there is no single step that fixes it and a
+    /// message with nothing specific in it cannot be reported.
+    #[test]
+    fn a_service_that_is_installed_but_silent_says_so_and_keeps_the_detail() {
+        let text = unreachable_service(std::io::ErrorKind::BrokenPipe, "the pipe has been ended");
+        assert!(text.contains("installed"), "{text}");
+        assert!(text.contains("the pipe has been ended"), "the detail was dropped: {text}");
+    }
 
     #[test]
     fn ending_from_the_tray_claims_nothing() {
