@@ -483,8 +483,41 @@ class CurfewRuntime internal constructor(
         db.state().get(KEY_RELEASES)?.let {
             runCatching { policy.restoreReleases(it) }
         }
+        seedStarterProfile()
         detectDowntime(now)
         refresh(now)
+    }
+
+    /**
+     * On an install that has never had a profile, make one that already blocks something.
+     *
+     * The timer screen asks which profile to run, and until now a fresh install answered that
+     * question with an empty list and a sentence telling the user to go and build one somewhere
+     * else. That is the wrong first minute: a blocker earns its place by blocking something within
+     * a minute of being opened, not by handing over a form.
+     *
+     * So the first launch gets one profile named for what it does, filled with whichever of the
+     * usual time sinks are actually on this phone. It is a starting point and nothing more — every
+     * entry is visible and removable in the app picker, and a user who wants something else edits
+     * or deletes it like any other profile.
+     *
+     * It runs once, by construction: it does nothing at all if any profile already exists, so a
+     * user who deletes it does not get it back on the next launch.
+     */
+    private suspend fun seedStarterProfile() {
+        val toml = runCatching { policy.configToml() }.getOrNull() ?: return
+        if (Policy.profiles(toml).isNotEmpty()) return
+        val installed = runCatching {
+            val pm = context.packageManager
+            STARTER_APPS.filter { pkg ->
+                runCatching { pm.getLaunchIntentForPackage(pkg) }.getOrNull() != null
+            }
+        }.getOrDefault(emptyList())
+        runCatching {
+            policy.upsertProfile(STARTER_PROFILE, "Distractions")
+            for (pkg in installed) policy.upsertRule(STARTER_PROFILE, Rule(target = Target.AppPackage(pkg)))
+            commitConfig("profile.seeded", STARTER_PROFILE)
+        }
     }
 
     // --- trusted time ------------------------------------------------------------------------------
@@ -643,6 +676,28 @@ class CurfewRuntime internal constructor(
 
         /** A fortnight: long enough to see a habit, short enough to fit a phone screen. */
         const val STATS_DAYS = 14
+
+        /** The id of the profile a fresh install is given. See `seedStarterProfile`. */
+        private const val STARTER_PROFILE = "distractions"
+
+        /**
+         * The apps a starter profile blocks, where they are installed.
+         *
+         * Short and unsurprising on purpose: the feeds and the video apps people say they lose
+         * evenings to. Nothing here is a judgement about an app — it is a first guess, shown in
+         * full on the app picker, and meant to be edited.
+         */
+        private val STARTER_APPS = listOf(
+            "com.instagram.android",
+            "com.zhiliaoapp.musically", // TikTok
+            "com.google.android.youtube",
+            "com.twitter.android",
+            "com.x.android",
+            "com.facebook.katana",
+            "com.reddit.frontpage",
+            "com.snapchat.android",
+            "com.netflix.mediaclient",
+        )
 
         /**
          * The real runtime, with the encrypted database.

@@ -1,5 +1,6 @@
 package dev.curfew.app.ui
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -14,7 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -23,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,7 +77,10 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     var minutes by remember { mutableIntStateOf(DEFAULT_MINUTES) }
     var strength by remember { mutableStateOf(Strength.Confirm) }
+    val context = LocalContext.current
     var profile by remember { mutableStateOf<String?>(null) }
+    // The profile a tap asked to lock, held while the accessibility question is answered.
+    var pending by remember { mutableStateOf<String?>(null) }
 
     // Whichever profile the user has, without making them choose on a fresh install where there is
     // only one. A missing profile is the one thing this screen cannot invent.
@@ -223,9 +230,50 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             colour = Palette.Live,
         ) {
             val id = chosen ?: return@PrimaryButton
+            // The one moment the accessibility service is genuinely needed is the moment a block
+            // starts, so that is where it is asked for. Asking on first launch instead taught
+            // people to tap through a wizard; not asking at all let someone start a block that
+            // then quietly enforced nothing, which is worse than either.
+            if (!Grant.Accessibility.isGranted(context)) {
+                pending = id
+                return@PrimaryButton
+            }
             model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
             onDone()
         }
+    }
+
+    pending?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text("One switch first") },
+            text = {
+                Text(
+                    "Curfew can only replace a blocked app if it is allowed to see which app is " +
+                        "in front. Without it the timer will run and nothing will be blocked.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pending = null
+                    Grant.Accessibility.settingsIntent(context)?.let { intent ->
+                        runCatching {
+                            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
+                }) { Text("Turn it on") }
+            },
+            dismissButton = {
+                // Left in on purpose. A blocker that refuses to start until a permission is
+                // granted is a blocker people uninstall; one that starts, and says plainly that
+                // it is not enforcing, is one they come back to and fix.
+                TextButton(onClick = {
+                    pending = null
+                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+                    onDone()
+                }) { Text("Start without it") }
+            },
+        )
     }
 }
 
