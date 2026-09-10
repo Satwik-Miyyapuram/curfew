@@ -42,18 +42,23 @@ h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
   <div style="width:100%;color:var(--dim);font-size:11px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700">What the menu says back</div>
 
   <!-- The long one. This is the answer to the only warning most people ever see, and the reason
-       the menu stopped using a MessageBox: none of this fits in one. -->
+       the menu stopped using a MessageBox: none of this fits in one. Every line the reader has to
+       reproduce exactly is a chip — the wording carries a tab in front of it and the card sets
+       that line in Consolas on the control surface. Prose said `curfew run` in backticks once,
+       which is markdown arriving at a window that renders none. -->
   <div style="width:460px;background:var(--sur);border:1px solid var(--line);border-left:4px solid var(--live);border-radius:12px;padding:22px;box-shadow:0 18px 40px rgba(0,0,0,.5)">
-    <div style="font-size:17px;font-weight:650;line-height:1.35">Curfew is not installed as a service on this PC yet, so nothing is being blocked.</div>
+    <div style="font-size:17px;font-weight:650;line-height:1.35">Curfew is not installed on this PC, so nothing is being blocked.</div>
     <div style="height:14px"></div>
-    <div style="font-size:13px;color:var(--mut);line-height:1.55">
+    <div style="font-size:14px;color:var(--mut);line-height:1.55">
       To install it, open Windows Terminal or PowerShell as an administrator and run:
-      <div style="height:10px"></div>
-      <span class="mono" style="background:var(--sur2);border:1px solid var(--line);border-radius:7px;padding:4px 9px;color:var(--tx)">curfew install</span>
-      <div style="height:12px"></div>
+      <div style="height:8px"></div>
+      <span class="mono" style="background:var(--sur2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;color:var(--tx);font-size:14px">curfew install</span>
+      <div style="height:14px"></div>
       Windows asks for administrator once, because a service any user could stop would not be much of a lock. The tray cannot do it for you, for the same reason.
-      <div style="height:12px"></div>
-      To try Curfew without installing anything, run <span class="mono" style="color:var(--tx)">curfew run</span> in an ordinary terminal and leave it open: it enforces for as long as it is running.
+      <div style="height:14px"></div>
+      To try Curfew without installing anything, run this in an ordinary terminal and leave it open — it enforces for as long as it is running:
+      <div style="height:8px"></div>
+      <span class="mono" style="background:var(--sur2);border:1px solid var(--line);border-radius:8px;padding:5px 10px;color:var(--tx);font-size:14px">curfew run</span>
     </div>
   </div>
 
@@ -63,10 +68,10 @@ h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
   <div style="width:460px;height:150px;background:var(--sur);border:1px solid var(--line);border-left:4px solid var(--live);border-radius:12px;padding:22px;box-shadow:0 18px 40px rgba(0,0,0,.5)">
     <div style="font-size:17px;font-weight:650;line-height:1.35">Deep work ended.</div>
     <div style="height:14px"></div>
-    <div style="font-size:13px;color:var(--mut);line-height:1.55">Nothing is blocked now. The next block starts at 21:00.</div>
+    <div style="font-size:14px;color:var(--mut);line-height:1.55">Nothing is blocked now. The next block starts at 21:00.</div>
   </div>
 
   <div style="width:460px;display:flex;gap:10px;align-items:center;color:var(--dim);font-size:11px">
-    <span class="grow">Bottom right, never focused. A click dismisses it; otherwise it stays as long as it takes to read.</span>
+    <span class="grow">Bottom right, never focused. A click dismisses it; otherwise it stays as long as it takes to read — seven seconds for a sentence, longer for this.</span>
   </div>
 </div>
