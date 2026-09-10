@@ -84,7 +84,7 @@ This pause is what you asked for."
         n => format!(
             "{name} opens in {n} seconds.
 
-This pause is what you asked for. Open it again when              the wait is up."
+This pause is what you asked for. Open it again when the wait is up."
         ),
     }
 }
@@ -122,8 +122,9 @@ mod sys {
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateSolidBrush, DrawTextW, EndPaint, FillRect, SetBkMode, SetTextColor,
-        DT_CENTER, DT_VCENTER, DT_WORDBREAK, PAINTSTRUCT, TRANSPARENT,
+        BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
+        EndPaint, FillRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, DT_LEFT,
+        DT_NOPREFIX, DT_TOP, DT_WORDBREAK, PAINTSTRUCT, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -134,8 +135,27 @@ mod sys {
     };
 
     const CLOSE_TIMER: usize = 7;
-    const WIDTH: i32 = 520;
-    const HEIGHT: i32 = 190;
+    const WIDTH: i32 = 460;
+    const HEIGHT: i32 = 196;
+
+    // The phone's palette, as GDI wants it: 0x00BBGGRR, not the 0xRRGGBB the rest of the project
+    // writes. One app should not look like two, and this notice is the only Curfew surface most
+    // Windows users ever see.
+    /// `Palette.Surface` — the card the phone draws every panel on.
+    const SURFACE: u32 = 0x0023_1B16;
+    /// `Palette.Line` — the hairline that separates a card from what is behind it.
+    const LINE: u32 = 0x0041_332A;
+    /// `Palette.Text`.
+    const TEXT_COLOUR: u32 = 0x00F7_F1ED;
+    /// `Palette.Muted`.
+    const MUTED: u32 = 0x00AC_9A8D;
+    /// `Palette.Live` — amber, which means "running" everywhere else in Curfew.
+    const LIVE: u32 = 0x005A_A6F2;
+
+    /// The amber stripe down the left edge, in pixels.
+    const STRIPE: i32 = 4;
+    /// The breathing room between the text and the edge of the card.
+    const PAD: i32 = 22;
 
     thread_local! {
         static TEXT: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -143,6 +163,27 @@ mod sys {
 
     fn wide(text: &str) -> Vec<u16> {
         std::ffi::OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    /// One face, two weights: whatever this Windows calls its UI font, at the size asked for.
+    fn font(height: i32, weight: i32) -> windows_sys::Win32::Graphics::Gdi::HFONT {
+        let face = wide("Segoe UI Variable Text");
+        // SAFETY: the face name outlives the call, and every numeric argument is a documented
+        // constant (DEFAULT_CHARSET, CLEARTYPE_QUALITY, default precision and pitch).
+        unsafe { CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()) }
+    }
+
+    /// The notice split into the line that states the fact and the paragraphs that qualify it.
+    ///
+    /// [`super::message`] already writes it that way — one sentence, a blank line, then the detail —
+    /// so the split is on the first blank line and nothing has to be restructured to draw it.
+    fn split(text: &[u16]) -> (Vec<u16>, Vec<u16>) {
+        let full = String::from_utf16_lossy(text);
+        let full = full.trim_end_matches('\u{0}');
+        match full.split_once("\n\n") {
+            Some((head, rest)) => (wide(head), wide(rest.trim())),
+            None => (wide(full), Vec::new()),
+        }
     }
 
     unsafe extern "system" fn overlay_proc(
@@ -157,26 +198,76 @@ mod sys {
                 let dc = BeginPaint(window, &mut paint);
                 let mut rect: RECT = std::mem::zeroed();
                 GetClientRect(window, &mut rect);
-                let brush = CreateSolidBrush(0x00201810);
-                FillRect(dc, &rect, brush);
-                SetBkMode(dc, TRANSPARENT as i32);
-                SetTextColor(dc, 0x00F0F0F0);
-                let mut inner = RECT {
-                    left: rect.left + 24,
-                    top: rect.top + 24,
-                    right: rect.right - 24,
-                    bottom: rect.bottom - 24,
+
+                // Card, hairline, and the amber stripe that says which state this notice belongs to.
+                let border = CreateSolidBrush(LINE);
+                FillRect(dc, &rect, border);
+                DeleteObject(border as _);
+                let inner_card = RECT {
+                    left: rect.left + 1,
+                    top: rect.top + 1,
+                    right: rect.right - 1,
+                    bottom: rect.bottom - 1,
                 };
-                TEXT.with(|text| {
-                    let text = text.borrow();
+                let card = CreateSolidBrush(SURFACE);
+                FillRect(dc, &inner_card, card);
+                DeleteObject(card as _);
+                let stripe_rect = RECT {
+                    left: rect.left + 1,
+                    top: rect.top + 1,
+                    right: rect.left + 1 + STRIPE,
+                    bottom: rect.bottom - 1,
+                };
+                let stripe = CreateSolidBrush(LIVE);
+                FillRect(dc, &stripe_rect, stripe);
+                DeleteObject(stripe as _);
+
+                SetBkMode(dc, TRANSPARENT as i32);
+                let (mut title, mut body) = TEXT.with(|t| split(&t.borrow()));
+
+                // The first line is the fact — which app, and why. It is set larger and brighter
+                // because it is the only line a person reads while reaching for the mouse.
+                let title_font = font(-21, 600);
+                let previous = SelectObject(dc, title_font as _);
+                SetTextColor(dc, TEXT_COLOUR);
+                let mut title_rect = RECT {
+                    left: rect.left + STRIPE + PAD,
+                    top: rect.top + PAD,
+                    right: rect.right - PAD,
+                    bottom: rect.bottom - PAD,
+                };
+                let title_height = DrawTextW(
+                    dc,
+                    title.as_mut_ptr(),
+                    -1,
+                    &mut title_rect,
+                    DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
+                );
+
+                if body.len() > 1 {
+                    let body_font = font(-16, 400);
+                    SelectObject(dc, body_font as _);
+                    SetTextColor(dc, MUTED);
+                    let mut body_rect = RECT {
+                        left: title_rect.left,
+                        top: rect.top + PAD + title_height + 14,
+                        right: title_rect.right,
+                        bottom: rect.bottom - PAD,
+                    };
                     DrawTextW(
                         dc,
-                        text.as_ptr(),
+                        body.as_mut_ptr(),
                         -1,
-                        &mut inner,
-                        DT_CENTER | DT_VCENTER | DT_WORDBREAK,
+                        &mut body_rect,
+                        DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
                     );
-                });
+                    SelectObject(dc, previous);
+                    DeleteObject(body_font as _);
+                } else {
+                    SelectObject(dc, previous);
+                }
+                DeleteObject(title_font as _);
+
                 EndPaint(window, &paint);
                 0
             }
@@ -216,10 +307,10 @@ mod sys {
                 class_name.as_ptr(),
                 class_name.as_ptr(),
                 WS_POPUP,
-                (screen_w - WIDTH) / 2,
-                // A third of the way down rather than centred: the middle of the screen is where the
-                // work is.
-                screen_h / 3,
+                // Bottom right, where Windows puts everything else that speaks without being asked.
+                // Centred, it landed on top of the window the user was about to go back to.
+                screen_w - WIDTH - 24,
+                screen_h - HEIGHT - 72,
                 WIDTH,
                 HEIGHT,
                 std::ptr::null_mut(),
@@ -230,6 +321,10 @@ mod sys {
             if window.is_null() {
                 return;
             }
+            // Rounded, like every other surface Windows 11 draws and like every card on the phone.
+            let region = CreateRoundRectRgn(0, 0, WIDTH + 1, HEIGHT + 1, 18, 18);
+            SetWindowRgn(window, region, 0);
+
             ShowWindow(window, SW_SHOWNA);
             SetTimer(window, CLOSE_TIMER, dwell_ms, None);
         }
