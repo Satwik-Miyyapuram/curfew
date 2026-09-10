@@ -123,7 +123,9 @@ fun ScheduleScreen(
 
     Screen(spacing = 0.dp) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(1f)) {
+            // The gap is the column's, not the button's: the summary is the one line on this page
+            // long enough to reach the button, and set against it the two read as one smudge.
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Title("Plan")
                 Sub(
                     summarise(
