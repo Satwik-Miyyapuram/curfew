@@ -32,10 +32,13 @@ Five, taken from what blockers get wrong rather than from a style guide:
 1. **Now** opens. Headline: *"Nothing is blocked right now."* Dial reads **Next up** — or `—` when
    nothing is scheduled. One filled button: **Start a block now**.
 2. Tap **Start a block now** → **Timer** screen.
-3. Duration: a dial preset to 30m, with **nudge it, or pick one** beneath. Tap a preset chip or
-   drag. No typing.
-4. Pick which profile to run. First run has none, so this is where the app must offer **Block
-   everything distracting** as a one-tap default rather than an empty list. *(Gap 1.)*
+3. Duration: a dial preset to 30m, with **drag the ring, or pick one** beneath. The ring is
+   draggable minute by minute the way a phone's own timer is; presets are there for the common
+   lengths. No typing.
+   A block of four hours or more asks once before it starts — a dial makes a long block easy to set
+   by accident, and under *Lock it* there is no taking it back.
+4. Pick which profile to run. First run has none, so this is where the app offers **Block
+   everything distracting** as a one-tap default rather than an empty list.
 5. **If you change your mind** — three strengths, plain-language, one selected by default:
    - *Just ask me* — end whenever.
    - *Make me wait* — a delay before it ends.
@@ -51,7 +54,6 @@ actually needs to see what is in front. Sheet: one sentence of cost, one button,
 Curfew's own row in Settings. Notifications is asked immediately after, by the system dialog.
 
 **Gaps**
-- *(Gap 1)* No starter profile. A first-run user reaches the Timer screen and has nothing to pick.
 - *(Gap 2)* Accessibility is asked from the Health screen rather than at step 6, so a first-run user
   can start a block that then silently enforces nothing.
 
@@ -107,6 +109,8 @@ Simple, which is how a user is told to go somewhere that does not exist).
    dialog. No settings detour; this one has a real Android prompt.
 2. With it: the next day and a half of events, grouped **Today / Tomorrow**, with a search field
    that filters as you type.
+0. The same list opens inside a profile, from its **Anything in my calendar** trigger. Picking an
+   event never means leaving the profile for the Events tab and finding your way back.
 3. Tap an event → **Block during this event**: which profile, and whether this is *just this event*
    or *every event whose title matches*.
 4. Saving the matching kind puts a blue rule on **Plan**, where it can be paused or removed like
@@ -123,10 +127,12 @@ Simple, which is how a user is told to go somewhere that does not exist).
 
 ## Flow 5 — Choosing what a profile blocks
 
-**Entry:** **Apps** tab.
+**Entry:** the profile itself — **Plan → a profile → What it blocks**. There is no Apps tab. Apps
+and sites belong to a profile, so a separate tab meant leaving the profile you were half way
+through building in order to say what it blocks, and then finding your way back.
 
-1. A profile picker at the top: apps and sites are **per profile**, and the screen says which one
-   it is showing.
+1. The row reads its own counts — *"3 apps and 2 sites"*, or *"Nothing yet"* — so the profile says
+   what it does without opening anything.
 2. Two panes — **Apps** and **Websites** — as tabs with counts, never one long scroll. Website
    addresses used to begin after two hundred app rows.
 3. **Apps**: search, then tap to tick. The list is the phone's real apps with their real names and
@@ -134,6 +140,8 @@ Simple, which is how a user is told to go somewhere that does not exist).
 4. **Websites**: add by typing a domain. `youtube.com/shorts` names a page and needs the browser
    extension on desktop; the row says so rather than failing quietly.
 5. Every tick writes immediately. The tick is the receipt.
+6. **Copy from** another profile, for the second profile that blocks almost what the first one did.
+   One confirm naming the counts; it adds and never removes.
 
 **Gaps**
 - *(Gap 5, closed in tests)* The running profile decides: its addresses are blocked and the other
@@ -213,11 +221,13 @@ Power changes what is *inside* screens and never the route to anything:
 |---|---|---|
 | Now | dial, session card, today's hours | next 24h timeline; which rule fired; blocks kept |
 | Plan | triggers with switches | ids, raw windows, the config |
+| Profile | triggers, what it blocks | — |
 | Usage | before / now / given back | per-app, per-day table |
 | Settings | the six things | audit trail, raw config, export |
 
-Both modes have the same five tabs — **Now · Plan · Events · Apps · Settings** — on the same
-floating bar. Power mode used to add tabs until the bar was unreadable.
+Both modes have the same four tabs — **Now · Plan · Events · Settings** — on the same floating
+bar. Power mode used to add tabs until the bar was unreadable; Apps was removed because what a
+profile blocks belongs inside that profile.
 
 ---
 
@@ -225,10 +235,30 @@ floating bar. Power mode used to add tabs until the bar was unreadable.
 
 In order:
 
-1. **Gap 1** — a starter profile so the first Timer screen has something to pick.
-2. **Gap 2** — permissions asked at the moment of need, accessibility first among them.
-3. **Gap 6** — the pre-Curfew baseline, and the Usage screen rewritten around the comparison.
-4. **Gap 3, 4, 5** — covered by tests. What remains of them is a hardware pass: the switch under a
+1. **Gap 2** — permissions asked at the moment of need, accessibility first among them.
+2. **Gap 6** — the pre-Curfew baseline, and the Usage screen rewritten around the comparison.
+3. **Gap 3, 4, 5** — covered by tests. What remains of them is a hardware pass: the switch under a
    finger, a real calendar provider, a real browser.
-5. **Gap 7** — pairing, which needs two devices and cannot be faked.
-6. Glass material on sheets, dialogs and the block screen, so the app has one material.
+4. **Gap 7** — pairing, which needs two devices and cannot be faked.
+5. Glass material on sheets, dialogs and the block screen, so the app has one material.
+
+---
+
+## What has never been touched by a finger
+
+Everything below is build-verified and test-verified and nothing more. It is written down because
+"the tests pass" is not the same claim as "it works", and the difference is exactly the kind of
+thing that gets forgotten between one session and the next.
+
+- The draggable ring, and whether a thumb can land on a specific minute without fighting it.
+- The confirmation on a block of four hours or more.
+- Picking a calendar event, apps, or a budget from inside a profile.
+- The **What it blocks** row now that the Apps tab is gone.
+- Copying what another profile blocks.
+- The one-second beat in front and the five-second beat behind, and whether the countdown reads
+  like a countdown on a real screen.
+- Enforcement against an app that is actually installed. The starter profile names Facebook and
+  Netflix, neither of which is on the phone this was written for.
+
+The emulator cannot stand in: this machine has no virtualisation extension for the x86 image and
+the wrong host architecture for the arm64 one.
