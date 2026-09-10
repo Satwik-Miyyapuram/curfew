@@ -9,6 +9,7 @@ import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.app.data.CalendarReader
 import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
+import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.Action
 import dev.curfew.policy.Activation
 import dev.curfew.policy.CalendarEvent
@@ -152,6 +153,23 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             val upcoming = runCatching { runtime.policy.upcoming(now, now + PREVIEW_SECONDS, events) }
                 .getOrDefault(emptyList())
                 .filter { it.end > now }
+            // Which rules catch which of those events, over the whole browsed window rather than
+            // the preview one. The Events screen lists two months, and asking the timeline — which
+            // only looks a day and a half ahead — meant every event past tomorrow said "nothing
+            // blocked" while a rule was sitting there catching it.
+            val eventRules = runCatching {
+                runtime.policy.upcoming(now, now + CalendarReader.BROWSE_SECONDS, events)
+            }
+                .getOrDefault(emptyList())
+                .mapNotNull { activation ->
+                    (activation.source as? ActivationSource.Calendar)?.let {
+                        it.event to EventRule(schedule = it.schedule, profile = activation.profile)
+                    }
+                }
+                // Grouped, not collapsed into one entry per event: an event can be caught by
+                // several rules, and the card is supposed to name all of them.
+                .groupBy({ it.first }, { it.second })
+                .mapValues { (_, rules) -> rules.distinct() }
             val usage = runCatching { runtime.usage(now) }.getOrNull()
             val spent = usage?.usage.orEmpty()
                 .mapValues { (_, consumption) -> consumption.rollups.sumOf { it.seconds } }
@@ -176,6 +194,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     // dropped rather than greyed out: the list exists to be pointed at, and a
                     // finished meeting is not something a new rule can usefully be built from.
                     calendarEvents = events.filter { it.end > now }.sortedBy { it.start },
+                    eventRules = eventRules,
                     calendarGranted = CalendarReader(getApplication()).hasPermission(),
                     profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
                         .getOrDefault(emptyList()),
@@ -781,6 +800,9 @@ internal const val PREVIEW_SECONDS = 36L * 3600
  * with each other — a countdown and the lock it belongs to cannot be allowed to come from two
  * different instants.
  */
+/** One calendar rule catching one event: the rule's id, and the profile it runs. */
+data class EventRule(val schedule: String, val profile: String)
+
 data class UiState(
     val now: Long = 0,
     val loading: Boolean = true,
@@ -808,6 +830,14 @@ data class UiState(
      * that silently never fires, and the user has no way to tell that from a rule that works.
      */
     val calendarEvents: List<CalendarEvent> = emptyList(),
+    /**
+     * The calendar rules that catch each event, by event id.
+     *
+     * Worked out by the policy core rather than by matching titles again on this side: the badge on
+     * an event says what will actually happen, and a second implementation of matching would
+     * eventually say something else.
+     */
+    val eventRules: Map<String, List<EventRule>> = emptyMap(),
     /** False when Curfew has no calendar permission, which makes [calendarEvents] meaningless. */
     val calendarGranted: Boolean = false,
     val profiles: List<ProfileName> = emptyList(),

@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,7 +42,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 
@@ -64,16 +65,7 @@ fun CalendarScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    var blocking by remember { mutableStateOf<CalendarEvent?>(null) }
-
-    // Which event ids the rules already catch, and which profile each one runs. Taken from the
-    // core's own activations rather than re-implementing matching here, so the badge cannot claim
-    // something the enforcement side would disagree with.
-    val caught: Map<String, String> = remember(state.upcoming) {
-        state.upcoming.mapNotNull { activation ->
-            (activation.source as? ActivationSource.Calendar)?.let { it.event to activation.profile }
-        }.toMap()
-    }
+    var editing by remember { mutableStateOf<Pick?>(null) }
 
     // Profiles answer to an id in the config and to a name on screen. The badge says the name:
     // an id is an implementation detail the user never chose and, for a renamed profile, is not
@@ -88,26 +80,36 @@ fun CalendarScreen(model: CurfewViewModel) {
         heading = "Pick from your calendar",
         query = query,
         shown = shown,
-        caught = caught,
+        caught = state.eventRules,
         names = names,
         onQuery = { query = it },
-        onPick = { blocking = it },
+        // Tapping an event that a rule already catches opens that rule, rather than starting a
+        // second one against the same meeting. That was the bug behind "Change does nothing": it
+        // opened an empty form, and saving it added another identical rule every time.
+        onPick = { event ->
+            val existing = state.eventRules[event.id]
+                ?.firstNotNullOfOrNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
+            editing = Pick(event, existing)
+        },
     )
 
-    blocking?.let { event ->
+    editing?.let { pick ->
         CalendarDialog(
-            existing = null,
-            prefill = event,
+            existing = pick.rule,
+            prefill = pick.event,
             profiles = state.profiles,
             now = state.now,
-            onDismiss = { blocking = null },
+            onDismiss = { editing = null },
             onSave = { rule: CalendarSchedule ->
-                blocking = null
+                editing = null
                 model.saveCalendarRule(rule)
             },
         )
     }
 }
+
+/** An event the user tapped, and the rule already covering it, when there is one. */
+private data class Pick(val event: CalendarEvent, val rule: CalendarSchedule?)
 
 /**
  * The list of events itself, with its search field — the part both the Events tab and the profile
@@ -125,7 +127,7 @@ internal fun CalendarList(
     heading: String,
     query: String,
     shown: List<CalendarEvent>,
-    caught: Map<String, String>,
+    caught: Map<String, List<EventRule>>,
     names: Map<String, String>,
     onQuery: (String) -> Unit,
     onPick: (CalendarEvent) -> Unit,
@@ -208,7 +210,9 @@ internal fun CalendarList(
                 is CalendarRow.Event -> EventCard(
                     event = row.event,
                     highlight = query.trim(),
-                    blockedBy = caught[row.event.id]?.let { names[it] ?: it },
+                    blockedBy = caught[row.event.id].orEmpty()
+                        .map { names[it.profile] ?: it.profile }
+                        .distinct(),
                     canBlock = state.profiles.isNotEmpty(),
                     onBlock = { onPick(row.event) },
                 )
@@ -268,18 +272,19 @@ private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -
 }
 
 /** One event, and the plain answer to "will this block anything?". */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EventCard(
     event: CalendarEvent,
     highlight: String,
-    blockedBy: String?,
+    blockedBy: List<String>,
     canBlock: Boolean,
     onBlock: () -> Unit,
 ) {
     // A caught event is outlined and faintly filled in the accent rather than given a different
     // background colour: the card must still read as the same kind of thing as the ones around it,
     // with one of them marked.
-    val tinted = blockedBy != null
+    val tinted = blockedBy.isNotEmpty()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -332,16 +337,30 @@ private fun EventCard(
         Gap(12.dp)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (blockedBy != null) {
-                Pill("Blocks $blockedBy", tint = Palette.Accent)
+            // Every plan this event starts, named. One chip per plan rather than one chip
+            // saying the first of them: an event caught by two rules that ran different profiles
+            // used to look exactly like an event caught by one.
+            if (blockedBy.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    blockedBy.forEach { profile -> Pill("Blocks $profile", tint = Palette.Accent) }
+                }
             } else {
-                Text("Nothing blocked", fontSize = 13.sp, color = Palette.Dim)
+                Text(
+                    "Nothing blocked",
+                    fontSize = 13.sp,
+                    color = Palette.Dim,
+                    modifier = Modifier.weight(1f),
+                )
             }
             Text(
-                if (blockedBy != null) "Change" else "Block this",
+                if (blockedBy.isNotEmpty()) "Change" else "Block this",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = if (canBlock) Palette.Accent else Palette.Dim,
@@ -446,11 +465,6 @@ fun CalendarPickerSheet(
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
 
-    val caught: Map<String, String> = remember(state.upcoming) {
-        state.upcoming.mapNotNull { activation ->
-            (activation.source as? ActivationSource.Calendar)?.let { it.event to activation.profile }
-        }.toMap()
-    }
     val names = remember(state.profiles) { state.profiles.associate { it.id to it.name } }
     val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
 
@@ -473,20 +487,34 @@ fun CalendarPickerSheet(
                     heading = "Which meetings should start it?",
                     query = query,
                     shown = shown,
-                    caught = caught,
+                    caught = state.eventRules,
                     names = names,
                     onQuery = { query = it },
                     onPick = { event ->
-                        // The event as it stands, against this profile: the same rule the Events
-                        // tab would write, minus the two questions the caller has already answered.
-                        model.saveCalendarRule(
-                            CalendarSchedule(
-                                id = "c-${state.now}",
-                                profile = profileId,
-                                matcher = dev.curfew.policy.EventMatcher(title = event.title),
-                                locks = listOf(dev.curfew.policy.Lock.Confirm),
-                            ),
-                        )
+                        val mine = state.eventRules[event.id].orEmpty()
+                            .filter { it.profile == profileId }
+                            .mapNotNull { r -> state.calendarRules.find { it.id == r.schedule } }
+                        if (mine.isEmpty()) {
+                            // The event as it stands, against this profile: the same rule the
+                            // Events tab would write, minus the two questions the caller has
+                            // already answered. The id comes from the wall clock, not from the
+                            // state's `now` — that only moves when the state refreshes, so two
+                            // events picked in the same second shared an id and the second rule
+                            // quietly replaced the first.
+                            model.saveCalendarRule(
+                                CalendarSchedule(
+                                    id = "c-" + System.currentTimeMillis(),
+                                    profile = profileId,
+                                    matcher = dev.curfew.policy.EventMatcher(title = event.title),
+                                    locks = listOf(dev.curfew.policy.Lock.Confirm),
+                                ),
+                            )
+                        } else {
+                            // Tapping it again takes it back out. Adding a second identical rule
+                            // is the one thing a second tap must never do, and there is nowhere
+                            // else in this sheet to undo the first one.
+                            mine.forEach { model.deleteCalendarRule(it.id) }
+                        }
                     },
                 )
             }

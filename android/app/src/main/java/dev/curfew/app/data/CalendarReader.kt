@@ -91,7 +91,11 @@ class CalendarReader(private val context: Context) {
                     busy = cursor.getInt(7) == CalendarContract.Instances.AVAILABILITY_BUSY,
                 )
             }
-            return events
+            // The provider can hand back the same instance twice — an event on two accounts that
+            // sync the same calendar, a recurrence whose exception row overlaps the series row —
+            // and a list showing one meeting three times reads as the app being broken. The id
+            // already identifies an instance exactly, so the second sighting is a repeat.
+            return events.distinctBy { it.id }
         }
 
         /**
