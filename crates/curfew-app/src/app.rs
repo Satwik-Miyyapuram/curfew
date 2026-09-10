@@ -41,6 +41,16 @@ fn config_path() -> PathBuf {
     Path::new(&root).join("Curfew").join("curfew.toml")
 }
 
+/// Where WebView2 keeps this user's profile for this window.
+///
+/// Per user, under `%LOCALAPPDATA%`, because that is the one place a program installed for the
+/// whole machine can be sure the person running it may write.
+fn webview_data_dir() -> PathBuf {
+    let root =
+        std::env::var("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
+    root.join("Curfew").join("webview")
+}
+
 /// Answer one call. Runs off the UI thread; the pipe is local and fast, but "fast" is not "always".
 fn answer(call: Call) -> serde_json::Value {
     match call {
@@ -118,8 +128,15 @@ pub fn run() {
         .build(&event_loop)
         .unwrap_or_else(|e| fatal(&format!("The Curfew window could not be created.\n\n{e}")));
 
+    // WebView2 keeps a profile — caches, a settings database — and unless told otherwise it puts
+    // it beside the executable. Beside the executable is `C:\Program Files\Curfew`, which no
+    // ordinary user may write to, so the webview failed to start with "Access is denied" for every
+    // account on an installed copy. It belongs in the user's own data directory, per user, like
+    // every other program's profile.
+    let mut context = wry::WebContext::new(Some(webview_data_dir()));
+
     let proxy = event_loop.create_proxy();
-    let webview = WebViewBuilder::new()
+    let webview = WebViewBuilder::with_web_context(&mut context)
         .with_html(PAGE)
         // The page is a local string with no origin and the design loads nothing remote, so there
         // is nothing here for a network permission to be for.
@@ -142,11 +159,14 @@ pub fn run() {
     let webview = match webview {
         Ok(webview) => webview,
         Err(e) => fatal(&format!(
-            "The Curfew window needs the Microsoft Edge WebView2 runtime, which this copy of \
-             Windows does not have. Installing it from Microsoft is enough; nothing else about \
-             Curfew changes.\n\n\
+            "The Curfew window did not open.\n\n\
+             It is drawn by the Microsoft Edge WebView2 runtime, which every supported build of \
+             Windows has; if this one does not, installing it from Microsoft is enough, and \
+             nothing else about Curfew changes:\n\n\
              https://developer.microsoft.com/microsoft-edge/webview2/\n\n\
-             Anything blocked stays blocked while this window will not open.\n\n{e}"
+             Anything blocked stays blocked while this window will not open. Blocking is done by \
+             the Curfew service, which is not this program.\n\n\
+             {e}"
         )),
     };
 
