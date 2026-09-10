@@ -60,3 +60,54 @@ Material defaults, not a copy of the desktop.
   the field or drop the row.
 - Phase 6 leftovers: webhooks on session start/end, externalized strings, F-Droid and winget/scoop.
 - Parked by request: NFC/QR (Phase 7), Shizuku (undecided), device-owner mode (refused outright).
+
+---
+
+# Revision 2 — design the experience first
+
+The order of work changed on instruction: **draw it before building it.** Every item below gets an
+artboard on the phone canvas first, and the code follows the artboard. What follows is the whole
+remaining list, in the order it will be done.
+
+## Step 0 — draw (design canvas, phone)
+
+New or redrawn artboards:
+
+1. **NavGlass** — the floating bar in both states, with the material spelled out: translucent
+   ground, lit top hairline, shaded belly, shadow, selected tab on a faint disc. This is the app's
+   material, and sheets and the block screen inherit it.
+2. **NowSimple / NowPower** — the same screen in two voices. Power shows more *inside* the screen
+   (which rule fired, what it matched, when it next runs) and not more tabs.
+3. **UsageSimple** — screen time before Curfew, screen time now, hours given back, streak. Numbers
+   with a subject and a comparison. The table of per-app seconds is the Power view of the same
+   screen, not the default one.
+4. **SettingsSimple** — where syncing lives for everyone: a plain "last synced" line, the devices
+   it syncs with, one control. Plus the way in to Usage, Health and Devices.
+5. **Permission** — the one-tap pattern: system dialog where Android has one, a deep link into the
+   exact settings page where it does not, one sentence saying what is lost without it.
+6. **BlockScreen** — restyled in the same glass material, no ids.
+
+## Step 1 — build, in this order
+
+1. **Immediacy.** Every mutation already calls `refresh()`, and there is a one-second tick, so the
+   "only updates when I leave and come back" symptom is not a missing call: it is `refresh()` being
+   slow or stalling. It reads the filesystem, the database, the sync node (which waits on the same
+   lock the discovery thread holds), the package manager and the permission states — all of it,
+   every second, for every screen. Split it: a fast path (lock, sessions, now, activations) that
+   runs on the tick and after every write, and a slow path (sync, stats, audit, grants) that runs
+   on its own longer cadence and on resume. Measure it on the device before and after.
+2. **Ending a block ends it.** The end must invalidate the enforcer's cached decision in the same
+   step it writes, not at the enforcer's next poll — the few seconds of re-blocking after an end is
+   that gap.
+3. **Permissions** as drawn in step 0.5.
+4. **Power mode redefined**: same five tabs, depth inside screens.
+5. **Usage rewritten** for a person.
+6. **Sync surfaced in Settings** for Simple.
+7. **Glass material** applied beyond the nav bar: sheets, dialogs, block screen.
+
+## Already landed while this plan was being written
+
+- Floating etched-glass nav bar, five tabs, identical in both modes. Events is now on the bar in
+  Simple mode — the previous build told a Simple user to "go to the Events tab" and then hid it.
+- No more "Saved." popup: a save is silent, the changed row is the receipt.
+- No ids on the block screen; the Now dial's countdown reads epoch seconds correctly.

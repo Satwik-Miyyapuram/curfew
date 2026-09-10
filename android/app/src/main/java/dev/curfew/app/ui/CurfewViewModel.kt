@@ -422,7 +422,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveConfig(toml: String) {
         viewModelScope.launch {
             runtime.setConfig(toml)
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That config could not be loaded.") }
             refresh()
         }
@@ -473,7 +472,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveProfile(id: String, name: String, description: String = "") {
         viewModelScope.launch {
             runtime.saveProfile(id, name, description)
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That profile could not be saved.") }
             refresh()
         }
@@ -490,7 +488,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.saveProfile(id, name)
                 .mapCatching { runtime.saveWeekly(window).getOrThrow() }
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That window could not be saved.") }
             refresh()
         }
@@ -510,7 +507,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveWeekly(window: WeeklySchedule) {
         viewModelScope.launch {
             runtime.saveWeekly(window)
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That window could not be saved.") }
             refresh()
         }
@@ -530,7 +526,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCalendarRule(rule: CalendarSchedule) {
         viewModelScope.launch {
             runtime.saveCalendarRule(rule)
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That rule could not be saved.") }
             refresh()
         }
@@ -554,7 +549,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveRule(profile: String, rule: Rule) {
         viewModelScope.launch {
             runtime.saveRule(profile, rule)
-                .onSuccess { say("Saved.") }
                 .onFailure { say(it.message ?: "That could not be blocked.") }
             refresh()
         }
@@ -596,7 +590,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.write(text.toByteArray())
                 }
             }
-                .onSuccess { say("Saved.") }
                 .onFailure { say("That file could not be written.") }
         }
     }
@@ -616,7 +609,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), profile, packages)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onSuccess { say("Saved.") }
                         .onFailure { say(it.message ?: "That change could not be saved.") }
                 }
                 .onFailure { say(it.message ?: "That change could not be saved.") }
