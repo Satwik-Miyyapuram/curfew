@@ -97,6 +97,34 @@
    "y": 2000,
    "w": 390,
    "h": 844
+  },
+  {
+   "file": "NavGlass.dc.html",
+   "x": 0,
+   "y": 2984,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "UsageSimple.dc.html",
+   "x": 480,
+   "y": 2984,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "SettingsSync.dc.html",
+   "x": 960,
+   "y": 2984,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "file": "Permission.dc.html",
+   "x": 1440,
+   "y": 2984,
+   "w": 390,
+   "h": 844
   }
  ],
  "annotations": [

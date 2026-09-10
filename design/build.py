@@ -7,7 +7,7 @@ NAV = open('_nav_simple.txt', encoding='utf-8').read()
 
 def nav(active):
     n = NAV
-    for k in ('TT', 'PP', 'AA', 'SS'):
+    for k in ('TT', 'PP', 'EE', 'AA', 'SS'):
         n = n.replace(k, 'on' if k == active else '')
     return n
 
@@ -46,6 +46,7 @@ page('Main.dc.html', """
   <div class="card" style="padding:16px 18px;display:flex;align-items:center;justify-content:space-between">
     <div>
       <div style="font-size:16px;font-weight:600">4h 20m blocked</div>
+      <div style="font-size:13px;color:var(--ok);margin-top:3px">2h 18m less screen time than before Curfew</div>
       <div style="font-size:13px;color:var(--mut);margin-top:3px">6 days in a row</div>
     </div>
     <div style="display:flex;gap:5px;align-items:flex-end;height:38px">
@@ -509,3 +510,209 @@ page('System.dc.html', """
 exec(open('_profiles.py', encoding='utf-8').read())
 
 print('built')
+
+
+# --- Revision 2 ----------------------------------------------------------------------------------
+#
+# Drawn before the code, on instruction. Four things the phone got wrong: a bar that changed shape
+# between modes, usage written as a table instead of a sentence, syncing that a Simple user could
+# not see at all, and permissions asked for in prose instead of by the system.
+
+page('NavGlass.dc.html', """
+<div class="body under">
+  <div style="height:14px"></div>
+  <h1>One bar.<br>One material.</h1>
+  <div class="sub">The same five tabs in both modes. Power adds depth inside a screen, never
+    another tab: a bar that changes shape between modes is a mode nobody turns on.</div>
+
+  <div style="height:24px"></div>
+  <div class="lbl">The slab, close up</div>
+  <div style="height:10px"></div>
+  <div class="card" style="padding:16px">
+    <div style="height:62px;border-radius:26px;display:flex;align-items:center;justify-content:space-between;padding:0 6px;
+      background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0)),rgba(22,27,35,.86);
+      border:1px solid rgba(255,255,255,.09);box-shadow:0 18px 40px rgba(0,0,0,.55)">
+      <div style="flex:1;text-align:center;color:var(--acc);font-size:10px;font-weight:600">
+        <div style="width:30px;height:30px;margin:0 auto 3px;border-radius:11px;background:rgba(124,156,245,.14)"></div>Now</div>
+      <div style="flex:1;text-align:center;color:var(--dim);font-size:10px;font-weight:600">
+        <div style="width:30px;height:30px;margin:0 auto 3px"></div>Plan</div>
+      <div style="flex:1;text-align:center;color:var(--dim);font-size:10px;font-weight:600">
+        <div style="width:30px;height:30px;margin:0 auto 3px"></div>Events</div>
+      <div style="flex:1;text-align:center;color:var(--dim);font-size:10px;font-weight:600">
+        <div style="width:30px;height:30px;margin:0 auto 3px"></div>Apps</div>
+      <div style="flex:1;text-align:center;color:var(--dim);font-size:10px;font-weight:600">
+        <div style="width:30px;height:30px;margin:0 auto 3px"></div>Settings</div>
+    </div>
+  </div>
+
+  <div style="height:18px"></div>
+  <div class="lbl">Why it reads as glass</div>
+  <div style="height:10px"></div>
+  <div class="card" style="font-size:13px;line-height:1.7;color:var(--mut)">
+    A translucent ground, so the page moving underneath shows through.<br>
+    A hairline along the top edge, catching light.<br>
+    A gradient that shades the belly, so the slab has a near side and a far one.<br>
+    A long soft shadow beneath, so it sits <i>above</i> the page rather than in it.<br>
+    <span style="color:var(--tx)">Sheets, dialogs and the block screen use the same four rules.</span>
+  </div>
+
+  <div style="height:16px"></div>
+  <div class="card" style="border-color:rgba(124,156,245,.3)">
+    <div style="font-size:13px;line-height:1.6;color:var(--mut)">Usage, Health and Devices left the
+      bar. They live one tap into Settings, for everyone — which is where a Simple user can finally
+      find syncing too.</div>
+  </div>
+</div>
+""", active='TT')
+
+
+page('UsageSimple.dc.html', """
+<div class="body under">
+  <div style="height:14px"></div>
+  <h1>You got 11 hours<br>back this week.</h1>
+  <div class="sub">Compared with the four weeks before you started.</div>
+
+  <div style="height:22px"></div>
+  <div class="card" style="padding:20px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:1.4px;color:var(--dim)">SCREEN TIME, DAILY AVERAGE</div>
+    <div style="height:16px"></div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <div style="flex:1">
+        <div style="font-size:13px;color:var(--mut);margin-bottom:6px">Before Curfew</div>
+        <div style="height:12px;border-radius:6px;background:var(--line)"></div>
+        <div style="font-size:22px;font-weight:700;margin-top:8px;color:var(--mut)">6h 10m</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:13px;color:var(--mut);margin-bottom:6px">Now</div>
+        <div style="height:12px;border-radius:6px;background:var(--line);position:relative">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:63%;border-radius:6px;background:var(--ok)"></div>
+        </div>
+        <div style="font-size:22px;font-weight:700;margin-top:8px;color:var(--ok)">3h 52m</div>
+      </div>
+    </div>
+    <div style="height:14px"></div>
+    <div style="font-size:13px;line-height:1.6;color:var(--mut)">That is <span style="color:var(--tx)">2h 18m a
+      day</span> you are not spending on a screen. Curfew only counts apps a rule of yours covers —
+      it keeps no record of everything you open.</div>
+  </div>
+
+  <div style="height:12px"></div>
+  <div class="card" style="padding:18px;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-size:19px;font-weight:700">6 days in a row</div>
+      <div style="font-size:13px;color:var(--mut);margin-top:3px">Best so far: 11. Today has not
+        finished, so it does not count against you yet.</div>
+    </div>
+  </div>
+
+  <div style="height:20px"></div>
+  <div class="lbl">Where it went today</div>
+  <div style="height:10px"></div>
+  <div class="card" style="padding:16px 18px">
+    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600"><span>Instagram</span><span style="color:var(--mut)">48m</span></div>
+    <div style="height:6px;border-radius:3px;background:var(--line);margin:8px 0 14px;position:relative"><div style="position:absolute;inset:0;width:80%;border-radius:3px;background:var(--acc)"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:600"><span>YouTube</span><span style="color:var(--mut)">31m</span></div>
+    <div style="height:6px;border-radius:3px;background:var(--line);margin:8px 0 0;position:relative"><div style="position:absolute;inset:0;width:52%;border-radius:3px;background:var(--acc)"></div></div>
+  </div>
+  <div style="height:10px"></div>
+  <div style="font-size:12px;color:var(--dim);line-height:1.6">The per-app table and the full log of
+    what Curfew did are the Power view of this same screen — not the first thing anyone sees.</div>
+</div>
+""", active='TT')
+
+
+page('SettingsSync.dc.html', """
+<div class="body under">
+  <div style="height:14px"></div>
+  <h1>Settings</h1>
+  <div style="height:20px"></div>
+
+  <div class="lbl">Your other devices</div>
+  <div style="height:10px"></div>
+  <div class="card" style="padding:0">
+    <div style="padding:16px 18px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:15px;font-weight:600">Syncing with 1 device</div>
+        <div style="font-size:13px;color:var(--mut);margin-top:3px">Last synced 4 minutes ago</div>
+      </div>
+      <div class="pill" style="background:rgba(95,211,166,.14);color:var(--ok)"><span class="dot" style="background:var(--ok)"></span>On</div>
+    </div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:14px">Satwik's laptop</div>
+      <div style="font-size:12px;color:var(--dim)">on this network</div>
+    </div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:14px 18px;font-size:14px;color:var(--acc);font-weight:600">Add a device</div>
+  </div>
+  <div style="height:8px"></div>
+  <div style="font-size:12px;color:var(--dim);line-height:1.6">Devices talk to each other directly on
+    your network. Nothing goes to a server, because there is no server.</div>
+
+  <div style="height:20px"></div>
+  <div class="lbl">More</div>
+  <div style="height:10px"></div>
+  <div class="card" style="padding:0">
+    <div style="padding:15px 18px;display:flex;justify-content:space-between;font-size:15px"><span>Where your time went</span><span style="color:var(--dim)">&rsaquo;</span></div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:15px 18px;display:flex;justify-content:space-between;font-size:15px"><span>Is it working?</span><span style="color:var(--ok);font-size:13px">All good &rsaquo;</span></div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:15px 18px;display:flex;justify-content:space-between;font-size:15px"><span>Show more detail everywhere</span>
+      <span style="width:44px;height:26px;border-radius:999px;background:var(--line);position:relative;display:inline-block">
+        <span style="position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--dim)"></span></span></div>
+  </div>
+  <div style="height:8px"></div>
+  <div style="font-size:12px;color:var(--dim);line-height:1.6">That last switch is all Power mode is
+    now: more inside these screens. It never moves a tab.</div>
+</div>
+""", active='SS')
+
+
+page('Permission.dc.html', """
+<div class="body under">
+  <div style="height:14px"></div>
+  <h1>Is it working?</h1>
+  <div class="sub" style="color:var(--bad)">Nothing is being blocked. Curfew cannot see which app is
+    in front, so it cannot put anything in its way.</div>
+
+  <div style="height:20px"></div>
+  <div class="card" style="padding:0">
+    <div style="padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span style="color:var(--bad);font-weight:700">!</span>
+        <div style="flex:1;font-size:15px;font-weight:600">See which app is in front</div>
+        <div style="height:32px;padding:0 15px;border-radius:10px;background:var(--acc);color:#0D1016;font-size:13px;font-weight:700;display:flex;align-items:center">Allow</div>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin:7px 0 0 30px;line-height:1.6">One tap opens
+        Android's own switch for this, already scrolled to Curfew.</div>
+    </div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span style="color:var(--ok);font-weight:700">&#10003;</span>
+        <div style="flex:1;font-size:15px;font-weight:600">Notifications</div>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin:7px 0 0 30px;line-height:1.6">Asked with the
+        system dialog, like every other app asks.</div>
+    </div>
+    <div style="height:1px;background:var(--line)"></div>
+    <div style="padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span style="color:var(--dim);font-weight:700">&ndash;</span>
+        <div style="flex:1;font-size:15px;font-weight:600">Make Curfew harder to uninstall</div>
+        <div style="height:32px;padding:0 15px;border-radius:10px;border:1px solid var(--line);color:var(--tx);font-size:13px;font-weight:600;display:flex;align-items:center">Read first</div>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin:7px 0 0 30px;line-height:1.6">The one thing
+        here that gets a page of explanation instead of a tap, because it is the one that deserves
+        it. Optional, and Curfew works without it.</div>
+    </div>
+  </div>
+
+  <div style="height:16px"></div>
+  <div class="card">
+    <div style="font-size:13px;line-height:1.7;color:var(--mut)">Every other permission is a system
+      dialog or a deep link straight into the page that grants it. A wall of prose with an
+      &ldquo;Open App info&rdquo; button is how an app teaches people to ignore it.</div>
+  </div>
+</div>
+""", active='SS')
