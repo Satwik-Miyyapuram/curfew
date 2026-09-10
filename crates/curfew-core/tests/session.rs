@@ -330,3 +330,35 @@ fn a_pass_spent_on_a_session_that_is_not_running_is_refused_and_still_gone() {
     assert_eq!(s.end_with_pass("nope", NOW, pass), Err(Refusal::NotRunning));
     assert_eq!(passes.remaining(NOW, &policy), 0);
 }
+
+/// Ending an unlocked scheduled session used to last one reconcile: the window still matched, so it
+/// started straight back up. The end now sticks for the occurrence it ended.
+#[test]
+fn ending_a_scheduled_session_does_not_let_the_same_window_restart_it() {
+    let mut s = Sessions::default();
+    let a = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&a), |_| "id".into());
+    let id = s.running[0].id.clone();
+
+    s.end(&id, 200, &BTreeSet::new()).expect("an unlocked session ends on request");
+    assert!(s.running.is_empty());
+
+    let started = reconcile(201, &mut s, std::slice::from_ref(&a), |_| "id2".into());
+    assert!(started.is_empty(), "the occurrence the user ended must stay ended");
+    assert!(s.running.is_empty());
+}
+
+/// Ending tonight's window is not editing the schedule: the next occurrence starts as it always did.
+#[test]
+fn ending_one_occurrence_leaves_the_next_one_alone() {
+    let mut s = Sessions::default();
+    let tonight = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&tonight), |_| "id".into());
+    let id = s.running[0].id.clone();
+    s.end(&id, 200, &BTreeSet::new()).expect("an unlocked session ends on request");
+
+    let tomorrow = activation("study", 1_000, 1_300, vec![]);
+    let started = reconcile(1_050, &mut s, std::slice::from_ref(&tomorrow), |_| "id2".into());
+    assert_eq!(started.len(), 1);
+    assert_eq!(s.running.len(), 1);
+}

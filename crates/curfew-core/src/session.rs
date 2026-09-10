@@ -10,6 +10,7 @@ use crate::lock::{Lock, LockSet};
 use crate::schedule::{Activation, ActivationSource};
 use crate::Timestamp;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 /// Why a session is running. Kept so the UI can say "running because: Work calendar", and so a
@@ -81,6 +82,17 @@ pub enum Refusal {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sessions {
     pub running: Vec<Session>,
+    /// For each profile, when its current occurrence was ended by hand.
+    ///
+    /// Ending a scheduled session used to last about a second: the session went away, and the very
+    /// next reconcile saw the same window still matching and started it straight back up. That is
+    /// not a lock keeping its promise, it is a bug wearing a lock's clothes — the promise is that a
+    /// session runs until its lock says otherwise, and the user had just satisfied that lock.
+    ///
+    /// So an end is remembered against the occurrence it ended, and reconcile skips exactly that
+    /// occurrence. The *next* one starts normally: this ends tonight's window, never the schedule.
+    #[serde(default)]
+    pub dismissed: BTreeMap<String, Timestamp>,
 }
 
 impl Sessions {
@@ -142,7 +154,11 @@ impl Sessions {
                 delayed_release_at: session.lock.delayed_release_at,
             });
         }
-        Ok(self.running.remove(index))
+        let ended = self.running.remove(index);
+        // Remembered against the profile, so the occurrence that is matching right now does not
+        // restart on the next reconcile a second from now.
+        self.dismissed.insert(ended.profile.clone(), now);
+        Ok(ended)
     }
 
     /// End a session with a spent emergency pass, whatever its lock says.
@@ -208,6 +224,15 @@ pub fn reconcile(
     let mut started = Vec::new();
     for activation in activations {
         if activation.end <= now {
+            continue;
+        }
+        // This exact occurrence was ended by hand: leave it ended. Anything starting later is a
+        // new occurrence and is unaffected.
+        if sessions
+            .dismissed
+            .get(&activation.profile)
+            .is_some_and(|at| *at >= activation.start && *at < activation.end)
+        {
             continue;
         }
         let existing_lock = sessions.for_profile(&activation.profile).map(|s| s.lock.clone());

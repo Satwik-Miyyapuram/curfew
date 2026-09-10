@@ -583,7 +583,17 @@ data class Session(
 )
 
 @Serializable
-data class Sessions(val running: List<Session> = emptyList())
+data class Sessions(
+    val running: List<Session> = emptyList(),
+    /**
+     * For each profile, when its current occurrence was ended by hand.
+     *
+     * The core writes this so a schedule that is still matching does not restart the session the
+     * user just ended. Nothing in the app reads it; it is here because the config is parsed with
+     * unknown keys refused, and a field the core writes is not unknown.
+     */
+    val dismissed: Map<String, Long> = emptyMap(),
+)
 
 @Serializable
 @OptIn(ExperimentalSerializationApi::class)

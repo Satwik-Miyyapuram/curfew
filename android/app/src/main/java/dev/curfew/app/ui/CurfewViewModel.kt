@@ -60,13 +60,42 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             runtime.restore()
-            // A second is the coarsest tick that still lets a countdown read like a countdown. The
-            // work behind it is a few reads of in-memory state plus one query, and it stops with
-            // the screen because the view model is scoped to the UI.
+            refresh()
+            // Two cadences, because they cost two different things.
+            //
+            // A second is the coarsest tick that still lets a countdown read like a countdown, and
+            // what it needs — the clock, the lock, the running sessions — is already in memory.
+            // Everything else costs a calendar-provider query, a TOML parse or two, a database
+            // read and a sweep of the permission states; doing all of that every second made the
+            // whole refresh take longer than the interval it ran on, which is why a change only
+            // appeared after leaving the app and coming back. It runs on its own slower beat, and
+            // — this is the part that matters — immediately after every write, so nothing a user
+            // does waits for a beat.
+            var tick = 0
             while (true) {
-                refresh()
                 delay(1_000)
+                if (tick++ % SLOW_TICKS == 0) refresh() else refreshFast()
             }
+        }
+    }
+
+    /**
+     * The clock, and the three things that move with it.
+     *
+     * Everything read here is already in memory: no file, no database, no content provider, no
+     * parse. It is safe to run every second and it is what makes a countdown a countdown.
+     */
+    private fun refreshFast() {
+        val now = runtime.clock.now()
+        _state.update {
+            it.copy(
+                now = now,
+                lock = runtime.lock.value,
+                activeProfiles = runtime.activeProfiles.value,
+                downtime = runtime.downtime.value,
+                clockTamper = runtime.clockTamper.value,
+                releasable = runtime.releasable.value,
+            )
         }
     }
 
@@ -82,6 +111,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun refresh() {
         withContext(Dispatchers.Default) {
+            // Sessions come first: a write that has just landed is the reason this was called.
             val now = runtime.clock.now()
             val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
             val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
@@ -644,6 +674,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val AUDIT_SHOWN = 200
+
+        /** One-second ticks between two full refreshes. Every write forces one regardless. */
+        private const val SLOW_TICKS = 5
     }
 }
 
