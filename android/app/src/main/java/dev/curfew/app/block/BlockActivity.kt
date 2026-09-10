@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,6 +85,10 @@ class BlockActivity : ComponentActivity() {
                             profile = profile,
                             explanation = explanation,
                             onClose = { goHome() },
+                            // The block that put this screen here is over. Closing returns the
+                            // user to whatever they were doing rather than leaving a screen up
+                            // that says a session is running when none is.
+                            onEnded = { finish() },
                         )
                     }
                 }
@@ -163,10 +168,31 @@ private fun BlockScreen(
     profile: String,
     explanation: String,
     onClose: () -> Unit,
+    onEnded: () -> Unit,
 ) {
     val context = LocalContext.current
     val lock by context.curfew.lock.collectAsStateWithLifecycle()
     val endsAt = lock.endsAt
+    val running by context.curfew.activeProfiles.collectAsStateWithLifecycle()
+
+    // A block screen that outlives its block is worse than no block screen at all: it sat there
+    // reading "Distractions is running" for as long as the phone was left alone, several minutes
+    // after the session had ended itself on time. So this screen watches the thing that justifies
+    // it, and leaves when that thing is gone.
+    //
+    // It waits to have seen the session running at least once first. The runtime's state arrives a
+    // moment after the activity does, and closing on that empty first value would dismiss every
+    // block screen before it had drawn.
+    var sawItRunning by remember { mutableStateOf(false) }
+    LaunchedEffect(running, profile) {
+        val stillRunning = profile.isEmpty() ||
+            running.any { it.equals(profile, ignoreCase = true) }
+        if (stillRunning) {
+            sawItRunning = true
+        } else if (sawItRunning) {
+            onEnded()
+        }
+    }
     val name = remember(target) { appLabel(context, target) }
     val passes = remember(lock) { runCatching { context.curfew.passesRemaining() }.getOrDefault(0) }
 
