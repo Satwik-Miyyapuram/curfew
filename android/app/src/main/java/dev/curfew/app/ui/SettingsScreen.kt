@@ -141,6 +141,43 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         }
 
         Gap(18.dp)
+        SectionLabel("Syncing")
+        Gap(10.dp)
+        DCard(padding = 18.dp) {
+            // Syncing used to be visible only on the Devices screen, which Simple mode never
+            // reached: a user whose blocks were following them between two devices had no way of
+            // seeing that this was happening, or of making it happen now. There is no "last
+            // synced" clock to show — devices talk when they are in earshot of each other, not on
+            // a schedule — so it says what is actually true at this moment.
+            Text(
+                when {
+                    !state.sync.available -> "Syncing is not set up on this device."
+                    state.sync.active.isEmpty() -> "No other device paired yet."
+                    !state.sync.running -> "Paired, but not listening right now."
+                    state.sync.nearby.isEmpty() ->
+                        "${state.sync.active.size} device(s) paired. None in earshot right now."
+                    else ->
+                        "${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in " +
+                            "earshot. Blocks follow you between them."
+                },
+                fontSize = 14.sp,
+                lineHeight = 21.sp,
+                color = if (state.sync.running) Palette.Muted else Palette.Live,
+            )
+            state.sync.error?.let { problem ->
+                Gap(6.dp)
+                Text(problem, fontSize = 13.sp, lineHeight = 20.sp, color = Palette.Bad)
+            }
+            if (state.sync.available) {
+                Gap(12.dp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GhostButton(text = "Sync now", onClick = model::syncNow)
+                    GhostButton(text = "Devices") { onOpen(Routes.DEVICES) }
+                }
+            }
+        }
+
+        Gap(18.dp)
         SectionLabel("The rest of Curfew")
         Gap(10.dp)
         DCardFlush {
