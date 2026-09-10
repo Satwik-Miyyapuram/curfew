@@ -299,9 +299,17 @@ impl Log {
     /// Deterministic in the *set* of entries: sorted by time, then author, then sequence, so two
     /// devices that hold the same entries agree even if they received them in opposite orders and
     /// even if two entries share a timestamp.
+    ///
+    /// Entries authored *after* `now` are not applied. `replay(now)` answers "what was true then",
+    /// and an entry that had not been written yet was not true then. Applying them looked harmless
+    /// while a device only ever replayed its own log at the present moment, but it meant a start
+    /// that has not happened yet could merge its lock into the session running now — so a device
+    /// on its own could show a promise that disappeared the moment a peer's log arrived and the
+    /// ordering changed. A lock that exists only until two devices talk is not a promise.
     pub fn replay(&self, now: Timestamp) -> Replay {
         let mut state = self.checkpoint.as_ref().map(|c| c.state.clone()).unwrap_or_default();
-        let mut ordered: Vec<&Entry> = self.entries.values().map(|s| &s.entry).collect();
+        let mut ordered: Vec<&Entry> =
+            self.entries.values().map(|s| &s.entry).filter(|e| e.at <= now).collect();
         ordered.sort_by(|a, b| {
             a.at.cmp(&b.at).then_with(|| a.author.cmp(&b.author)).then_with(|| a.seq.cmp(&b.seq))
         });
