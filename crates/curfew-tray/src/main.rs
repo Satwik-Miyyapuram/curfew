@@ -49,11 +49,16 @@ pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
              leave it open \u{2014} it enforces for as long as it is running:\n\
              \tcurfew run"
             .to_string(),
-        // The pipe is there but shut to this account. Nothing to install, so nothing to instruct.
+        // The pipe is there but shut to this account. Since the service began writing an explicit
+        // descriptor on its control pipe, the honest reading of this is a service older than the
+        // tray talking to it \u{2014} so say that, and say the repair, rather than guessing at accounts.
         std::io::ErrorKind::PermissionDenied => "Windows refused this program access to the \
              Curfew service.\n\n\
-             That usually means the service is running for a different user account. Blocks are \
-             not being enforced for you while this is true."
+             That usually means the installed service is older than this program. Reinstalling it \
+             from an administrator terminal replaces it with a matching one:\n\
+             \tcurfew install\n\n\
+             Blocks are still being enforced while this is true \u{2014} this program just cannot see \
+             or change them."
             .to_string(),
         _ => format!(
             "The Curfew service is installed but did not answer, so blocks are not being enforced \

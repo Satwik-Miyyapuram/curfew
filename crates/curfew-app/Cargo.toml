@@ -1,0 +1,24 @@
+[package]
+name = "curfew-app"
+description = "The Curfew window: what is running, what is planned, and whether any of it is working"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "curfew-app"
+path = "src/main.rs"
+
+[dependencies]
+curfew-core = { path = "../curfew-core" }
+curfew-win = { path = "../curfew-win" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# The window is Win32 through tao; the page inside it is the system's own WebView2, which every
+# supported build of Windows already has. Nothing here is a second browser engine to ship.
+tao = "0.31"
+wry = "0.47"

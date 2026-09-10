@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/curfew-core", "crates/curfew-cli", "crates/curfew-ics", "crates/curfew-ffi", "crates/curfew-sync", "crates/curfew-win", "crates/curfew-svc", "crates/curfew-tray"]
+members = ["crates/curfew-core", "crates/curfew-cli", "crates/curfew-ics", "crates/curfew-ffi", "crates/curfew-sync", "crates/curfew-win", "crates/curfew-svc", "crates/curfew-tray", "crates/curfew-app"]
 
 [workspace.package]
 version = "0.1.0"

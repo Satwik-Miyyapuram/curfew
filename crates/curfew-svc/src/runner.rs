@@ -259,10 +259,51 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
     }
 }
 
+/// Who may talk to the control pipe.
+///
+/// The service runs as SYSTEM, and a pipe SYSTEM creates with the default descriptor is one only
+/// SYSTEM and administrators can open. That is wrong for this pipe: the tray, the overlay and the
+/// command line all run as the ordinary logged-in user, and without this they are told "Windows
+/// refused this program access to the Curfew service" while enforcement carries on without them.
+///
+/// The grant is deliberate rather than lax. Everything expressible on this channel is something an
+/// unprivileged user of this machine may already do — there is no "stop enforcing" message, and
+/// ending a session goes through the core's refusal — so handing the interactive user read and
+/// write is not handing them a way out of a lock.
+///
+/// Two narrowings that matter:
+///
+/// - **`IU`, not `AU` or `WD`.** Interactive excludes network logons, and a named pipe is
+///   reachable over the network through `IPC$` by an authenticated remote user. Nobody signed in
+///   from another machine has business ending a block on this one.
+/// - **`0x12019B`, not `GA`.** That is file generic read plus generic write with
+///   `FILE_CREATE_PIPE_INSTANCE` (`0x4`) masked off. With that bit a user could create a second
+///   instance of `\.\pipe\curfew.sock` and answer for the service — a fake "no session is
+///   running" is exactly what someone trying to get out of a block would want to say.
+#[cfg(windows)]
+const PIPE_SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)";
+
+/// The listener, with the descriptor above where the platform has one.
+#[cfg(windows)]
+fn control_listener() -> std::io::Result<interprocess::local_socket::Listener> {
+    use interprocess::os::windows::local_socket::ListenerOptionsExt as _;
+    use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+
+    let sddl = widestring::U16CString::from_str(PIPE_SDDL).map_err(std::io::Error::other)?;
+    let descriptor = SecurityDescriptor::deserialize(&sddl)?;
+    let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
+    ListenerOptions::new().name(name).security_descriptor(descriptor).create_sync()
+}
+
+#[cfg(not(windows))]
+fn control_listener() -> std::io::Result<interprocess::local_socket::Listener> {
+    let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
+    ListenerOptions::new().name(name).create_sync()
+}
+
 /// Serve control messages until the process ends. One connection, one request, one line back.
 fn serve(enforcer: Arc<Mutex<Enforcer>>) -> std::io::Result<()> {
-    let name = SOCKET.to_ns_name::<GenericNamespaced>()?;
-    let listener = ListenerOptions::new().name(name).create_sync()?;
+    let listener = control_listener()?;
     for connection in listener.incoming() {
         let Ok(stream) = connection else { continue };
         let mut reader = BufReader::new(stream);
@@ -454,5 +495,18 @@ pub fn run(
     let guard = enforcer.lock().expect("enforcer");
     if guard.sessions.running.is_empty() {
         let _ = hosts::clear(&guard.hosts_path);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod pipe_acl_tests {
+    /// The descriptor is a string literal, and a typo in it would not fail the build — it would
+    /// fail at the moment the service starts listening, on a machine, in a service, with the error
+    /// going wherever service errors go. So it is parsed here instead.
+    #[test]
+    fn the_control_pipe_descriptor_parses() {
+        use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+        let sddl = widestring::U16CString::from_str(super::PIPE_SDDL).unwrap();
+        SecurityDescriptor::deserialize(&sddl).expect("the pipe's SDDL is not valid");
     }
 }

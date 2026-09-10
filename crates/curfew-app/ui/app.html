@@ -1,0 +1,528 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Curfew</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:14px; --r-ctl:9px;
+ --f:"Segoe UI Variable Text","Segoe UI",-apple-system,Inter,sans-serif;
+}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;
+ overflow:hidden;font-size:13px;user-select:none}
+.main{height:100%;display:flex;overflow:hidden}
+.side{width:212px;flex:none;border-right:1px solid var(--line);padding:14px 10px;display:flex;
+ flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
+.nav{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);
+ font-size:13px;color:var(--mut);cursor:default}
+.nav:hover{background:rgba(29,36,46,.6)}
+.nav.on{background:var(--sur2);color:var(--tx);font-weight:600}
+.nav .ic{width:16px;text-align:center;font-size:13px}
+.side .sp{flex:1}
+.body{flex:1;padding:22px 26px;overflow-y:auto;overflow-x:hidden}
+h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.5;margin-top:5px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
+.flush{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.row+.row{border-top:1px solid var(--line)}
+.lbl{font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.btn{height:36px;padding:0 16px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;
+ font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;
+ border:none;font-family:var(--f)}
+.btn:disabled{opacity:.45}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:25px;padding:0 11px;border-radius:999px;
+ font-size:11px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.tab{height:30px;padding:0 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--sur2);
+ border:1px solid var(--line);color:var(--mut);display:inline-flex;align-items:center;cursor:default}
+.tab.on{background:var(--acc);border-color:var(--acc);color:#0D1016;font-weight:700}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px;flex:none}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.grow{flex:1;min-width:0}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--live);flex:none}
+.note{font-size:12px;color:var(--dim);line-height:1.55}
+.wrap{white-space:pre-wrap}
+.strip{display:flex;gap:8px;flex-wrap:wrap}
+.name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{font-size:11px;color:var(--mut)}
+.bad{color:var(--bad)}
+.ok{color:var(--ok)}
+input{height:34px;width:100%;background:var(--sur2);border:1px solid var(--line);color:var(--tx);
+ border-radius:var(--r-ctl);padding:0 11px;font-family:var(--f);font-size:13px;user-select:text}
+.scrim{position:fixed;inset:0;background:rgba(6,8,12,.72);display:grid;place-items:center}
+.sheet{width:420px;background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);
+ padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+</style>
+
+<div class="main">
+  <div class="side">
+    <div class="nav on" data-page="now"><span class="ic">&#9679;</span>Now</div>
+    <div class="nav" data-page="plan"><span class="ic">&#9783;</span>Plan</div>
+    <div class="nav" data-page="apps"><span class="ic">&#9635;</span>Apps &amp; sites</div>
+    <div class="nav" data-page="health"><span class="ic">&#10003;</span>Is it working</div>
+    <div class="sp"></div>
+    <div id="livepill"></div>
+    <div class="note" style="margin-top:8px;padding:0 4px">Closing this window does not stop anything. The blocking is done by a service that keeps running.</div>
+  </div>
+  <div class="body" id="body"></div>
+</div>
+<div id="modal"></div>
+
+<script>
+"use strict";
+
+// ---- the bridge -------------------------------------------------------------------------------
+// One promise per call, settled by the host through __curfewReply. Nothing here reaches the
+// network: this page has no origin and loads nothing.
+let nextId = 1;
+const pending = new Map();
+function call(message) {
+  return new Promise((resolve) => {
+    const id = nextId++;
+    pending.set(id, resolve);
+    window.ipc.postMessage(JSON.stringify(Object.assign({ id }, message)));
+  });
+}
+window.__curfewReply = function (id, json) {
+  const resolve = pending.get(id);
+  if (!resolve) return;
+  pending.delete(id);
+  resolve(JSON.parse(json));
+};
+const askService = (payload) => call({ kind: "ipc", payload });
+const readConfig = () => call({ kind: "config" });
+
+// ---- words ------------------------------------------------------------------------------------
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+function clock(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+function atTime(unix) {
+  return new Date(unix * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function hhmm(minute) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(minute / 60) % 24)}:${pad(minute % 60)}`;
+}
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function describeDays(days) {
+  if (!days || days.length === 0) return "Every day";
+  const sorted = [...days].sort((a, b) => a - b).join(",");
+  if (sorted === "0,1,2,3,4") return "Weekdays";
+  if (sorted === "5,6") return "Weekends";
+  return [...days].sort((a, b) => a - b).map((d) => DAYS[d] || "?").join(", ");
+}
+// The lock names are the promise, said the way the user chose it rather than the way it is stored.
+function describeLock(lock) {
+  const kind = typeof lock === "string" ? lock : lock.kind;
+  switch (kind) {
+    case "timer": return "runs to the end";
+    case "confirm": return "asks before ending";
+    case "device_credential": return "your Windows password";
+    case "restart_required": return "a restart";
+    case "challenge": return "a challenge";
+    case "peer_release": return "another device";
+    case "token": return "a tag";
+    default: return String(kind);
+  }
+}
+function describeTarget(target) {
+  const t = target.target || target.kind;
+  switch (t) {
+    case "windows_exe": return { text: target.exe, group: "apps" };
+    case "app_package": return { text: target.package, group: "apps" };
+    case "domain": return { text: target.domain, group: "sites" };
+    case "url": return { text: target.pattern, group: "sites" };
+    case "keyword": return { text: `anything saying "${target.text}"`, group: "sites" };
+    case "window_title": return { text: `windows titled ${target.pattern}`, group: "apps" };
+    case "file_path": return { text: target.pattern, group: "apps" };
+    case "notification_source": return { text: `notifications from ${target.package}`, group: "apps" };
+    case "whole_device": return { text: "the whole machine", group: "apps" };
+    default: return { text: JSON.stringify(target), group: "apps" };
+  }
+}
+function describeAction(action) {
+  const kind = action.kind;
+  if (kind === "block") return "Blocked";
+  if (kind === "allow_only") return "Allowed, everything else blocked";
+  if (kind === "budget") return `${Math.round(action.seconds / 60)} minutes a day`;
+  if (kind === "launch_limit") return `${action.count} openings`;
+  if (kind === "delay") return `${action.seconds} second wait first`;
+  if (kind === "mute_notifications") return "Notifications silenced";
+  return kind;
+}
+function describeRefusal(refusal) {
+  switch (refusal.refusal) {
+    case "not_running": return "That session is not running any more.";
+    case "locked":
+      return "Not yet: this session is locked by " +
+        (refusal.missing || []).map(describeLock).join(" and ") + ".";
+    case "frozen": return "The machine is frozen. Nothing can be ended until it lifts.";
+    default: return "The service refused: " + JSON.stringify(refusal);
+  }
+}
+
+// ---- state ------------------------------------------------------------------------------------
+const state = { page: "now", status: null, trouble: null, config: null, configError: null, tab: "apps", profile: null };
+
+async function refresh() {
+  const answer = await askService({ request: "status" });
+  if (answer.ok && answer.value.response === "status") {
+    state.status = answer.value;
+    state.trouble = null;
+  } else if (answer.ok) {
+    state.status = null;
+    state.trouble = { kind: "error", detail: "The service answered something other than a status." };
+  } else {
+    state.status = null;
+    state.trouble = answer;
+  }
+  const config = await readConfig();
+  if (config.ok) { state.config = config.value; state.configError = null; }
+  else { state.config = null; state.configError = config.detail; }
+  draw();
+}
+
+// What the service is doing, and why the pages cannot say anything if it is not.
+function troubleCard() {
+  const t = state.trouble;
+  if (!t) return "";
+  let text;
+  if (t.kind === "not_found") {
+    text = "Curfew is not installed on this PC, so nothing is being blocked.\n\n" +
+      "To install it, open Windows Terminal or PowerShell as an administrator and run:\n" +
+      "\tcurfew install";
+  } else if (t.kind === "denied") {
+    text = "Windows refused this program access to the Curfew service.\n\n" +
+      "That usually means the installed service is older than this window. Reinstalling it from an " +
+      "administrator terminal replaces it with a matching one:\n\tcurfew install\n\n" +
+      "Blocks are still being enforced while this is true — this window just cannot see them.";
+  } else {
+    text = "The Curfew service did not answer, so this window cannot show what is running.\n\n" +
+      t.detail;
+  }
+  return `<div class="card" style="border-left:3px solid var(--live)">
+    <div class="lbl">The service</div><div style="height:8px"></div>
+    <div class="wrap" style="line-height:1.6;color:var(--mut)">${esc(text)}</div></div>`;
+}
+
+// ---- the pages --------------------------------------------------------------------------------
+function pageNow() {
+  if (!state.status) {
+    return `<h1>Curfew</h1><div class="sub">Nothing can be shown until the service answers.</div>
+      <div style="height:18px"></div>${troubleCard()}`;
+  }
+  const s = state.status;
+  const running = s.running || [];
+  if (running.length === 0) {
+    const next = nextWindows(1)[0];
+    return `<h1>Nothing is running</h1>
+      <div class="sub">${next
+        ? `Next is ${esc(next.name)}, at ${esc(hhmm(next.start_minute))}.`
+        : "No window is scheduled. The Plan page is where windows are made."}</div>
+      <div style="height:18px"></div>${blockedSummary()}`;
+  }
+  return running.map(sessionCard).join('<div style="height:14px"></div>') +
+    '<div style="height:14px"></div>' + blockedSummary() +
+    `<div style="height:14px"></div><div class="note">A lock is a promise: ending a session early goes through the same check you set up, even here.</div>`;
+}
+
+function profileName(id) {
+  const found = (state.config?.profiles || []).find((p) => p.id === id);
+  return found ? found.name : id;
+}
+
+function sessionCard(session) {
+  const s = state.status;
+  const ends = session.lock?.ends_at ?? null;
+  const left = ends === null ? null : ends - s.now;
+  const conditions = session.lock?.conditions || [];
+  const releasable = (s.releasable || []).includes(session.id);
+  const released = (s.released || []).includes(session.id);
+  const delayed = session.lock?.delayed_release_at ?? null;
+  const why = conditions.length === 0
+    ? "You can end it whenever you like."
+    : "Ends early only for " + conditions.map(describeLock).join(" and ") + ".";
+  return `<div><h1>${esc(profileName(session.profile))} is running</h1>
+    <div class="sub">Started ${esc(atTime(session.started_at))}${ends ? `, ends at ${esc(atTime(ends))}` : ""}. ${esc(why)}</div>
+    <div style="height:18px"></div>
+    <div class="card" style="display:flex;align-items:center;gap:22px">
+      <div><div class="lbl">Time left</div>
+        <div class="mono" style="font-size:44px;font-weight:700;letter-spacing:-1.5px;color:var(--live);line-height:1.1">${left === null ? "&mdash;" : esc(clock(left))}</div>
+        <div class="meta" style="margin-top:2px">${delayed ? `Delayed release lands ${esc(atTime(delayed))}` : ends ? `Ends at ${esc(atTime(ends))}` : "Runs until it is released"}</div>
+      </div>
+      <div class="grow"></div>
+      ${released ? '<span class="pill ok">Released by this device</span>' :
+        releasable ? `<button class="btn ghost" data-act="release" data-id="${esc(session.id)}">Release it</button>` : ""}
+      ${(s.passes_left || 0) > 0 ? `<button class="btn ghost" data-act="emergency" data-id="${esc(session.id)}">Emergency pass (${s.passes_left})</button>` : ""}
+      <button class="btn" data-act="end" data-id="${esc(session.id)}">End it early</button>
+    </div></div>`;
+}
+
+function blockedSummary() {
+  const s = state.status;
+  const closed = [...(s.closed || [])];
+  const failing = [...(s.failing || [])];
+  const domains = [...(s.blocked_domains || [])];
+  const delayed = Object.entries(s.delayed || {});
+  const rows = [];
+  for (const exe of closed.slice(0, 6)) {
+    rows.push(row("rgba(242,114,114,.14)", "&#10005;", exe, "Closed while a session is running"));
+  }
+  for (const [exe, seconds] of delayed.slice(0, 4)) {
+    rows.push(row("rgba(124,156,245,.14)", "&#9684;", exe, `Held for another ${clock(seconds)}`));
+  }
+  for (const exe of failing.slice(0, 4)) {
+    rows.push(row("rgba(242,114,114,.14)", "!", exe, "Could not be closed — see Is it working"));
+  }
+  const left = `<div class="flush grow">
+      <div class="row"><span class="lbl grow">Right now</span></div>
+      ${rows.length ? rows.join("") : '<div class="row"><span class="meta">Nothing has been closed.</span></div>'}
+    </div>`;
+  const right = `<div class="card" style="width:330px;flex:none">
+      <div class="lbl">Next 24 hours</div><div style="height:10px"></div>
+      ${nextWindows(4).map((w) => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0">
+        <span class="dot" style="background:var(--acc)"></span>
+        <div class="grow name">${esc(w.name)}</div>
+        <div class="mono meta">${esc(hhmm(w.start_minute))}&ndash;${esc(hhmm(w.end_minute))}</div></div>`).join("")
+        || '<div class="meta">No windows are scheduled.</div>'}
+      <div style="height:12px"></div>
+      <div class="strip"><span class="pill">${domains.length} sites blocked</span>
+      ${s.freeze ? '<span class="pill" style="color:var(--live)">A freeze is counting down</span>' : ""}</div>
+    </div>`;
+  return `<div style="display:flex;gap:14px;align-items:flex-start">${left}${right}</div>`;
+}
+function row(bg, glyph, name, meta) {
+  return `<div class="row"><span class="tile" style="background:${bg}">${glyph}</span>
+    <div class="grow"><div class="name">${esc(name)}</div><div class="meta">${esc(meta)}</div></div></div>`;
+}
+
+// The windows due next, in clock order from now. Enabled ones only: a paused window is not a plan.
+function nextWindows(limit) {
+  const weekly = (state.config?.weekly || []).filter((w) => w.enabled !== false);
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  return weekly
+    .map((w) => ({ ...w, name: profileName(w.profile) }))
+    .sort((a, b) => {
+      const key = (w) => (w.start_minute >= nowMinutes ? w.start_minute : w.start_minute + 1440);
+      return key(a) - key(b);
+    })
+    .slice(0, limit);
+}
+
+function pagePlan() {
+  if (state.configError) {
+    return `<h1>Plan</h1><div class="sub">The config could not be read.</div><div style="height:18px"></div>
+      <div class="card wrap" style="color:var(--mut);line-height:1.6">${esc(state.configError)}</div>`;
+  }
+  const weekly = state.config?.weekly || [];
+  const calendars = state.config?.calendars || [];
+  const sources = state.config?.calendar_sources || [];
+  const windows = weekly.length
+    ? weekly.map((w) => `<div class="row">
+        <span class="dot" style="background:${w.enabled === false ? "var(--dim)" : "var(--acc)"}"></span>
+        <div class="grow"><div class="name">${esc(profileName(w.profile))}</div>
+          <div class="meta">${esc(describeDays(w.days))} &middot; ${esc(hhmm(w.start_minute))}&ndash;${esc(hhmm(w.end_minute))}${w.end_minute <= w.start_minute ? ", overnight" : ""}${(w.locks || []).length ? " &middot; " + esc((w.locks || []).map(describeLock).join(", ")) : ""}</div></div>
+        ${w.enabled === false ? '<span class="pill">Paused</span>' : ""}</div>`).join("")
+    : '<div class="row"><span class="meta">No weekly windows.</span></div>';
+  const rules = calendars.length
+    ? calendars.map((c) => `<div class="row"><span class="dot" style="background:var(--ok)"></span>
+        <div class="grow"><div class="name">${esc(profileName(c.profile))}</div>
+          <div class="meta">${esc(describeMatcher(c.matcher))}</div></div></div>`).join("")
+    : '<div class="row"><span class="meta">No calendar rules.</span></div>';
+  return `<h1>Plan</h1>
+    <div class="sub">When Curfew starts a session by itself. ${sources.length} calendar${sources.length === 1 ? "" : "s"} subscribed.</div>
+    <div style="height:18px"></div>
+    <div class="lbl">Weekly windows</div><div style="height:8px"></div><div class="flush">${windows}</div>
+    <div style="height:18px"></div>
+    <div class="lbl">From your calendar</div><div style="height:8px"></div><div class="flush">${rules}</div>
+    <div style="height:16px"></div>
+    <div class="note">This is what the service is enforcing, read from its own config. Editing it needs
+      an administrator, so it is done from a terminal for now:\n\tcurfew add-window &lt;config&gt; ...</div>`;
+}
+function describeMatcher(matcher) {
+  if (!matcher) return "Every event";
+  const parts = [];
+  if (matcher.title) parts.push(`titled ${matcher.title}`);
+  if (matcher.calendar) parts.push(`in ${matcher.calendar}`);
+  if (matcher.location) parts.push(`at ${matcher.location}`);
+  if (matcher.busy_only) parts.push("marked busy");
+  return parts.length ? "Events " + parts.join(", ") : "Every event";
+}
+
+function pageApps() {
+  const profiles = state.config?.profiles || [];
+  if (state.configError) {
+    return `<h1>Apps &amp; sites</h1><div class="sub">The config could not be read.</div>
+      <div style="height:18px"></div><div class="card wrap" style="color:var(--mut)">${esc(state.configError)}</div>`;
+  }
+  if (profiles.length === 0) return `<h1>Apps &amp; sites</h1><div class="sub">No profiles yet.</div>`;
+  if (!profiles.some((p) => p.id === state.profile)) state.profile = profiles[0].id;
+  const profile = profiles.find((p) => p.id === state.profile);
+  const sorted = { apps: [], sites: [] };
+  for (const rule of profile.rules || []) {
+    const target = describeTarget(rule.target);
+    sorted[target.group].push({ text: target.text, action: describeAction(rule.action) });
+  }
+  const shown = sorted[state.tab];
+  return `<h1>Apps &amp; sites</h1>
+    <div class="sub">${esc(profile.description || "What this profile closes while it runs.")}</div>
+    <div style="height:16px"></div>
+    <div class="strip">${profiles.map((p) => `<span class="tab${p.id === state.profile ? " on" : ""}" data-profile="${esc(p.id)}">${esc(p.name)}</span>`).join("")}</div>
+    <div style="height:12px"></div>
+    <div class="strip">
+      <span class="tab${state.tab === "apps" ? " on" : ""}" data-tab="apps">Apps (${sorted.apps.length})</span>
+      <span class="tab${state.tab === "sites" ? " on" : ""}" data-tab="sites">Sites (${sorted.sites.length})</span>
+    </div>
+    <div style="height:12px"></div>
+    <div class="flush">${shown.length
+      ? shown.map((r) => `<div class="row"><div class="grow name">${esc(r.text)}</div>
+          <span class="pill">${esc(r.action)}</span></div>`).join("")
+      : `<div class="row"><span class="meta">Nothing here in ${esc(profile.name)}.</span></div>`}</div>`;
+}
+
+function pageHealth() {
+  const s = state.status;
+  const lines = [];
+  if (!s) {
+    return `<h1>Is it working</h1><div class="sub">No, and here is why.</div>
+      <div style="height:18px"></div>${troubleCard()}`;
+  }
+  lines.push(["ok", "The service answered", "That is the part that does the blocking."]);
+  if (s.hosts_error) lines.push(["bad", "Website blocking is not working", s.hosts_error]);
+  else lines.push(["ok", `${(s.blocked_domains || []).length} sites in the hosts file`, "Written by the service, checked every tick."]);
+  if (s.state_warning) lines.push(["bad", "Saved locks may have been lost", s.state_warning]);
+  const failing = [...(s.failing || [])];
+  if (failing.length) lines.push(["bad", `${failing.length} could not be closed`, failing.join(", ")]);
+  const unwatched = [...(s.unwatched || [])];
+  if (unwatched.length) {
+    lines.push(["bad", `${unwatched.length} browser${unwatched.length === 1 ? "" : "s"} without the extension`,
+      unwatched.join(", ") + " — page-level rules cannot be enforced there, so the browser is closed instead."]);
+  }
+  if (s.pass_refusal) lines.push(["mut", "No emergency pass right now", JSON.stringify(s.pass_refusal)]);
+  else lines.push(["mut", `${s.passes_left || 0} emergency passes`, "Spent from the Now page, on one session."]);
+  return `<h1>Is it working</h1>
+    <div class="sub">Everything that could be quietly broken, said out loud.</div>
+    <div style="height:18px"></div>
+    <div class="flush">${lines.map(([tone, title, detail]) => `<div class="row">
+      <span class="tile" style="background:${tone === "bad" ? "rgba(242,114,114,.14)" : tone === "ok" ? "rgba(95,211,166,.14)" : "rgba(141,154,172,.12)"}">${tone === "bad" ? "!" : tone === "ok" ? "&#10003;" : "&#8226;"}</span>
+      <div class="grow"><div class="name">${esc(title)}</div><div class="meta wrap">${esc(detail)}</div></div></div>`).join("")}</div>`;
+}
+
+// ---- drawing ----------------------------------------------------------------------------------
+function draw() {
+  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, health: pageHealth };
+  document.getElementById("body").innerHTML = (pages[state.page] || pageNow)();
+  for (const nav of document.querySelectorAll(".nav")) {
+    nav.classList.toggle("on", nav.dataset.page === state.page);
+  }
+  const running = state.status?.running || [];
+  const pill = document.getElementById("livepill");
+  if (running.length) {
+    const session = running[0];
+    const left = session.lock?.ends_at ? session.lock.ends_at - state.status.now : null;
+    pill.innerHTML = `<span class="pill" style="color:var(--live)"><span class="dot" style="width:6px;height:6px"></span>${esc(profileName(session.profile))}${left === null ? "" : " &middot; " + esc(clock(left)) + " left"}</span>`;
+  } else {
+    pill.innerHTML = state.status ? '<span class="pill">Nothing running</span>' : '<span class="pill bad">No service</span>';
+  }
+}
+
+// ---- what the buttons do ----------------------------------------------------------------------
+function sheet(html) { document.getElementById("modal").innerHTML = html ? `<div class="scrim"><div class="sheet">${html}</div></div>` : ""; }
+function say(title, text) {
+  sheet(`<div style="font-size:17px;font-weight:650">${esc(title)}</div>
+    <div style="height:10px"></div><div class="wrap" style="color:var(--mut);line-height:1.6">${esc(text)}</div>
+    <div style="height:16px"></div><div style="display:flex;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Close</button></div>`);
+}
+
+// Ending a session is the one place the promise is kept or broken, so it is done in two steps: ask
+// the service plainly, and only if it names a condition do we offer the way to satisfy it.
+async function end(id) {
+  const answer = await askService({ request: "end", id, satisfied: [] });
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  const value = answer.value;
+  if (value.response === "ok") { await refresh(); return sheet(""); }
+  if (value.response === "refused") {
+    const missing = value.refusal.refusal === "locked" ? value.refusal.missing || [] : [];
+    if (missing.some((l) => describeLock(l) === "asks before ending")) return confirmEnd(id, missing);
+    if (missing.some((l) => describeLock(l) === "your Windows password")) return password(id);
+    return say("Still locked", describeRefusal(value.refusal));
+  }
+  return say("The service said", JSON.stringify(value));
+}
+
+function confirmEnd(id, missing) {
+  sheet(`<div style="font-size:17px;font-weight:650">End this session?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You asked to be asked. Nothing else is standing in the way.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Keep it running</button>
+    <button class="btn" data-act="confirm-end" data-id="${esc(id)}">End it</button></div>`);
+}
+
+// The password is typed here and checked by the service with LogonUser. This window never sees
+// whether it was right, and never stores it.
+function password(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Your Windows password</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You chose to have this asked for. Windows checks it, not Curfew.</div>
+    <div style="height:14px"></div>
+    <input id="user" placeholder="User name" value="${esc(window.__curfewUser || "")}">
+    <div style="height:8px"></div><input id="pw" type="password" placeholder="Password">
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Cancel</button>
+    <button class="btn" data-act="unlock" data-id="${esc(id)}">Unlock</button></div>`);
+  setTimeout(() => document.getElementById("pw")?.focus(), 0);
+}
+
+document.addEventListener("click", async (event) => {
+  const nav = event.target.closest(".nav");
+  if (nav) { state.page = nav.dataset.page; return draw(); }
+  const tab = event.target.closest("[data-tab]");
+  if (tab) { state.tab = tab.dataset.tab; return draw(); }
+  const profile = event.target.closest("[data-profile]");
+  if (profile) { state.profile = profile.dataset.profile; return draw(); }
+  const button = event.target.closest("[data-act]");
+  if (!button) return;
+  const id = button.dataset.id;
+  switch (button.dataset.act) {
+    case "close": return sheet("");
+    case "end": return end(id);
+    case "confirm-end": {
+      const answer = await askService({ request: "end", id, satisfied: [{ kind: "confirm" }] });
+      sheet("");
+      if (answer.ok && answer.value.response === "refused") say("Still locked", describeRefusal(answer.value.refusal));
+      return refresh();
+    }
+    case "unlock": {
+      const username = document.getElementById("user").value;
+      const pw = document.getElementById("pw").value;
+      const answer = await askService({ request: "unlock", id, username, domain: "", password: pw });
+      sheet("");
+      if (answer.ok && answer.value.response === "refused") say("Not unlocked", describeRefusal(answer.value.refusal));
+      return refresh();
+    }
+    case "release": {
+      const answer = await askService({ request: "release", id });
+      if (answer.ok && answer.value.response === "refused") say("Not released", describeRefusal(answer.value.refusal));
+      return refresh();
+    }
+    case "emergency": {
+      const answer = await askService({ request: "emergency", id });
+      if (answer.ok && answer.value.response === "no_pass") say("No pass to spend", JSON.stringify(answer.value.refusal));
+      return refresh();
+    }
+  }
+});
+
+refresh();
+// A second is the resolution of the clock on the page; the pipe call is cheap and local.
+setInterval(refresh, 1000);
+</script>
