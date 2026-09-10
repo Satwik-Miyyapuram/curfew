@@ -3,6 +3,7 @@ package dev.curfew.app.data
 import android.content.Context
 import androidx.room.Room
 import dev.curfew.app.enforce.CurfewDeviceAdmin
+import dev.curfew.app.enforce.ScreenTime
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.Consumption
@@ -484,8 +485,57 @@ class CurfewRuntime internal constructor(
             runCatching { policy.restoreReleases(it) }
         }
         seedStarterProfile()
+        captureBaseline(now)
         detectDowntime(now)
         refresh(now)
+    }
+
+    private val screenTime = ScreenTime(context)
+
+    /**
+     * Freeze what a day looked like before Curfew, once, so there is something to compare against.
+     *
+     * The honest version of "look how much time you got back" needs a number Curfew did not
+     * produce. Android keeps daily screen-time totals for weeks, including the weeks before this
+     * app was installed, so the baseline is the average of those days — taken once, on the first
+     * launch that has usage access, and never rewritten afterwards. A baseline that moved with
+     * recent behaviour would compare the app against itself and always flatter it.
+     *
+     * If usage access is not granted yet there is nothing to freeze, and this quietly does nothing
+     * and tries again next launch. That is the whole failure mode: the comparison simply does not
+     * appear until there is something true to say.
+     */
+    private suspend fun captureBaseline(now: Long) {
+        if (db.state().get(KEY_BASELINE) != null) return
+        val totals = screenTime.dailyTotals(ScreenTime.BASELINE_DAYS, now)
+        // Whole days only: today is half over, and half a day always looks like an improvement.
+        val today = now / ScreenTime.DAY_SECONDS
+        val whole = totals.filterKeys { it < today }
+        val average = screenTime.average(whole)
+        if (average <= 0) return
+        db.state().put(StateRow(KEY_BASELINE, "$average:${whole.size}:$now"))
+    }
+
+    /**
+     * Screen time before Curfew against screen time now, or null while either is unknown.
+     *
+     * Both halves are the system's own figures, so this says nothing about what Curfew blocked —
+     * it says what actually happened, which is the only version of this number worth showing.
+     */
+    suspend fun screenTimeComparison(now: Long = clock.now()): ScreenTimeComparison? {
+        val stored = db.state().get(KEY_BASELINE) ?: return null
+        val parts = stored.split(":")
+        val before = parts.getOrNull(0)?.toLongOrNull() ?: return null
+        val today = now / ScreenTime.DAY_SECONDS
+        val recent = screenTime.dailyTotals(ScreenTime.RECENT_DAYS, now).filterKeys { it < today }
+        val nowAverage = screenTime.average(recent)
+        if (before <= 0 || nowAverage <= 0) return null
+        return ScreenTimeComparison(
+            beforeSeconds = before,
+            nowSeconds = nowAverage,
+            baselineDays = parts.getOrNull(1)?.toIntOrNull() ?: 0,
+            recentDays = recent.size,
+        )
     }
 
     /**
@@ -657,6 +707,7 @@ class CurfewRuntime internal constructor(
         private const val KEY_CLOCK = "clock_witness"
         private const val KEY_BOOTS = "boots"
         private const val KEY_RELEASES = "releases"
+        private const val KEY_BASELINE = "screen_time_baseline"
 
         /**
          * How long a silence has to be before it is worth reporting. The service ticks every
@@ -768,4 +819,21 @@ fun interface Clock {
 
         override fun uptime(): Long = android.os.SystemClock.elapsedRealtime() / 1000
     }
+}
+
+/**
+ * Average daily screen time before Curfew, and average daily screen time now.
+ *
+ * Both are the system's own totals over whole days. [beforeSeconds] was frozen on the first launch
+ * with usage access; [nowSeconds] is the last week. The days behind each are carried along so the
+ * screen can say how much evidence the comparison rests on rather than stating it as a fact.
+ */
+data class ScreenTimeComparison(
+    val beforeSeconds: Long,
+    val nowSeconds: Long,
+    val baselineDays: Int,
+    val recentDays: Int,
+) {
+    /** Seconds a day less than before, or zero when it went the other way. */
+    val savedSeconds: Long get() = (beforeSeconds - nowSeconds).coerceAtLeast(0)
 }

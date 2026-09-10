@@ -61,6 +61,12 @@ fun UsageScreen(model: CurfewViewModel) {
             Title("Where your time went", size = 26)
             Gap(16.dp)
         }
+        state.screenTime?.let { comparison ->
+            item {
+                ComparisonCard(comparison)
+                Gap(10.dp)
+            }
+        }
         item {
             DCard {
                 StreakSummary(state.stats)
@@ -272,4 +278,61 @@ private fun describeAudit(kind: String, detail: String): String = when (kind) {
     "enforcement.gap" -> "Curfew was not running for a while, so nothing was blocked."
     "enforcement.clock" -> "The device's clock was changed, and the change was refused."
     else -> "$kind $detail".trim()
+}
+
+/**
+ * Before Curfew, now, and the difference — the only claim on this screen the app did not make itself.
+ *
+ * Both numbers come from Android's own daily totals, so this is not "time Curfew blocked": it is
+ * what actually happened to the phone. That is why it can go the wrong way, and why it says so
+ * plainly when it does. A tool that only ever reports progress is not measuring anything.
+ */
+@Composable
+private fun ComparisonCard(comparison: dev.curfew.app.data.ScreenTimeComparison) {
+    DCard(padding = 20.dp) {
+        SectionLabel("Screen time, a day")
+        Gap(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Column {
+                Text("Before Curfew", fontSize = 12.sp, color = Palette.Dim)
+                Text(
+                    duration(comparison.beforeSeconds.toInt()),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Muted,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("Now", fontSize = 12.sp, color = Palette.Dim)
+                Text(
+                    duration(comparison.nowSeconds.toInt()),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (comparison.savedSeconds > 0) Palette.Ok else Palette.Text,
+                )
+            }
+        }
+        Gap(12.dp)
+        Text(
+            if (comparison.savedSeconds > 0) {
+                "${duration(comparison.savedSeconds.toInt())} a day back, against the " +
+                    "${comparison.baselineDays} days before you started."
+            } else {
+                "No lower than before yet, against the ${comparison.baselineDays} days before " +
+                    "you started."
+            },
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+            color = if (comparison.savedSeconds > 0) Palette.Ok else Palette.Muted,
+        )
+        Text(
+            "Android's own figures, averaged over the last ${comparison.recentDays} whole days.",
+            fontSize = 12.sp,
+            color = Palette.Dim,
+        )
+    }
 }

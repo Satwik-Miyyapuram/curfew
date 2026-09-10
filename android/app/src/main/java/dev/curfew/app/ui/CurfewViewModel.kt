@@ -160,6 +160,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                         .getOrDefault(emptyList()),
                     stats = runCatching { runtime.stats(now = now) }.getOrDefault(Stats()),
+                    screenTime = runCatching { runtime.screenTimeComparison(now) }.getOrNull(),
                     grants = grantStates(getApplication()),
                     restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
                     downtime = runtime.downtime.value,
@@ -733,6 +734,13 @@ data class UiState(
     val audit: List<AuditRow> = emptyList(),
     /** Days blocked, streaks and totals over the last fortnight. */
     val stats: Stats = Stats(),
+    /**
+     * Screen time before Curfew against screen time now, when both are known.
+     *
+     * Null until usage access has been granted and there is at least one whole day on each side of
+     * the comparison. The screens show nothing rather than a comparison with a zero in it.
+     */
+    val screenTime: dev.curfew.app.data.ScreenTimeComparison? = null,
     val grants: List<GrantState> = emptyList(),
     /** True while Android is refusing accessibility access because Curfew was sideloaded. */
     val restrictedSettings: Boolean = false,
