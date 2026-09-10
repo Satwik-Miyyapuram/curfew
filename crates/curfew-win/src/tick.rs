@@ -22,6 +22,11 @@ use curfew_core::{CalendarEvent, Observation};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+/// How long the tray's report of the foreground window is believed. Longer than its polling
+/// interval, so one missed poll does not drop a second of charging; short enough that a tray that
+/// has quit stops vouching for a window within moments.
+pub const SEEN_SECONDS: i64 = 10;
+
 /// How long a finished session stays on record. The same thirty days the phone keeps.
 pub const HISTORY_SECONDS: Timestamp = 30 * 24 * 60 * 60;
 
@@ -112,6 +117,9 @@ pub struct Enforcer {
     /// Which browsers have an extension answering for them. Not persisted either: after a restart
     /// every browser is unproven, and each gets its startup grace to say so again.
     pub watch: crate::extension::Watch,
+    /// The foreground window as the tray last reported it, and when. Not persisted: a window
+    /// remembered across a restart is a window nobody is looking at.
+    pub seen: Option<(Process, Timestamp)>,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -141,6 +149,7 @@ impl Enforcer {
             freeze: None,
             gates: Default::default(),
             watch: Default::default(),
+            seen: None,
             counter: 0,
         }
     }
@@ -264,13 +273,31 @@ impl Enforcer {
     /// wrong in the direction that makes people uninstall it.
     fn accrue(&mut self, now: Timestamp, seconds: u32, foreground: Option<Process>) {
         let Some(process) = foreground else { return };
+        self.charge(now, seconds, Observation::Window { exe: process.exe, title: process.title });
+    }
+
+    /// Charge `seconds` against every budget `obs` falls under.
+    fn charge(&mut self, now: Timestamp, seconds: u32, obs: Observation) {
         if seconds == 0 {
             return;
         }
-        let obs = Observation::Window { exe: process.exe, title: process.title };
         let state = self.state(now);
         for key in charged_keys(&state, &obs, &self.config) {
             self.usage.entry(key).or_default().record(now, seconds);
+        }
+    }
+
+    /// The window the user is looking at: what the tray said, if it said so recently, otherwise
+    /// what this process can see for itself.
+    ///
+    /// The tray's word comes first because the service cannot see the desktop at all — it runs in
+    /// session 0, where `GetForegroundWindow` returns nothing — and a service that never charged an
+    /// app budget would enforce every limit except the ones about time. Asking the machine is the
+    /// fallback for `curfew run` on a desktop, where there is no tray in between.
+    fn foreground(&self, now: Timestamp, processes: &impl Processes) -> Option<Process> {
+        match &self.seen {
+            Some((process, at)) if (now - *at).abs() <= SEEN_SECONDS => Some(process.clone()),
+            _ => processes.foreground(),
         }
     }
 
@@ -286,7 +313,8 @@ impl Enforcer {
         events: &[CalendarEvent],
         processes: &impl Processes,
     ) -> Tick {
-        self.accrue(now, elapsed, processes.foreground());
+        let foreground = self.foreground(now, processes);
+        self.accrue(now, elapsed, foreground);
 
         let mut tick = Tick { froze: self.settle_freeze(now), ..Default::default() };
         if let Ok(tz) = self.config.tz() {
@@ -550,8 +578,23 @@ impl Enforcer {
 
             // Recorded and nothing else. A heartbeat is not a request to change anything, which is
             // why it is safe for it to be unauthenticated on a local pipe.
-            Request::Beat { browser } => {
-                self.watch.beat(&browser, now);
+            Request::Beat { browser, url } => {
+                let seconds = self.watch.beat(&browser, now);
+                // The page has been up since the previous beat, which is the only clock the
+                // service has for it. Nothing focused, nothing charged: a tab behind another
+                // program is no more in use than a minimized window.
+                if let Some(url) = url {
+                    self.charge(
+                        now,
+                        seconds,
+                        Observation::Web { url: curfew_core::Url::parse(&url) },
+                    );
+                }
+                Response::Ok
+            }
+
+            Request::Seen { exe, title } => {
+                self.seen = Some((Process { pid: 0, exe, title }, now));
                 Response::Ok
             }
 

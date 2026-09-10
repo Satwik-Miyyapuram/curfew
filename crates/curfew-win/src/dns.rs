@@ -602,11 +602,66 @@ pub struct Interface {
     pub servers: Vec<String>,
 }
 
+/// The PowerShell that lists every connection's DNS settings straight from the registry, as JSON.
+///
+/// The registry rather than `netsh`, because `netsh` speaks the user's language: on a German or
+/// Japanese Windows its "Configuration for interface" is something else, the parser below finds
+/// nothing, and Curfew silently never points the machine at itself. Registry value names do not
+/// translate. `NameServer` holds the statically configured resolvers (empty under DHCP), and the
+/// connection's friendly name — the one `netsh set dnsservers` wants — lives under the network
+/// class key. Interfaces with no connection name (WAN miniports, the loopback) and adapters that are
+/// no longer present are skipped: nothing resolves through them, and `netsh` refuses to set a
+/// resolver on hardware that is not there — which, with the error propagated, would stop every
+/// interface after it from being pointed at Curfew.
+pub const LIST_SCRIPT: &str = r#"$ErrorActionPreference = 'Stop'
+$net = 'HKLM:\SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}'
+$present = @{}
+foreach ($adapter in Get-NetAdapter -IncludeHidden | Where-Object { $_.Status -ne 'Not Present' }) {
+  $present[$adapter.InterfaceGuid.ToLowerInvariant()] = $true
+}
+$list = foreach ($key in Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces') {
+  $guid = $key.PSChildName
+  if (-not $present[$guid.ToLowerInvariant()]) { continue }
+  $name = (Get-ItemProperty -Path "$net\$guid\Connection" -Name Name -ErrorAction SilentlyContinue).Name
+  if (-not $name) { continue }
+  $static = [string](Get-ItemProperty -Path $key.PSPath -Name NameServer -ErrorAction SilentlyContinue).NameServer
+  [pscustomobject]@{ name = $name; static = $static }
+}
+ConvertTo-Json -InputObject @($list) -Compress"#;
+
+/// Read the JSON [`LIST_SCRIPT`] prints.
+///
+/// `static` is the registry's `NameServer` value: the resolvers separated by commas or spaces, or
+/// empty when the interface takes them from DHCP.
+pub fn parse_registry(output: &str) -> Result<Vec<Interface>, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        name: String,
+        #[serde(default)]
+        r#static: String,
+    }
+    let entries: Vec<Entry> = serde_json::from_str(output.trim())?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| {
+            let servers: Vec<String> = entry
+                .r#static
+                .split([',', ' '])
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            Interface { name: entry.name, dhcp: servers.is_empty(), servers }
+        })
+        .collect())
+}
+
 /// Read `netsh interface ipv4 show dnsservers` output.
 ///
-/// Parsed rather than shelled around because the restore depends on it: getting this wrong means
-/// handing back the wrong resolver, and the failure would show up as "the internet is broken" long
-/// after Curfew was uninstalled.
+/// The fallback for a machine where PowerShell could not be run, and only good on an English
+/// Windows: the headings it looks for are translated everywhere else. Parsed rather than shelled
+/// around because the restore depends on it: getting this wrong means handing back the wrong
+/// resolver, and the failure would show up as "the internet is broken" long after Curfew was
+/// uninstalled.
 pub fn parse_interfaces(output: &str) -> Vec<Interface> {
     let mut interfaces: Vec<Interface> = Vec::new();
     for line in output.lines() {
@@ -723,7 +778,19 @@ mod sys {
     }
 
     /// Read what every interface is using now.
+    ///
+    /// From the registry, in any language; `netsh` only if PowerShell itself could not be run.
     pub fn interfaces() -> std::io::Result<Vec<Interface>> {
+        let listed = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", LIST_SCRIPT])
+            .output();
+        if let Ok(output) = listed {
+            if output.status.success() {
+                if let Ok(interfaces) = parse_registry(&String::from_utf8_lossy(&output.stdout)) {
+                    return Ok(interfaces);
+                }
+            }
+        }
         let output = std::process::Command::new("netsh")
             .args(["interface", "ipv4", "show", "dnsservers"])
             .output()?;
@@ -807,6 +874,31 @@ Configuration for interface \"Loopback Pseudo-Interface 1\"\r
         let commands = repoint(&parse_interfaces(OUTPUT));
         assert_eq!(commands.len(), 3, "an interface left alone is a way round the resolver");
         assert!(commands.iter().all(|c| c.contains(&"127.0.0.1".to_string())));
+    }
+
+    #[test]
+    fn the_registry_listing_reads_the_same_in_every_language() {
+        let json = r#"[{"name":"Ethernet","static":""},{"name":"WLAN","static":"1.1.1.1,8.8.8.8"},{"name":"VPN","static":"10.0.0.1 10.0.0.2"}]"#;
+        let interfaces = parse_registry(json).unwrap();
+        assert_eq!(
+            interfaces,
+            vec![
+                Interface { name: "Ethernet".into(), dhcp: true, servers: vec![] },
+                Interface {
+                    name: "WLAN".into(),
+                    dhcp: false,
+                    servers: vec!["1.1.1.1".into(), "8.8.8.8".into()],
+                },
+                Interface {
+                    name: "VPN".into(),
+                    dhcp: false,
+                    servers: vec!["10.0.0.1".into(), "10.0.0.2".into()],
+                },
+            ]
+        );
+        // A single connection is still a list: the script is asked for an array however few.
+        assert_eq!(parse_registry(r#"[{"name":"Ethernet"}]"#).unwrap().len(), 1);
+        assert!(parse_registry("not json").is_err());
     }
 
     #[test]

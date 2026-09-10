@@ -5,6 +5,7 @@
 //! or leaving the hosts file blocking a machine whose lock ended hours ago.
 
 use curfew_core::{CalendarEvent, Config, Lock, Session, SessionSource};
+use curfew_win::ipc::Request;
 use curfew_win::procs::{Process, Processes};
 use curfew_win::Enforcer;
 use std::cell::RefCell;
@@ -219,6 +220,43 @@ fn a_budgeted_app_left_in_the_background_is_not_charged() {
     assert!(
         enforcer.usage.values().all(|c| c.rollups.is_empty()),
         "an allowance was spent on an app nobody was looking at"
+    );
+}
+
+#[test]
+fn a_service_that_cannot_see_the_desktop_charges_the_window_the_tray_reports() {
+    let (mut enforcer, _) = enforcer("seen");
+    // The service's own view: session 0, no foreground window at all.
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+
+    for i in 1..=10 {
+        let at = NOW + i * 60;
+        enforcer.handle(at, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+        enforcer.tick(at, 60, &[], &table);
+    }
+    let tick = enforcer.tick(NOW + 11 * 60, 60, &[], &table);
+
+    assert_eq!(
+        tick.processes.closed,
+        BTreeSet::from(["news.exe".to_string()]),
+        "the tray said the user was reading the news for ten minutes and none of it was charged"
+    );
+}
+
+#[test]
+fn a_report_that_has_gone_stale_stops_vouching_for_the_window() {
+    let (mut enforcer, _) = enforcer("stale-seen");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.handle(NOW, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+    // A tray that has quit: nothing reported for twenty minutes.
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    assert!(
+        enforcer.usage.values().all(|c| c.rollups.is_empty()),
+        "a window the tray reported twenty minutes ago was still being charged"
     );
 }
 

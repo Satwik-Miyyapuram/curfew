@@ -131,6 +131,18 @@ fn refresh_tooltip(window: HWND) {
     show_tip(window, &text);
 }
 
+/// Tell the service which window the user is looking at.
+///
+/// The service cannot see: it runs in session 0, where there is no desktop and
+/// `GetForegroundWindow` answers nothing. Without this report no app budget would ever be charged.
+/// Sent on the fast timer and never awaited beyond the reply, so a stalled service cannot stall the
+/// tray.
+fn report_foreground() {
+    if let Some(process) = curfew_win::windows::foreground() {
+        let _ = ask(&Request::Seen { exe: process.exe, title: process.title });
+    }
+}
+
 /// Notice what the service has closed since the last poll, and explain it.
 ///
 /// An unreachable service clears the memory rather than keeping it: when the service comes back, the
@@ -277,7 +289,8 @@ fn chosen(window: HWND, id: usize) {
         Item::Unlock { .. } => {
             let credential = prompt::ask(
                 window,
-                "Ending this session early needs the password for this computer.",
+                "Ending this session early needs the password for this computer — the account \
+                 password, not a Windows Hello PIN.",
             );
             // Closing the prompt is not an attempt and gets no dialog: changing your mind is the
             // system working, not a failure to report.
@@ -378,7 +391,10 @@ unsafe extern "system" fn window_proc(
         }
         WM_TIMER => {
             match wparam {
-                w if w == WATCH_TIMER => watch_closures(window),
+                w if w == WATCH_TIMER => {
+                    report_foreground();
+                    watch_closures(window);
+                }
                 _ => refresh_tooltip(window),
             }
             0

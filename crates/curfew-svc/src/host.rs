@@ -21,7 +21,7 @@ pub fn respond(
 ) -> Vec<u8> {
     let answer = match serde_json::from_slice::<FromExtension>(message) {
         Err(e) => ToExtension::Error { detail: e.to_string() },
-        Ok(FromExtension::Beat { browser }) => match ask(&Request::Beat { browser }) {
+        Ok(FromExtension::Beat { browser, url }) => match ask(&Request::Beat { browser, url }) {
             Ok(_) => ToExtension::Ok,
             Err(e) => ToExtension::Error { detail: e.to_string() },
         },
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn a_heartbeat_is_passed_straight_through() {
         let reply = answer(br#"{"type":"beat","browser":"firefox.exe"}"#, |request| {
-            assert_eq!(request, &Request::Beat { browser: "firefox.exe".into() });
+            assert_eq!(request, &Request::Beat { browser: "firefox.exe".into(), url: None });
             Ok(Response::Ok)
         });
 

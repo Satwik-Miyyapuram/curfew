@@ -537,11 +537,66 @@ fn a_heartbeat_is_recorded_and_changes_nothing_else() {
     let mut e = url_enforcer("beat");
     e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
 
-    assert_eq!(e.handle(NOW, Request::Beat { browser: "chrome.exe".into() }), Response::Ok);
+    assert_eq!(
+        e.handle(NOW, Request::Beat { browser: "chrome.exe".into(), url: None }),
+        Response::Ok
+    );
 
     assert!(e.watch.trusted("chrome.exe", NOW + 10));
     // The one thing a heartbeat must never be is a way out of a session.
     assert_eq!(e.sessions.running.len(), 1);
+}
+
+const WEB_BUDGET: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "url", pattern = "*youtube.com*" }
+action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minute = 240 } }
+"#;
+
+#[test]
+fn a_heartbeat_naming_a_page_spends_that_page_s_budget() {
+    let mut e =
+        Enforcer::new(Config::from_toml(WEB_BUDGET).unwrap(), dir("web-budget").join("hosts"));
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    let url = "https://www.youtube.com/watch?v=x".to_string();
+
+    // The first beat opens the clock; each later one charges the interval since the last.
+    e.handle(NOW, Request::Beat { browser: "chrome.exe".into(), url: Some(url.clone()) });
+    for i in 1..=30 {
+        e.handle(
+            NOW + i * 20,
+            Request::Beat { browser: "chrome.exe".into(), url: Some(url.clone()) },
+        );
+    }
+
+    let check =
+        e.handle(NOW + 601, Request::Check { browser: "chrome.exe".into(), url: url.clone() });
+    assert!(
+        matches!(check, Response::Verdict { blocked: true, .. }),
+        "ten minutes on the page left the ten-minute budget untouched: {check:?}"
+    );
+}
+
+#[test]
+fn a_heartbeat_with_no_focused_page_spends_nothing() {
+    let mut e =
+        Enforcer::new(Config::from_toml(WEB_BUDGET).unwrap(), dir("web-idle").join("hosts"));
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    for i in 0..=40 {
+        e.handle(NOW + i * 20, Request::Beat { browser: "chrome.exe".into(), url: None });
+    }
+
+    assert!(
+        e.usage.values().all(|c| c.rollups.is_empty()),
+        "a browser behind another window was charged for a page nobody was looking at"
+    );
 }
 
 #[test]
@@ -553,7 +608,7 @@ fn nothing_the_extension_can_say_ends_a_locked_session() {
     );
     let id = e.sessions.running[0].id.clone();
 
-    e.handle(NOW, Request::Beat { browser: "chrome.exe".into() });
+    e.handle(NOW, Request::Beat { browser: "chrome.exe".into(), url: None });
     e.handle(NOW, Request::Check { browser: "chrome.exe".into(), url: "https://x.test/".into() });
 
     assert!(matches!(
