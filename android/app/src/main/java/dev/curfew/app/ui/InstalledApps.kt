@@ -6,8 +6,11 @@ import android.content.pm.PackageManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -62,14 +65,15 @@ fun appLabel(context: Context, packageName: String): String = runCatching {
 @Composable
 fun AppIcon(packageName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val icon by produceState<ImageBitmap?>(initialValue = null, packageName) {
-        value = withContext(Dispatchers.IO) { loadIcon(context, packageName) }
+    var image by remember(packageName) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(packageName) {
+        image = withContext(Dispatchers.IO) { loadIcon(context, packageName) }
     }
-    val image = icon
-    if (image == null) {
+    val bitmap = image
+    if (bitmap == null) {
         Spacer(modifier = modifier)
     } else {
-        Image(bitmap = image, contentDescription = null, modifier = modifier)
+        Image(bitmap = bitmap, contentDescription = null, modifier = modifier)
     }
 }
 

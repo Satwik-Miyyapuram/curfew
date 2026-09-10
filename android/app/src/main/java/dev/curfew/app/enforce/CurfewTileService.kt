@@ -44,7 +44,9 @@ class CurfewTileService : TileService() {
     }
 
     /** Tapping opens Curfew, because everything worth doing needs a screen to do it on. */
-    @Suppress("DEPRECATION")
+    // The Intent overload throws on Android 14 and up, which is why the branch above exists; lint
+    // flags the call regardless of the version gate that keeps it off those devices.
+    @Suppress("DEPRECATION", "StartActivityAndCollapseDeprecated")
     override fun onClick() {
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
