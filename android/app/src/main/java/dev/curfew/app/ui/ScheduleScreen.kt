@@ -582,12 +582,15 @@ private fun matches(rule: CalendarSchedule, event: CalendarEvent): Boolean {
 private fun summarise(profiles: Int, triggers: Int, fromCalendar: Int, loading: Boolean): String {
     if (loading) return "Reading your plan\u2026"
     if (profiles == 0) return "Nothing set up yet."
-    val who = if (profiles == 1) "One profile." else "$profiles profiles."
-    if (triggers == 0) return "$who Nothing starts them on its own yet."
+    val one = profiles == 1
+    val who = if (one) "One profile." else "$profiles profiles."
+    // "them" for one profile reads as a typo, which is what it was.
+    val it = if (one) "it" else "them"
+    if (triggers == 0) return "$who Nothing starts $it on its own yet."
     val what = if (triggers == 1) {
-        "One thing can start it."
+        "One thing can start $it."
     } else {
-        "$triggers things can start them."
+        "$triggers things can start $it."
     }
     val calendar = when {
         fromCalendar == 0 -> ""

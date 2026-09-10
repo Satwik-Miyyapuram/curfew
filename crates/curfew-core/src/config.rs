@@ -330,7 +330,23 @@ impl Config {
         let before = self.weekly.clone();
         match self.weekly.iter_mut().find(|w| w.id == window.id) {
             Some(existing) => *existing = window,
-            None => self.weekly.push(window),
+            None => {
+                // A new window that runs the same profile on the same days between the same two
+                // minutes is not a second window, it is the first one asked for twice. Two of them
+                // cannot behave differently from one, so keeping both only fills the plan with
+                // rows the user then has to delete individually. A phone here collected eight of
+                // them from a screen that saved on every recomposition; the screen was fixed, and
+                // this is the layer that cannot be got wrong from a new caller.
+                if self.weekly.iter().any(|w| {
+                    w.profile == window.profile
+                        && w.days == window.days
+                        && w.start_minute == window.start_minute
+                        && w.end_minute == window.end_minute
+                }) {
+                    return Ok(());
+                }
+                self.weekly.push(window)
+            }
         }
         // Put the config back exactly as it was if the edit does not stand up. A validate that
         // leaves the invalid value behind turns one bad edit into a config nobody can save.

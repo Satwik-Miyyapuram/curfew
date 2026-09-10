@@ -357,6 +357,28 @@ fn a_window_saved_twice_is_edited_rather_than_duplicated() {
     assert_eq!(saved.start_minute, 20 * 60);
 }
 
+/// Eight of these turned up on a real phone: a screen saved a fresh window on every pass, each with
+/// a new id, and the plan filled with rows that said the same thing and had to be deleted one by
+/// one. Two windows over the same profile, days and minutes cannot behave differently from one.
+#[test]
+fn a_second_window_identical_to_one_already_there_is_not_added() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    let after_first = cfg.weekly.len();
+
+    let mut again = window("evenings", "deep-work");
+    again.id = "evenings-2".into();
+    cfg.upsert_weekly(again).unwrap();
+    assert_eq!(cfg.weekly.len(), after_first, "an identical window was added again");
+
+    // Same times, a different profile: a real second window, and it stays.
+    let mut elsewhere = window("evenings-3", "deep-work");
+    elsewhere.profile =
+        cfg.profiles.iter().map(|p| p.id.clone()).find(|id| id != "deep-work").unwrap();
+    cfg.upsert_weekly(elsewhere).unwrap();
+    assert_eq!(cfg.weekly.len(), after_first + 1);
+}
+
 /// The refusal is only half of it. A form that reports an error and leaves the bad value in the
 /// config means the next thing the user saves is refused too, for a reason they cannot see.
 #[test]
