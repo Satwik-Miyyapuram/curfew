@@ -148,6 +148,102 @@ class ScheduleEditingTest {
         assertFalse(runtime.config.read().contains("standup"))
     }
 
+    // --- pausing ----------------------------------------------------------------------------
+
+    /** The `mornings` window of the test config, paused, as the switch on a Plan row writes it. */
+    private val pausedMornings = WeeklySchedule(
+        id = "mornings",
+        profile = "deep-work",
+        days = listOf(0, 1, 2, 3, 4),
+        startMinute = 540,
+        endMinute = 720,
+        locks = listOf(Lock.Timer),
+        enabled = false,
+    )
+
+    /**
+     * The switch on a Plan row is a save like any other: the row is rewritten with
+     * `enabled = false`. Pausing is not deleting — "not this week" is a thing people mean often —
+     * so the window has to still be in the file afterwards, and it has to stop starting sessions.
+     */
+    @Test
+    fun `a paused window stays in the file and starts nothing`() = runTest {
+        val runtime = TestRuntime.create(now, configToml = TestRuntime.CONFIG.replace(
+            """locks = [{ kind = "timer" }]""",
+            """locks = [{ kind = "timer" }]
+enabled = false""",
+        ))
+
+        // Reconciled first, or "nothing is running" would be true of any config at all.
+        assertTrue(runtime.reconcile(now).isEmpty())
+
+        val saved = runtime.weeklySchedules().single { it.id == "mornings" }
+        assertFalse("the paused flag did not survive the config", saved.enabled)
+        assertTrue("a paused window was dropped rather than kept", runtime.config.read().contains("mornings"))
+        assertTrue(
+            "a paused window started its session anyway",
+            runtime.policy.activeProfiles(now).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `flicking the switch off writes the flag and leaves the row where it was`() = runTest {
+        val runtime = TestRuntime.create(now)
+        runtime.saveWeekly(pausedMornings).getOrThrow()
+
+        val saved = runtime.weeklySchedules().single { it.id == "mornings" }
+        assertFalse("the switch did not write enabled = false", saved.enabled)
+        assertEquals(540, saved.startMinute)
+        assertEquals(listOf("mornings"), runtime.weeklySchedules().map { it.id })
+    }
+
+    @Test
+    fun `a paused window runs again when the switch goes back on`() = runTest {
+        val runtime = TestRuntime.create(now, configToml = TestRuntime.CONFIG.replace(
+            """locks = [{ kind = "timer" }]""",
+            """locks = [{ kind = "timer" }]
+enabled = false""",
+        ))
+        assertTrue(runtime.reconcile(now).isEmpty())
+        assertTrue(runtime.policy.activeProfiles(now).isEmpty())
+
+        runtime.saveWeekly(pausedMornings.copy(enabled = true)).getOrThrow()
+        assertEquals(listOf("deep-work"), runtime.policy.activeProfiles(now))
+    }
+
+    /**
+     * Invariant 2, at the switch this time. Off means it starts nothing; it does not end what it
+     * has already started, because that promise was made to the person now flicking the switch in
+     * a weaker moment.
+     */
+    @Test
+    fun `pausing a window does not end the session it already started`() = runTest {
+        val runtime = TestRuntime.create(now)
+        // Reconcile once, the way a tick does, so `mornings` is genuinely running before the
+        // switch is touched.
+        runtime.reconcile(now)
+        assertEquals(listOf("deep-work"), runtime.policy.activeProfiles(now))
+
+        runtime.saveWeekly(pausedMornings).getOrThrow()
+        assertEquals(listOf("deep-work"), runtime.policy.activeProfiles(now + 60))
+    }
+
+    @Test
+    fun `a paused calendar rule stays in the file and matches nothing`() = runTest {
+        val runtime = TestRuntime.create(now)
+        val rule = CalendarSchedule(
+            id = "standups",
+            profile = "deep-work",
+            matcher = EventMatcher(title = "*standup*"),
+        )
+        runtime.saveCalendarRule(rule).getOrThrow()
+        runtime.saveCalendarRule(rule.copy(enabled = false)).getOrThrow()
+
+        val saved = runtime.calendarSchedules().single { it.id == "standups" }
+        assertFalse("the switch did not write enabled = false", saved.enabled)
+        assertTrue("a paused rule was dropped rather than kept", runtime.config.read().contains("standup"))
+    }
+
     // --- profiles ---------------------------------------------------------------------------
 
     @Test
