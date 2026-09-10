@@ -162,14 +162,18 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                         ) {
                             Text("Next up", fontSize = 15.sp, color = Palette.Muted)
                             Text(
-                                nextStart(state.weekly) ?: "—",
+                                nextStart(state.weekly, state.now) ?: "—",
                                 fontSize = 34.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = (-1).sp,
                                 color = Palette.Text,
                             )
                             Text(
-                                nextNote(state.weekly, state.profiles.associate { it.id to it.name }),
+                                nextNote(
+                                    state.weekly,
+                                    state.profiles.associate { it.id to it.name },
+                                    state.now,
+                                ),
                                 fontSize = 13.sp,
                                 color = Palette.Dim,
                             )
@@ -777,17 +781,37 @@ private fun clockOf(epochMillis: Long): String {
 }
 
 /** The earliest start among the weekly windows, as a clock face, or null when there are none. */
-private fun nextStart(weekly: List<dev.curfew.policy.WeeklySchedule>): String? =
-    weekly.minByOrNull { it.startMinute }
+/**
+ * The schedule that will start next, or null when nothing is scheduled.
+ *
+ * "Next" is measured forward from right now and wraps past midnight, so at 22:00 a window that
+ * starts at 07:00 is nine hours away rather than fifteen hours behind. Paused schedules are left
+ * out: a screen that counts down to a window which has been switched off is telling the user
+ * something that will not happen.
+ */
+private fun nextWeekly(
+    weekly: List<dev.curfew.policy.WeeklySchedule>,
+    now: Long,
+): dev.curfew.policy.WeeklySchedule? {
+    val minuteNow = minuteOfDay(now)
+    return weekly.filter { it.enabled }
+        .minByOrNull { (it.startMinute - minuteNow + MINUTES_A_DAY) % MINUTES_A_DAY }
+}
+
+private fun nextStart(weekly: List<dev.curfew.policy.WeeklySchedule>, now: Long): String? =
+    nextWeekly(weekly, now)
         ?.let { "%02d:%02d".format(it.startMinute / 60, it.startMinute % 60) }
 
 /** "Deep work · 2h" under the next start, or the reason there is nothing to say. */
 private fun nextNote(
     weekly: List<dev.curfew.policy.WeeklySchedule>,
     names: Map<String, String>,
+    now: Long,
 ): String {
-    val next = weekly.minByOrNull { it.startMinute } ?: return "nothing scheduled"
-    val length = (next.endMinute - next.startMinute).coerceAtLeast(0)
+    val next = nextWeekly(weekly, now) ?: return "nothing scheduled"
+    // An end at or before the start means the window runs into the next day, the way the core
+    // reads it. Subtracting the two directly made every overnight window read as "0m".
+    val length = ((next.endMinute - next.startMinute + MINUTES_A_DAY - 1) % MINUTES_A_DAY) + 1
     val spelled = when {
         length >= 60 && length % 60 == 0 -> "${length / 60}h"
         length >= 60 -> "${length / 60}h ${length % 60}m"
@@ -795,3 +819,12 @@ private fun nextNote(
     }
     return "${names[next.profile] ?: next.profile} · $spelled"
 }
+
+/** Local minutes since midnight for an epoch-second instant. */
+private fun minuteOfDay(now: Long): Int =
+    java.time.Instant.ofEpochSecond(now)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toLocalTime()
+        .let { it.hour * 60 + it.minute }
+
+private const val MINUTES_A_DAY = 24 * 60

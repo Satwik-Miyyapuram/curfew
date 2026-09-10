@@ -73,12 +73,34 @@ fun AppIcon(packageName: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** [packageName]'s icon as a bitmap, or null when the app is gone or refuses to draw. */
+/**
+ * [packageName]'s icon as a bitmap, or null when the app is gone or refuses to draw.
+ *
+ * The icon is asked for at this screen's own density rather than taken as `getApplicationIcon`
+ * hands it over. That call resolves against the density Curfew's own resources were loaded at, and
+ * for an app whose icon is a plain bitmap that can mean a 48-pixel mdpi drawable — which then gets
+ * stretched three times over to fill the row, and arrives looking like it was faxed. Asking the
+ * owning app's resources for the densest version it ships fixes exactly those icons and changes
+ * nothing for the adaptive ones, which are vectors and scale either way.
+ */
 private fun loadIcon(context: Context, packageName: String): ImageBitmap? = runCatching {
-    context.packageManager.getApplicationIcon(packageName)
+    val pm = context.packageManager
+    val info = pm.getApplicationInfo(packageName, 0)
+    val dense = runCatching {
+        val resources = pm.getResourcesForApplication(info)
+        val id = if (info.icon != 0) info.icon else info.logo
+        if (id == 0) null else resources.getDrawableForDensity(id, ICON_DENSITY, null)
+    }.getOrNull()
+    (dense ?: pm.getApplicationIcon(info))
         .toBitmap(width = ICON_PIXELS, height = ICON_PIXELS)
         .asImageBitmap()
 }.getOrNull()
 
-/** Big enough for the size the rows draw at on a dense screen, and no bigger. */
-private const val ICON_PIXELS = 128
+/**
+ * Comfortably above the size the rows draw at on the densest phones: 36dp at 4x is 144 pixels, and
+ * a bitmap scaled down reads cleanly while one scaled up does not.
+ */
+private const val ICON_PIXELS = 192
+
+/** The densest bucket Android defines, so the best artwork an app ships is the one we get. */
+private const val ICON_DENSITY = android.util.DisplayMetrics.DENSITY_XXXHIGH
