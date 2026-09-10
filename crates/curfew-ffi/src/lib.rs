@@ -697,7 +697,26 @@ impl Curfew {
                 .map_err(payload)?;
         let config = self.config.read().expect("config lock");
         let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
-        Ok(next_change_after(now, tz, &config.weekly, &config.calendars, &events))
+        let by_schedule = next_change_after(now, tz, &config.weekly, &config.calendars, &events);
+        // A session's own end is a change too, and the schedules do not know about it: a block
+        // started by hand for forty minutes has no window behind it, and a scheduled one whose
+        // window was shortened after it started still ends when its lock says. Without this the
+        // only thing that ended such a session was the slow poll, so a timer sat at zero until
+        // something else woke the service up.
+        let by_session = self
+            .sessions
+            .read()
+            .expect("sessions lock")
+            .running
+            .iter()
+            .flat_map(|s| [s.lock.ends_at, s.lock.delayed_release_at])
+            .flatten()
+            .filter(|t| *t > now)
+            .min();
+        Ok(match (by_schedule, by_session) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        })
     }
 
     /// What the last `days` days of blocking added up to: per-day seconds, streaks, totals.

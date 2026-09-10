@@ -87,6 +87,13 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun refreshFast() {
         val now = runtime.clock.now()
+        // A timer that reaches zero has to end the session itself. It used to sit at zero until
+        // the enforcement service's next poll noticed — up to half a minute, and longer if the
+        // service was dozing — which read as "I have to press End now or it never ends". The
+        // countdown and the end are the same event, so they happen on the same tick.
+        if (_state.value.sessions.any { s -> s.lock.endsAt?.let { it <= now } == true }) {
+            reconcileNow()
+        }
         _state.update {
             it.copy(
                 now = now,

@@ -24,6 +24,18 @@ enforcer's cached decision is invalidated in the same step rather than at its ne
 re-block on a stale snapshot. Invariant 2 ("a lock is a promise") already says the exit is one
 place; this makes the exit take effect at one instant too.
 
+## 2b. A timer that reaches zero ends itself
+
+Reported from the phone: the countdown reaches 0s and the session stays up until "End now" is
+pressed. Two causes, both fixed:
+
+- `next_change_after` only ever considered *schedule* boundaries, so a block started by hand had no
+  alarm behind it at all — nothing was scheduled to wake anything at its end. A running session's
+  own `ends_at` (and any delayed release) is now folded into the answer the alarm is set from.
+- Nothing reaped on the UI's tick either, so even with the app open the end waited on the
+  enforcement service's thirty-second poll. The countdown and the end are the same event now: the
+  tick that shows zero is the tick that ends it.
+
 ## 3. Permissions asked the way every other app asks
 
 Runtime permission prompts wherever Android offers one (notifications, usage access where a dialog
