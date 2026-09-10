@@ -765,6 +765,11 @@ fn simple(request: Request) -> i32 {
 /// Run the loop in the foreground. Useful for debugging, and the only way to run Curfew at all on a
 /// machine where the service cannot be installed.
 fn run_in_console() -> i32 {
+    // A machine with no config yet gets the starter one rather than an error naming a file the
+    // user has never heard of.
+    if let Err(e) = runner::ensure_config(&runner::config_path()) {
+        eprintln!("curfew: could not write a starting config ({e}).");
+    }
     let enforcer =
         match runner::build(&runner::config_path(), &state::default_path(), runner::hosts_path()) {
             Ok(enforcer) => enforcer,

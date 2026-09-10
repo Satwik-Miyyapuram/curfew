@@ -189,6 +189,7 @@ fun Pill(
     selected: Boolean = false,
     tint: Color? = null,
     onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val background = when {
         selected -> Palette.Accent
@@ -196,11 +197,11 @@ fun Pill(
         else -> Palette.Raised
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

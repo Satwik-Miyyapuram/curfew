@@ -118,33 +118,23 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 }
             }
 
-            Gap(16.dp)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                // Five at a time until five, then one at a time: a two-minute block is a real ask
-                // — a phone put down for the length of a queue — and a floor of five made it
-                // impossible to say.
-                Step("−", "a little less") {
-                    minutes = if (minutes > 5) (minutes - 5) else (minutes - 1).coerceAtLeast(1)
-                }
-                Text("drag the ring, or pick one", fontSize = 13.sp, color = Palette.Dim)
-                Step("+", "a little more") {
-                    minutes = if (minutes < 5) (minutes + 1) else (minutes + 5).coerceAtMost(MAX_MINUTES)
-                }
-            }
+            Gap(14.dp)
+            Text("drag the ring, or pick one", fontSize = 13.sp, color = Palette.Dim)
 
-            Gap(11.dp)
+            // The presets, evenly spread: with the ring taking every value between them, a
+            // stepper beside them was a third way to say the same thing, and the one nobody
+            // reached for. Four lengths, each wide enough to hit without looking.
+            Gap(14.dp)
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 PRESETS.forEach { preset ->
                     Pill(
                         text = spellDuration(preset),
                         selected = minutes == preset,
                         onClick = { minutes = preset },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }

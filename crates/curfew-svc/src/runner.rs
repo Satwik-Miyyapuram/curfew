@@ -36,6 +36,51 @@ pub fn config_path() -> PathBuf {
     Path::new(&root).join("Curfew").join("curfew.toml")
 }
 
+/// The config a machine starts life with, written the first time one is needed.
+///
+/// A fresh install used to have no config at all: the service started, found nothing at
+/// `config_path()`, and stopped with "The system cannot find the file specified" — which tells a
+/// person who has just installed a blocker precisely nothing about what to do next. There is also
+/// nowhere else for a first profile to come from, since every editing command refuses to write a
+/// config that is not already there.
+///
+/// So the file is created once, with one profile that blocks the handful of sites people actually
+/// name when asked what eats their evening, and no schedule and no session: it enforces nothing
+/// until someone asks it to, and it gives every later command something to edit.
+pub const STARTER_CONFIG: &str = r#"# Curfew's config. Everything the locks are made of lives here.
+# Edit it with `curfew` commands, or by hand — `curfew check` will tell you if it is wrong.
+schema_version = 1
+
+[[profiles]]
+id = "distractions"
+name = "Distractions"
+description = "The usual suspects. Add or remove whatever you like."
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "youtube.com" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "x.com" }
+action = { kind = "block" }
+"#;
+
+/// Write [`STARTER_CONFIG`] to `path` if nothing is there yet. An existing config is never touched.
+pub fn ensure_config(path: &Path) -> std::io::Result<bool> {
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, STARTER_CONFIG)?;
+    Ok(true)
+}
+
 /// Where the hosts file is, honouring an override.
 ///
 /// The override exists so Curfew can be run end to end without administrator rights and without

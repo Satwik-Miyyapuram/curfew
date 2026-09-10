@@ -88,6 +88,11 @@ fn manager(access: ServiceManagerAccess) -> windows_service::Result<ServiceManag
 }
 
 pub fn install() -> windows_service::Result<()> {
+    // Written here, while the install still has the administrator rights that %ProgramData% wants,
+    // so the service's first start finds a config rather than stopping on a missing file.
+    if let Err(e) = crate::runner::ensure_config(&crate::runner::config_path()) {
+        eprintln!("curfew: could not write a starting config ({e}).");
+    }
     let manager = manager(ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)?;
     let executable = std::env::current_exe().map_err(windows_service::Error::Winapi)?;
 
