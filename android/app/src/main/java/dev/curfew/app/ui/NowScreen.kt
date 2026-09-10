@@ -760,9 +760,15 @@ private fun remaining(session: Session, now: Long): Float {
     return ((ends - now).toFloat() / whole.toFloat()).coerceIn(0f, 1f)
 }
 
-/** "1:12", the way a clock left-of-the-colon counts down. Seconds only under a minute. */
+/**
+ * "1:12", the way a clock left-of-the-colon counts down. Seconds only under a minute.
+ *
+ * Every instant in this app is an epoch SECOND — the core writes them, `state.now` is one, and
+ * `Format.clockTime` reads them that way. Dividing by a thousand here turned twenty-five minutes
+ * into "1s" while the session card two inches below said "Ends in 24 min".
+ */
 private fun countdown(endsAt: Long, now: Long): String {
-    val left = ((endsAt - now) / 1000).coerceAtLeast(0)
+    val left = (endsAt - now).coerceAtLeast(0)
     val hours = left / 3600
     val minutes = (left % 3600) / 60
     return when {
@@ -772,9 +778,9 @@ private fun countdown(endsAt: Long, now: Long): String {
     }
 }
 
-/** An epoch millisecond as a wall clock, in whatever zone the phone is in. */
-private fun clockOf(epochMillis: Long): String {
-    val time = java.time.Instant.ofEpochMilli(epochMillis)
+/** An epoch second as a wall clock, in whatever zone the phone is in. */
+private fun clockOf(epochSeconds: Long): String {
+    val time = java.time.Instant.ofEpochSecond(epochSeconds)
         .atZone(java.time.ZoneId.systemDefault())
         .toLocalTime()
     return "%02d:%02d".format(time.hour, time.minute)

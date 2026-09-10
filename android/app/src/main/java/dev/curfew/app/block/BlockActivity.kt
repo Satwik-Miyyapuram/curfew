@@ -107,12 +107,17 @@ class BlockActivity : ComponentActivity() {
         private const val EXTRA_EXPLANATION = "explanation"
         private const val EXTRA_DELAY = "delay"
 
-        fun intent(context: Context, target: String, reason: dev.curfew.policy.BlockReason): Intent =
+        fun intent(
+            context: Context,
+            target: String,
+            reason: dev.curfew.policy.BlockReason,
+            profileName: String = reason.profile,
+        ): Intent =
             Intent(context, BlockActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 .putExtra(EXTRA_TARGET, target)
-                .putExtra(EXTRA_PROFILE, reason.profile)
-                .putExtra(EXTRA_EXPLANATION, explain(reason))
+                .putExtra(EXTRA_PROFILE, profileName)
+                .putExtra(EXTRA_EXPLANATION, explain(reason, profileName))
 
         fun delayIntent(context: Context, target: String, seconds: Int): Intent =
             Intent(context, BlockActivity::class.java)
@@ -121,11 +126,14 @@ class BlockActivity : ComponentActivity() {
                 .putExtra(EXTRA_DELAY, seconds)
 
         /** Plain language, in the user's own terms, for every reason the core can give. */
-        fun explain(reason: dev.curfew.policy.BlockReason): String = when (reason) {
+        fun explain(
+            reason: dev.curfew.policy.BlockReason,
+            profileName: String = reason.profile,
+        ): String = when (reason) {
             is dev.curfew.policy.BlockReason.Blocked ->
-                "This is blocked while ${reason.profile} is running."
+                "This is blocked while $profileName is running."
             is dev.curfew.policy.BlockReason.NotAllowlisted ->
-                "${reason.profile} only allows a few apps, and this is not one of them."
+                "$profileName only allows a few apps, and this is not one of them."
             is dev.curfew.policy.BlockReason.BudgetExhausted ->
                 "You have used all ${reason.seconds / 60} minutes of your time here today."
             is dev.curfew.policy.BlockReason.LaunchLimitReached ->
@@ -249,11 +257,20 @@ private fun BlockScreen(
     }
 }
 
-/** The app's own name, falling back to whatever the rule matched on. */
-private fun appLabel(context: Context, target: String): String = runCatching {
-    val pm = context.packageManager
-    pm.getApplicationLabel(pm.getApplicationInfo(target, 0)).toString()
-}.getOrDefault(target)
+/**
+ * The app's own name.
+ *
+ * Targets arrive as keys — "app:com.example" — so the kind is stripped before the package manager
+ * is asked. If the package cannot be resolved (an uninstalled app, a website rule) the key is
+ * described in words rather than printed raw: an id on this screen reads as a crash.
+ */
+private fun appLabel(context: Context, target: String): String {
+    val value = target.substringAfter(':', target)
+    return runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(value, 0)).toString()
+    }.getOrElse { dev.curfew.app.ui.describeTarget(target) }
+}
 
 /** One sentence: which profile, until when, and why it is running. */
 private fun reasonLine(profile: String, explanation: String, endsAt: Long?): String {

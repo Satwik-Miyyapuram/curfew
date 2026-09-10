@@ -223,7 +223,7 @@ class AndroidActions(private val context: Context) : Enforcer.Actions {
         // draw over other apps, and the refusal is silent from in here. Caught and logged so that
         // a block that never appears leaves a trace pointing at the permission, rather than
         // looking like a scheduling bug.
-        runCatching { context.startActivity(BlockActivity.intent(context, target, reason)) }
+        runCatching { context.startActivity(BlockActivity.intent(context, target, reason, context.curfew.profileName(reason.profile))) }
             .onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
     }
 

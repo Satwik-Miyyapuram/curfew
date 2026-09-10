@@ -238,6 +238,18 @@ class CurfewRuntime internal constructor(
         }
     }
 
+    /**
+     * A profile's display name, for anything a user reads.
+     *
+     * Ids are how the config refers to a profile; they are not words anyone chose to see. Falls
+     * back to the id only when the profile has been deleted out from under a running session.
+     */
+    fun profileName(id: String): String =
+        runCatching { Policy.profiles(config.read()).firstOrNull { it.id == id }?.name }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: id
+
     /** How many emergency passes are left, and why there are none when there are none. */
     fun passesRemaining(now: Long = clock.now()): Int = policy.passesRemaining(now)
 
