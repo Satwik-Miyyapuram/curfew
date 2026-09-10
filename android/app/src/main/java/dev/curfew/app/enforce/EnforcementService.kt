@@ -33,6 +33,8 @@ class EnforcementService : Service() {
     private var loop: Job? = null
     private var sync: Job? = null
     private var watch: Job? = null
+    private var charge: Job? = null
+    private var screen: android.content.BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -54,6 +56,47 @@ class EnforcementService : Service() {
         // the End button having done nothing.
         watch = runtime.scope.launch {
             runtime.activeProfiles.collect { updateNotification() }
+        }
+        charge = runtime.scope.launch { chargeLoop() }
+        screen = screenReceiver().also {
+            registerReceiver(
+                it,
+                android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),
+            )
+        }
+    }
+
+    /**
+     * The meter.
+     *
+     * An app that stays in front sends no events, and the poller only samples what is in front,
+     * so nothing here ever told the enforcer that time was passing. A budget therefore never ran
+     * out while the app it covered was open: the slice was written when the app was left, and the
+     * block came on the *next* launch. This loop says "time passed" every few seconds and the
+     * enforcer charges the slice and decides again, so a budget ends a sitting rather than
+     * forbidding the next one.
+     *
+     * Runs whether or not the accessibility service is on, since both detectors have the same
+     * blind spot. The wall clock rather than the trusted one, because a clock moved forward here
+     * only charges a budget faster, and the trusted reading writes to the database each time.
+     */
+    private suspend fun chargeLoop() {
+        while (runtime.scope.isActive) {
+            delay(CHARGE_MILLIS)
+            runCatching { enforcer(this).onTick(runtime.clock.now()) }
+                .onFailure { android.util.Log.w(TAG, "charging failed", it) }
+        }
+    }
+
+    /**
+     * A screen that is off is not a slice of anything. Without this the meter above would charge
+     * a phone in a pocket for whatever was in front when it went dark — the exact failure the old
+     * charge-on-leave design was built to avoid. When the device is unlocked again the next window
+     * event or poll starts a fresh slice; nothing is resumed by guesswork.
+     */
+    private fun screenReceiver() = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runtime.scope.launch { enforcer(context).onIdle(runtime.clock.now()) }
         }
     }
 
@@ -173,6 +216,8 @@ class EnforcementService : Service() {
 
     override fun onDestroy() {
         runtime.sync?.stop()
+        screen?.let { runCatching { unregisterReceiver(it) } }
+        charge?.cancel()
         watch?.cancel()
         sync?.cancel()
         loop?.cancel()
@@ -192,6 +237,8 @@ class EnforcementService : Service() {
         private const val TAG = "Curfew"
         private const val NOTIFICATION_ID = 1
         private const val POLL_MILLIS = 30_000L
+        /** How often the app in front is charged for the time it has had. */
+        private const val CHARGE_MILLIS = 5_000L
         /** How often peers are talked to. Slower than enforcement: nothing waits on it. */
         private const val SYNC_MILLIS = 60_000L
 
