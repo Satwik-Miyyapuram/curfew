@@ -39,14 +39,15 @@ pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
     match kind {
         // No pipe at all: the service has never been registered on this machine, or has been
         // removed. There is exactly one thing to do about it, so the dialog says that thing.
-        std::io::ErrorKind::NotFound => "Curfew is not installed as a service on this PC yet, so \
-             nothing is being blocked.\n\n\
-             To install it, open Windows Terminal or PowerShell as an administrator and run:\n\n\
-             \x20   curfew install\n\n\
+        std::io::ErrorKind::NotFound => "Curfew is not installed on this PC, so nothing is being \
+             blocked.\n\n\
+             To install it, open Windows Terminal or PowerShell as an administrator and run:\n\
+             \tcurfew install\n\n\
              Windows asks for administrator once, because a service any user could stop would not \
              be much of a lock. The tray cannot do it for you, for the same reason.\n\n\
-             To try Curfew without installing anything, run `curfew run` in an ordinary terminal \
-             and leave it open: it enforces for as long as it is running."
+             To try Curfew without installing anything, run this in an ordinary terminal and \
+             leave it open \u{2014} it enforces for as long as it is running:\n\
+             \tcurfew run"
             .to_string(),
         // The pipe is there but shut to this account. Nothing to install, so nothing to instruct.
         std::io::ErrorKind::PermissionDenied => "Windows refused this program access to the \
@@ -58,7 +59,8 @@ pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
             "The Curfew service is installed but did not answer, so blocks are not being enforced \
              right now.\n\n\
              It may be starting or stopping; opening this menu again in a moment is worth a try. \
-             If it stays this way, run `curfew install` again from an administrator terminal.\n\n\
+             If it stays this way, run this again from an administrator terminal:\n\
+             \tcurfew install\n\n\
              Windows said: {detail}"
         ),
     }
@@ -170,6 +172,16 @@ mod tests {
         assert!(text.contains("administrator"), "does not say why it needs one: {text}");
         assert!(text.contains("curfew run"), "no way to try it without installing: {text}");
         assert!(!text.contains("os error"), "the errno leaked into the dialog: {text}");
+        // The card draws a command as a chip when the line starts with a tab, and draws it as prose
+        // otherwise. Backticks are markdown, and this window renders none: they used to reach the
+        // screen as two stray characters the reader had to guess the status of.
+        assert!(!text.contains('`'), "markdown leaked into a window that cannot render it: {text}");
+        for command in ["curfew install", "curfew run"] {
+            assert!(
+                text.contains(&format!("	{command}")),
+                "{command} is not marked as a command, so it will be set as prose: {text}"
+            );
+        }
     }
 
     /// Every other failure keeps the detail, because there is no single step that fixes it and a

@@ -135,9 +135,10 @@ mod sys {
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn,
-        DT_CALCRECT, DT_LEFT, DT_NOPREFIX, DT_TOP, DT_WORDBREAK, PAINTSTRUCT, TRANSPARENT,
+        BeginPaint, CreateFontW, CreatePen, CreateRoundRectRgn, CreateSolidBrush, DeleteObject,
+        DrawTextW, EndPaint, FillRect, GetDC, ReleaseDC, RoundRect, SelectObject, SetBkMode,
+        SetTextColor, SetWindowRgn, DT_CALCRECT, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_TOP,
+        DT_WORDBREAK, HDC, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -158,6 +159,8 @@ mod sys {
     // Windows users ever see.
     /// `Palette.Surface` — the card the phone draws every panel on.
     const SURFACE: u32 = 0x0023_1B16;
+    /// `Palette.Surface2` — what a control sits on when it has to read as a control.
+    const SURFACE2: u32 = 0x002E_241D;
     /// `Palette.Line` — the hairline that separates a card from what is behind it.
     const LINE: u32 = 0x0041_332A;
     /// `Palette.Text`.
@@ -173,6 +176,23 @@ mod sys {
     const PAD: i32 = 22;
     /// The gap between the line that states the fact and the paragraphs under it.
     const GAP: i32 = 14;
+    /// The two type sizes of the card, matching `design/win/Answer.dc.html`.
+    ///
+    /// They were four points larger each, from when this window said one short sentence about one
+    /// closed application. At that size the service-not-installed answer opened with three lines of
+    /// heavy title and read as a shouted error; the design has always had a 17px statement over 13px
+    /// detail, and that is what a notice with a paragraph in it needs.
+    const TITLE_PT: i32 = -17;
+    const BODY_PT: i32 = -14;
+
+    /// A body line beginning with a tab is a command, drawn as a chip rather than as prose.
+    ///
+    /// A command is the one part of these answers the reader has to reproduce exactly, and prose
+    /// cannot show where it starts and ends: the wording used to put backticks around it, which is
+    /// markdown leaking into a window that does not render markdown, and the reader was left to
+    /// guess whether the backticks were part of what to type. A tab never appears in a sentence, so
+    /// it costs the writer one character and needs no escaping.
+    const COMMAND: char = '\t';
 
     thread_local! {
         static TEXT: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -190,6 +210,13 @@ mod sys {
         unsafe { CreateFontW(height, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()) }
     }
 
+    /// The face a command is set in, so a command cannot be mistaken for a sentence.
+    fn mono_font(height: i32) -> windows_sys::Win32::Graphics::Gdi::HFONT {
+        let face = wide("Consolas");
+        // SAFETY: as [`font`]; the face name outlives the call.
+        unsafe { CreateFontW(height, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face.as_ptr()) }
+    }
+
     /// The notice split into the line that states the fact and the paragraphs that qualify it.
     ///
     /// [`super::message`] already writes it that way — one sentence, a blank line, then the detail —
@@ -201,6 +228,90 @@ mod sys {
             Some((head, rest)) => (wide(head), wide(rest.trim())),
             None => (wide(full), Vec::new()),
         }
+    }
+
+    /// Draw — or, with `paint` false, only measure — the paragraphs under the title.
+    ///
+    /// One function for both because the two have to agree to the pixel: the window is sized from
+    /// the measurement before it exists, and a paint pass that lays the same text out differently
+    /// either leaves a band of empty card or cuts off the last line. Returns the height used.
+    ///
+    /// SAFETY: `dc` must be a valid device context; every object this selects into it is put back
+    /// and deleted before returning.
+    unsafe fn draw_body(dc: HDC, left: i32, top: i32, right: i32, body: &str, paint: bool) -> i32 {
+        let prose = font(BODY_PT, 400);
+        let mono = mono_font(BODY_PT);
+        let previous = SelectObject(dc, prose as _);
+        let mut y = top;
+
+        for part in body.split('\n') {
+            let part = part.trim_end();
+            if let Some(command) = part.strip_prefix(COMMAND) {
+                // The chip: mono, on its own line, boxed so the reader can see exactly what to type.
+                SelectObject(dc, mono as _);
+                let mut text = wide(command.trim());
+                let mut extent = RECT { left: 0, top: 0, right: right - left, bottom: 0 };
+                let flags = DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT;
+                let height = DrawTextW(dc, text.as_mut_ptr(), -1, &mut extent, flags);
+                let (box_w, box_h) = (extent.right - extent.left + 20, height + 11);
+                if paint {
+                    let pen = CreatePen(PS_SOLID as _, 1, LINE);
+                    let fill = CreateSolidBrush(SURFACE2);
+                    let old_pen = SelectObject(dc, pen as _);
+                    let old_fill = SelectObject(dc, fill as _);
+                    RoundRect(dc, left, y, left + box_w, y + box_h, 8, 8);
+                    SelectObject(dc, old_pen);
+                    SelectObject(dc, old_fill);
+                    DeleteObject(pen as _);
+                    DeleteObject(fill as _);
+                    SetTextColor(dc, TEXT_COLOUR);
+                    let mut at = RECT {
+                        left: left + 10,
+                        top: y + 5,
+                        right: left + box_w,
+                        bottom: y + box_h,
+                    };
+                    DrawTextW(
+                        dc,
+                        text.as_mut_ptr(),
+                        -1,
+                        &mut at,
+                        DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX,
+                    );
+                }
+                y += box_h;
+                SelectObject(dc, prose as _);
+            } else if part.is_empty() {
+                y += GAP;
+            } else {
+                let mut text = wide(part);
+                let mut at = RECT { left, top: y, right, bottom: y + 4_000 };
+                let mut calc = at;
+                let height = DrawTextW(
+                    dc,
+                    text.as_mut_ptr(),
+                    -1,
+                    &mut calc,
+                    DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT,
+                );
+                if paint {
+                    SetTextColor(dc, MUTED);
+                    DrawTextW(
+                        dc,
+                        text.as_mut_ptr(),
+                        -1,
+                        &mut at,
+                        DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
+                    );
+                }
+                y += height;
+            }
+        }
+
+        SelectObject(dc, previous);
+        DeleteObject(prose as _);
+        DeleteObject(mono as _);
+        y - top
     }
 
     unsafe extern "system" fn overlay_proc(
@@ -240,11 +351,14 @@ mod sys {
                 DeleteObject(stripe as _);
 
                 SetBkMode(dc, TRANSPARENT as i32);
-                let (mut title, mut body) = TEXT.with(|t| split(&t.borrow()));
+                let (mut title, body) = TEXT.with(|t| {
+                    let (head, rest) = split(&t.borrow());
+                    (head, String::from_utf16_lossy(&rest).trim_end_matches('\u{0}').to_string())
+                });
 
                 // The first line is the fact — which app, and why. It is set larger and brighter
                 // because it is the only line a person reads while reaching for the mouse.
-                let title_font = font(-21, 600);
+                let title_font = font(TITLE_PT, 650);
                 let previous = SelectObject(dc, title_font as _);
                 SetTextColor(dc, TEXT_COLOUR);
                 let mut title_rect = RECT {
@@ -273,28 +387,17 @@ mod sys {
                     DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
                 );
 
-                if body.len() > 1 {
-                    let body_font = font(-16, 400);
-                    SelectObject(dc, body_font as _);
-                    SetTextColor(dc, MUTED);
-                    let mut body_rect = RECT {
-                        left: title_rect.left,
-                        top: rect.top + PAD + title_height + GAP,
-                        right: title_rect.right,
-                        bottom: rect.bottom - PAD,
-                    };
-                    DrawTextW(
+                if !body.is_empty() {
+                    draw_body(
                         dc,
-                        body.as_mut_ptr(),
-                        -1,
-                        &mut body_rect,
-                        DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX,
+                        title_rect.left,
+                        rect.top + PAD + title_height + GAP,
+                        title_rect.right,
+                        &body,
+                        true,
                     );
-                    SelectObject(dc, previous);
-                    DeleteObject(body_font as _);
-                } else {
-                    SelectObject(dc, previous);
                 }
+                SelectObject(dc, previous);
                 DeleteObject(title_font as _);
 
                 EndPaint(window, &paint);
@@ -323,7 +426,8 @@ mod sys {
     /// DC, and asks GDI where the text would end.
     fn measure(text: &str) -> i32 {
         let wrap = WIDTH - STRIPE - PAD * 2;
-        let (mut title, mut body) = split(&wide(text));
+        let (mut title, body) = split(&wide(text));
+        let body = String::from_utf16_lossy(&body).trim_end_matches('\u{0}').to_string();
         // SAFETY: a screen DC is released below, every object selected is deleted after the DC is
         // put back, and DT_CALCRECT draws nothing.
         unsafe {
@@ -332,18 +436,12 @@ mod sys {
                 return MIN_HEIGHT;
             }
             let mut rect = RECT { left: 0, top: 0, right: wrap, bottom: 0 };
-            let title_font = font(-21, 600);
+            let title_font = font(TITLE_PT, 650);
             let previous = SelectObject(dc, title_font as _);
             let flags = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT;
             let title_height = DrawTextW(dc, title.as_mut_ptr(), -1, &mut rect, flags);
-            let mut body_height = 0;
-            if body.len() > 1 {
-                let body_font = font(-16, 400);
-                SelectObject(dc, body_font as _);
-                let mut body_rect = RECT { left: 0, top: 0, right: wrap, bottom: 0 };
-                body_height = DrawTextW(dc, body.as_mut_ptr(), -1, &mut body_rect, flags) + GAP;
-                DeleteObject(body_font as _);
-            }
+            let body_height =
+                if body.is_empty() { 0 } else { GAP + draw_body(dc, 0, 0, wrap, &body, false) };
             SelectObject(dc, previous);
             DeleteObject(title_font as _);
             ReleaseDC(std::ptr::null_mut(), dc);
