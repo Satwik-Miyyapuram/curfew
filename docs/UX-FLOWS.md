@@ -250,15 +250,30 @@ Everything below is build-verified and test-verified and nothing more. It is wri
 "the tests pass" is not the same claim as "it works", and the difference is exactly the kind of
 thing that gets forgotten between one session and the next.
 
-- The draggable ring, and whether a thumb can land on a specific minute without fighting it.
 - The confirmation on a block of four hours or more.
 - Picking a calendar event, apps, or a budget from inside a profile.
-- The **What it blocks** row now that the Apps tab is gone.
 - Copying what another profile blocks.
-- The one-second beat in front and the five-second beat behind, and whether the countdown reads
-  like a countdown on a real screen.
-- Enforcement against an app that is actually installed. The starter profile names Facebook and
-  Netflix, neither of which is on the phone this was written for.
+- Two devices, and everything in Flow 8.
 
 The emulator cannot stand in: this machine has no virtualisation extension for the x86 image and
 the wrong host architecture for the arm64 one.
+
+## What a finger has now done, on a Galaxy S24
+
+Walked on the device on 10 September 2026, against the starter profile:
+
+- **The draggable ring.** A thumb lands on a specific minute without fighting it, and a lap that
+  goes past the hour keeps the handle under the thumb. Dragged 25m back to 3m in one movement.
+- **Flow 1 end to end.** Start a block now, drag, pick a strength, lock it in; Now came back amber
+  and counting down.
+- **The one-second beat.** The block screen counted 2:26 → 2:21 across five seconds of real time.
+- **Enforcement against an app that is actually installed.** Netflix, which the starter profile
+  blocks, was replaced by the block screen naming the app, the profile and the end time.
+- **The **What it blocks** row now that the Apps tab is gone**, with its two tabs, counts, search
+  and the chosen apps pinned at the top.
+- **A calendar rule read from a real provider** — an event from the user's Google calendar, shown
+  on Plan.
+- **A session ending itself at zero**, with the dial grey and the hours banked on the same tick.
+  This is also where the finger found a bug the tests could not: the block screen it had put in
+  front of Netflix stayed up after its session ended, still saying a session was running. Fixed —
+  the screen now watches the profile that justifies it and leaves when it stops running.

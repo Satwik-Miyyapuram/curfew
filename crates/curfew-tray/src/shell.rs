@@ -221,6 +221,9 @@ fn show_menu(window: HWND) {
             Item::Details => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide("What is blocked…").as_ptr());
             },
+            Item::About => unsafe {
+                AppendMenuW(handle, MF_STRING, id, wide("Why Windows warned about this…").as_ptr());
+            },
             Item::Quit => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide("Hide this icon").as_ptr());
             },
@@ -261,6 +264,7 @@ fn chosen(window: HWND, id: usize) {
             };
             say(window, &text);
         }
+        Item::About => say(window, crate::welcome::WELCOME),
         Item::Quit => {
             say(window, menu::QUIT_NOTE);
             unsafe { DestroyWindow(window) };

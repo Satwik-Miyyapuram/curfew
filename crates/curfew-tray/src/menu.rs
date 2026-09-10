@@ -47,6 +47,13 @@ pub enum Item {
     Separator,
     /// Show what is blocked, and anything that is failing.
     Details,
+    /// Say again what the first-run notice said.
+    ///
+    /// That notice explains why Windows called an unsigned build unrecognised and why the icon is
+    /// not what does the blocking. It is shown once, which is right for something nobody wants at
+    /// every login and wrong for the only place those two facts are written down: a user who
+    /// dismissed it, or who inherited the machine, had no way back to it.
+    About,
     /// Hide the tray icon. It never stops enforcement, and says so.
     Quit,
 }
@@ -218,6 +225,7 @@ pub fn menu(status: &Status) -> Vec<Item> {
 
     items.push(Item::Separator);
     items.push(Item::Details);
+    items.push(Item::About);
     items.push(Item::Quit);
     items
 }
