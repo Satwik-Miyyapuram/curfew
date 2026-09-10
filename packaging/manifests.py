@@ -17,35 +17,46 @@ REPO = "Satwik-Miyyapuram/curfew"
 ARCHES = {"x64": "x64", "arm64": "arm64"}
 
 
-def checksum(directory: Path, arch: str) -> str:
-    """The SHA-256 of one architecture's archive, read from the file the build wrote."""
-    line = (directory / f"curfew-{arch}.zip.sha256").read_text().strip()
+def checksum(directory: Path, name: str) -> str:
+    """The SHA-256 of one release file, read from the sidecar the build wrote."""
+    line = (directory / f"{name}.sha256").read_text().strip()
     # `sha256sum` writes "<hash>  <name>". Winget wants it upper case; scoop does not care.
     return line.split()[0].upper()
 
 
-def url(version: str, arch: str) -> str:
-    return f"https://github.com/{REPO}/releases/download/v{version}/curfew-{arch}.zip"
+def url(version: str, name: str) -> str:
+    return f"https://github.com/{REPO}/releases/download/v{version}/{name}"
 
 
 def winget(version: str, directory: Path) -> str:
+    """The installer manifest, pointing at the MSI.
+
+    Not the portable archive it used to point at. `winget install Curfew.Curfew` has to leave the
+    machine in the state a person expects — service registered, window in the Start menu, tray at
+    login — and a portable alias leaves them with a command line and no blocking. The MSI does the
+    registering behind winget's own elevation prompt, and `winget uninstall` undoes it, subject to
+    Curfew's own refusal to uninstall itself while a lock is running.
+    """
     installers = "\n".join(
         f"""- Architecture: {ARCHES[arch]}
-  InstallerType: zip
-  InstallerUrl: {url(version, arch)}
-  InstallerSha256: {checksum(directory, arch)}
-  NestedInstallerType: portable
-  NestedInstallerFiles:
-  - RelativeFilePath: curfew-{arch}\\curfew.exe
-    PortableCommandAlias: curfew
-  - RelativeFilePath: curfew-{arch}\\curfew-tray.exe
-    PortableCommandAlias: curfew-tray"""
+  InstallerType: wix
+  InstallerUrl: {url(version, f'curfew-{arch}.msi')}
+  InstallerSha256: {checksum(directory, f'curfew-{arch}.msi')}
+  Scope: machine
+  InstallerSwitches:
+    Silent: /quiet
+    SilentWithProgress: /passive"""
         for arch in ARCHES
     )
     return f"""# Curfew.Curfew.installer.yaml
 PackageIdentifier: Curfew.Curfew
 PackageVersion: {version}
 MinimumOSVersion: 10.0.17763.0
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
 Installers:
 {installers}
 ManifestType: installer
@@ -91,8 +102,8 @@ ManifestVersion: 1.6.0
 def scoop(version: str, directory: Path) -> str:
     architecture = ",\n".join(
         f"""        "{'64bit' if arch == 'x64' else 'arm64'}": {{
-            "url": "{url(version, arch)}",
-            "hash": "{checksum(directory, arch).lower()}",
+            "url": "{url(version, f'curfew-{arch}.zip')}",
+            "hash": "{checksum(directory, f'curfew-{arch}.zip').lower()}",
             "extract_dir": "curfew-{arch}"
         }}"""
         for arch in ARCHES
@@ -107,8 +118,9 @@ def scoop(version: str, directory: Path) -> str:
     }},
     "bin": ["curfew.exe", "curfew-tray.exe"],
     "notes": [
-        "Curfew enforces from a Windows service, which has to be registered once:",
+        "Scoop installs the files but not the service. To register it:",
         "    curfew install        (from a terminal opened as administrator)",
+        "The MSI on the releases page does that step for you, and adds the window and the tray.",
         "Uninstalling is refused while a lock is running. That is the point of it;",
         "`curfew release <id>` starts the 24-hour way out."
     ],

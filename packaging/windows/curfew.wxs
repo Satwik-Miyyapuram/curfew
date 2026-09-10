@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer.
+
+  Everything a person had to type before — `curfew install`, an administrator terminal, a PATH entry
+  — happens here instead, once, behind the one UAC prompt Windows shows for any installer. The
+  service is registered by the program's own `install` verb rather than by MSI's ServiceInstall,
+  because that verb also writes the starting config, sets the restart-on-kill actions and opens the
+  firewall hole the DNS proxy needs; a second description of all that in XML is a second thing to
+  drift.
+
+  The uninstall is deliberately allowed to fail. `curfew uninstall` refuses while a lock is running,
+  and that refusal is the product: an uninstaller that ends a session the user asked to be locked
+  out of is a bypass with a wizard around it. The message says how to get out properly.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="Curfew"
+           Manufacturer="Curfew"
+           Version="$(Version)"
+           UpgradeCode="fe615efe-0155-4855-b07f-aecf30621a81"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+
+    <SummaryInformation Description="Distraction blocking that keeps its promises" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Curfew is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Uninstalling from Settings is the path most people take, so it has to be a first-class
+         one: no repair option to click by mistake, and an icon that says which program this is. -->
+    <Property Id="ARPPRODUCTICON" Value="curfew.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Satwik-Miyyapuram/curfew" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Icon Id="curfew.ico" SourceFile="curfew.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Curfew" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="StartupFolder" />
+
+    <Feature Id="Main" Title="Curfew" Level="1">
+      <ComponentGroupRef Id="Program" />
+    </Feature>
+
+    <ComponentGroup Id="Program" Directory="INSTALLFOLDER">
+      <Component Id="Cli">
+        <File Id="curfew.exe" Source="$(Stage)\curfew.exe" KeyPath="yes" />
+        <!-- On PATH for the terminal commands that have no window yet — editing the config, the
+             stats. Nothing in normal use needs it, which is the point of the installer. -->
+        <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last"
+                     System="yes" Permanent="no" />
+      </Component>
+      <Component Id="Window">
+        <File Id="curfew_app.exe" Source="$(Stage)\curfew-app.exe" KeyPath="yes" />
+        <Shortcut Id="StartMenuWindow" Directory="ProgramMenuFolder" Name="Curfew"
+                  Description="What is running, what is planned, and whether any of it is working"
+                  Advertise="yes" Icon="curfew.ico" />
+      </Component>
+      <Component Id="Tray">
+        <File Id="curfew_tray.exe" Source="$(Stage)\curfew-tray.exe" KeyPath="yes" />
+        <!-- Every user's startup, not this one's: the machine has the service, so every account on
+             it should be able to see what the service is doing. -->
+        <Shortcut Id="StartupTray" Directory="StartupFolder" Name="Curfew"
+                  Description="The Curfew tray icon" Advertise="yes" Icon="curfew.ico" />
+      </Component>
+      <Component Id="Licence">
+        <File Id="LICENSE.txt" Source="$(Stage)\LICENSE.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- The service. Deferred and not impersonated, so it runs with the installer's elevation
+         rather than the user's; QuietExec so no console flashes over the progress bar. -->
+    <SetProperty Id="RegisterService" Sequence="execute" Before="RegisterService"
+                 Value="&quot;[INSTALLFOLDER]curfew.exe&quot; install" />
+    <CustomAction Id="RegisterService" DllEntry="$(QuietExec)" Execute="deferred"
+                  Impersonate="no" Return="check" BinaryRef="$(UtilCA)" />
+
+    <SetProperty Id="RemoveService" Sequence="execute" Before="RemoveService"
+                 Value="&quot;[INSTALLFOLDER]curfew.exe&quot; uninstall" />
+    <CustomAction Id="RemoveService" DllEntry="$(QuietExec)" Execute="deferred"
+                  Impersonate="no" Return="check" BinaryRef="$(UtilCA)" />
+
+    <!-- Started for this session too, so the tray appears without a sign-out. Not impersonated is
+         wrong for a tray icon, so this one runs as the user who is installing. -->
+    <Property Id="WixShellExecTarget" Value="[#curfew_tray.exe]" />
+    <CustomAction Id="StartTray" DllEntry="WixShellExec" Impersonate="yes" Return="ignore"
+                  BinaryRef="$(UtilCA)" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RegisterService" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RemoveService" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="StartTray" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(Stage)\license.rtf" />
+  </Package>
+</Wix>

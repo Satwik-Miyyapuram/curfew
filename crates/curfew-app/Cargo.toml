@@ -22,3 +22,5 @@ serde_json = { workspace = true }
 # supported build of Windows already has. Nothing here is a second browser engine to ship.
 tao = "0.31"
 wry = "0.47"
+# One message box, for the one failure a user can do something about: no WebView2 runtime.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

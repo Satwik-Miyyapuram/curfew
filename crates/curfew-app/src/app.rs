@@ -85,6 +85,25 @@ fn reply_script(id: u64, value: &serde_json::Value) -> String {
     format!("window.__curfewReply({id}, {literal});")
 }
 
+/// A last word before the window gives up.
+///
+/// The only failure here a person can act on is a missing WebView2 runtime, and a process that
+/// exits silently tells them nothing: the shortcut was clicked, and nothing happened. Blocks carry
+/// on either way — this is the window, not the enforcement.
+fn fatal(message: &str) -> ! {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let body = wide(message);
+    let title = wide("Curfew");
+    // SAFETY: both strings are NUL-terminated and outlive the call, and a null owner window is
+    // what MessageBoxW documents for a dialog with no parent.
+    unsafe {
+        MessageBoxW(std::ptr::null_mut(), body.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR)
+    };
+    std::process::exit(1)
+}
+
 /// A reply, sent home.
 enum Ev {
     Reply(String),
@@ -97,7 +116,7 @@ pub fn run() {
         .with_inner_size(tao::dpi::LogicalSize::new(1120.0, 720.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(880.0, 560.0))
         .build(&event_loop)
-        .expect("curfew-app: the window could not be created");
+        .unwrap_or_else(|e| fatal(&format!("The Curfew window could not be created.\n\n{e}")));
 
     let proxy = event_loop.create_proxy();
     let webview = WebViewBuilder::new()
@@ -119,8 +138,17 @@ pub fn run() {
                 let _ = proxy.send_event(Ev::Reply(script));
             });
         })
-        .build(&window)
-        .expect("curfew-app: WebView2 could not start");
+        .build(&window);
+    let webview = match webview {
+        Ok(webview) => webview,
+        Err(e) => fatal(&format!(
+            "The Curfew window needs the Microsoft Edge WebView2 runtime, which this copy of \
+             Windows does not have. Installing it from Microsoft is enough; nothing else about \
+             Curfew changes.\n\n\
+             https://developer.microsoft.com/microsoft-edge/webview2/\n\n\
+             Anything blocked stays blocked while this window will not open.\n\n{e}"
+        )),
+    };
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;

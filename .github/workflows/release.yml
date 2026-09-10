@@ -43,7 +43,7 @@ jobs:
         run: cargo test --all-features
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p curfew-svc -p curfew-tray
+        run: cargo build --release --locked --target ${{ matrix.target }} -p curfew-svc -p curfew-app -p curfew-tray
 
       - name: Stage
         shell: bash
@@ -52,6 +52,7 @@ jobs:
           out="curfew-${{ matrix.arch }}"
           mkdir "$out"
           cp "target/${{ matrix.target }}/release/curfew.exe" "$out/"
+          cp "target/${{ matrix.target }}/release/curfew-app.exe" "$out/"
           cp "target/${{ matrix.target }}/release/curfew-tray.exe" "$out/"
           cp LICENSE README.md "$out/" 2>/dev/null || true
           cp packaging/windows/INSTALL.txt "$out/"
@@ -61,10 +62,41 @@ jobs:
           sha256sum "$out.zip" > "$out.zip.sha256"
           cat "$out.zip.sha256"
 
+      # WiX 5, not 6 or later: from v6 the toolset is behind the Open Source Maintenance Fee, and
+      # this project has no revenue to pay it out of. Versions pinned so a release built today and
+      # a release built next year are built by the same compiler.
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+
+      # The MSI is what ordinary users install: it registers the service, puts the window in the
+      # Start menu and the tray in startup, so nobody has to open a terminal to be blocked. The ZIP
+      # above stays for scoop and for people who would rather place the files themselves.
+      - name: Installer
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME.Substring(1) } else { '0.0.0' }
+          ./packaging/windows/build.ps1 `
+            -Version $version `
+            -Arch ${{ matrix.arch }} `
+            -BinDir "target/${{ matrix.target }}/release" `
+            -OutFile "curfew-${{ matrix.arch }}.msi"
+
+      - name: Installer checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum "curfew-${{ matrix.arch }}.msi" > "curfew-${{ matrix.arch }}.msi.sha256"
+          cat "curfew-${{ matrix.arch }}.msi.sha256"
+
       - uses: actions/upload-artifact@v4
         with:
           name: curfew-${{ matrix.arch }}
           path: |
+            curfew-${{ matrix.arch }}.msi
+            curfew-${{ matrix.arch }}.msi.sha256
             curfew-${{ matrix.arch }}.zip
             curfew-${{ matrix.arch }}.zip.sha256
 

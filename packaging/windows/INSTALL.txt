@@ -4,7 +4,8 @@ Curfew for Windows
 What is in this folder
 ----------------------
 
-  curfew.exe        the service and the command line. Everything is done through this.
+  curfew.exe        the service and the command line.
+  curfew-app.exe    the window: what is running, what is planned, whether it is working.
   curfew-tray.exe   the tray icon: what is blocked now, and the overlay when something is.
   LICENSE           AGPL-3.0-or-later. The source is the release this was built from.
   INSTALL.txt       this file.
@@ -12,6 +13,19 @@ What is in this folder
 
 Installing
 ----------
+
+Use the installer. curfew-x64.msi (or curfew-arm64.msi) is on the same release page as this
+archive; double-click it, approve the one Windows prompt, and it is done. It puts the programs in
+C:\Program Files\Curfew, registers the Windows service, adds Curfew to the Start menu and starts
+the tray icon. Nothing has to be typed. Uninstalling is done from Settings > Apps like anything
+else, subject to the refusal described below.
+
+    winget install Curfew.Curfew
+
+does the same thing from a package manager, if that is how you prefer to install things.
+
+This folder is the other way: the files on their own, for placing by hand or for scoop. If you
+took that route, the service still has to be registered once:
 
 1. Put this folder somewhere permanent. C:\Program Files\Curfew is the usual choice, but any
    path works — the service remembers where it was registered from, so moving the folder
@@ -62,6 +76,8 @@ that name whole sites or apps need none of this.
 Uninstalling
 ------------
 
+Settings > Apps > Installed apps > Curfew, if you used the installer. Or, either way:
+
        curfew uninstall
 
 This is refused while a lock is running, and that refusal is the product working. If you are
@@ -97,6 +113,7 @@ So expect one of these:
 
 Do not just click through it. Verify the download instead:
 
+    certutil -hashfile curfew-x64.msi SHA256
     certutil -hashfile curfew-x64.zip SHA256
 
 and compare that against the SHA256SUMS file on the release page. If they match, the archive is
