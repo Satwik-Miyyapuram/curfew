@@ -82,6 +82,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     // The id is minted from the name the first time and never shown or changed afterwards:
     // renaming a profile must not orphan the schedules pointing at it.
     val profileId = id ?: slug(name)
+    val appCount = remember(profileId, state.configToml) { model.blockedApps(profileId).size }
+    val siteCount = remember(profileId, state.configToml) { model.rulesBeyondApps(profileId).size }
     val windows = state.weekly.filter { it.profile == profileId }
     val tint = Palette.ProfileColours[
         state.profiles.indexOfFirst { it.id == profileId }
@@ -211,11 +213,17 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 picking = "apps"
                             }
                         }
-                        "Anything in my calendar" ->
-                            model.say(
-                                "Pick the events from the Events tab \u2014 they can point at " +
-                                    "this profile.",
-                            )
+                        "Anything in my calendar" -> {
+                            // The events open here rather than on their own tab. Being told to go
+                            // somewhere else, find the same list, and remember which profile you
+                            // were half way through building is how a profile gets abandoned.
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else {
+                                model.saveProfile(profileId, name.trim())
+                                picking = "calendar"
+                            }
+                        }
                         "A daily budget" -> {
                             if (name.isBlank()) {
                                 model.say("Give it a name first.")
@@ -229,6 +237,31 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 "Add a window covering the whole week to leave it always on.",
                             )
                     }
+                }
+            }
+        }
+
+        Gap(16.dp)
+        SectionLabel("What it blocks")
+        Gap(8.dp)
+        // The other half of a profile, and the half that used to live on a tab of its own. Apps
+        // and sites belong to a profile, so the place to set them is inside the profile — the tab
+        // asked which profile you meant when you had just come from it.
+        DCardFlush {
+            TriggerRow(
+                Trigger(
+                    glyph = "■",
+                    tint = Palette.Accent,
+                    title = blocksLine(appCount, siteCount),
+                    example = "Apps and websites, kept apart in two lists.",
+                    chosen = appCount + siteCount > 0,
+                ),
+            ) {
+                if (name.isBlank()) {
+                    model.say("Give it a name first.")
+                } else {
+                    model.saveProfile(profileId, name.trim())
+                    picking = "apps"
                 }
             }
         }
@@ -655,4 +688,12 @@ fun BudgetSheet(model: CurfewViewModel, profileId: String, onDone: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
     )
+}
+
+/** "Nothing yet", or what the profile holds, counted in the two kinds it is kept in. */
+private fun blocksLine(apps: Int, sites: Int): String = when {
+    apps == 0 && sites == 0 -> "Nothing yet"
+    sites == 0 -> "$apps app${if (apps == 1) "" else "s"}"
+    apps == 0 -> "$sites site${if (sites == 1) "" else "s"}"
+    else -> "$apps app${if (apps == 1) "" else "s"} and $sites site${if (sites == 1) "" else "s"}"
 }

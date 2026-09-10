@@ -94,6 +94,10 @@ class MainActivity : FragmentActivity() {
  * mode that rearranges the furniture is a mode nobody dares turn on. Power now means more inside
  * a screen, not more screens along the bottom. Usage, Health and Devices are one tap away in
  * Settings for everyone, which is also where a Simple user can finally find syncing.
+ *
+ * There is no Apps tab. Apps and sites belong to a profile, so a tab for them had to open by
+ * asking which profile was meant — usually the one the user had just been editing. It is a row
+ * inside the profile now, where the answer to that question is already known.
  */
 private enum class Tab(
     val route: String,
@@ -104,7 +108,6 @@ private enum class Tab(
     Now("now", "Now", "Now", Icons.Filled.CheckCircle),
     Schedule("schedule", "Plan", "Plan", Icons.Filled.Edit),
     Calendar("calendar", "Calendar", "Events", Icons.Filled.DateRange),
-    Apps("apps", "Blocked apps and sites", "Apps", Icons.Filled.Lock),
     Settings("settings", "Settings", "Settings", Icons.Filled.Settings),
 }
 
@@ -158,7 +161,6 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                     onEditProfile = { go(Routes.profile(it)) },
                 )
             }
-            composable(Tab.Apps.route) { AppPickerScreen(model) }
             composable(Tab.Settings.route) { SettingsScreen(model, onOpen = ::go) }
             composable(Tab.Calendar.route) { CalendarScreen(model) }
             composable(Routes.USAGE) { UsageScreen(model) }
