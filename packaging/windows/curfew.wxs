@@ -35,6 +35,22 @@
     <Property Id="ARPPRODUCTICON" Value="curfew.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/Satwik-Miyyapuram/curfew" />
     <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!-- No reboot, ever, and no dialog offering one.
+
+         Windows decides whether a reboot is needed at InstallValidate, which runs before anything
+         that could free a file: before the service is stopped, before the tray is asked to close.
+         It sees curfew.exe held open by the running service and by the watchdog beside it, and it
+         asks for a restart. By the time the files are actually copied both are gone, stopped by the
+         ServiceControl and the CloseApplication entries below, so the restart it asked for would
+         have been for nothing.
+
+         Restart Manager is disabled for the same reason: it cannot cycle the watchdog, which is a
+         plain process and not a service, so all it contributes is the false alarm. If a file really
+         is still held at copy time the install fails loudly, which is the honest outcome and one a
+         user can retry — quietly queueing a file swap for the next boot is not. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
     <Icon Id="curfew.ico" SourceFile="curfew.ico" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -89,6 +105,13 @@
                            CloseMessage="yes" RebootPrompt="no" />
     <util:CloseApplication Id="CloseWindow" Target="curfew-app.exe"
                            CloseMessage="yes" RebootPrompt="no" />
+    <!-- The watchdog. A second curfew.exe whose whole job is starting the service again after
+         something kills it, which includes an installer stopping it. It has no window, so a close
+         message reaches nothing and it has to be ended outright; it holds no state that a restart
+         would lose. The service process is a curfew.exe too, but a running service cannot be
+         terminated this way, and it is the ServiceControl above that stops it. -->
+    <util:CloseApplication Id="CloseWatchdog" Target="curfew.exe"
+                           TerminateProcess="0" RebootPrompt="no" />
 
     <!-- The service. Deferred and not impersonated, so it runs with the installer's elevation
          rather than the user's; QuietExec so no console flashes over the progress bar. -->
