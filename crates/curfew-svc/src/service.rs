@@ -138,7 +138,62 @@ pub fn install() -> windows_service::Result<()> {
         ]),
     })?;
     service.start::<&str>(&[])?;
+    allow_through_firewall();
     Ok(())
+}
+
+/// The name both firewall rules carry, so uninstalling can find them again.
+const FIREWALL_RULE: &str = "Curfew (device sync)";
+
+/// Ask Windows Firewall for the sync port once, here, instead of once per boot forever.
+///
+/// Sync listens for the other devices on this machine's own network, and Windows answers a fresh
+/// listening socket with a prompt — one that needs an administrator and appears again whenever the
+/// service restarts, which for a service configured to restart itself is often. Installing already
+/// holds the administrator token this needs, so the question is asked once, at the moment the user
+/// has already said yes to installing a blocker.
+///
+/// Private and domain networks only. A blocker has no business accepting connections on the café
+/// wifi, and the devices this talks to are the user's own.
+///
+/// Failure is not fatal and not silent: without the rule sync still works on the loopback and the
+/// user gets the prompt they would have got anyway, which is worse but not broken.
+fn allow_through_firewall() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    // Removed first so re-installing from a new folder does not leave a rule pointing at the old
+    // one, which would be a rule allowing a program that is no longer there.
+    revoke_firewall_rules();
+    for protocol in ["tcp", "udp"] {
+        let status = std::process::Command::new("netsh")
+            .args([
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                &format!("name={FIREWALL_RULE}"),
+                "dir=in",
+                "action=allow",
+                &format!("program={}", exe.display()),
+                &format!("protocol={protocol}"),
+                "profile=private,domain",
+                "enable=yes",
+            ])
+            .status();
+        if !matches!(status, Ok(s) if s.success()) {
+            eprintln!(
+                "curfew: could not add the firewall rule for {protocol}. Syncing with your other                  devices will still work, but Windows will ask about it each time."
+            );
+        }
+    }
+}
+
+/// Take the rules back out. Called on uninstall, and before adding them, so they never accumulate.
+fn revoke_firewall_rules() {
+    let _ = std::process::Command::new("netsh")
+        .args(["advfirewall", "firewall", "delete", "rule", &format!("name={FIREWALL_RULE}")])
+        .status();
 }
 
 pub fn uninstall() -> windows_service::Result<()> {
@@ -150,5 +205,8 @@ pub fn uninstall() -> windows_service::Result<()> {
     if service.query_status()?.current_state != ServiceState::Stopped {
         service.stop()?;
     }
+    // Before the delete, because after it there is nothing left to be sure of: an uninstall that
+    // leaves a firewall rule behind has left a hole named after a program that is gone.
+    revoke_firewall_rules();
     service.delete()
 }

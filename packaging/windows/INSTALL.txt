@@ -28,6 +28,13 @@ Installing
 
        curfew status
 
+`curfew install` also adds one Windows Firewall rule, named "Curfew (device sync)", allowing
+curfew.exe to accept connections on private and domain networks. That is how your own devices
+find each other; without it Windows asks for an administrator every time the service restarts.
+It is not added for public networks, and `curfew uninstall` removes it again. To do without it,
+delete the rule in Windows Defender Firewall — syncing between devices stops, and nothing else
+changes.
+
 
 Blocking a page rather than a whole site
 ----------------------------------------
