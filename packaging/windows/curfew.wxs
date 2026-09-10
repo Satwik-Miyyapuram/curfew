@@ -77,6 +77,19 @@
       </Component>
     </ComponentGroup>
 
+    <!-- The tray and the window are ordinary programs of this user's, and they are almost always
+         running when an upgrade arrives — the tray is in startup and the window is how people got
+         here. A running exe cannot be overwritten, so without this every upgrade ends in "a reboot
+         will be required", which is a rude thing to ask of someone who clicked Update. They are
+         sent a close message instead, and the tray is started again at the end.
+
+         The service is not in this list. It is stopped by the ServiceControl above, and if it
+         refuses to stop, that is a lock running and the refusal is the product. -->
+    <util:CloseApplication Id="CloseTray" Target="curfew-tray.exe"
+                           CloseMessage="yes" RebootPrompt="no" />
+    <util:CloseApplication Id="CloseWindow" Target="curfew-app.exe"
+                           CloseMessage="yes" RebootPrompt="no" />
+
     <!-- The service. Deferred and not impersonated, so it runs with the installer's elevation
          rather than the user's; QuietExec so no console flashes over the progress bar. -->
     <SetProperty Id="RegisterService" Sequence="execute" Before="RegisterService"
