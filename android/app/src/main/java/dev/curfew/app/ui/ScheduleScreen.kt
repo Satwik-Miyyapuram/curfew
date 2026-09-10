@@ -64,19 +64,22 @@ import dev.curfew.policy.WeeklySchedule
  * that one reason for it.
  *
  * Tapping a card opens the profile; holding one offers to remove it. The config text itself stays,
- * in Power mode only, because the file is the thing a user backs up and carries between devices and
- * hiding it would make their own document a mystery to them.
+ * last and below everything else, because the file is the thing a user backs up and carries between
+ * devices and hiding it would make their own document a mystery to them.
  */
 @Composable
 fun ScheduleScreen(
     model: CurfewViewModel,
     onNewProfile: () -> Unit = {},
     onEditProfile: (String) -> Unit = {},
+    onPickFromCalendar: () -> Unit = {},
 ) {
     val state by model.state.collectAsStateWithLifecycle()
-    val mode by model.mode.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(state.configToml) }
     var editing by remember { mutableStateOf(false) }
+    // Folded away by default. The file matters, but a page of monospace TOML under the plan is a
+    // wall the reader has to scroll past every time to reach anything below it.
+    var showConfig by remember { mutableStateOf(false) }
 
     // Which form is open, if any. `Editing(null)` is a new schedule; a value is an edit of that
     // one. Held here rather than in the rows so only one form can be open at a time.
@@ -291,11 +294,15 @@ fun ScheduleScreen(
             GhostButton("Add a window", Modifier.weight(1f), enabled = state.profiles.isNotEmpty()) {
                 weeklyForm = Editing(null)
             }
+            // Straight to the calendar, not to an empty matcher form. Someone who says "from
+            // calendar" has an event in mind, and asking them to describe it in a title pattern
+            // before they have seen the list is asking them to guess at their own diary.
             GhostButton(
                 "From calendar",
                 Modifier.weight(1f),
                 enabled = state.profiles.isNotEmpty(),
-            ) { calendarForm = Editing(null) }
+                onClick = onPickFromCalendar,
+            )
         }
 
         Gap(14.dp)
@@ -315,10 +322,16 @@ fun ScheduleScreen(
             )
         }
 
-        // Power only, and last: the file is for the person who wants the file. In Simple mode the
-        // same document is still exportable from Settings, so nothing becomes unreachable.
-        if (mode.isPower) {
-            Gap(22.dp)
+        // Last, below everything else, and folded: the file is for the person who wants the file,
+        // and it is also the only way a config leaves this device before sync exists.
+        Gap(22.dp)
+        GhostButton(
+            if (showConfig) "Hide the config file" else "Show the config file",
+            colour = Palette.Muted,
+            onClick = { showConfig = !showConfig },
+        )
+        if (showConfig) {
+            Gap(14.dp)
             SectionLabel("curfew.toml")
             Gap(10.dp)
             OutlinedTextField(

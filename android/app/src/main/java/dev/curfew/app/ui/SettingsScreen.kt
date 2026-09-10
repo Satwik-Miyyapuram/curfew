@@ -38,55 +38,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * beside anything it cannot — not a wall of permission names, and not something filed under an
  * advanced heading, because a permission Curfew is missing is a block that is not going to happen.
  *
- * The screens Simple leaves out of the tab bar are listed below it. That is the rule this design
- * runs on: **Simple hides tabs, not powers**. Nothing here is unavailable in Simple mode; it is one
- * tap further away, which is what "simple" is allowed to mean.
+ * Below that are the screens the tab bar has no room for. There is no beginner/expert switch: an
+ * app that hides half of itself behind a mode makes the reader wonder what else it is hiding, and
+ * every screen here is one tap away regardless.
  */
 @Composable
 fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
-    val mode by model.mode.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val missing = state.grants.count { it.grant.required && !it.granted }
+    // Two counts, because the card above lists every permission and this line summarises that
+    // same list: counting only the required ones said "one permission is missing" under a card
+    // showing three red marks, and the reader believed the card.
+    val missing = state.grants.count { !it.granted }
+    val blocking = state.grants.count { it.grant.required && !it.granted }
 
     Screen(spacing = 0.dp) {
         Gap(14.dp)
         Title("Settings", size = 24)
         Gap(16.dp)
-
-        DCard {
-            SectionLabel("How much do you want to see?")
-            Gap(12.dp)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Dsn.CtlRadius))
-                    .background(Palette.Raised)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Mode.entries.forEach { option ->
-                    ModeTab(
-                        label = if (option == Mode.Simple) "Simple" else "Power",
-                        selected = mode == option,
-                        modifier = Modifier.weight(1f),
-                    ) { model.setMode(option) }
-                }
-            }
-            Gap(14.dp)
-            Text(
-                if (mode.isPower) {
-                    "Every screen in the bar, exact timers, the rule that matched, and the " +
-                        "config file itself. Simple keeps four tabs and plain words."
-                } else {
-                    "Four tabs, plain words, no ids. Power adds Usage, Sync and Health, exact " +
-                        "timers, rule syntax and the raw curfew.toml."
-                },
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-                color = Palette.Muted,
-            )
-        }
 
         Gap(18.dp)
         SectionLabel("Curfew can enforce")
@@ -184,9 +153,23 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Entry(
                 title = "Is Curfew working",
                 note = when {
-                    missing == 1 -> "One permission is missing. Nothing is blocked without it."
-                    missing > 1 -> "$missing permissions are missing. Nothing is blocked without them."
-                    else -> "Everything it needs, it has."
+                    missing == 0 -> "Everything it needs, it has."
+                    // Everything still missing is one Curfew cannot work without.
+                    missing == blocking && missing == 1 ->
+                        "One permission is missing. Nothing is blocked without it."
+                    missing == blocking ->
+                        "$missing permissions are missing. Nothing is blocked without them."
+                    // Some of what is missing only makes Curfew harder to escape, not able to run.
+                    blocking > 0 ->
+                        "$missing permissions are missing" +
+                            if (blocking == 1) {
+                                ", and one of them has to be allowed before anything is blocked."
+                            } else {
+                                ", and $blocking of them have to be allowed before anything is " +
+                                    "blocked."
+                            }
+                    missing == 1 -> "One permission is missing. Curfew still blocks without it."
+                    else -> "$missing permissions are missing. Curfew still blocks without them."
                 },
                 warn = missing > 0,
             ) { onOpen(Routes.HEALTH) }
@@ -194,7 +177,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Entry(
                 title = "Your calendar",
                 note = if (state.calendarGranted) {
-                    "${state.calendarEvents.size} events read for the next day and a half."
+                    "${state.calendarEvents.size} events read, over the next eight weeks."
                 } else {
                     "Not connected. Blocks from your calendar will not start."
                 },
@@ -230,31 +213,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }
         Gap(8.dp)
-    }
-}
-
-/** Half of the Simple/Power tray. */
-@Composable
-private fun ModeTab(
-    label: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (selected) Palette.Accent else Color.Transparent)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (selected) Palette.Ink else Palette.Muted,
-        )
     }
 }
 

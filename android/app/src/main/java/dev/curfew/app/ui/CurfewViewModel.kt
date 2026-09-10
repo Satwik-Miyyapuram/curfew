@@ -48,13 +48,6 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     private val runtime: CurfewRuntime = app.curfew
 
-    private val modes = UiModeStore(app)
-
-    /** Simple or Power. See [UiModeStore] for why it lives outside the policy database. */
-    val mode: StateFlow<Mode> = modes.mode
-
-    fun setMode(mode: Mode) = modes.set(mode)
-
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -145,7 +138,11 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         withContext(Dispatchers.Default) {
             // Sessions come first: a write that has just landed is the reason this was called.
             val now = runtime.clock.now()
-            val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
+            // The browsing window, not the enforcement one: this list is also what the Events
+            // screen shows, and a calendar that stopped at tomorrow looked to the user like a
+            // calendar that had lost most of their year.
+            val events = runCatching { runtime.calendarEvents(now, CalendarReader.BROWSE_SECONDS) }
+                .getOrDefault(emptyList())
             val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
             val activations = runCatching { runtime.policy.activations(now, events) }
                 .getOrDefault(emptyList())

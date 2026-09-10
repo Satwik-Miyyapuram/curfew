@@ -89,11 +89,9 @@ class MainActivity : FragmentActivity() {
  * [short] is what fits under an icon; [label] is the full name, and it is what the icon is
  * described as, so shortening the visible one costs nothing.
  *
- * There is one bar, and it is the same in both modes. Power used to add three more tabs to it,
- * which turned the one surface people navigate by into the most crowded thing on screen — and a
- * mode that rearranges the furniture is a mode nobody dares turn on. Power now means more inside
- * a screen, not more screens along the bottom. Usage, Health and Devices are one tap away in
- * Settings for everyone, which is also where a Simple user can finally find syncing.
+ * There is one bar, and it is short. It used to carry seven tabs, which turned the one surface
+ * people navigate by into the most crowded thing on screen. Usage, Health and Devices are one tap
+ * away in Settings instead, which is also where syncing lives.
  *
  * There is no Apps tab. Apps and sites belong to a profile, so a tab for them had to open by
  * asking which profile was meant — usually the one the user had just been editing. It is a row
@@ -159,6 +157,7 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                     model,
                     onNewProfile = { go(Routes.PROFILE_NEW) },
                     onEditProfile = { go(Routes.profile(it)) },
+                    onPickFromCalendar = { go(Tab.Calendar.route) },
                 )
             }
             composable(Tab.Settings.route) { SettingsScreen(model, onOpen = ::go) }

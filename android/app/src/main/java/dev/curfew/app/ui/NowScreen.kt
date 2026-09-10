@@ -59,7 +59,6 @@ import dev.curfew.policy.Stats
 @Composable
 fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
-    val mode by model.mode.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? FragmentActivity
 
     // The conditions this screen can satisfy are gathered one at a time, in a fixed order, and
@@ -186,7 +185,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         }
 
         Gap(14.dp)
-        GivenBackCard(stats = state.stats, detailed = mode.isPower)
+        GivenBackCard(stats = state.stats, detailed = true)
 
         state.downtime?.let { downtime ->
             Gap(14.dp)
@@ -226,11 +225,9 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             GhostButton("Check the schedules now", colour = Palette.Muted, onClick = model::reconcileNow)
         }
 
-        // Power mode adds the timeline. Simple mode deliberately does not have it: "something will
-        // start later" is the whole of what a simple user needs, and a list of the next four
-        // activations with their exact windows is the kind of detail that makes a calm screen look
-        // like a control panel.
-        if (mode.isPower) {
+        // What is coming, in order. Four at most: enough to answer "what happens next" without
+        // turning a calm screen into a control panel.
+        run {
             Gap(20.dp)
             SectionLabel("Upcoming · next 24h")
             Gap(10.dp)

@@ -43,6 +43,17 @@ class CalendarReader(private val context: Context) {
         /** How far either side of now to look. Long enough for any rule's padding, and no longer. */
         const val WINDOW_SECONDS = 24L * 60 * 60
 
+        /**
+         * How far ahead the *browsing* read goes, when the user is looking at the list themselves.
+         *
+         * Enforcement reads a day, because a rule can only start a session that is happening soon.
+         * Picking a meeting to block is the opposite question: someone opening the calendar wants
+         * to find the exam in three weeks, and a list that stops at Sunday looks broken rather
+         * than careful. Eight weeks is far enough to hold a term's fixed commitments and short
+         * enough that this is still not a read of someone's whole diary.
+         */
+        const val BROWSE_SECONDS = 56L * 24 * 60 * 60
+
         val PROJECTION = arrayOf(
             CalendarContract.Instances.EVENT_ID,
             CalendarContract.Instances.TITLE,

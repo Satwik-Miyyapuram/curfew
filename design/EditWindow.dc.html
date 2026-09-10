@@ -1,0 +1,101 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:22px; --r-ctl:14px;
+ --f:-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+}
+body{width:390px;height:844px;background:var(--bg);color:var(--tx);font-family:var(--f);
+ -webkit-font-smoothing:antialiased;overflow:hidden;position:relative}
+.scrim{position:absolute;inset:0;background:rgba(6,8,12,.72)}
+/* The sheet is the page's own material, not a platform dialog: same surface, same hairline, same
+   22px corner as every card behind it. It rises from the bottom edge because it is a continuation
+   of the row that was tapped, not an interruption of the app. */
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--sur);
+ border-top:1px solid var(--line);border-radius:26px 26px 0 0;
+ box-shadow:0 -20px 50px rgba(0,0,0,.6);padding:8px 20px 20px;max-height:96%}
+.grip{width:38px;height:4px;border-radius:999px;background:var(--line);margin:6px auto 14px}
+h2{font-size:22px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.45;margin-top:4px}
+.lbl{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.chip{height:36px;padding:0 14px;border-radius:999px;display:inline-flex;align-items:center;
+ font-size:13px;font-weight:600;background:var(--sur2);border:1px solid var(--line);color:var(--mut)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#0D1016;font-weight:700}
+/* A time is a value you read at a glance, so it is set at the size of a value, not of form text. */
+.time{flex:1;background:var(--sur2);border:1px solid var(--line);border-radius:var(--r-ctl);padding:11px 14px}
+.time .k{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim)}
+.time .v{font-size:24px;font-weight:700;letter-spacing:-.5px;margin-top:2px;font-variant-numeric:tabular-nums}
+.note{font-size:12px;color:var(--mut);line-height:1.5;margin-top:10px}
+.sec{margin-top:20px}
+.btn{height:52px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:16px;font-weight:650;
+ display:flex;align-items:center;justify-content:center;border:none;flex:1;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx);height:52px}
+</style>
+
+<!-- The page underneath, dimmed: the sheet never hides which row it belongs to. -->
+<div style="padding:60px 20px 0">
+  <div style="font-size:28px;font-weight:700;letter-spacing:-.6px">Plan</div>
+  <div style="height:16px"></div>
+  <div style="background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);height:220px"></div>
+</div>
+<div class="scrim"></div>
+
+<div class="sheet">
+  <div class="grip"></div>
+  <h2>Edit window</h2>
+  <div class="sub">Weekdays &middot; 21:00 &ndash; 00:00, overnight.</div>
+
+  <div class="sec">
+    <div class="lbl">Profile</div>
+    <div class="row">
+      <span class="chip on">Distractions</span>
+      <span class="chip">Deep work</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">Days</div>
+    <!-- Presets before the seven chips: "weekdays" is what people actually mean, and tapping one
+         word beats tapping five days and hoping you did not miss one. -->
+    <div class="row" style="margin-bottom:10px">
+      <span class="chip">Every day</span>
+      <span class="chip on">Weekdays</span>
+      <span class="chip">Weekends</span>
+    </div>
+    <div class="row">
+      <span class="chip on">Mon</span><span class="chip on">Tue</span><span class="chip on">Wed</span>
+      <span class="chip on">Thu</span><span class="chip on">Fri</span>
+      <span class="chip">Sat</span><span class="chip">Sun</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">When</div>
+    <div style="display:flex;gap:10px">
+      <div class="time"><div class="k">From</div><div class="v">21:00</div></div>
+      <div class="time"><div class="k">Until</div><div class="v">00:00</div></div>
+    </div>
+    <div class="note">Runs overnight, into the next morning.</div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">Locked by</div>
+    <div class="row">
+      <span class="chip">Runs to the end</span>
+      <span class="chip on">Ask before ending</span>
+      <span class="chip">Screen lock</span>
+      <span class="chip">Restart the device</span>
+    </div>
+    <div class="note">Nothing chosen means you can end it whenever you like.</div>
+  </div>
+
+  <div style="height:22px"></div>
+  <div style="display:flex;gap:10px">
+    <button class="btn ghost">Cancel</button>
+    <button class="btn">Save</button>
+  </div>
+</div>

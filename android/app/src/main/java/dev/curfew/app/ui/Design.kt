@@ -551,3 +551,200 @@ fun DialNumber(text: String, size: Int = 46) {
         color = Palette.Text,
     )
 }
+
+/**
+ * A form that rises from the bottom edge, in the app's own material.
+ *
+ * The schedule forms used to be Material `AlertDialog`s, which meant every control inside them —
+ * chips, text fields, the buttons — came from a theme this app otherwise never shows: lighter
+ * surfaces, different corners, a different idea of what a label is. Against the Plan page behind
+ * it the form read as a screen borrowed from another application, which is exactly what it was.
+ *
+ * A sheet instead of a centred box because the form is a continuation of the row that was tapped:
+ * it comes up from the same edge the thumb is on, keeps the page visible above it, and ends in the
+ * two buttons every other screen ends in.
+ */
+@Composable
+fun DSheet(
+    title: String,
+    sub: String?,
+    onDismiss: () -> Unit,
+    confirm: String,
+    confirmEnabled: Boolean,
+    onConfirm: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                .background(Palette.Surface)
+                .padding(horizontal = Dsn.Gutter)
+                .padding(top = 8.dp, bottom = 20.dp),
+        ) {
+            // The grip is not a control: it says which edge this came from, and that it goes back.
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 6.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Palette.Line)
+                    .size(width = 38.dp, height = 4.dp),
+            )
+            Gap(8.dp)
+            Text(
+                title,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.4).sp,
+                color = Palette.Text,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (sub != null) {
+                Text(
+                    sub,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Palette.Muted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            ) {
+                content()
+            }
+            Gap(22.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Cancel", Modifier.weight(1f), onClick = onDismiss)
+                Box(Modifier.weight(1f)) {
+                    PrimaryButton(confirm, enabled = confirmEnabled, onClick = onConfirm)
+                }
+            }
+        }
+    }
+}
+
+/** A block of the form: its label, and what it asks for. */
+@Composable
+fun ColumnScope.SheetSection(label: String, content: @Composable ColumnScope.() -> Unit) {
+    Gap(20.dp)
+    SectionLabel(label)
+    Gap(9.dp)
+    content()
+}
+
+/**
+ * One editable value, set at the size of a value.
+ *
+ * A time is read at a glance and typed rarely, so it is shown the way the Now screen shows a time —
+ * large, tabular, on the raised surface — rather than as body text inside an outlined box.
+ */
+@Composable
+fun ValueField(
+    label: String,
+    value: String,
+    bad: Boolean,
+    modifier: Modifier = Modifier,
+    onChange: (String) -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Raised)
+            .border(
+                width = 1.dp,
+                color = if (bad) Palette.Bad else Palette.Line,
+                shape = RoundedCornerShape(Dsn.CtlRadius),
+            )
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Text(
+            label.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = Palette.Dim,
+        )
+        androidx.compose.foundation.text.BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = if (bad) Palette.Bad else Palette.Text,
+            ),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Accent),
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+        )
+    }
+}
+
+/** The sentence a form says back to the reader about what it has understood. */
+@Composable
+fun SheetNote(text: String, bad: Boolean = false) {
+    Text(
+        text,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = if (bad) Palette.Bad else Palette.Muted,
+        modifier = Modifier.padding(top = 10.dp),
+    )
+}
+
+/**
+ * A line of text the user types: label above, value in the field, placeholder when it is empty.
+ *
+ * The same tile as [ValueField] at body size, so a form asking for a word and a form asking for a
+ * time are visibly the same form. An empty field shows what it would accept rather than a floating
+ * label that moves when touched — nothing here is ever asked for twice, so there is no label to
+ * preserve once the answer is in.
+ */
+@Composable
+fun TextField(
+    label: String,
+    value: String,
+    placeholder: String = "",
+    modifier: Modifier = Modifier,
+    onChange: (String) -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Raised)
+            .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Text(
+            label.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+            color = Palette.Dim,
+        )
+        Box(Modifier.padding(top = 3.dp)) {
+            if (value.isEmpty() && placeholder.isNotEmpty()) {
+                Text(placeholder, fontSize = 16.sp, color = Palette.Dim)
+            }
+            androidx.compose.foundation.text.BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Palette.Text,
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Palette.Accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}

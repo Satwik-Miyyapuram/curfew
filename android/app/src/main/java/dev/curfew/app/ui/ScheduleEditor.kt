@@ -7,14 +7,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -208,14 +202,12 @@ internal fun CalendarRuleCard(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose: (String) -> Unit) {
-    Text("Profile", style = MaterialTheme.typography.labelLarge)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         profiles.forEach { profile ->
-            FilterChip(
-                selected = profile.id == chosen,
-                onClick = { onChoose(profile.id) },
-                label = { Text(profile.name) },
-            )
+            Pill(profile.name, selected = profile.id == chosen, onClick = { onChoose(profile.id) })
         }
     }
 }
@@ -223,22 +215,31 @@ private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose:
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LockPicker(chosen: List<Lock>, onChange: (List<Lock>) -> Unit) {
-    Text("Locked by", style = MaterialTheme.typography.labelLarge)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         OFFERED_LOCKS.forEach { (label, lock) ->
-            FilterChip(
-                selected = lock in chosen,
-                onClick = { onChange(if (lock in chosen) chosen - lock else chosen + lock) },
-                label = { Text(label) },
-            )
+            Pill(label, selected = lock in chosen, onClick = {
+                onChange(if (lock in chosen) chosen - lock else chosen + lock)
+            })
         }
     }
-    Text(
-        "With nothing chosen the session can be ended whenever you like. Every condition you add " +
-            "is one you will have to satisfy to get out early.",
-        style = MaterialTheme.typography.bodySmall,
+    SheetNote(
+        if (chosen.isEmpty()) {
+            "Nothing chosen means you can end it whenever you like."
+        } else {
+            "Every condition you add is one you will have to satisfy to get out early."
+        },
     )
 }
+
+/** The day presets, because "weekdays" is what people mean and five taps is how they mistype it. */
+private val DAY_PRESETS: List<Pair<String, List<Int>>> = listOf(
+    "Every day" to emptyList(),
+    "Weekdays" to listOf(0, 1, 2, 3, 4),
+    "Weekends" to listOf(5, 6),
+)
 
 /**
  * The weekly window form, used for both a new window and an edit.
@@ -268,86 +269,83 @@ internal fun WeeklyDialog(
         endMinutes != null &&
         startMinutes != endMinutes
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "New window" else "Edit window") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
+    // The line under the title is the window itself, said back: the reader can check what they are
+    // about to save without reassembling it from four separate controls.
+    val overnight = startMinutes != null && endMinutes != null && endMinutes <= startMinutes
+    val summary = when {
+        startMinutes == null || endMinutes == null -> "Pick a start and an end."
+        else -> describeDays(days) + " · " + minutesToHhMm(startMinutes) + " – " +
+            minutesToHhMm(endMinutes) + if (overnight && startMinutes != endMinutes) ", overnight." else "."
+    }
+
+    DSheet(
+        title = if (existing == null) "New window" else "Edit window",
+        sub = summary,
+        onDismiss = onDismiss,
+        confirm = "Save",
+        confirmEnabled = valid,
+        onConfirm = {
+            onSave(
+                WeeklySchedule(
+                    id = existing?.id ?: "w-$now",
+                    profile = profile,
+                    days = days.sorted(),
+                    startMinute = startMinutes ?: 0,
+                    endMinute = endMinutes ?: 0,
+                    locks = locks,
+                    // Editing a paused window must not quietly switch it back on.
+                    enabled = existing?.enabled ?: true,
+                ),
+            )
+        },
+    ) {
+        SheetSection("Profile") { ProfilePicker(profiles, profile) { profile = it } }
+
+        SheetSection("Days") {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ProfilePicker(profiles, profile) { profile = it }
-
-                Text("Days", style = MaterialTheme.typography.labelLarge)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DAY_NAMES.forEachIndexed { index, name ->
-                        FilterChip(
-                            selected = index in days,
-                            onClick = { days = if (index in days) days - index else days + index },
-                            label = { Text(name) },
-                        )
-                    }
+                DAY_PRESETS.forEach { (label, preset) ->
+                    Pill(label, selected = days.sorted() == preset, onClick = { days = preset })
                 }
-                Text(
-                    if (days.isEmpty()) "No day chosen means every day." else describeDays(days),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = start,
-                        onValueChange = { start = it },
-                        label = { Text("From") },
-                        isError = startMinutes == null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = end,
-                        onValueChange = { end = it },
-                        label = { Text("Until") },
-                        isError = endMinutes == null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                // The overnight case is the one people mean most often and read wrongly most
-                // often, so it is confirmed back to them rather than left implied by the numbers.
-                if (startMinutes != null && endMinutes != null && endMinutes <= startMinutes) {
-                    Text(
-                        if (startMinutes == endMinutes) {
-                            "A window cannot start and end at the same minute."
-                        } else {
-                            "This window runs overnight, into the next morning."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                LockPicker(locks) { locks = it }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = valid,
-                onClick = {
-                    onSave(
-                        WeeklySchedule(
-                            id = existing?.id ?: "w-$now",
-                            profile = profile,
-                            days = days.sorted(),
-                            startMinute = startMinutes ?: 0,
-                            endMinute = endMinutes ?: 0,
-                            locks = locks,
-                            // Editing a paused window must not quietly switch it back on.
-                            enabled = existing?.enabled ?: true,
-                        ),
-                    )
-                },
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            Gap(10.dp)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DAY_NAMES.forEachIndexed { index, name ->
+                    Pill(name, selected = index in days, onClick = {
+                        days = if (index in days) days - index else days + index
+                    })
+                }
+            }
+            if (days.isEmpty()) SheetNote("No day chosen means every day.")
+        }
+
+        SheetSection("When") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ValueField("From", start, bad = startMinutes == null, modifier = Modifier.weight(1f)) {
+                    start = it
+                }
+                ValueField("Until", end, bad = endMinutes == null, modifier = Modifier.weight(1f)) {
+                    end = it
+                }
+            }
+            // The overnight case is the one people mean most often and read wrongly most often, so
+            // it is confirmed back to them rather than left implied by the numbers.
+            if (startMinutes != null && endMinutes != null && endMinutes <= startMinutes) {
+                if (startMinutes == endMinutes) {
+                    SheetNote("A window cannot start and end at the same minute.", bad = true)
+                } else {
+                    SheetNote("Runs overnight, into the next morning.")
+                }
+            }
+        }
+
+        SheetSection("Locked by") { LockPicker(locks) { locks = it } }
+    }
 }
 
 /**
@@ -387,102 +385,79 @@ internal fun CalendarDialog(
         beforeMinutes != null && beforeMinutes >= 0 &&
         afterMinutes != null && afterMinutes >= 0
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "New calendar rule" else "Edit calendar rule") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ProfilePicker(profiles, profile) { profile = it }
+    DSheet(
+        title = if (existing == null) "New calendar rule" else "Edit calendar rule",
+        sub = describeMatcher(
+            EventMatcher(
+                title = title.trim().ifBlank { null },
+                calendar = calendar.trim().ifBlank { null },
+                location = location.trim().ifBlank { null },
+                busyOnly = busyOnly,
+            ),
+        ) + ".",
+        onDismiss = onDismiss,
+        confirm = "Save",
+        confirmEnabled = valid,
+        onConfirm = {
+            onSave(
+                CalendarSchedule(
+                    id = existing?.id ?: "c-$now",
+                    profile = profile,
+                    matcher = EventMatcher(
+                        // Blank means "do not care", not "match the empty string": a matcher
+                        // holding "" would catch nothing at all.
+                        title = title.trim().ifBlank { null },
+                        calendar = calendar.trim().ifBlank { null },
+                        location = location.trim().ifBlank { null },
+                        busyOnly = busyOnly,
+                    ),
+                    padBeforeSeconds = (beforeMinutes ?: 0) * 60,
+                    padAfterSeconds = (afterMinutes ?: 0) * 60,
+                    locks = locks,
+                    // Editing a paused rule must not quietly switch it back on.
+                    enabled = existing?.enabled ?: true,
+                ),
+            )
+        },
+    ) {
+        SheetSection("Profile") { ProfilePicker(profiles, profile) { profile = it } }
 
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title contains") },
-                    placeholder = { Text("*focus*") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = calendar,
-                    onValueChange = { calendar = it },
-                    label = { Text("Calendar") },
-                    placeholder = { Text("Work") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = location,
-                    onValueChange = { location = it },
-                    label = { Text("Location") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "Leave a field empty to ignore it. A star matches anything, so *focus* catches " +
-                        "any event with the word focus in it. A rule with nothing filled in catches " +
-                        "every event on every calendar.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        SheetSection("Which events") {
+            TextField("Title contains", title, placeholder = "*focus*") { title = it }
+            Gap(10.dp)
+            TextField("Calendar", calendar, placeholder = "Work") { calendar = it }
+            Gap(10.dp)
+            TextField("Location", location, placeholder = "Anywhere") { location = it }
+            SheetNote(
+                "Leave a field empty to ignore it. A star matches anything, so *focus* catches any " +
+                    "event with the word focus in it.",
+            )
+            Gap(14.dp)
+            DRow(
+                title = "Only events marked busy",
+                note = "Ignores the ones you are merely invited to.",
+                trailing = { Switch(busyOnly) { busyOnly = it } },
+            )
+        }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Only events marked busy", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = busyOnly, onCheckedChange = { busyOnly = it })
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = before,
-                        onValueChange = { before = it },
-                        label = { Text("Start early (min)") },
-                        isError = beforeMinutes == null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = after,
-                        onValueChange = { after = it },
-                        label = { Text("Run late (min)") },
-                        isError = afterMinutes == null,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-
-                LockPicker(locks) { locks = it }
+        SheetSection("Padding") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ValueField(
+                    "Start early",
+                    before,
+                    bad = beforeMinutes == null,
+                    modifier = Modifier.weight(1f),
+                ) { before = it }
+                ValueField(
+                    "Run late",
+                    after,
+                    bad = afterMinutes == null,
+                    modifier = Modifier.weight(1f),
+                ) { after = it }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = valid,
-                onClick = {
-                    onSave(
-                        CalendarSchedule(
-                            id = existing?.id ?: "c-$now",
-                            profile = profile,
-                            matcher = EventMatcher(
-                                // Blank means "do not care", not "match the empty string": a
-                                // matcher holding "" would catch nothing at all.
-                                title = title.trim().ifBlank { null },
-                                calendar = calendar.trim().ifBlank { null },
-                                location = location.trim().ifBlank { null },
-                                busyOnly = busyOnly,
-                            ),
-                            padBeforeSeconds = (beforeMinutes ?: 0) * 60,
-                            padAfterSeconds = (afterMinutes ?: 0) * 60,
-                            locks = locks,
-                            // Editing a paused rule must not quietly switch it back on.
-                            enabled = existing?.enabled ?: true,
-                        ),
-                    )
-                },
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            SheetNote("Minutes, either side of the event.")
+        }
+
+        SheetSection("Locked by") { LockPicker(locks) { locks = it } }
+    }
 }

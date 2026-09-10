@@ -394,17 +394,28 @@ class CurfewRuntime internal constructor(
     @Volatile
     private var peerEvents: List<CalendarEvent> = emptyList()
 
-    /** What this device's own calendar provider says. Empty without the permission. */
-    fun localCalendarEvents(now: Long = clock.now()): List<CalendarEvent> =
-        calendar.events(now - CalendarReader.WINDOW_SECONDS, now + CalendarReader.WINDOW_SECONDS)
+    /**
+     * What this device's own calendar provider says. Empty without the permission.
+     *
+     * [ahead] is how far forward to look. It defaults to the enforcement window, because that is
+     * what a tick needs; a screen showing the user their own calendar passes something longer.
+     */
+    fun localCalendarEvents(
+        now: Long = clock.now(),
+        ahead: Long = CalendarReader.WINDOW_SECONDS,
+    ): List<CalendarEvent> = calendar.events(now - CalendarReader.WINDOW_SECONDS, now + ahead)
 
     /**
      * Every event a calendar rule could be looking at right now: this device's own, plus the ones
      * its paired devices published. A phone that was never given calendar permission is still
      * blocked during a meeting the PC can see.
      */
-    fun calendarEvents(now: Long = clock.now()): List<CalendarEvent> =
-        (localCalendarEvents(now) + peerEvents).sortedWith(compareBy({ it.start }, { it.id }))
+    fun calendarEvents(
+        now: Long = clock.now(),
+        ahead: Long = CalendarReader.WINDOW_SECONDS,
+    ): List<CalendarEvent> =
+        (localCalendarEvents(now, ahead) + peerEvents)
+            .sortedWith(compareBy({ it.start }, { it.id }))
 
     // --- sync --------------------------------------------------------------------------------------
 
