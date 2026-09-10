@@ -55,6 +55,14 @@
       "w": 460,
       "h": 260,
       "title": "Block notice"
+    },
+    {
+      "file": "Welcome.dc.html",
+      "x": 1900,
+      "y": 1760,
+      "w": 520,
+      "h": 440,
+      "title": "First notice"
     }
   ],
   "launch": {
