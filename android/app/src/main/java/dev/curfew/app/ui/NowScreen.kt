@@ -47,6 +47,7 @@ import dev.curfew.policy.Lock
 import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refusal
 import dev.curfew.policy.Session
+import dev.curfew.policy.Stats
 
 /**
  * What is running right now, and the only place a session can be ended.
@@ -183,6 +184,9 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 }
             }
         }
+
+        Gap(14.dp)
+        GivenBackCard(stats = state.stats, detailed = mode.isPower)
 
         state.downtime?.let { downtime ->
             Gap(14.dp)
@@ -381,6 +385,53 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
  * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
  * leave it on screen until the person has read it.
  */
+/**
+ * What the blocking has actually bought, on the home screen.
+ *
+ * The point of a blocker is not that it says no; it is the hours on the other side of the no. Those
+ * hours were only ever visible on a separate screen behind a tab, which meant the one number that
+ * says "this is working" was the one number nobody saw. It is stated as time the phone stayed shut
+ * rather than "time saved", because that is the part Curfew can actually vouch for — the phone was
+ * locked for this long, on purpose, because you asked it to be.
+ */
+@Composable
+private fun GivenBackCard(stats: Stats, detailed: Boolean) {
+    val today = stats.days.lastOrNull()?.blockedSeconds ?: 0
+    val week = stats.days.takeLast(7).sumOf { it.blockedSeconds.toLong() }
+    if (today == 0 && week == 0L && stats.currentStreak == 0) return
+    DCard(padding = 20.dp) {
+        Text(
+            if (today > 0) "${duration(today)} away from the phone today"
+            else "Nothing blocked yet today",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Palette.Text,
+        )
+        Gap(6.dp)
+        Text(
+            buildString {
+                append(duration(week.toInt()))
+                append(" this week")
+                if (stats.currentStreak > 1) {
+                    append(" · ")
+                    append(stats.currentStreak)
+                    append(" days in a row")
+                }
+            },
+            fontSize = 14.sp,
+            color = Palette.Ok,
+        )
+        if (detailed) {
+            Gap(4.dp)
+            Text(
+                "${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.",
+                fontSize = 13.sp,
+                color = Palette.Dim,
+            )
+        }
+    }
+}
+
 @Composable
 private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
     Card(
