@@ -1,0 +1,72 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:14px; --r-ctl:9px;
+ --f:"Segoe UI Variable Text","Segoe UI",-apple-system,Inter,sans-serif;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;overflow:hidden}
+.win{width:460px;height:260px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:10px}
+.title{height:38px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line);background:rgba(22,27,35,.7);font-size:12px;color:var(--mut)}
+.title .dot{width:9px;height:9px;border-radius:50%;background:var(--live)}
+.title .sp{flex:1}
+.title .ctl{display:flex;gap:16px;color:var(--dim);font-size:13px}
+.main{flex:1;display:flex;overflow:hidden}
+.side{width:212px;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
+.nav{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--mut)}
+.nav.on{background:var(--sur2);color:var(--tx);font-weight:600}
+.nav .ic{width:16px;text-align:center;font-size:13px}
+.side .sp{flex:1}
+.body{flex:1;padding:22px 26px;overflow:hidden}
+h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.5;margin-top:5px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
+.flush{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.row+.row{border-top:1px solid var(--line)}
+.lbl{font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.btn{height:36px;padding:0 16px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;border:none;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:25px;padding:0 11px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.grow{flex:1}
+</style>
+
+
+<div style="width:560px;height:700px;padding:20px;background:#0D1016;display:flex;flex-direction:column;gap:22px;align-items:flex-end">
+
+  <div style="width:100%;color:var(--dim);font-size:11px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700">What the menu says back</div>
+
+  <!-- The long one. This is the answer to the only warning most people ever see, and the reason
+       the menu stopped using a MessageBox: none of this fits in one. -->
+  <div style="width:460px;background:var(--sur);border:1px solid var(--line);border-left:4px solid var(--live);border-radius:12px;padding:22px;box-shadow:0 18px 40px rgba(0,0,0,.5)">
+    <div style="font-size:17px;font-weight:650;line-height:1.35">Curfew is not installed as a service on this PC yet, so nothing is being blocked.</div>
+    <div style="height:14px"></div>
+    <div style="font-size:13px;color:var(--mut);line-height:1.55">
+      To install it, open Windows Terminal or PowerShell as an administrator and run:
+      <div style="height:10px"></div>
+      <span class="mono" style="background:var(--sur2);border:1px solid var(--line);border-radius:7px;padding:4px 9px;color:var(--tx)">curfew install</span>
+      <div style="height:12px"></div>
+      Windows asks for administrator once, because a service any user could stop would not be much of a lock. The tray cannot do it for you, for the same reason.
+      <div style="height:12px"></div>
+      To try Curfew without installing anything, run <span class="mono" style="color:var(--tx)">curfew run</span> in an ordinary terminal and leave it open: it enforces for as long as it is running.
+    </div>
+  </div>
+
+  <!-- The short one, at the floor height. A one-line answer in a tall card reads as something that
+       failed to load, so the card never shrinks below this and never grows past three quarters of
+       the screen. -->
+  <div style="width:460px;height:150px;background:var(--sur);border:1px solid var(--line);border-left:4px solid var(--live);border-radius:12px;padding:22px;box-shadow:0 18px 40px rgba(0,0,0,.5)">
+    <div style="font-size:17px;font-weight:650;line-height:1.35">Deep work ended.</div>
+    <div style="height:14px"></div>
+    <div style="font-size:13px;color:var(--mut);line-height:1.55">Nothing is blocked now. The next block starts at 21:00.</div>
+  </div>
+
+  <div style="width:460px;display:flex;gap:10px;align-items:center;color:var(--dim);font-size:11px">
+    <span class="grow">Bottom right, never focused. A click dismisses it; otherwise it stays as long as it takes to read.</span>
+  </div>
+</div>

@@ -63,6 +63,14 @@
       "w": 520,
       "h": 440,
       "title": "First notice"
+    },
+    {
+      "file": "Answer.dc.html",
+      "x": 2520,
+      "y": 1760,
+      "w": 560,
+      "h": 700,
+      "title": "Menu answer"
     }
   ],
   "launch": {
