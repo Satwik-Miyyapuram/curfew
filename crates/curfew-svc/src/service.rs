@@ -247,5 +247,10 @@ pub fn uninstall() -> windows_service::Result<()> {
     // Before the delete, because after it there is nothing left to be sure of: an uninstall that
     // leaves a firewall rule behind has left a hole named after a program that is gone.
     revoke_firewall_rules();
-    service.delete()
+    service.delete()?;
+    // The watchdog's own copy of this program. It retires by itself once the service is gone, and
+    // it is holding this file open until it does, so the delete is attempted and its failure
+    // ignored: the copy left behind runs nothing and the next install overwrites it.
+    let _ = std::fs::remove_file(crate::watchdog::image_path());
+    Ok(())
 }

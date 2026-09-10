@@ -11,7 +11,7 @@
 //! means Curfew was removed the supported way, and the watchdog stops.
 
 use curfew_win::state::{self, Loaded};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// How often the watchdog looks. Slower than the enforcement tick on purpose: this process exists
@@ -136,13 +136,58 @@ pub fn run(name: &str, state_path: &Path) {
     }
 }
 
+/// Where the watchdog runs from: its own copy, beside the state file rather than in the install
+/// directory.
+///
+/// A running process holds its own image open, and the watchdog's image used to be the same
+/// `curfew.exe` the service runs from. That made every upgrade a file the installer could not
+/// replace: Windows decides whether a reboot is needed before it stops anything, sees a second
+/// process holding the binary, and asks the user to restart their machine to install a program.
+/// Restart Manager cannot help there either, because the watchdog is a plain process and not a
+/// service, so there is nothing for it to stop and start again.
+///
+/// `%ProgramData%\Curfew` is administrator-owned, the same as the config and the state file beside
+/// it, so running from here is no easier to tamper with than running from Program Files.
+pub fn image_path() -> PathBuf {
+    state::default_path().with_file_name("curfew-watchdog.exe")
+}
+
 /// Start the watchdog as a detached child of the service.
 ///
 /// Failure is reported and not fatal. A Curfew with no watchdog still enforces everything it was
 /// asked to; it is just easier to interrupt, and refusing to run at all would be a worse trade.
 pub fn spawn() -> std::io::Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    std::process::Command::new(exe).arg("watchdog").spawn()
+    // Refreshed whenever the service's own binary is newer, so an upgraded Curfew is not watched
+    // by the version it replaced. A copy that cannot be written — most often because the previous
+    // watchdog is still running from it — is not fatal: the one already there is this program too.
+    let image = image_path();
+    if let Err(e) = refresh(&exe, &image) {
+        eprintln!("curfew: watchdog image not refreshed: {e}");
+    }
+    let from = if image.exists() { image } else { exe };
+    std::process::Command::new(from).arg("watchdog").spawn()
+}
+
+/// Copy [`from`] over [`to`] unless what is already there was written by the same build.
+fn refresh(from: &Path, to: &Path) -> std::io::Result<()> {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let current = std::fs::metadata(from)?;
+    if let Ok(existing) = std::fs::metadata(to) {
+        // Length first: it is the cheap half of the comparison and the half that never lies about
+        // a different build. Times are only consulted when the sizes agree.
+        let same = existing.len() == current.len()
+            && match (existing.modified(), current.modified()) {
+                (Ok(there), Ok(here)) => there >= here,
+                _ => false,
+            };
+        if same {
+            return Ok(());
+        }
+    }
+    std::fs::copy(from, to).map(|_| ())
 }
 
 #[cfg(test)]
