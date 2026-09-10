@@ -180,11 +180,21 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
         }
 
         val current = backStack?.destination
-        GlassBar(
-            isSelected = { tab -> current?.hierarchy?.any { it.route == tab.route } == true },
-            onPick = { go(it) },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        // Only the four tabs carry the bar. A pushed screen — the timer, a profile, usage — has a
+        // back arrow and one job, and a tab bar floating over it both invites a user to abandon
+        // what they were half way through and, being glass with nothing reserved beneath it,
+        // covers the bottom of the screen it is sitting on. The timer's own lock choices were
+        // underneath it.
+        val onATab = Tab.entries.any { tab ->
+            current?.hierarchy?.any { it.route == tab.route } == true
+        }
+        if (onATab) {
+            GlassBar(
+                isSelected = { tab -> current?.hierarchy?.any { it.route == tab.route } == true },
+                onPick = { go(it) },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
     }
 }
 

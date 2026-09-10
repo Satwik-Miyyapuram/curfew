@@ -425,7 +425,13 @@ fun DragDial(
     var dragging by remember { mutableStateOf(false) }
     if (!dragging && live.roundToInt() != minutes) live = minutes.toFloat()
 
-    val fraction = (live / max).coerceIn(0f, 1f)
+    // The ring is a lap, not a progress bar. A progress bar over the whole range would mean the
+    // handle moved at one rate and the thumb at another, so the handle slid out from under the
+    // finger holding it and the value went wherever the mismatch took it. One turn is [perTurn]
+    // minutes and the handle sits exactly where the thumb is; longer than a turn simply goes round
+    // again, which is how a phone's own timer has always behaved.
+    val laps = (live / perTurn).toInt()
+    val fraction = ((live % perTurn) / perTurn).coerceIn(0f, 1f)
     Box(
         Modifier
             .size(diameter)
@@ -470,6 +476,19 @@ fun DragDial(
                 size = box,
                 style = androidx.compose.ui.graphics.drawscope.Stroke(width),
             )
+                        // A completed lap stays on the ring, dimmed, so an hour and a half does not read the
+            // same as half an hour.
+            if (laps > 0) {
+                drawArc(
+                    color = colour.copy(alpha = 0.28f),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                    size = box,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width),
+                )
+            }
             if (fraction > 0f) {
                 drawArc(
                     color = colour,
