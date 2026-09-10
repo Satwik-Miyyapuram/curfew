@@ -112,10 +112,20 @@ pub fn install() -> windows_service::Result<()> {
         account_password: None,
     };
 
-    let service = manager.create_service(
-        &info,
-        ServiceAccess::CHANGE_CONFIG | ServiceAccess::START | ServiceAccess::QUERY_STATUS,
-    )?;
+    let access = ServiceAccess::CHANGE_CONFIG | ServiceAccess::START | ServiceAccess::QUERY_STATUS;
+    // Installing over an existing registration is the normal case, not the odd one: the installer
+    // runs this on every upgrade, and plenty of machines registered the service by hand first.
+    // Creating fails there, so the existing one is pointed at this binary instead. Anything else
+    // would mean an upgrade that either refuses or leaves the service running the old exe.
+    let service = match manager.create_service(&info, access) {
+        Ok(service) => service,
+        Err(e) if is_already_installed(&e) => {
+            let service = manager.open_service(NAME, access | ServiceAccess::CHANGE_CONFIG)?;
+            service.change_config(&info)?;
+            service
+        }
+        Err(e) => return Err(e),
+    };
     service.set_description(
         "Enforces the blocks you asked Curfew for, including across restarts. Curfew is \
          open source and sends nothing anywhere.",
@@ -142,9 +152,33 @@ pub fn install() -> windows_service::Result<()> {
             },
         ]),
     })?;
-    service.start::<&str>(&[])?;
+    // Already running is the success case here, not a failure: a reinstall over a service that
+    // never stopped has nothing left to do.
+    match service.start::<&str>(&[]) {
+        Ok(()) => {}
+        Err(e) if is_already_running(&e) => {}
+        Err(e) => return Err(e),
+    }
     allow_through_firewall();
     Ok(())
+}
+
+/// ERROR_SERVICE_EXISTS.
+fn is_already_installed(e: &windows_service::Error) -> bool {
+    raw_error(e) == Some(1073)
+}
+
+/// ERROR_SERVICE_ALREADY_RUNNING.
+fn is_already_running(e: &windows_service::Error) -> bool {
+    raw_error(e) == Some(1056)
+}
+
+/// The Win32 code behind a service error, where there is one.
+fn raw_error(e: &windows_service::Error) -> Option<i32> {
+    match e {
+        windows_service::Error::Winapi(io) => io.raw_os_error(),
+        _ => None,
+    }
 }
 
 /// The name both firewall rules carry, so uninstalling can find them again.

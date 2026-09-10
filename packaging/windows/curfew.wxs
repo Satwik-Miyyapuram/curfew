@@ -50,6 +50,10 @@
     <ComponentGroup Id="Program" Directory="INSTALLFOLDER">
       <Component Id="Cli">
         <File Id="curfew.exe" Source="$(Stage)\curfew.exe" KeyPath="yes" />
+        <!-- Stopped before its own file is overwritten, because a running service holds its binary
+             open and the copy would fail. Stopping is refused while a lock is running, which is the
+             same refusal `curfew uninstall` gives and for the same reason. -->
+        <ServiceControl Id="StopCurfew" Name="Curfew" Stop="both" Wait="yes" />
         <!-- On PATH for the terminal commands that have no window yet — editing the config, the
              stats. Nothing in normal use needs it, which is the point of the installer. -->
         <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last"
