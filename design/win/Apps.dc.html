@@ -1,0 +1,62 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:14px; --r-ctl:9px;
+ --f:"Segoe UI Variable Text","Segoe UI",-apple-system,Inter,sans-serif;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;overflow:hidden}
+.win{width:1120px;height:720px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:10px}
+.title{height:38px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line);background:rgba(22,27,35,.7);font-size:12px;color:var(--mut)}
+.title .dot{width:9px;height:9px;border-radius:50%;background:var(--live)}
+.title .sp{flex:1}
+.title .ctl{display:flex;gap:16px;color:var(--dim);font-size:13px}
+.main{flex:1;display:flex;overflow:hidden}
+.side{width:212px;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
+.nav{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--mut)}
+.nav.on{background:var(--sur2);color:var(--tx);font-weight:600}
+.nav .ic{width:16px;text-align:center;font-size:13px}
+.side .sp{flex:1}
+.body{flex:1;padding:22px 26px;overflow:hidden}
+h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.5;margin-top:5px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
+.flush{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.row+.row{border-top:1px solid var(--line)}
+.lbl{font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.btn{height:36px;padding:0 16px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;border:none;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:25px;padding:0 11px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.grow{flex:1}
+</style>
+<div class="win"><div class="title"><span class="dot"></span>Curfew<span class="sp"></span><span class="ctl"><span>–</span><span>□</span><span>✕</span></span></div><div class="main"><div class="side"><div class="nav"><span class="ic">●</span>Now</div><div class="nav"><span class="ic">☷</span>Plan</div><div class="nav on"><span class="ic">▣</span>Apps & sites</div><div class="nav"><span class="ic">◔</span>Where time went</div><div class="nav"><span class="ic">⇄</span>Devices</div><div class="nav"><span class="ic">✓</span>Is it working</div><div class="sp"></div><div class="pill" style="color:var(--live)"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--live)"></span>Study · 1:12 left</div><div style="font-size:11px;color:var(--dim);margin-top:8px;padding:0 4px;line-height:1.5">Service running. Closing this window does not stop it.</div></div><div class="body">
+<h1>What Study closes</h1>
+<div class="sub">Per profile, not per machine. Sleep can leave these open and still close everything else.</div>
+<div style="height:16px"></div>
+<div style="display:flex;gap:8px;align-items:center">
+  <div style="display:flex;gap:4px;background:var(--sur2);padding:4px;border-radius:var(--r-ctl)">
+    <span style="height:30px;padding:0 16px;border-radius:7px;background:var(--acc);color:#0D1016;font-size:12px;font-weight:700;display:grid;place-items:center">Apps · 11</span>
+    <span style="height:30px;padding:0 16px;border-radius:7px;color:var(--mut);font-size:12px;font-weight:600;display:grid;place-items:center">Sites · 4</span>
+  </div>
+  <div class="grow"></div>
+  <div style="height:34px;width:280px;border-radius:var(--r-ctl);background:var(--sur2);display:flex;align-items:center;padding:0 12px;gap:8px;font-size:12px;color:var(--dim)">⌕ Search installed programs</div>
+</div>
+<div style="height:14px"></div>
+<div class="flush">
+  <div class="row"><span class="tile" style="background:rgba(124,156,245,.14)">🎮</span><div class="grow"><div style="font-size:13px;font-weight:600">Steam</div><div style="font-size:11px;color:var(--mut)" class="mono">steam.exe</div></div><span style="width:38px;height:22px;border-radius:999px;background:var(--acc);display:flex;align-items:center;justify-content:flex-end;padding:2px"><span style="width:18px;height:18px;border-radius:50%;background:#0D1016"></span></span></div>
+  <div class="row"><span class="tile" style="background:rgba(124,156,245,.14)">💬</span><div class="grow"><div style="font-size:13px;font-weight:600">Discord</div><div style="font-size:11px;color:var(--mut)" class="mono">discord.exe</div></div><span style="width:38px;height:22px;border-radius:999px;background:var(--acc);display:flex;align-items:center;justify-content:flex-end;padding:2px"><span style="width:18px;height:18px;border-radius:50%;background:#0D1016"></span></span></div>
+  <div class="row"><span class="tile" style="background:rgba(141,154,172,.12)">🎵</span><div class="grow"><div style="font-size:13px;font-weight:600">Spotify</div><div style="font-size:11px;color:var(--mut)" class="mono">spotify.exe</div></div><span style="width:38px;height:22px;border-radius:999px;background:var(--sur2);display:flex;align-items:center;padding:2px"><span style="width:18px;height:18px;border-radius:50%;background:var(--dim)"></span></span></div>
+  <div class="row"><span class="tile" style="background:rgba(141,154,172,.12)">💻</span><div class="grow"><div style="font-size:13px;font-weight:600">Visual Studio Code</div><div style="font-size:11px;color:var(--mut)" class="mono">code.exe</div></div><span style="width:38px;height:22px;border-radius:999px;background:var(--sur2);display:flex;align-items:center;padding:2px"><span style="width:18px;height:18px;border-radius:50%;background:var(--dim)"></span></span></div>
+</div>
+<div style="height:12px"></div>
+<div class="card" style="display:flex;gap:12px;align-items:center">
+  <span class="tile" style="background:rgba(124,156,245,.14)">ℹ</span>
+  <div style="font-size:12px;color:var(--mut);line-height:1.5" class="grow">A blocked program is closed as it opens, and the person is told why — nothing disappears without a sentence. Sites are refused in the hosts file, which every browser on this machine obeys.</div>
+</div>
+</div></div></div>

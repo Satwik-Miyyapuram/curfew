@@ -1,0 +1,72 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:14px; --r-ctl:9px;
+ --f:"Segoe UI Variable Text","Segoe UI",-apple-system,Inter,sans-serif;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;overflow:hidden}
+.win{width:1120px;height:720px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:10px}
+.title{height:38px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line);background:rgba(22,27,35,.7);font-size:12px;color:var(--mut)}
+.title .dot{width:9px;height:9px;border-radius:50%;background:var(--live)}
+.title .sp{flex:1}
+.title .ctl{display:flex;gap:16px;color:var(--dim);font-size:13px}
+.main{flex:1;display:flex;overflow:hidden}
+.side{width:212px;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
+.nav{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--mut)}
+.nav.on{background:var(--sur2);color:var(--tx);font-weight:600}
+.nav .ic{width:16px;text-align:center;font-size:13px}
+.side .sp{flex:1}
+.body{flex:1;padding:22px 26px;overflow:hidden}
+h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.5;margin-top:5px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
+.flush{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.row+.row{border-top:1px solid var(--line)}
+.lbl{font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.btn{height:36px;padding:0 16px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;border:none;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:25px;padding:0 11px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.grow{flex:1}
+</style>
+<div class="win"><div class="title"><span class="dot"></span>Curfew<span class="sp"></span><span class="ctl"><span>–</span><span>□</span><span>✕</span></span></div><div class="main"><div class="side"><div class="nav on"><span class="ic">●</span>Now</div><div class="nav"><span class="ic">☷</span>Plan</div><div class="nav"><span class="ic">▣</span>Apps & sites</div><div class="nav"><span class="ic">◔</span>Where time went</div><div class="nav"><span class="ic">⇄</span>Devices</div><div class="nav"><span class="ic">✓</span>Is it working</div><div class="sp"></div><div class="pill" style="color:var(--live)"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--live)"></span>Study · 1:12 left</div><div style="font-size:11px;color:var(--dim);margin-top:8px;padding:0 4px;line-height:1.5">Service running. Closing this window does not stop it.</div></div><div class="body">
+<h1>Study is running</h1>
+<div class="sub">Started 21:00, ends at midnight. Eleven apps and four sites are closed while it runs.</div>
+<div style="height:18px"></div>
+<div class="card" style="display:flex;align-items:center;gap:22px">
+  <div>
+    <div class="lbl">Time left</div>
+    <div style="font-size:44px;font-weight:700;letter-spacing:-1.5px;color:var(--live);line-height:1.1" class="mono">1:12:04</div>
+    <div style="font-size:12px;color:var(--mut);margin-top:2px">Ends at 00:00 · you chose to confirm before ending it</div>
+  </div>
+  <div class="grow"></div>
+  <button class="btn ghost">End it early</button>
+  <button class="btn">Add 30 minutes</button>
+</div>
+<div style="height:14px"></div>
+<div style="display:flex;gap:14px">
+  <div class="flush grow">
+    <div class="row"><span class="lbl grow">Closed just now</span></div>
+    <div class="row"><span class="tile" style="background:rgba(242,114,114,.14)">✕</span><div class="grow"><div style="font-size:13px;font-weight:600">Steam</div><div style="font-size:11px;color:var(--mut)">Closed 4 minutes ago · blocked during Study</div></div></div>
+    <div class="row"><span class="tile" style="background:rgba(242,114,114,.14)">✕</span><div class="grow"><div style="font-size:13px;font-weight:600">Discord</div><div style="font-size:11px;color:var(--mut)">Closed 12 minutes ago · blocked during Study</div></div></div>
+    <div class="row"><span class="tile" style="background:rgba(124,156,245,.14)">◔</span><div class="grow"><div style="font-size:13px;font-weight:600">reddit.com</div><div style="font-size:11px;color:var(--mut)">Refused by the hosts file · 26 times today</div></div></div>
+  </div>
+  <div style="width:330px" class="card">
+    <div class="lbl">Next 24 hours</div>
+    <div style="height:10px"></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:6px 0"><span style="width:9px;height:9px;border-radius:50%;background:var(--acc)"></span><div class="grow" style="font-size:13px">Sleep</div><div class="mono" style="font-size:12px;color:var(--mut)">00:00–07:00</div></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:6px 0"><span style="width:9px;height:9px;border-radius:50%;background:var(--ok)"></span><div class="grow" style="font-size:13px">Lecture — from your calendar</div><div class="mono" style="font-size:12px;color:var(--mut)">09:00–11:00</div></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:6px 0"><span style="width:9px;height:9px;border-radius:50%;background:var(--acc)"></span><div class="grow" style="font-size:13px">Study</div><div class="mono" style="font-size:12px;color:var(--mut)">21:00–midnight</div></div>
+    <div style="height:12px"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill" style="color:var(--ok)">Ticks on time</span><span class="pill">1 peer</span><span class="pill">312 logged</span></div>
+  </div>
+</div>
+<div style="height:14px"></div>
+<div style="font-size:12px;color:var(--dim)">A lock is a promise: ending a session early goes through the same check you set up, even here.</div>
+</div></div></div>

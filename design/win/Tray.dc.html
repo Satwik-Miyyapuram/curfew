@@ -1,0 +1,53 @@
+<script src="./support.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+ --bg:#0D1016; --sur:#161B23; --sur2:#1D242E; --line:#2A3341;
+ --tx:#EDF1F7; --mut:#8D9AAC; --dim:#5D6879;
+ --acc:#7C9CF5; --live:#F2A65A; --ok:#5FD3A6; --bad:#F27272;
+ --r-card:14px; --r-ctl:9px;
+ --f:"Segoe UI Variable Text","Segoe UI",-apple-system,Inter,sans-serif;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;overflow:hidden}
+.win{width:360px;height:430px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line);border-radius:10px}
+.title{height:38px;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--line);background:rgba(22,27,35,.7);font-size:12px;color:var(--mut)}
+.title .dot{width:9px;height:9px;border-radius:50%;background:var(--live)}
+.title .sp{flex:1}
+.title .ctl{display:flex;gap:16px;color:var(--dim);font-size:13px}
+.main{flex:1;display:flex;overflow:hidden}
+.side{width:212px;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
+.nav{height:36px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:var(--r-ctl);font-size:13px;color:var(--mut)}
+.nav.on{background:var(--sur2);color:var(--tx);font-weight:600}
+.nav .ic{width:16px;text-align:center;font-size:13px}
+.side .sp{flex:1}
+.body{flex:1;padding:22px 26px;overflow:hidden}
+h1{font-size:23px;font-weight:700;letter-spacing:-.4px}
+.sub{font-size:13px;color:var(--mut);line-height:1.5;margin-top:5px}
+.card{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);padding:16px}
+.flush{background:var(--sur);border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.row+.row{border-top:1px solid var(--line)}
+.lbl{font-size:10px;font-weight:700;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim)}
+.btn{height:36px;padding:0 16px;border-radius:var(--r-ctl);background:var(--acc);color:#0D1016;font-size:13px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;border:none;font-family:var(--f)}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:25px;padding:0 11px;border-radius:999px;font-size:11px;font-weight:600;background:var(--sur2);color:var(--mut)}
+.tile{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:15px}
+.mono{font-family:ui-monospace,Consolas,monospace}
+.grow{flex:1}
+</style>
+
+<div style="width:360px;height:430px;padding:18px;display:flex;align-items:flex-end;justify-content:flex-end;background:#0D1016">
+  <div style="width:308px;background:var(--sur);border:1px solid var(--line);border-radius:12px;padding:7px;box-shadow:0 18px 40px rgba(0,0,0,.5)">
+    <div style="padding:9px 11px;font-size:12px;color:var(--live);font-weight:600">Study · 1 h 12 min left</div>
+    <div style="padding:2px 11px 9px;font-size:11px;color:var(--mut)">Ends Fri 6 Sep, 00:00</div>
+    <div style="height:1px;background:var(--line);margin:5px 0"></div>
+    <div style="padding:9px 11px;font-size:13px;border-radius:7px;background:var(--sur2)">End Study</div>
+    <div style="padding:9px 11px;font-size:13px;color:var(--mut)">End Sleep — needs your Windows password</div>
+    <div style="padding:9px 11px;font-size:13px;color:var(--mut)">Spend an emergency pass (2 left)</div>
+    <div style="padding:9px 11px;font-size:13px;color:var(--mut)">Ask for a release in 24 hours</div>
+    <div style="height:1px;background:var(--line);margin:5px 0"></div>
+    <div style="padding:9px 11px;font-size:13px;color:var(--mut)">What is blocked right now…</div>
+    <div style="padding:9px 11px;font-size:13px;color:var(--mut)">Hide this icon</div>
+    <div style="padding:4px 11px 9px;font-size:11px;color:var(--dim);line-height:1.45">Hiding the icon does not stop anything. The service keeps enforcing with this menu closed.</div>
+  </div>
+</div>
