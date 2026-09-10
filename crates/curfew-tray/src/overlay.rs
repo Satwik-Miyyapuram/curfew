@@ -16,6 +16,19 @@ use std::collections::BTreeSet;
 /// How long the notice stays up.
 pub const DWELL_MS: u32 = 7_000;
 
+/// How long a notice of `text` should stay up.
+///
+/// A block explanation is one sentence and seven seconds is generous for it. The same window now
+/// carries the answers the menu used to hand to a `MessageBox` — what the service said, why it
+/// could not be reached, the welcome — and some of those are a paragraph, which nobody finishes
+/// in seven seconds. So the dwell follows the reading: a beat to notice it, then roughly the time
+/// it takes to read at an unhurried pace, capped so a stray long string cannot leave a card parked
+/// on the screen. A click still dismisses it at any point.
+pub fn dwell_for(text: &str) -> u32 {
+    let reading = text.chars().count() as u32 * 55;
+    (DWELL_MS + reading).min(40_000)
+}
+
 /// Names closed since the previous poll.
 ///
 /// The service reports what the last pass closed, and passes repeat every couple of seconds while
@@ -123,8 +136,8 @@ mod sys {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, DT_LEFT,
-        DT_NOPREFIX, DT_TOP, DT_WORDBREAK, PAINTSTRUCT, TRANSPARENT,
+        EndPaint, FillRect, GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn,
+        DT_CALCRECT, DT_LEFT, DT_NOPREFIX, DT_TOP, DT_WORDBREAK, PAINTSTRUCT, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -136,7 +149,9 @@ mod sys {
 
     const CLOSE_TIMER: usize = 7;
     const WIDTH: i32 = 460;
-    const HEIGHT: i32 = 196;
+    /// The shortest a card is ever drawn. A one-line notice in a tall card looks like something
+    /// failed to load.
+    const MIN_HEIGHT: i32 = 196;
 
     // The phone's palette, as GDI wants it: 0x00BBGGRR, not the 0xRRGGBB the rest of the project
     // writes. One app should not look like two, and this notice is the only Curfew surface most
@@ -156,6 +171,8 @@ mod sys {
     const STRIPE: i32 = 4;
     /// The breathing room between the text and the edge of the card.
     const PAD: i32 = 22;
+    /// The gap between the line that states the fact and the paragraphs under it.
+    const GAP: i32 = 14;
 
     thread_local! {
         static TEXT: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -236,7 +253,19 @@ mod sys {
                     right: rect.right - PAD,
                     bottom: rect.bottom - PAD,
                 };
+                // Measured, then drawn. The height a `DrawTextW` returns is the height of what it
+                // put on screen, which is one line short of what was wrapped when the string ends
+                // without a break, and the body was landing on top of the title's last line.
+                // DT_CALCRECT asks the same question of the same rect without painting anything.
+                let mut calc = title_rect;
                 let title_height = DrawTextW(
+                    dc,
+                    title.as_mut_ptr(),
+                    -1,
+                    &mut calc,
+                    DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT,
+                );
+                DrawTextW(
                     dc,
                     title.as_mut_ptr(),
                     -1,
@@ -250,7 +279,7 @@ mod sys {
                     SetTextColor(dc, MUTED);
                     let mut body_rect = RECT {
                         left: title_rect.left,
-                        top: rect.top + PAD + title_height + 14,
+                        top: rect.top + PAD + title_height + GAP,
                         right: title_rect.right,
                         bottom: rect.bottom - PAD,
                     };
@@ -285,9 +314,51 @@ mod sys {
         }
     }
 
+    /// How tall the card has to be to hold `text` without cutting a word off.
+    ///
+    /// The height used to be a constant, which was right while the only thing this window said was
+    /// one sentence about a closed application. It now says everything the menu says, including a
+    /// paragraph about why the service cannot be reached, and a fixed 196 px cut those in half. The
+    /// measurement runs the same two fonts and the same wrap width as the paint pass, on a screen
+    /// DC, and asks GDI where the text would end.
+    fn measure(text: &str) -> i32 {
+        let wrap = WIDTH - STRIPE - PAD * 2;
+        let (mut title, mut body) = split(&wide(text));
+        // SAFETY: a screen DC is released below, every object selected is deleted after the DC is
+        // put back, and DT_CALCRECT draws nothing.
+        unsafe {
+            let dc = GetDC(std::ptr::null_mut());
+            if dc.is_null() {
+                return MIN_HEIGHT;
+            }
+            let mut rect = RECT { left: 0, top: 0, right: wrap, bottom: 0 };
+            let title_font = font(-21, 600);
+            let previous = SelectObject(dc, title_font as _);
+            let flags = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT;
+            let title_height = DrawTextW(dc, title.as_mut_ptr(), -1, &mut rect, flags);
+            let mut body_height = 0;
+            if body.len() > 1 {
+                let body_font = font(-16, 400);
+                SelectObject(dc, body_font as _);
+                let mut body_rect = RECT { left: 0, top: 0, right: wrap, bottom: 0 };
+                body_height = DrawTextW(dc, body.as_mut_ptr(), -1, &mut body_rect, flags) + GAP;
+                DeleteObject(body_font as _);
+            }
+            SelectObject(dc, previous);
+            DeleteObject(title_font as _);
+            ReleaseDC(std::ptr::null_mut(), dc);
+
+            let wanted = PAD * 2 + title_height + body_height;
+            // Never taller than most of the screen: a card that runs off the bottom edge hides the
+            // end of its own sentence and there is nothing to scroll.
+            wanted.clamp(MIN_HEIGHT, (GetSystemMetrics(SM_CYSCREEN) * 3) / 4)
+        }
+    }
+
     /// Put the notice on screen. It never takes focus, so it cannot steal a keystroke from whatever
     /// the user moved on to.
     pub fn show(text: &str, dwell_ms: u32) {
+        let height = measure(text);
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
             let class_name = wide("CurfewOverlay");
@@ -310,9 +381,9 @@ mod sys {
                 // Bottom right, where Windows puts everything else that speaks without being asked.
                 // Centred, it landed on top of the window the user was about to go back to.
                 screen_w - WIDTH - 24,
-                screen_h - HEIGHT - 72,
+                screen_h - height - 72,
                 WIDTH,
-                HEIGHT,
+                height,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 instance,
@@ -322,7 +393,7 @@ mod sys {
                 return;
             }
             // Rounded, like every other surface Windows 11 draws and like every card on the phone.
-            let region = CreateRoundRectRgn(0, 0, WIDTH + 1, HEIGHT + 1, 18, 18);
+            let region = CreateRoundRectRgn(0, 0, WIDTH + 1, height + 1, 18, 18);
             SetWindowRgn(window, region, 0);
 
             ShowWindow(window, SW_SHOWNA);
@@ -372,6 +443,22 @@ mod tests {
     use curfew_core::{Lock, LockSet, Session, SessionSource};
 
     const NOW: Timestamp = 1_788_510_600;
+
+    #[test]
+    fn a_paragraph_is_given_longer_to_be_read_than_a_sentence() {
+        let sentence = "Slack is blocked during deep-work.";
+        let paragraph = crate::welcome::WELCOME;
+        assert!(dwell_for(paragraph) > dwell_for(sentence));
+        // The short case is not made slower by the change: it is still the seven seconds a closed
+        // application has always had, plus a little.
+        assert!(dwell_for(sentence) < DWELL_MS + 3_000);
+    }
+
+    #[test]
+    fn a_runaway_string_cannot_park_a_card_on_the_screen() {
+        let absurd = "x".repeat(100_000);
+        assert_eq!(dwell_for(&absurd), 40_000);
+    }
 
     fn set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|n| n.to_string()).collect()

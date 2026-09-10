@@ -19,9 +19,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW,
     PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu,
-    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONINFORMATION, MB_ICONWARNING, MB_OK,
-    MB_YESNO, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP,
-    WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONWARNING, MB_YESNO, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY,
+    WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 /// The message the shell sends us when someone clicks the icon.
@@ -61,15 +61,20 @@ fn wide(text: &str) -> Vec<u16> {
     std::ffi::OsStr::new(text).encode_wide().chain(std::iter::once(0)).collect()
 }
 
-fn say(window: HWND, text: &str) {
+/// Say something back after a menu click.
+///
+/// This was a `MessageBox` for as long as the menu had nothing to say but "done". It grew into the
+/// place the app explains itself — what the service answered, why it cannot be reached and what
+/// to run, the welcome — and a grey system dialog with an OK button was the wrong voice for all
+/// of it: it looked like an error whatever it said, it stole focus from whatever the user was doing,
+/// and it made one app look like two next to the notice that explains a closed window. Same card,
+/// same palette, same click-to-dismiss. The yes/no dialogs stay as they are: this window tells, it
+/// does not ask, and a question needs a button and the focus that goes with it.
+fn say(_window: HWND, text: &str) {
     if text.is_empty() {
         return;
     }
-    let body = wide(text);
-    let caption = wide("Curfew");
-    unsafe {
-        MessageBoxW(window, body.as_ptr(), caption.as_ptr(), MB_OK | MB_ICONINFORMATION);
-    }
+    crate::overlay::show(text, crate::overlay::dwell_for(text));
 }
 
 /// One line for the tooltip: what a glance at the icon should tell you.
