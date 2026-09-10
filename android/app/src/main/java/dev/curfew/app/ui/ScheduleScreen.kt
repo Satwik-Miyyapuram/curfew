@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.ProfileName
 import dev.curfew.policy.WeeklySchedule
@@ -76,6 +77,10 @@ fun ScheduleScreen(
     var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
     var removing by remember { mutableStateOf<Removal?>(null) }
     var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
+
+    // Which profile is picking meetings, if any. The picker is the same sheet the profile screen
+    // opens, so an event chosen from either place is the same rule written the same way.
+    var picking by remember { mutableStateOf<ProfileName?>(null) }
 
     // Schedules point at a profile by id; every row says the name instead. A row headed
     // "socials-diet" is the config talking, not the app.
@@ -136,29 +141,79 @@ fun ScheduleScreen(
 
         Gap(22.dp)
 
-        if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
+        if (state.profiles.isEmpty()) {
             DCard {
                 Text(
-                    if (state.profiles.isEmpty()) {
-                        "Nothing can start a block yet. Make a profile first — a profile is the " +
-                            "set of things to switch off — then say when it should run."
-                    } else {
-                        "Nothing starts on its own yet. Add a weekly window for the same time " +
-                            "every week, or a calendar rule that follows your meetings."
-                    },
+                    "Nothing can start a block yet. Make a profile first \u2014 a profile is the " +
+                        "set of things to switch off \u2014 then say when it should run.",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = Palette.Muted,
                 )
             }
-        } else {
+        }
+
+        // One card per profile, with everything that can switch it on inside it.
+        //
+        // The flat list this replaced gave every rule a card of its own, headed by the profile it
+        // ran \u2014 so a profile started by three meetings read as three separate blocks all called
+        // "Distractions", and the events themselves were only ever described as a matcher. A plan
+        // is a small number of profiles, each with a handful of reasons to run; this says that.
+        state.profiles.forEachIndexed { index, profile ->
+            val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
+            val windows = state.weekly.filter { it.profile == profile.id }
+            val calendar = state.calendarRules.filter { it.profile == profile.id }
+
             DCardFlush {
-                var first = true
-                state.weekly.forEach { window ->
-                    if (!first) Rule()
-                    first = false
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = { onEditProfile(profile.id) },
+                            onLongClick = { removingProfile = profile },
+                            onClickLabel = "Edit ${profile.name}",
+                            onLongClickLabel = "Remove ${profile.name}",
+                        )
+                        .padding(Dsn.CardPad),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(13.dp),
+                ) {
+                    Glyph(tint, size = 38.dp) {
+                        Text(
+                            profile.name.take(1).uppercase(),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tint,
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            profile.name,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Palette.Text,
+                        )
+                        Text(
+                            model.describeBlocks(profile.id),
+                            fontSize = 12.sp,
+                            color = Palette.Muted,
+                        )
+                    }
+                    // The master switch: what "not this week" means for a whole profile, rather
+                    // than for one of the three rules that happen to start it.
+                    val live = windows.any { it.enabled } || calendar.any { it.enabled }
+                    if (windows.isNotEmpty() || calendar.isNotEmpty()) {
+                        Switch(live) { on ->
+                            windows.forEach { model.saveWeekly(it.copy(enabled = on)) }
+                            calendar.forEach { model.saveCalendarRule(it.copy(enabled = on)) }
+                        }
+                    }
+                }
+
+                windows.forEach { window ->
+                    Rule()
                     TriggerRow(
-                        name = names[window.profile] ?: window.profile,
+                        title = describeWindow(window).substringBefore(" \u00B7 "),
                         note = describeWindow(window),
                         tint = Palette.Live,
                         enabled = window.enabled,
@@ -169,12 +224,13 @@ fun ScheduleScreen(
                         },
                     )
                 }
-                state.calendarRules.forEach { rule ->
-                    if (!first) Rule()
-                    first = false
+
+                calendar.forEach { rule ->
+                    Rule()
+                    val caught = state.calendarEvents.filter { matches(rule, it) }
                     TriggerRow(
-                        name = names[rule.profile] ?: rule.profile,
-                        note = "From your calendar · " + describeMatcher(rule.matcher),
+                        title = "From your calendar",
+                        note = describeMatcher(rule.matcher),
                         tint = Palette.Accent,
                         enabled = rule.enabled,
                         onToggle = { model.saveCalendarRule(rule.copy(enabled = it)) },
@@ -182,12 +238,43 @@ fun ScheduleScreen(
                         onRemove = {
                             removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
                         },
+                        bottomPad = if (caught.isEmpty()) Dsn.CardPad else 8.dp,
+                    )
+                    // The meetings themselves, named. A rule the user made by tapping an event is
+                    // stored as a title match, and printing the match back at them ("Events titled
+                    // Tapri Lab Meeting") is the config talking; these are the actual dates it has.
+                    caught.take(4).forEach { event ->
+                        CaughtEvent(event.title, "${dayLabel(event.start, state.now)} " + clockTime(event.start))
+                    }
+                    if (caught.size > 4) {
+                        CaughtEvent("and ${caught.size - 4} more", "")
+                    }
+                }
+
+                if (windows.isEmpty() && calendar.isEmpty()) {
+                    Rule()
+                    TriggerRow(
+                        title = "Nothing starts it yet",
+                        note = "Pick a meeting, or set a schedule",
+                        tint = Palette.Muted,
+                        enabled = false,
+                        onToggle = {},
+                        onOpen = { picking = profile },
+                        onRemove = {},
+                        showSwitch = false,
                     )
                 }
+
+                // Adding a meeting to a profile that already follows some, without going through
+                // the profile screen: this is the page those meetings are listed on.
+                if (state.calendarGranted && (windows.isNotEmpty() || calendar.isNotEmpty())) {
+                    AddEvent { picking = profile }
+                }
             }
+            Gap(14.dp)
         }
 
-        Gap(12.dp)
+        Gap(4.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             GhostButton("Add a window", Modifier.weight(1f), enabled = state.profiles.isNotEmpty()) {
                 weeklyForm = Editing(null)
@@ -199,7 +286,7 @@ fun ScheduleScreen(
             ) { calendarForm = Editing(null) }
         }
 
-        Gap(18.dp)
+        Gap(14.dp)
         // The status line the canvas ends on: whether the calendar half of the plan can actually
         // happen. It is the one dependency on this screen that lives outside the app.
         DCard(padding = 16.dp) {
@@ -214,53 +301,6 @@ fun ScheduleScreen(
                 lineHeight = 19.sp,
                 color = if (state.calendarGranted) Palette.Muted else Palette.Bad,
             )
-        }
-
-        if (state.profiles.isNotEmpty()) {
-            Gap(22.dp)
-            SectionLabel("Profiles")
-            Gap(10.dp)
-            DCardFlush {
-                state.profiles.forEachIndexed { index, profile ->
-                    if (index > 0) Rule()
-                    val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = { onEditProfile(profile.id) },
-                                onLongClick = { removingProfile = profile },
-                                onClickLabel = "Edit ${profile.name}",
-                                onLongClickLabel = "Remove ${profile.name}",
-                            )
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(13.dp),
-                    ) {
-                        Glyph(tint, size = 38.dp) {
-                            Text(
-                                profile.name.take(1).uppercase(),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = tint,
-                            )
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                profile.name,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
-                            )
-                            Text(
-                                countWindows(state.weekly, state.calendarRules, profile.id),
-                                fontSize = 12.sp,
-                                color = Palette.Muted,
-                            )
-                        }
-                    }
-                }
-            }
         }
 
         // Power only, and last: the file is for the person who wants the file. In Simple mode the
@@ -303,6 +343,15 @@ fun ScheduleScreen(
                 color = Palette.Muted,
             )
         }
+    }
+
+    picking?.let { profile ->
+        CalendarPickerSheet(
+            model = model,
+            profileId = profile.id,
+            profileName = profile.name,
+            onDone = { picking = null },
+        )
     }
 
     removingProfile?.let { profile ->
@@ -391,13 +440,15 @@ fun ScheduleScreen(
  */
 @Composable
 private fun TriggerRow(
-    name: String,
+    title: String,
     note: String,
     tint: androidx.compose.ui.graphics.Color,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
     onOpen: () -> Unit,
     onRemove: () -> Unit,
+    showSwitch: Boolean = true,
+    bottomPad: androidx.compose.ui.unit.Dp = Dsn.CardPad,
 ) {
     Row(
         modifier = Modifier
@@ -408,30 +459,105 @@ private fun TriggerRow(
                 onClickLabel = "Edit this trigger",
                 onLongClickLabel = "Remove this trigger",
             )
-            .padding(Dsn.CardPad)
-            .alpha(if (enabled) 1f else 0.55f),
+            .padding(start = Dsn.CardPad, end = Dsn.CardPad, top = Dsn.CardPad, bottom = bottomPad)
+            .alpha(if (enabled || !showSwitch) 1f else 0.55f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         val glyphTint = if (enabled) tint else Palette.Muted
-        Glyph(glyphTint) {
+        Glyph(glyphTint, size = 38.dp) {
             Text(
-                name.take(1).uppercase(),
+                title.take(1).uppercase(),
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = glyphTint,
             )
         }
         Column(Modifier.weight(1f)) {
-            Text(name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
             Text(
-                if (enabled) note else "$note · paused",
-                fontSize = 13.sp,
+                if (enabled || !showSwitch) note else "$note · paused",
+                fontSize = 12.5.sp,
                 color = Palette.Muted,
             )
         }
-        Switch(enabled, onToggle)
+        if (showSwitch) Switch(enabled, onToggle)
     }
+}
+
+/** One meeting a calendar rule has caught, indented under the rule that caught it. */
+@Composable
+private fun CaughtEvent(title: String, whenIt: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 69.dp, end = Dsn.CardPad, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(11.dp))
+                .background(Palette.Raised)
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Text(
+                    title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Palette.Text,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (whenIt.isNotEmpty()) {
+                    Text(whenIt, fontSize = 11.5.sp, color = Palette.Dim)
+                }
+            }
+        }
+    }
+}
+
+/** The way to add another meeting to a profile without leaving the page that lists them. */
+@Composable
+private fun AddEvent(onClick: () -> Unit) {
+    Text(
+        "+  Add an event",
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Palette.Accent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onClickLabel = "Add an event")
+            .padding(start = 69.dp, end = Dsn.CardPad, top = 2.dp, bottom = 16.dp),
+    )
+}
+
+/**
+ * Whether a rule would catch an event, for listing purposes only.
+ *
+ * Deliberately the loose half of the core's matcher \u2014 title, calendar and busy \u2014 because this
+ * is a label under a row, not the decision to block: the core does that, on the same data, and
+ * anything shown here that it would not catch is a wrong caption rather than a wrong block.
+ */
+private fun matches(rule: CalendarSchedule, event: CalendarEvent): Boolean {
+    val m = rule.matcher
+    val title = m.title
+    if (!title.isNullOrBlank() && !event.title.contains(title.trim('*'), ignoreCase = true)) {
+        return false
+    }
+    val calendar = m.calendar
+    if (!calendar.isNullOrBlank() && !event.calendar.equals(calendar, ignoreCase = true)) {
+        return false
+    }
+    if (m.busyOnly && !event.busy) return false
+    return true
 }
 
 /** The subtitle under "Plan": what the list below adds up to, in one sentence. */

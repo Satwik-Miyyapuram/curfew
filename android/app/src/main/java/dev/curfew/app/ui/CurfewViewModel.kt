@@ -9,6 +9,7 @@ import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.app.data.CalendarReader
 import dev.curfew.app.data.Downtime
 import dev.curfew.app.curfew
+import dev.curfew.policy.Action
 import dev.curfew.policy.Activation
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
@@ -707,6 +708,36 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The packages the picker should open with ticked, for [profile]. */
+    /**
+     * The daily budget this profile rations its apps by, in seconds, or null if it has none.
+     *
+     * Deliberately not read through [rulesBeyondApps]: a budget is written onto the app rules
+     * themselves, which that helper filters out, so the profile screen was asking the one list
+     * that could never answer and showed a budget it had just saved as unset.
+     */
+    fun budgetSeconds(profile: String): Int? =
+        runCatching { runtime.rules(profile) }.getOrDefault(emptyList())
+            .firstNotNullOfOrNull { (it.action as? Action.Budget)?.seconds }
+
+    /**
+     * One line naming what a profile takes away: "2 apps · 1 site · 1h a day".
+     *
+     * The Plan page shows a profile once, with its reasons nested under it, so this is the only
+     * place the contents get counted — a card that named neither would be a title and a switch.
+     */
+    fun describeBlocks(profile: String): String {
+        val apps = blockedApps(profile).size
+        val sites = rulesBeyondApps(profile)
+            .count { it.target is Target.Domain || it.target is Target.Url }
+        val budget = budgetSeconds(profile)
+        val parts = buildList {
+            if (apps > 0) add("$apps app" + if (apps == 1) "" else "s")
+            if (sites > 0) add("$sites site" + if (sites == 1) "" else "s")
+            if (budget != null) add(spellDuration(budget / 60) + " a day")
+        }
+        return if (parts.isEmpty()) "Nothing yet" else parts.joinToString(" · ")
+    }
+
     fun blockedApps(profile: String): List<String> =
         Policy.blockedApps(runCatching { runtime.policy.configToml() }.getOrDefault(""), profile)
 

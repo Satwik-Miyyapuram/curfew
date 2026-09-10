@@ -325,6 +325,9 @@ class CurfewRuntime internal constructor(
     }
 
     /** Everything a profile blocks that is not a plain app block. */
+    /** Every rule in a profile, apps included. */
+    fun rules(profile: String): List<Rule> = policy.rules(profile)
+
     fun rulesBeyondApps(profile: String): List<Rule> =
         policy.rules(profile).filter { it.target !is Target.AppPackage }
 

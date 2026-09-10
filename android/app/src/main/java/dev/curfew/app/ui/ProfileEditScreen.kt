@@ -129,16 +129,38 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // Read back from the config rather than from a wizard's own memory: a trigger is chosen
         // because something in curfew.toml says so, which is the only version of "chosen" that
         // survives leaving the screen.
-        val budgeted = remember(profileId, state.configToml) {
-            model.rulesBeyondApps(profileId).any { it.action is Action.Budget }
+        val budgetSeconds = remember(profileId, state.configToml) { model.budgetSeconds(profileId) }
+        val budgeted = budgetSeconds != null
+        val budgetExample = budgetSeconds
+            ?.let { "${spellDuration(it / 60)} a day, then they close." }
+            ?: "Half an hour of socials a day, then they close."
+        val mine = state.calendarRules.filter { it.profile == profileId }
+        val fromCalendar = mine.isNotEmpty()
+
+        // Once a rule exists, the hint is worse than nothing: the row went on offering ‘lecture’ as
+        // an example while sitting under a tick, so the one thing it could not tell you was which
+        // meetings it had actually caught. Named while there are few enough to name.
+        val calendarExample = when {
+            mine.isEmpty() -> "Events whose title contains \u2018lecture\u2019."
+            mine.size == 1 -> {
+                val title = mine.first().matcher.title
+                if (title.isNullOrBlank()) "One event starts it." else "\u201C$title\u201D starts it."
+            }
+            else -> "${mine.size} events start it."
         }
-        val fromCalendar = state.calendarRules.any { it.profile == profileId }
         val triggers = listOf(
             Trigger(
                 glyph = "\uD83D\uDD01",
                 tint = Palette.Accent,
                 title = "A repeating schedule",
-                example = "Weeknights 21:00 to midnight, every Mon\u2013Fri.",
+                // A tick with a suggestion under it read as "still not set". Once there is a
+                // window, the row says which one, and the card that edits and removes it sits
+                // directly below rather than underneath the whole rest of the screen.
+                example = when (windows.size) {
+                    0 -> "Weeknights 21:00 to midnight, every Mon\u2013Fri."
+                    1 -> describeWindow(windows.first()) + ". Edit it below."
+                    else -> "${windows.size} windows. Edit them below."
+                },
                 chosen = windows.isNotEmpty(),
             ),
             Trigger(
@@ -153,14 +175,14 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 glyph = "\uD83D\uDCC5",
                 tint = Palette.Ok,
                 title = "Anything in my calendar",
-                example = "Events whose title contains \u2018lecture\u2019.",
+                example = calendarExample,
                 chosen = fromCalendar,
             ),
             Trigger(
                 glyph = "\u23F3",
                 tint = Palette.Bad,
                 title = "A daily budget",
-                example = "Half an hour of socials a day, then they close.",
+                example = budgetExample,
                 chosen = budgeted,
             ),
             Trigger(
@@ -180,6 +202,12 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         "A repeating schedule" -> {
                             if (name.isBlank()) {
                                 model.say("Give it a name first.")
+                            } else if (windows.isNotEmpty()) {
+                                // Already set. Every tap used to mint another 21:00 Mon\u2013Fri
+                                // window, so the trigger could be chosen over and over and never
+                                // unchosen; the window's own card, right below, is where it gets
+                                // edited or removed.
+                                Unit
                             } else {
                                 model.saveProfileWithWindow(
                                     profileId,
@@ -241,6 +269,15 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
         }
 
+        windows.forEach { window ->
+            Gap(12.dp)
+            WindowCard(
+                window = window,
+                onChange = { model.saveWeekly(it) },
+                onRemove = { model.deleteWeekly(window.id) },
+            )
+        }
+
         Gap(16.dp)
         SectionLabel("What it blocks")
         Gap(8.dp)
@@ -275,14 +312,6 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             color = Palette.Dim,
         )
 
-        windows.forEach { window ->
-            Gap(12.dp)
-            WindowCard(
-                window = window,
-                onChange = { model.saveWeekly(it) },
-                onRemove = { model.deleteWeekly(window.id) },
-            )
-        }
 
         Gap(18.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -428,8 +428,12 @@ internal fun search(events: List<CalendarEvent>, query: String): List<CalendarEv
  * A profile is the place where a person decides what a block *is*, so it is also where they expect
  * to say "and during these meetings". Sending them to another tab to do it — and to pick, from a
  * dropdown, the profile they were already looking at — is the kind of detour that gets a feature
- * abandoned halfway. Tapping an event here writes the rule against this profile straight away and
- * closes the sheet: the profile is not a question that needs asking twice.
+ * abandoned halfway. Tapping an event here writes the rule against this profile straight away: the
+ * profile is not a question that needs asking twice.
+ *
+ * The sheet then stays open. It asks which meetings, plural, and closing after the first one made
+ * that a lie — picking a week of lectures meant reopening the sheet once per lecture. The tapped
+ * card turns into a “Blocks …” chip, which is the whole receipt; leaving is the back arrow.
  */
 @Composable
 fun CalendarPickerSheet(
@@ -483,7 +487,6 @@ fun CalendarPickerSheet(
                                 locks = listOf(dev.curfew.policy.Lock.Confirm),
                             ),
                         )
-                        onDone()
                     },
                 )
             }

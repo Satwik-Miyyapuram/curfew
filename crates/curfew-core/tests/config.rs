@@ -145,8 +145,9 @@ fn an_empty_config_is_valid_and_blocks_nothing() {
 }
 
 /// The app picker's edits, which are the only writes to a config that do not come from a person
-/// typing. The rules are: what the picker owns it may replace, and what it does not own it must
-/// not touch — a hand-written budget is the user saying something more specific.
+/// typing. The picker owns every app rule in the profile, blocked outright or rationed by a
+/// budget: both are shown ticked, so both must survive a save that leaves the tick alone, and both
+/// go when the tick does. Rules against anything but an app — a site, a URL — it must not touch.
 mod picker {
     use curfew_core::config::{Action, Config};
     use curfew_core::target::Target;
@@ -173,9 +174,12 @@ action = { kind = "block" }
 "#;
 
     #[test]
-    fn the_picker_sees_only_the_rules_it_owns() {
+    fn the_picker_sees_the_app_rules_and_not_the_site_ones() {
         let config = Config::from_toml(CONFIG).unwrap();
-        assert_eq!(config.blocked_apps("deep-work"), vec!["com.instagram.android".to_string()]);
+        assert_eq!(
+            config.blocked_apps("deep-work"),
+            vec!["com.instagram.android".to_string(), "com.reddit.frontpage".to_string()]
+        );
     }
 
     #[test]
@@ -187,12 +191,35 @@ action = { kind = "block" }
     }
 
     #[test]
-    fn a_budget_on_an_app_survives_the_picker() {
+    /// The budget belongs to the tick. Saving the same set back — which the app does on every
+    /// visit to the picker — used to rewrite the rationed app as a plain block, so a budget set
+    /// on Monday was gone by Tuesday without anyone touching it.
+    fn a_budget_survives_the_app_staying_ticked() {
+        let mut config = Config::from_toml(CONFIG).unwrap();
+        config
+            .set_blocked_apps(
+                "deep-work",
+                &["com.instagram.android".into(), "com.reddit.frontpage".into()],
+            )
+            .unwrap();
+
+        let profile = config.profile("deep-work").unwrap();
+        assert!(profile.rules.iter().any(|r| matches!(
+            (&r.target, &r.action),
+            (Target::AppPackage { package }, Action::Budget { seconds: 600, .. })
+                if package == "com.reddit.frontpage"
+        )));
+    }
+
+    #[test]
+    /// Unticking is the user saying the app is not blocked at all, and a ration is a way of being
+    /// blocked. What it must not reach is the rest of the profile.
+    fn unticking_an_app_takes_its_budget_with_it_and_leaves_the_sites_alone() {
         let mut config = Config::from_toml(CONFIG).unwrap();
         config.set_blocked_apps("deep-work", &[]).unwrap();
 
         let profile = config.profile("deep-work").unwrap();
-        assert!(profile.rules.iter().any(|r| matches!(r.action, Action::Budget { .. })));
+        assert!(!profile.rules.iter().any(|r| matches!(r.action, Action::Budget { .. })));
         assert!(profile.rules.iter().any(|r| matches!(&r.target, Target::Domain { .. })));
     }
 

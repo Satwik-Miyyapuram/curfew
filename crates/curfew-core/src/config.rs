@@ -183,10 +183,28 @@ impl Config {
         let Some(p) = self.profiles.iter_mut().find(|p| p.id == profile) else {
             return Err(ConfigError::Invalid(format!("no profile {profile:?}")));
         };
+        // What a package was rationed by before, so a tick survives being re-saved: the picker
+        // owns budgeted apps as well as plainly blocked ones (they are shown ticked), and dropping
+        // them to a plain block on every save would have quietly deleted the budget the profile
+        // screen had just set. Unticking still removes both — not blocked is not rationed.
+        let budgets: Vec<(String, Action)> = p
+            .rules
+            .iter()
+            .filter_map(|r| match (&r.target, &r.action) {
+                // Cloned whole, refill included: a budget is more than its number of seconds.
+                (Target::AppPackage { package }, Action::Budget { .. })
+                    if r.platforms.is_empty() =>
+                {
+                    Some((package.clone(), r.action.clone()))
+                }
+                _ => None,
+            })
+            .collect();
         p.rules.retain(|r| {
             !matches!(
                 (&r.target, &r.action),
-                (Target::AppPackage { .. }, Action::Block) if r.platforms.is_empty()
+                (Target::AppPackage { .. }, Action::Block | Action::Budget { .. })
+                    if r.platforms.is_empty()
             )
         });
         // Deduplicated and ordered, so the written file does not churn when the picker returns the
@@ -198,9 +216,14 @@ impl Config {
             if package.trim().is_empty() {
                 return Err(ConfigError::Invalid("an app rule has an empty package".into()));
             }
+            let action = budgets
+                .iter()
+                .find(|(had, _)| *had == package)
+                .map(|(_, action)| action.clone())
+                .unwrap_or(Action::Block);
             p.rules.push(Rule {
                 target: Target::AppPackage { package },
-                action: Action::Block,
+                action,
                 platforms: Vec::new(),
             });
         }
@@ -213,8 +236,13 @@ impl Config {
             .map(|p| {
                 p.rules
                     .iter()
+                    // A budget counts. There is one rule per target, so putting a package on a
+                    // budget replaces its plain block — and when that dropped the package out of
+                    // this list, setting a budget from the profile screen read as "Nothing yet"
+                    // and the app picker forgot every tick. Rationed is a way of being blocked,
+                    // not a way of being let go.
                     .filter_map(|r| match (&r.target, &r.action) {
-                        (Target::AppPackage { package }, Action::Block)
+                        (Target::AppPackage { package }, Action::Block | Action::Budget { .. })
                             if r.platforms.is_empty() =>
                         {
                             Some(package.clone())
