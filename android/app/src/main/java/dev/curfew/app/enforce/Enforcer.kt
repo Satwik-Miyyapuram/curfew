@@ -37,15 +37,17 @@ class Enforcer(
     }
 
     private var current: String? = null
+    private var observation: Observation? = null
     private var charging: List<String> = emptyList()
     private var since: Long = 0
 
     /**
      * A new foreground app, window or page.
      *
-     * Time is charged to the *previous* target on the way out rather than to the current one on a
-     * timer, because a phone in a pocket generates no events at all and a timer would happily
-     * charge an hour of screen-off time against a budget.
+     * Time is charged to the *previous* target on the way out, and by [onTick] while it stays in
+     * front. Only the second of those runs on a timer, and it charges nothing once [onIdle] has
+     * said the screen is off: a phone in a pocket generates no events at all, and a timer that did
+     * not know that would happily charge an hour of screen-off time against a budget.
      */
     suspend fun onObservation(observation: Observation, now: Long) {
         // A notification is not a foreground change: it must neither end the current target's slice
@@ -67,38 +69,63 @@ class Enforcer(
         }
         val target = identity(observation)
         if (target == null) {
-            flush(now)
-            current = null
-            charging = emptyList()
+            stop(now)
             return
         }
         if (target != current) {
             flush(now)
             current = target
+            this.observation = observation
             since = now
             charging = runtime.policy.chargedKeys(now, observation)
             for (key in charging) runtime.recordLaunch(key, now)
         }
+        decide(target, observation, now)
+    }
 
+    /**
+     * Time passed and nothing changed.
+     *
+     * The app in front is still in front, so no observation arrives — and until this existed, that
+     * was the whole story: the slice was only written when the app was left, and the decision was
+     * only made when it was entered, so a budget of fifteen minutes let a single sitting run for
+     * as long as it liked and only settled up afterwards. A tick writes what has been spent so far
+     * and asks again, which is how a budget runs out *while* the app is open.
+     *
+     * Nothing is charged with no target, which is what [onIdle] leaves behind: a screen that is
+     * off is not a slice of anything.
+     */
+    suspend fun onTick(now: Long) {
+        val target = current ?: return
+        val observation = observation ?: return
+        flush(now)
+        decide(target, observation, now)
+    }
+
+    /** The screen went off, or the device idled. Stop charging time to anything. */
+    suspend fun onIdle(now: Long) = stop(now)
+
+    private suspend fun stop(now: Long) {
+        flush(now)
+        current = null
+        observation = null
+        charging = emptyList()
+    }
+
+    private suspend fun decide(target: String, observation: Observation, now: Long) {
         when (val decision = runtime.decide(observation, now)) {
             Decision.Allow -> actions.allow(target)
             is Decision.Block -> {
                 // A blocked app must not also accrue time against its own budget: the seconds it
                 // spends on screen are seconds of the block screen, not of the app.
                 current = null
+                this.observation = null
                 charging = emptyList()
                 actions.block(target, decision.reason)
             }
             is Decision.Delay -> actions.delay(target, decision.seconds)
             Decision.Mute -> actions.muteNotification(target)
         }
-    }
-
-    /** The screen went off, or the device idled. Stop charging time to anything. */
-    suspend fun onIdle(now: Long) {
-        flush(now)
-        current = null
-        charging = emptyList()
     }
 
     private suspend fun flush(now: Long) {

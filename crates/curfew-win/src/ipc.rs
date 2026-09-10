@@ -89,7 +89,22 @@ pub enum Request {
     /// without path rules being enforced. It buys them nothing below that layer — domains, apps and
     /// the lock itself are enforced by the service and are not reachable from here — which is
     /// exactly why the extension is a granularity layer and never the floor (GAPS G1).
-    Beat { browser: String },
+    ///
+    /// `url` is the page in the browser's focused tab, or nothing when no window of that browser
+    /// is focused. It is what web budgets are charged against: the service cannot see a tab
+    /// from where it runs, so time on a page is counted from the extension saying so.
+    Beat {
+        browser: String,
+        #[serde(default)]
+        url: Option<String>,
+    },
+    /// "This is the window the user is looking at." Sent by the tray every couple of seconds.
+    ///
+    /// The service runs in session 0, where `GetForegroundWindow` sees no desktop at all, so the
+    /// only process that can answer the question is one in the user's session. Unauthenticated,
+    /// like the heartbeat, and with the same limit: a program that lies here can under-charge an
+    /// app budget. It cannot touch a block, a schedule or a lock.
+    Seen { exe: String, title: String },
     /// "The user is opening this URL. May they?" The service decides; the extension only reports
     /// and obeys, so a tampered extension cannot invent an allow the core did not give.
     Check { browser: String, url: String },

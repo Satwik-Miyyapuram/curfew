@@ -78,9 +78,14 @@ pub struct Watch {
 }
 
 impl Watch {
-    /// Record that a browser's extension is alive.
-    pub fn beat(&mut self, exe: &str, now: Timestamp) {
-        self.beats.insert(exe.to_lowercase(), now);
+    /// Record that a browser's extension is alive. Returns the seconds since its previous beat,
+    /// capped at the grace interval: that is how long the page it reports can be assumed to have
+    /// been up, and a gap longer than the grace means the browser was not trusted anyway.
+    pub fn beat(&mut self, exe: &str, now: Timestamp) -> u32 {
+        match self.beats.insert(exe.to_lowercase(), now) {
+            Some(last) => (now - last).clamp(0, GRACE_SECONDS) as u32,
+            None => 0,
+        }
     }
 
     /// Note what is running, so a browser gets its startup grace from when it appeared rather than
@@ -145,8 +150,13 @@ pub const HOST_NAME: &str = "com.curfew.host";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FromExtension {
-    /// Sent once when the service worker starts, and then on a timer.
-    Beat { browser: String },
+    /// Sent once when the service worker starts, and then on a timer. `url` is the focused tab's
+    /// page, when a window of this browser is focused at all.
+    Beat {
+        browser: String,
+        #[serde(default)]
+        url: Option<String>,
+    },
     /// "The user is trying to open this. May they?"
     Check { browser: String, url: String },
 }

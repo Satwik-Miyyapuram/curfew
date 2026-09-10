@@ -73,8 +73,19 @@ function ask(message, timeoutMs = 1500) {
   });
 }
 
-function beat() {
-  ask({ type: "beat", browser: BROWSER });
+// The heartbeat carries the page in the focused tab, when one of this browser's windows is
+// focused at all: that is what the service charges web budgets against, since it cannot see a tab
+// from where it runs. A tab behind another program reports nothing and costs nothing.
+async function beat() {
+  let url = null;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    const focused = tab && (await chrome.windows.get(tab.windowId)).focused;
+    if (focused && tab.url && /^https?:/i.test(tab.url)) url = tab.url;
+  } catch (e) {
+    // No tabs permission, no window: a beat with no page is still a beat.
+  }
+  ask({ type: "beat", browser: BROWSER, url });
 }
 
 async function check(tabId, url) {

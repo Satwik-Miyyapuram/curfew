@@ -171,11 +171,14 @@ impl Node {
             peers.active(to).map_err(|_| crate::wire::Error::Unpaired)?.identity.clone()
         };
         let mut stream = lan::connect(address)?;
-        let mut log = self.shared.log.lock().expect("the log lock is never poisoned");
-        let peers = self.shared.peers.lock().expect("the peers lock is never poisoned");
-        let received = lan::dial(&mut stream, &self.shared.identity, &peer, &peers, &mut log)?;
-        drop(peers);
-        drop(log);
+        // The locks go in as locks: dial takes each only for the instant a frame needs it.
+        let received = lan::dial(
+            &mut stream,
+            &self.shared.identity,
+            &peer,
+            &self.shared.peers,
+            &self.shared.log,
+        )?;
         if received.accepted > 0 {
             self.shared.changed();
         }
@@ -249,11 +252,8 @@ fn answer_loop(
             let shared = shared.clone();
             let live = live.clone();
             std::thread::spawn(move || {
-                let received = {
-                    let mut log = shared.log.lock().expect("the log lock is never poisoned");
-                    let peers = shared.peers.lock().expect("the peers lock is never poisoned");
-                    lan::serve(&mut stream, &shared.identity, &peers, &mut log)
-                };
+                let received =
+                    lan::serve(&mut stream, &shared.identity, &shared.peers, &shared.log);
                 // A stranger connecting, or a peer disappearing mid-sentence, is ordinary. Nothing
                 // was taken in, so there is nothing to say about it.
                 if matches!(received, Ok(got) if got.accepted > 0) {
@@ -289,15 +289,19 @@ fn overhear_loop(
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         while running.load(Ordering::SeqCst) {
+            // The wait comes first and holds nothing. The socket blocks for up to half a second at
+            // a time, and a peer list locked for that long is a peer list every conversation on
+            // this device queues behind, half a second per frame.
+            let Ok(Some(beacon)) = lan::hear(&socket) else { continue };
             let now = clock();
             let heard = {
                 let peers = shared.peers.lock().expect("the peers lock is never poisoned");
                 let mut nearby = nearby.lock().expect("the nearby lock is never poisoned");
-                lan::overhear(&socket, &peers, &mut nearby, now)
+                lan::accept(beacon, &peers, &mut nearby, now)
             };
             // Hearing a peer is the moment to talk to it: it has just told us it is reachable, and
             // waiting for the next tick would spend the seconds the user notices.
-            if let Ok(Some(id)) = heard {
+            if let Some(id) = heard {
                 let address = nearby
                     .lock()
                     .expect("the nearby lock is never poisoned")
@@ -318,11 +322,8 @@ fn push_from(shared: &Shared, to: &DeviceId, address: SocketAddr) -> Result<(), 
         peers.active(to).map_err(|_| crate::wire::Error::Unpaired)?.identity.clone()
     };
     let mut stream = lan::connect(address)?;
-    let mut log = shared.log.lock().expect("the log lock is never poisoned");
-    let peers = shared.peers.lock().expect("the peers lock is never poisoned");
-    let received = lan::dial(&mut stream, &shared.identity, &peer, &peers, &mut log)?;
-    drop(peers);
-    drop(log);
+    // The locks go in as locks: dial takes each only for the instant a frame needs it.
+    let received = lan::dial(&mut stream, &shared.identity, &peer, &shared.peers, &shared.log)?;
     if received.accepted > 0 {
         shared.changed();
     }

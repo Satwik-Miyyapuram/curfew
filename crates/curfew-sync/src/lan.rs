@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 /// The multicast group beacons go to. Administratively scoped: routers do not forward it off the
@@ -182,31 +183,40 @@ pub fn read_frame(from: &mut impl Read) -> Result<Packet, Error> {
 ///
 /// Three messages, no state kept between them. If the connection dies at any point, both sides are
 /// left holding valid logs that are merely less caught up than they hoped.
+///
+/// The log and the peers are taken as locks rather than as borrows, and each is held only for the
+/// moment a frame is being built or applied — never across a read or a write. Held across the
+/// network, they deadlock two devices that call each other at once: each is waiting on the other's
+/// answer while holding the very lock the other's answering thread needs, and both sit there until
+/// the socket times out. That was a sync measured in tens of seconds that should have taken one.
 pub fn dial(
     stream: &mut (impl Read + Write),
     me: &Identity,
     peer: &PublicIdentity,
-    peers: &Peers,
-    log: &mut Log,
+    peers: &Mutex<Peers>,
+    log: &Mutex<Log>,
 ) -> Result<Received, Error> {
     // Four frames, fixed order, no negotiation: heads out, entries back, their heads, our entries.
-    write_frame(stream, &wire::pack(me, peer, &wire::greet(log)))?;
+    let greeting = wire::pack(me, peer, &wire::greet(&lock(log)));
+    write_frame(stream, &greeting)?;
 
     let theirs = read_frame(stream)?;
-    let received = match wire::unpack(me, peers, &theirs)? {
-        Message::Entries(entries) => wire::receive(log, peers, &entries),
-        Message::Heads(_) => return Err(Error::Malformed),
+    let received = {
+        let peers = lock(peers);
+        match wire::unpack(me, &peers, &theirs)? {
+            Message::Entries(entries) => wire::receive(&mut lock(log), &peers, &entries),
+            Message::Heads(_) => return Err(Error::Malformed),
+        }
     };
 
     // Their heads are asked for rather than guessed, so a peer rebuilt from a backup is sent what
     // it actually lacks instead of what we assume it kept.
     let request = read_frame(stream)?;
-    match wire::unpack(me, peers, &request)? {
-        Message::Heads(heads) => {
-            write_frame(stream, &wire::pack(me, peer, &wire::answer(log, &heads)))?
-        }
+    let answer = match wire::unpack(me, &lock(peers), &request)? {
+        Message::Heads(heads) => wire::pack(me, peer, &wire::answer(&lock(log), &heads)),
         Message::Entries(_) => return Err(Error::Malformed),
-    }
+    };
+    write_frame(stream, &answer)?;
     Ok(received)
 }
 
@@ -215,24 +225,37 @@ pub fn dial(
 pub fn serve(
     stream: &mut (impl Read + Write),
     me: &Identity,
-    peers: &Peers,
-    log: &mut Log,
+    peers: &Mutex<Peers>,
+    log: &Mutex<Log>,
 ) -> Result<Received, Error> {
     let greeting = read_frame(stream)?;
-    let peer = peers.active(&greeting.from).map_err(|_| wire::Error::Unpaired)?.identity.clone();
-    let heads = match wire::unpack(me, peers, &greeting)? {
-        Message::Heads(heads) => heads,
-        Message::Entries(_) => return Err(Error::Malformed),
+    let (peer, answer) = {
+        let peers = lock(peers);
+        let peer =
+            peers.active(&greeting.from).map_err(|_| wire::Error::Unpaired)?.identity.clone();
+        let heads = match wire::unpack(me, &peers, &greeting)? {
+            Message::Heads(heads) => heads,
+            Message::Entries(_) => return Err(Error::Malformed),
+        };
+        let answer = wire::pack(me, &peer, &wire::answer(&lock(log), &heads));
+        (peer, answer)
     };
-    write_frame(stream, &wire::pack(me, &peer, &wire::answer(log, &heads)))?;
+    write_frame(stream, &answer)?;
 
-    write_frame(stream, &wire::pack(me, &peer, &wire::greet(log)))?;
+    let mine = wire::pack(me, &peer, &wire::greet(&lock(log)));
+    write_frame(stream, &mine)?;
     let theirs = read_frame(stream)?;
-    let received = match wire::unpack(me, peers, &theirs)? {
-        Message::Entries(entries) => wire::receive(log, peers, &entries),
+    let peers = lock(peers);
+    let received = match wire::unpack(me, &peers, &theirs)? {
+        Message::Entries(entries) => wire::receive(&mut lock(log), &peers, &entries),
         Message::Heads(_) => return Err(Error::Malformed),
     };
     Ok(received)
+}
+
+/// A lock, taken. Neither is ever held across a panic, so a poisoned one is a bug and not a state.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().expect("a sync lock is never poisoned")
 }
 
 /// Bind the socket beacons are sent and received on.
@@ -260,16 +283,13 @@ pub fn announce(socket: &UdpSocket, me: &Identity, port: u16, now: Timestamp) ->
     Ok(())
 }
 
-/// Listen for one beacon, and record it if it is from a paired device.
+/// Wait for one beacon, from anyone.
 ///
 /// Returns `Ok(None)` when nothing arrived before the socket's timeout, which is the ordinary case
-/// on a quiet network and not worth waking anything for.
-pub fn overhear(
-    socket: &UdpSocket,
-    peers: &Peers,
-    nearby: &mut Nearby,
-    now: Timestamp,
-) -> io::Result<Option<DeviceId>> {
+/// on a quiet network and not worth waking anything for — and when what arrived was not a beacon
+/// at all. Checked by nobody yet: this is the half that blocks, and it is kept apart from the half
+/// that needs the peer list so the wait is never spent holding a lock.
+pub fn hear(socket: &UdpSocket) -> io::Result<Option<(SignedBeacon, SocketAddr)>> {
     let mut buffer = [0u8; 2048];
     let (read, from) = match socket.recv_from(&mut buffer) {
         Ok(got) => got,
@@ -278,15 +298,32 @@ pub fn overhear(
         }
         Err(e) => return Err(e),
     };
-    let Ok(signed) = serde_json::from_slice::<SignedBeacon>(&buffer[..read]) else {
-        return Ok(None);
-    };
+    Ok(serde_json::from_slice::<SignedBeacon>(&buffer[..read]).ok().map(|signed| (signed, from)))
+}
+
+/// Record a beacon, if it is from a paired device. Returns who it was from.
+pub fn accept(
+    (signed, from): (SignedBeacon, SocketAddr),
+    peers: &Peers,
+    nearby: &mut Nearby,
+    now: Timestamp,
+) -> Option<DeviceId> {
     if !signed.check(peers, now) {
-        return Ok(None);
+        return None;
     }
     let address = SocketAddr::new(from.ip(), signed.beacon.port);
     nearby.heard(signed.beacon.from.clone(), address, now);
-    Ok(Some(signed.beacon.from))
+    Some(signed.beacon.from)
+}
+
+/// Listen for one beacon, and record it if it is from a paired device: [`hear`] then [`accept`].
+pub fn overhear(
+    socket: &UdpSocket,
+    peers: &Peers,
+    nearby: &mut Nearby,
+    now: Timestamp,
+) -> io::Result<Option<DeviceId>> {
+    Ok(hear(socket)?.and_then(|heard| accept(heard, peers, nearby, now)))
 }
 
 /// Bind the port peers connect to. Port zero: the operating system picks, and the beacon carries
@@ -428,7 +465,7 @@ mod tests {
         .unwrap();
 
         let mut answerer = Pipe::new(opening.outgoing);
-        let result = serve(&mut answerer, &p.pc, &p.on_pc, &mut log);
+        let result = serve(&mut answerer, &p.pc, &Mutex::new(p.on_pc), &Mutex::new(log));
 
         assert!(matches!(result, Err(Error::Wire(wire::Error::Unpaired))));
         assert!(answerer.outgoing.is_empty(), "a stranger was sent bytes");
@@ -548,22 +585,24 @@ mod tests {
         let address =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listener.local_addr().unwrap().port());
         let pc_public = p.pc.public();
-        let (pc, on_pc) = (p.pc, p.on_pc);
+        let (pc, on_pc) = (p.pc, Mutex::new(p.on_pc));
         let answering = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
-            serve(&mut stream, &pc, &on_pc, &mut pc_log).unwrap();
-            pc_log
+            let pc_log = Mutex::new(pc_log);
+            serve(&mut stream, &pc, &on_pc, &pc_log).unwrap();
+            pc_log.into_inner().unwrap()
         });
 
         let mut phone_log = Log::default();
         phone_log.append(&p.phone, NOW + 1, start("phone-1", "evenings"));
+        let phone_log = Mutex::new(phone_log);
         let mut stream = connect(address).unwrap();
         let received =
-            dial(&mut stream, &p.phone, &pc_public, &p.on_phone, &mut phone_log).unwrap();
+            dial(&mut stream, &p.phone, &pc_public, &Mutex::new(p.on_phone), &phone_log).unwrap();
 
         let pc_log = answering.join().unwrap();
         assert_eq!(received.accepted, 1);
-        assert_eq!(phone_log.replay(NOW + 5), pc_log.replay(NOW + 5));
+        assert_eq!(phone_log.into_inner().unwrap().replay(NOW + 5), pc_log.replay(NOW + 5));
     }
 }
