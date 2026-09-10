@@ -92,7 +92,9 @@ Curfew's own row in Settings. Notifications is asked immediately after, by the s
 5. Long-press or the row's own control removes it, with one confirm naming what is being removed.
 
 **Gaps**
-- *(Gap 3)* The pause switch's write of `enabled = false` has never been checked on hardware.
+- *(Gap 3, closed in tests)* The pause switch is covered end to end — flag written, row kept, nothing
+  started, restarted when switched back on, and a running session left alone. What is left needs a
+  finger on a real switch, not a test.
 
 ---
 
@@ -113,8 +115,9 @@ Simple, which is how a user is told to go somewhere that does not exist).
    occurrences only.
 
 **Gaps**
-- *(Gap 4)* End-to-end sync — event → rule → session start → enforcement — has never been walked on
-  hardware.
+- *(Gap 4, closed in tests except the provider read)* Rule → event → session → block is covered,
+  padding and end-of-meeting included. The calendar-provider read itself still needs a phone with a
+  real calendar on it.
 
 ---
 
@@ -133,7 +136,8 @@ Simple, which is how a user is told to go somewhere that does not exist).
 5. Every tick writes immediately. The tick is the receipt.
 
 **Gaps**
-- *(Gap 5)* Per-profile website blocking is unverified on hardware.
+- *(Gap 5, closed in tests)* The running profile decides: its addresses are blocked and the other
+  profile's are allowed, through the enforcer rather than by reading the config back.
 
 ---
 
@@ -224,6 +228,7 @@ In order:
 1. **Gap 1** — a starter profile so the first Timer screen has something to pick.
 2. **Gap 2** — permissions asked at the moment of need, accessibility first among them.
 3. **Gap 6** — the pre-Curfew baseline, and the Usage screen rewritten around the comparison.
-4. **Gap 3, 4, 5, 7** — the hardware passes: the pause switch, calendar end to end, per-profile
-   websites, pairing on two devices.
-5. Glass material on sheets, dialogs and the block screen, so the app has one material.
+4. **Gap 3, 4, 5** — covered by tests. What remains of them is a hardware pass: the switch under a
+   finger, a real calendar provider, a real browser.
+5. **Gap 7** — pairing, which needs two devices and cannot be faked.
+6. Glass material on sheets, dialogs and the block screen, so the app has one material.
