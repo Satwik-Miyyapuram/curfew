@@ -251,9 +251,16 @@ Everything below is build-verified and test-verified and nothing more. It is wri
 thing that gets forgotten between one session and the next.
 
 - The confirmation on a block of four hours or more.
-- Picking a calendar event, apps, or a budget from inside a profile.
-- Copying what another profile blocks.
+- Setting a budget from inside a profile. The bug it hid — a budget replacing the app's block and
+  emptying the profile's app list — is fixed in the core and covered by tests, but the fix has not
+  been through a finger yet.
+- The Plan page as one card per profile, and unticking a repeating schedule.
+- Copying what another profile blocks. Needs a second profile to exist first.
 - Two devices, and everything in Flow 8.
+
+Picking calendar events from inside a profile **has** been done by hand, on a Galaxy S24 Ultra: the
+sheet opens from the profile, reads real events, filters as you type, takes several events in one
+visit, and the rules survive an app restart.
 
 The emulator cannot stand in: this machine has no virtualisation extension for the x86 image and
 the wrong host architecture for the arm64 one.
