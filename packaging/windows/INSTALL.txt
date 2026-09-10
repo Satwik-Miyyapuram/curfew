@@ -35,6 +35,10 @@ It is not added for public networks, and `curfew uninstall` removes it again. To
 delete the rule in Windows Defender Firewall — syncing between devices stops, and nothing else
 changes.
 
+Until this machine is paired with another device, Curfew opens no port at all: an unpaired
+device has nothing to say and nobody to say it to, so it does not listen and Windows has no
+reason to ask about it. The listener starts within half a minute of the first pairing.
+
 
 Blocking a page rather than a whole site
 ----------------------------------------

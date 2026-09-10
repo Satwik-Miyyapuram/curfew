@@ -26,6 +26,9 @@ pub use curfew_win::ipc::{ask, SOCKET};
 /// spends a laptop's battery enumerating processes nobody started.
 pub const TICK: Duration = Duration::from_secs(2);
 
+/// How many ticks pass before an unpaired device looks again for a pairing — see [`start_sync`].
+const SYNC_RETRY_TICKS: u32 = 15;
+
 /// Where the machine's config lives. `%ProgramData%` rather than the user's profile: the config is
 /// what the locks are made of, so a standard user must not be able to rewrite it.
 pub fn config_path() -> PathBuf {
@@ -160,6 +163,14 @@ pub fn sync_root() -> PathBuf {
 /// network, a locked-down LAN, or a sync directory it cannot write is still a machine that has to
 /// keep its own locks; sync is how the *other* device finds out, and a device that refused to block
 /// because it could not gossip would have the priorities exactly backwards.
+///
+/// **Nothing is bound until this device is paired with something.** The node listens on a TCP port
+/// and a UDP beacon on every interface, and the first time it does, Windows Defender Firewall puts
+/// an administrator prompt on screen — on a machine that has no peer to talk to, about traffic that
+/// would go nowhere. Someone without an administrator password cannot answer it and someone who
+/// can is being asked to allow a listener for a feature they have not switched on. So an unpaired
+/// device binds nothing at all, and [`resume_sync`] brings the node up on the pass after the first
+/// pairing lands.
 fn start_sync() -> Option<(curfew_sync::node::Node, PathBuf)> {
     let root = sync_root();
     let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into());
@@ -172,6 +183,10 @@ fn start_sync() -> Option<(curfew_sync::node::Node, PathBuf)> {
     };
     for complaint in complaints {
         eprintln!("curfew: {complaint}");
+    }
+    if shared.peers.lock().is_ok_and(|peers| peers.is_empty()) {
+        // Not an error and not worth a warning: this is simply a device that has not been paired.
+        return None;
     }
     match curfew_sync::node::Node::start(shared) {
         Ok(node) => Some((node, root)),
@@ -258,7 +273,11 @@ pub fn run(
 
     // Sync, if this machine can have it. Held for the life of the loop: dropping the node stops
     // its threads, which is exactly what should happen when the service stops.
-    let sync = start_sync();
+    let mut sync = start_sync();
+    // When the node did not start because nothing is paired yet, look again now and then rather
+    // than making the user restart the service after pairing. Half a minute is far below anything
+    // a person would notice and far above anything this costs.
+    let mut sync_retry = 0u32;
     let mut mirror = curfew_sync::mirror::Mirror::default();
 
     // Calendar subscriptions. Cached beside the state file so an outage — or a restart during one —
@@ -363,6 +382,13 @@ pub fn run(
                 }
             }
             persist(&guard, &state_path, now);
+        }
+        if sync.is_none() {
+            sync_retry += 1;
+            if sync_retry >= SYNC_RETRY_TICKS {
+                sync_retry = 0;
+                sync = start_sync();
+            }
         }
         // The other half of the pair: killing the watchdog is as obvious an attack as killing the
         // service, so the service starts it again the moment it notices it has gone.
