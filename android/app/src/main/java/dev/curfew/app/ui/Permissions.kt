@@ -128,7 +128,21 @@ enum class Grant(
      * caller should request through the permission launcher instead.
      */
     fun settingsIntent(context: Context): Intent? = when (this) {
-        Accessibility -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        // The details page for Curfew's own service where Android has one (12+), so the user lands
+        // on the switch rather than on a list of every accessibility service they have ever
+        // installed. The list is the fallback, not the destination.
+        Accessibility ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Spelled out rather than taken from `Settings`: the constants for this page are
+                // not in the SDK this app compiles against, and the strings are the platform's
+                // public, stable names for it.
+                Intent(ACTION_ACCESSIBILITY_DETAILS).putExtra(
+                    EXTRA_ACCESSIBILITY_COMPONENT,
+                    ComponentName(context, CurfewAccessibilityService::class.java).flattenToString(),
+                )
+            } else {
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            }
         UsageAccess -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
         Overlay -> Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -143,7 +157,16 @@ enum class Grant(
         // Asking to be exempted from battery optimisation with ACTION_REQUEST_IGNORE_... is a
         // policy violation on Play, and Curfew is distributed outside it — but the settings screen
         // is the honest route either way: the user should see the list they are changing.
-        NotificationAccess -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        NotificationAccess ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+                    Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                    ComponentName(context, CurfewNotificationListener::class.java)
+                        .flattenToString(),
+                )
+            } else {
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            }
         BatteryUnrestricted -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
         // Android's own add-admin dialog, not a Settings screen: it is the only place the
         // explanation is shown at the moment the user decides.
@@ -267,6 +290,10 @@ fun requestRuntimePermission(context: Context, permission: String) {
     val activity = context.findActivity() ?: return
     ActivityCompat.requestPermissions(activity, arrayOf(permission), PERMISSION_REQUEST_CODE)
 }
+
+/** Android's accessibility page for one service, and the extra naming that service. API 31+. */
+private const val ACTION_ACCESSIBILITY_DETAILS = "android.settings.ACCESSIBILITY_DETAILS_SETTINGS"
+private const val EXTRA_ACCESSIBILITY_COMPONENT = "android.provider.extra.ACCESSIBILITY_COMPONENT_NAME"
 
 /** The one code Curfew asks with. Small enough for `FragmentActivity`, and never read back. */
 private const val PERMISSION_REQUEST_CODE = 0x0C0F

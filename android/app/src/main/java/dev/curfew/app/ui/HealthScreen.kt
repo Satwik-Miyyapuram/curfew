@@ -138,9 +138,19 @@ fun HealthScreen(model: CurfewViewModel) {
                                 when {
                                     permission != null ->
                                         requestRuntimePermission(context, permission)
-                                    settings != null -> context.startActivity(
-                                        settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                    )
+                                    // Some of these pages do not exist on every OEM's build, and
+                                    // an ActivityNotFoundException here would kill the one screen
+                                    // whose job is to fix permissions. App info always resolves.
+                                    settings != null -> runCatching {
+                                        context.startActivity(
+                                            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }.onFailure {
+                                        context.startActivity(
+                                            RestrictedSettings.appInfoIntent(context)
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }
                                 }
                             }
                         }
