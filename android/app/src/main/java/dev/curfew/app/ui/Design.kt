@@ -19,7 +19,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import kotlin.math.roundToInt
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,8 +60,15 @@ object Dsn {
     val ButtonHeight = 52.dp
     val GhostHeight = 46.dp
 
-    /** Room under the last element so a scrolled screen clears the navigation bar. */
-    val BottomRoom = 28.dp
+    /**
+     * Room under the last element so a scrolled screen clears the navigation bar.
+     *
+     * The bar floats over the content rather than sitting beside it, so this has to cover the bar
+     * itself, the margin it floats on and the system's own gesture inset. At 28dp it did not: the
+     * last control on every screen sat behind the bar, and on the Timer screen that control was
+     * "Lock it in for 25m" — the one button the whole screen exists to offer.
+     */
+    val BottomRoom = 116.dp
 }
 
 /**
@@ -377,6 +391,122 @@ fun Dial(
         }
         content()
     }
+}
+
+/**
+ * A [Dial] you can set with your thumb, the way a kitchen timer is set.
+ *
+ * The stepper next to it moves in fives, which is right for "make it a bit longer" and wrong for
+ * "thirty-seven minutes, because that is when the train gets in". So the ring itself is draggable:
+ * one full turn is [perTurn] minutes, and turns accumulate, which keeps a minute a comfortable
+ * six degrees of arc instead of the half a degree it would be if the whole range were mapped onto
+ * one revolution. Dragging past either end stops at the end rather than wrapping, because a timer
+ * that silently jumps from twelve hours to one minute under a thumb is a timer nobody trusts.
+ *
+ * The handle is drawn where the value is, so there is something to aim at, and every whole minute
+ * crossed ticks the phone — the feedback that makes a dial feel like a physical control rather than
+ * like a slider with a round hitbox.
+ */
+@Composable
+fun DragDial(
+    minutes: Int,
+    max: Int,
+    onChange: (Int) -> Unit,
+    diameter: androidx.compose.ui.unit.Dp,
+    stroke: androidx.compose.ui.unit.Dp = 12.dp,
+    perTurn: Int = 60,
+    colour: Color = Palette.Live,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // The value being dragged, in minutes, kept as a float so a slow drag accumulates fractions
+    // instead of rounding every one of them away to nothing.
+    var live by remember { mutableStateOf(minutes.toFloat()) }
+    var dragging by remember { mutableStateOf(false) }
+    if (!dragging && live.roundToInt() != minutes) live = minutes.toFloat()
+
+    val fraction = (live / max).coerceIn(0f, 1f)
+    Box(
+        Modifier
+            .size(diameter)
+            .pointerInput(max, perTurn) {
+                val centre = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                var last = 0f
+                detectDragGestures(
+                    onDragStart = { at ->
+                        dragging = true
+                        last = angleOf(at - centre)
+                    },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false },
+                ) { change, _ ->
+                    change.consume()
+                    val now = angleOf(change.position - centre)
+                    // The shortest way round from the last sample. Anything larger than half a
+                    // turn between two frames is the seam at twelve o'clock, not a real jump.
+                    var delta = now - last
+                    if (delta > 180f) delta -= 360f
+                    if (delta < -180f) delta += 360f
+                    last = now
+                    val before = live.roundToInt()
+                    live = (live + delta / 360f * perTurn).coerceIn(1f, max.toFloat())
+                    val after = live.roundToInt()
+                    if (after != before) {
+                        haptics.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
+                        )
+                        onChange(after)
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(diameter)) {
+            val width = stroke.toPx()
+            val inset = width / 2
+            val box = androidx.compose.ui.geometry.Size(size.width - width, size.height - width)
+            drawArc(
+                color = Color(0xFF232B36),
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                size = box,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width),
+            )
+            if (fraction > 0f) {
+                drawArc(
+                    color = colour,
+                    startAngle = -90f,
+                    sweepAngle = 360f * fraction,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                    size = box,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width,
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    ),
+                )
+            }
+            // The handle: something to put a thumb on, and the only part of the ring that says
+            // this one can be dragged at all.
+            val radians = Math.toRadians((360f * fraction - 90f).toDouble())
+            val radius = (size.minDimension - width) / 2f
+            val at = androidx.compose.ui.geometry.Offset(
+                size.width / 2f + (radius * kotlin.math.cos(radians)).toFloat(),
+                size.height / 2f + (radius * kotlin.math.sin(radians)).toFloat(),
+            )
+            drawCircle(color = Palette.Ink, radius = width * 0.95f, center = at)
+            drawCircle(color = colour, radius = width * 0.62f, center = at)
+        }
+        content()
+    }
+}
+
+/** Where a point sits around the centre, in degrees clockwise from twelve o'clock. */
+private fun angleOf(offset: androidx.compose.ui.geometry.Offset): Float {
+    val degrees = Math.toDegrees(kotlin.math.atan2(offset.y.toDouble(), offset.x.toDouble())).toFloat()
+    return (degrees + 90f + 360f) % 360f
 }
 
 /** The big numeral in the middle of a [Dial]. */

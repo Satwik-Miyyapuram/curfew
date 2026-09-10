@@ -72,7 +72,7 @@ private enum class Pane { Apps, Sites }
  * they had. A block that a user can see is on, is on.
  */
 @Composable
-fun AppPickerScreen(model: CurfewViewModel) {
+fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // Read off the main thread: the launcher query walks every installed package, which on a full
@@ -81,14 +81,15 @@ fun AppPickerScreen(model: CurfewViewModel) {
         value = withContext(Dispatchers.IO) { installedApps(context) }
     }
 
-    var profile by remember { mutableStateOf<String?>(null) }
+    var profile by remember { mutableStateOf(pinned) }
     var query by remember { mutableStateOf("") }
     var adding by remember { mutableStateOf(false) }
     var pane by remember { mutableStateOf(Pane.Apps) }
+    var copying by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.profiles, profile) {
         if (profile == null || state.profiles.none { it.id == profile }) {
-            profile = state.profiles.firstOrNull()?.id
+            profile = pinned ?: state.profiles.firstOrNull()?.id
         }
     }
 
@@ -126,25 +127,74 @@ fun AppPickerScreen(model: CurfewViewModel) {
     }
 
     Screen(spacing = 0.dp) {
-        SectionLabel("Blocked by this profile")
-        Gap(8.dp)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            state.profiles.forEach { p ->
-                Pill(p.name, selected = current == p.id, onClick = { profile = p.id })
+        // Opened from inside a profile, the profile is not a question: the row of pills would be
+        // asking the user to pick the thing they are already standing in.
+        if (pinned == null) {
+            SectionLabel("Blocked by this profile")
+            Gap(8.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                state.profiles.forEach { p ->
+                    Pill(p.name, selected = current == p.id, onClick = { profile = p.id })
+                }
+            }
+            Gap(7.dp)
+            Text(
+                othersHold(state.profiles.filter { it.id != current }, counts, siteCounts),
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = Palette.Dim,
+            )
+            Gap(16.dp)
+        }
+        // Copying is the difference between a second profile that is right and a second profile
+        // nobody finishes. It adds to what is here rather than replacing it, and it says whose
+        // list it is taking so it is never a mystery afterwards.
+        val donors = state.profiles.filter {
+            it.id != current && ((counts[it.id] ?: 0) > 0 || (siteCounts[it.id] ?: 0) > 0)
+        }
+        if (current != null && donors.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Copy from", fontSize = 12.sp, color = Palette.Dim)
+                donors.forEach { donor ->
+                    Pill(donor.name, selected = false, onClick = { copying = donor.id })
+                }
+            }
+            Gap(14.dp)
+        }
+        copying?.let { donorId ->
+            val donor = state.profiles.firstOrNull { it.id == donorId }
+            val mine = current
+            if (donor == null || mine == null) {
+                copying = null
+            } else {
+                AlertDialog(
+                    onDismissRequest = { copying = null },
+                    title = { Text("Copy ${donor.name}'s list?") },
+                    text = {
+                        Text(
+                            "${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites " +
+                                "get added here. Nothing already blocked is removed.",
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            model.copyBlocksFrom(donorId, mine)
+                            copying = null
+                        }) { Text("Copy them") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { copying = null }) { Text("Cancel") }
+                    },
+                )
             }
         }
-        Gap(7.dp)
-        Text(
-            othersHold(state.profiles.filter { it.id != current }, counts, siteCounts),
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-            color = Palette.Dim,
-        )
-
-        Gap(16.dp)
         PaneTabs(
             pane = pane,
             apps = blocked.size,
@@ -497,4 +547,37 @@ private fun BlockDialog(onDismiss: () -> Unit, onSave: (Target) -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+
+/**
+ * The app and website lists, opened from inside a profile.
+ *
+ * Same screen, same writes; it simply arrives already knowing which profile it is editing, because
+ * the only way to reach it is from that profile's own card.
+ */
+@Composable
+fun AppPickerSheet(
+    model: CurfewViewModel,
+    profileId: String,
+    profileName: String,
+    onDone: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDone,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Palette.Ink),
+        ) {
+            Box(Modifier.padding(horizontal = Dsn.Gutter)) {
+                BackRow("What $profileName blocks", onDone)
+            }
+            Box(Modifier.weight(1f)) {
+                AppPickerScreen(model, pinned = profileId)
+            }
+        }
+    }
 }

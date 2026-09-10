@@ -82,6 +82,54 @@ fun CalendarScreen(model: CurfewViewModel) {
 
     val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
 
+    CalendarList(
+        state = state,
+        context = context,
+        heading = "Pick from your calendar",
+        query = query,
+        shown = shown,
+        caught = caught,
+        names = names,
+        onQuery = { query = it },
+        onPick = { blocking = it },
+    )
+
+    blocking?.let { event ->
+        CalendarDialog(
+            existing = null,
+            prefill = event,
+            profiles = state.profiles,
+            now = state.now,
+            onDismiss = { blocking = null },
+            onSave = { rule: CalendarSchedule ->
+                blocking = null
+                model.saveCalendarRule(rule)
+            },
+        )
+    }
+}
+
+/**
+ * The list of events itself, with its search field — the part both the Events tab and the profile
+ * screen's own picker need.
+ *
+ * It was only ever a tab before, which meant setting a profile up meant leaving the profile: pick
+ * the events somewhere else, against a profile chosen from a dropdown, then come back. Everything
+ * here takes its heading and its "what happens when you tap one" from the caller, so the same list
+ * can be the tab and can be the sheet that opens inside a profile.
+ */
+@Composable
+internal fun CalendarList(
+    state: UiState,
+    context: android.content.Context,
+    heading: String,
+    query: String,
+    shown: List<CalendarEvent>,
+    caught: Map<String, String>,
+    names: Map<String, String>,
+    onQuery: (String) -> Unit,
+    onPick: (CalendarEvent) -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -89,7 +137,7 @@ fun CalendarScreen(model: CurfewViewModel) {
         item {
             Column {
                 Gap(14.dp)
-                Title("Pick from your calendar", size = 24)
+                Title(heading, size = 24)
             }
         }
 
@@ -126,7 +174,7 @@ fun CalendarScreen(model: CurfewViewModel) {
                 query = query,
                 kept = shown.size,
                 total = state.calendarEvents.size,
-                onChange = { query = it },
+                onChange = onQuery,
             )
         }
 
@@ -162,7 +210,7 @@ fun CalendarScreen(model: CurfewViewModel) {
                     highlight = query.trim(),
                     blockedBy = caught[row.event.id]?.let { names[it] ?: it },
                     canBlock = state.profiles.isNotEmpty(),
-                    onBlock = { blocking = row.event },
+                    onBlock = { onPick(row.event) },
                 )
             }
         }
@@ -180,20 +228,6 @@ fun CalendarScreen(model: CurfewViewModel) {
         }
 
         item { Gap(8.dp) }
-    }
-
-    blocking?.let { event ->
-        CalendarDialog(
-            existing = null,
-            prefill = event,
-            profiles = state.profiles,
-            now = state.now,
-            onDismiss = { blocking = null },
-            onSave = { rule: CalendarSchedule ->
-                blocking = null
-                model.saveCalendarRule(rule)
-            },
-        )
     }
 }
 
@@ -385,5 +419,74 @@ internal fun search(events: List<CalendarEvent>, query: String): List<CalendarEv
     return events.filter { event ->
         listOf(event.title, event.calendar, event.location)
             .any { it.contains(needle, ignoreCase = true) }
+    }
+}
+
+/**
+ * The same calendar, opened from inside a profile.
+ *
+ * A profile is the place where a person decides what a block *is*, so it is also where they expect
+ * to say "and during these meetings". Sending them to another tab to do it — and to pick, from a
+ * dropdown, the profile they were already looking at — is the kind of detour that gets a feature
+ * abandoned halfway. Tapping an event here writes the rule against this profile straight away and
+ * closes the sheet: the profile is not a question that needs asking twice.
+ */
+@Composable
+fun CalendarPickerSheet(
+    model: CurfewViewModel,
+    profileId: String,
+    profileName: String,
+    onDone: () -> Unit,
+) {
+    val state by model.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var query by remember { mutableStateOf("") }
+
+    val caught: Map<String, String> = remember(state.upcoming) {
+        state.upcoming.mapNotNull { activation ->
+            (activation.source as? ActivationSource.Calendar)?.let { it.event to activation.profile }
+        }.toMap()
+    }
+    val names = remember(state.profiles) { state.profiles.associate { it.id to it.name } }
+    val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDone,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Palette.Ink),
+        ) {
+            Box(Modifier.padding(horizontal = Dsn.Gutter)) {
+                BackRow("Events for $profileName", onDone)
+            }
+            Box(Modifier.weight(1f)) {
+                CalendarList(
+                    state = state,
+                    context = context,
+                    heading = "Which meetings should start it?",
+                    query = query,
+                    shown = shown,
+                    caught = caught,
+                    names = names,
+                    onQuery = { query = it },
+                    onPick = { event ->
+                        // The event as it stands, against this profile: the same rule the Events
+                        // tab would write, minus the two questions the caller has already answered.
+                        model.saveCalendarRule(
+                            CalendarSchedule(
+                                id = "c-${state.now}",
+                                profile = profileId,
+                                matcher = dev.curfew.policy.EventMatcher(title = event.title),
+                                locks = listOf(dev.curfew.policy.Lock.Confirm),
+                            ),
+                        )
+                        onDone()
+                    },
+                )
+            }
+        }
     }
 }

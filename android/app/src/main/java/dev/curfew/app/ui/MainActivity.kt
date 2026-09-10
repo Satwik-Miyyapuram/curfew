@@ -123,6 +123,11 @@ object Routes {
 
 @Composable
 fun CurfewApp(model: CurfewViewModel = viewModel()) {
+    // A second between ticks while someone is watching a countdown, five while nobody is.
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        model.onForeground(true)
+        onPauseOrDispose { model.onForeground(false) }
+    }
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
 

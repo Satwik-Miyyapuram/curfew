@@ -71,10 +71,21 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // appeared after leaving the app and coming back. It runs on its own slower beat, and
             // — this is the part that matters — immediately after every write, so nothing a user
             // does waits for a beat.
+            //
+            // Off screen, none of that is worth a beat at all: nothing is being read, and the
+            // service that does the actual blocking does not run from here. So the loop slows to
+            // the slow beat itself and does the full refresh on it — one pass every five seconds
+            // instead of five, and the state is already correct by the time a screen comes back.
             var tick = 0
             while (true) {
-                delay(1_000)
-                if (tick++ % SLOW_TICKS == 0) refresh() else refreshFast()
+                if (foreground) {
+                    delay(1_000)
+                    if (tick++ % SLOW_TICKS == 0) refresh() else refreshFast()
+                } else {
+                    delay(SLOW_TICKS * 1_000L)
+                    tick = 0
+                    refresh()
+                }
             }
         }
     }
@@ -85,6 +96,19 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * Everything read here is already in memory: no file, no database, no content provider, no
      * parse. It is safe to run every second and it is what makes a countdown a countdown.
      */
+    /**
+     * Whether a Curfew screen is actually in front of someone.
+     *
+     * The cadence below is paid for by whoever is looking at it, so it follows the looking.
+     */
+    private var foreground = true
+
+    /** Called by the UI as it resumes and pauses; see [foreground]. */
+    fun onForeground(visible: Boolean) {
+        foreground = visible
+        if (visible) viewModelScope.launch { refresh() }
+    }
+
     private fun refreshFast() {
         val now = runtime.clock.now()
         // A timer that reaches zero has to end the session itself. It used to sit at zero until
@@ -650,6 +674,34 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                         .onFailure { say(it.message ?: "That change could not be saved.") }
                 }
                 .onFailure { say(it.message ?: "That change could not be saved.") }
+            refresh()
+        }
+    }
+
+    /**
+     * Copy everything one profile blocks onto another.
+     *
+     * Profiles overlap heavily in practice — "Deep work" and "Evening" block most of the same
+     * dozen apps and the same handful of sites — and ticking that dozen a second time by hand is
+     * where people give up and keep one profile that is wrong for both. This adds; it never
+     * removes, so a copy can never quietly unblock something the target profile already had.
+     */
+    fun copyBlocksFrom(source: String, target: String) {
+        viewModelScope.launch {
+            val apps = (blockedApps(target) + blockedApps(source)).distinct()
+            Policy.setBlockedApps(runtime.policy.configToml(), target, apps)
+                .onSuccess { toml ->
+                    runtime.setConfig(toml)
+                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                }
+                .onFailure { say(it.message ?: "That change could not be saved.") }
+            // Everything that is not an app package — domains, urls, keywords — one at a time,
+            // because those go through the ordinary rule path rather than the picker's.
+            val had = rulesBeyondApps(target).map { it.target }.toSet()
+            rulesBeyondApps(source).filterNot { had.contains(it.target) }.forEach { rule ->
+                runtime.saveRule(target, rule)
+                    .onFailure { say(it.message ?: "That could not be blocked.") }
+            }
             refresh()
         }
     }

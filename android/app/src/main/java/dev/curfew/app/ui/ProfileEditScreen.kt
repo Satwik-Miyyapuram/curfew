@@ -70,6 +70,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     // Matched on the minted id as well as the routed one, so the screen stops calling itself
     // "New profile" the moment the first save lands and starts editing what it just created.
     var name by remember(id) { mutableStateOf("") }
+    // Which of the triggers has opened its own picker, so choosing what a profile blocks never
+    // means leaving the profile.
+    var picking by remember { mutableStateOf<String?>(null) }
     val existing = state.profiles.firstOrNull { it.id == (id ?: slug(name)) }
 
     LaunchedEffect(existing?.id) {
@@ -200,20 +203,27 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 )
                             }
                         }
-                        "A timer I start myself" ->
-                            model.say(
-                                "Nothing to set up. Start one from the Now tab whenever you want.",
-                            )
+                        "A timer I start myself" -> {
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else {
+                                model.saveProfile(profileId, name.trim())
+                                picking = "apps"
+                            }
+                        }
                         "Anything in my calendar" ->
                             model.say(
                                 "Pick the events from the Events tab \u2014 they can point at " +
                                     "this profile.",
                             )
-                        "A daily budget" ->
-                            model.say(
-                                "Budgets live in the rules for now. Add one under this profile " +
-                                    "in the config.",
-                            )
+                        "A daily budget" -> {
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else {
+                                model.saveProfile(profileId, name.trim())
+                                picking = "budget"
+                            }
+                        }
                         else ->
                             model.say(
                                 "Add a window covering the whole week to leave it always on.",
@@ -265,6 +275,28 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 onDone()
             }
         }
+    }
+
+    when (picking) {
+        "calendar" -> CalendarPickerSheet(
+            model = model,
+            profileId = profileId,
+            profileName = name.trim(),
+            onDone = { picking = null },
+        )
+
+        "apps" -> AppPickerSheet(
+            model = model,
+            profileId = profileId,
+            profileName = name.trim(),
+            onDone = { picking = null },
+        )
+
+        "budget" -> BudgetSheet(
+            model = model,
+            profileId = profileId,
+            onDone = { picking = null },
+        )
     }
 
     // Whatever the core said. This screen used to swallow it, which is how "Add a window" could
@@ -560,4 +592,67 @@ private fun chosenWord(count: Int): String {
         else -> "Five"
     }
     return if (count == 0) "$word chosen yet." else "$word chosen."
+}
+
+/**
+ * A daily budget, set from inside the profile it belongs to.
+ *
+ * A budget is not a separate kind of rule so much as a softer verb on the rules already there: the
+ * apps this profile blocks get a number of minutes a day instead of none. So the sheet asks for the
+ * number and writes it onto every app the profile already names, which is the only version of
+ * "half an hour of socials" that means anything — a budget with nothing under it blocks nothing.
+ */
+@Composable
+fun BudgetSheet(model: CurfewViewModel, profileId: String, onDone: () -> Unit) {
+    val apps = remember(profileId) { model.blockedApps(profileId) }
+    var minutes by remember { mutableStateOf(30) }
+
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("A daily budget") },
+        text = {
+            Column {
+                Text(
+                    if (apps.isEmpty()) {
+                        "This profile does not block any app yet, so there is nothing to ration. " +
+                            "Add some apps first and the budget will apply to those."
+                    } else {
+                        "${apps.size} app${if (apps.size == 1) "" else "s"} in this profile will " +
+                            "open until the budget is spent, then close for the rest of the day."
+                    },
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                    color = Palette.Muted,
+                )
+                Gap(14.dp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(15, 30, 60, 120).forEach { option ->
+                        Pill(
+                            text = spellDuration(option),
+                            selected = minutes == option,
+                            onClick = { minutes = option },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = apps.isNotEmpty(),
+                onClick = {
+                    apps.forEach { packageName ->
+                        model.saveRule(
+                            profileId,
+                            dev.curfew.policy.Rule(
+                                target = dev.curfew.policy.Target.AppPackage(packageName),
+                                action = Action.Budget(seconds = minutes * 60),
+                            ),
+                        )
+                    }
+                    onDone()
+                },
+            ) { Text("Set it") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
+    )
 }

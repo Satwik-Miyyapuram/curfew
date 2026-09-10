@@ -43,6 +43,15 @@ private const val DEFAULT_MINUTES = 90
 private const val MAX_MINUTES = 12 * 60
 
 /**
+ * Past this, starting asks first.
+ *
+ * Four hours is longer than any of the presets and longer than a working session, so a timer that
+ * long is either deliberate or a thumb that dragged too far. The dialog costs a second in the first
+ * case and saves an evening in the second.
+ */
+private const val LONG_MINUTES = 4 * 60
+
+/**
  * How hard the user wants this particular block to be to escape.
  *
  * Asked here rather than buried in a profile, because the honest answer changes between a study
@@ -81,6 +90,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     var profile by remember { mutableStateOf<String?>(null) }
     // The profile a tap asked to lock, held while the accessibility question is answered.
     var pending by remember { mutableStateOf<String?>(null) }
+    var confirming by remember { mutableStateOf<String?>(null) }
 
     // Whichever profile the user has, without making them choose on a fresh install where there is
     // only one. A missing profile is the one thing this screen cannot invent.
@@ -92,8 +102,12 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
 
         Gap(6.dp)
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Dial(
-                fraction = minutes.toFloat() / MAX_MINUTES,
+            // Draggable, one turn to the hour: the stepper is for "a bit longer", the ring is
+            // for landing on the exact minute the meeting ends.
+            DragDial(
+                minutes = minutes,
+                max = MAX_MINUTES,
+                onChange = { minutes = it },
                 diameter = 236.dp,
                 stroke = 12.dp,
             ) {
@@ -109,10 +123,15 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Step("−", "five minutes less") { minutes = (minutes - 5).coerceAtLeast(5) }
-                Text("nudge it, or pick one", fontSize = 13.sp, color = Palette.Dim)
-                Step("+", "five minutes more") {
-                    minutes = (minutes + 5).coerceAtMost(MAX_MINUTES)
+                // Five at a time until five, then one at a time: a two-minute block is a real ask
+                // — a phone put down for the length of a queue — and a floor of five made it
+                // impossible to say.
+                Step("−", "a little less") {
+                    minutes = if (minutes > 5) (minutes - 5) else (minutes - 1).coerceAtLeast(1)
+                }
+                Text("drag the ring, or pick one", fontSize = 13.sp, color = Palette.Dim)
+                Step("+", "a little more") {
+                    minutes = if (minutes < 5) (minutes + 1) else (minutes + 5).coerceAtMost(MAX_MINUTES)
                 }
             }
 
@@ -238,9 +257,41 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 pending = id
                 return@PrimaryButton
             }
+            if (minutes >= LONG_MINUTES) {
+                confirming = id
+                return@PrimaryButton
+            }
             model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
             onDone()
         }
+    }
+
+    confirming?.let { id ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text("That is ${spellDuration(minutes)}") },
+            text = {
+                Text(
+                    if (strength.lock == Lock.Timer) {
+                        "Nothing ends this early except an emergency pass. It runs until " +
+                            "${endsAt(minutes)}. Start it?"
+                    } else {
+                        "It runs until ${endsAt(minutes)}. A long block is easy to set by " +
+                            "accident on a dial, so this is the check. Start it?"
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = null
+                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+                    onDone()
+                }) { Text("Start it") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = null }) { Text("Go back") }
+            },
+        )
     }
 
     pending?.let { id ->
@@ -278,7 +329,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
 }
 
 /** "1h 30m", not "90 minutes" and never "5400". */
-private fun spellDuration(minutes: Int): String = when {
+internal fun spellDuration(minutes: Int): String = when {
     minutes < 60 -> "${minutes}m"
     minutes % 60 == 0 -> "${minutes / 60}h"
     else -> "${minutes / 60}h ${minutes % 60}m"
