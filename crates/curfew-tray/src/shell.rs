@@ -312,7 +312,7 @@ fn chosen(window: HWND, id: usize) {
                 MessageBoxW(
                     window,
                     wide(
-                        "Use an emergency pass? It ends this session now, it is counted against                          your ration on every paired device, and it cannot be given back.",
+                        "Use an emergency pass? It ends this session now, it is counted against your ration on every paired device, and it cannot be given back.",
                     )
                     .as_ptr(),
                     wide("Curfew").as_ptr(),
@@ -429,6 +429,11 @@ pub fn run() {
             CLOSED.with(|slot| *slot.borrow_mut() = status.closed);
         }
         SetTimer(window, WATCH_TIMER, WATCH_MS, None);
+
+        // Said after the icon is up, so the notice has an icon to point at, and only ever once.
+        if let Some(text) = crate::welcome::take(&crate::welcome::marker_path()) {
+            say(window, text);
+        }
 
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {

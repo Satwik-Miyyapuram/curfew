@@ -20,6 +20,7 @@ mod overlay;
 mod prompt;
 #[cfg(windows)]
 mod shell;
+mod welcome;
 
 use curfew_win::ipc::{self, Request, Response};
 
