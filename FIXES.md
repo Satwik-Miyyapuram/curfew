@@ -98,6 +98,8 @@ must run.
 | 80 | Hiding the tray silently stopped window-title and budget enforcement (P2-16) | **P2** | **Fixed** — the gap is named on `Status`, in the menu and in the quit text (entry 68) |
 | 81 | A killed service stopped enforcing and left no record the user could see (P1-8) | **P1** | **Fixed on Windows** — the gap is detected, logged and shown; Android already had it (entry 69) |
 | 82 | `git add -A` swept throwaway scaffolding into a commit, twice | **build** | **Fixed** — `tools/check_workspace.py` reports any script in `tools/` that does not belong (entry 70) |
+| 83 | Two overlay notices shared one text slot, so the earlier rendered the later (P2-14) | **P2** | **Fixed** — each window owns its text via `GWLP_USERDATA` (entry 71) |
+| 84 | The overlay appeared on the primary monitor, outside the work area (P2-15) | **P2** | **Fixed** — cursor monitor + work area; DPI still undeclared (entry 72) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -183,8 +185,8 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-11 | P2 | **verified open.** `curfew remove` deletes a window or calendar rule with no session-state query, while `README.md` and `INSTALL.txt` tell the user nothing short of the 24-hour release shortens a lock. The blast radius is bounded — a running session keeps its own copy — but the expectation the docs set is not met. **Not done**: `curfew-cli` depends only on `curfew-core`, so mirroring the uninstall refusal means giving the CLI an IPC path and a behaviour for *no service installed*, which is a first-class case rather than an error |
 | P2-12 | P2 | **fixed** (entry 56). `ARCHITECTURE.md` advertised in-page element blocking the manifest cannot implement (no `content_scripts`, `scripting` or `declarativeNetRequest`); corrected in both places it appeared. And the functional half: a rule starting while a matching page was already open never took effect, which `tabs.onActivated` and `windows.onFocusChanged` now fix |
 | P2-13 | P2 | **fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front |
-| P2-14 | P2 | **verified open.** Every overlay's text lives in one `thread_local` and `WM_PAINT` reads that slot, so a second `show()` overwrites it before the first window paints and the earlier notice renders the later text. **Not done**: Win32 window code with no test harness here, and the fix — per-window text rather than a shared slot — restructures the paint path rather than patching it |
-| P2-15 | P2 | **verified open.** The overlay is positioned with `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`, the primary display in physical pixels, with no `MonitorFromPoint`/`GetMonitorInfoW` and no `WM_DPICHANGED`, so on a multi-monitor or scaled desk the notice can land on the wrong screen or off a scaled one. **Not done**: the same reason as P2-14 — placement that cannot be verified on this host, and a blind change would be worse than a named gap |
+| P2-14 | P2 | **fixed** (entry 71). Each window owns its text through `GWLP_USERDATA`, handed over with `Box::into_raw` and reclaimed on `WM_NCDESTROY`, instead of one `thread_local` that every `show()` wrote and every paint read — a second notice overwrote the first before it had painted. **The executable tests cannot catch a mutation of the fix**: `overlay_proc` is a Win32 callback, so the wiring is guarded at the source level and the tests pin only the ownership rule's shape |
+| P2-15 | P2 | **fixed** (entry 72), for placement. `MonitorFromPoint(GetCursorPos())` plus `GetMonitorInfoW().rcWork` puts the card on the monitor the user is looking at and inside its work area, instead of on the primary monitor minus a guessed 72-pixel taskbar. The arithmetic is a portable function, so it is tested without a display. **DPI awareness is deliberately not declared**, and the row says so: the font sizes are fixed points, so declaring it without scaling every dimension would render the notice at a third of its size on a 200% display |
 | P2-16 | P2 | **fixed** (entry 68), though not the way the review proposed. **Its suggested fix — move the watch into the service — cannot be done**: a service is in session 0, which has no interactive desktop, so the user session's foreground window is not addressable from there. The only process that can answer is the tray, and the tray is what is gone. So the gap is reported instead: `Rule::needs_foreground` says which rules depend on it, `foreground_warning` names the profiles that stopped being enforced, `Status` carries both so a surface can warn *before* the action, and `QUIT_NOTE` no longer claims the service "keeps enforcing everything you asked for" |
 | P2-17 | P2 | **fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now |
 | P2-18 | P2 | **verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one |
@@ -280,6 +282,8 @@ this table is a reading aid.
 | `992db90` | Say what stops being enforced when the tray goes (entry 68) |
 | `2dd2ccb` | Report the window enforcement was down (entry 69) |
 | `435f24b` | Report scaffolding left in `tools/` (entry 70) |
+| `77c878f` | Each overlay window owns its text (entry 71) |
+| `742abcb` | Place the overlay on the user's monitor, inside its work area (entry 72) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3972,3 +3976,116 @@ called `add_p18_window2.py` and `msg59.tmp`.
 Verified both ways: a file called `add_something.py` is reported as scaffolding, an unlisted
 `newthing.py` is reported as a script that needs a decision rather than an accident, and the six that
 belong here pass.
+
+---
+
+## 71. P2-14: two overlay notices shared one text slot
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-14**. **Fixed.**
+
+### What was wrong
+
+Every overlay's text lived in one `thread_local`. `show()` wrote it and `WM_PAINT` read it, so a second
+notice overwrote the first before it had painted — the earlier card rendered the later text. Not an edge
+case: `note` fires once per closed app per pass, so two notices in a row is the ordinary way this is used.
+And the window owned nothing, so the `Vec<u16>` it painted belonged to whoever wrote the slot last.
+
+### The fix
+
+The Win32 way: `GWLP_USERDATA` holds a boxed, NUL-terminated copy owned by the window, and `WM_NCDESTROY`
+reclaims it. That also makes the buffer's lifetime *correct* rather than accidental — before, a window had
+no way to know its text had changed underneath it.
+
+Three paths had to be right, and all three are commented: the store, the read with a null-check that ends
+the paint rather than dereferencing, and the reclaim with the pointer cleared so a second `WM_NCDESTROY`
+cannot double-free. The window-creation failure path frees the box too, or every failed `CreateWindowExW`
+would leak the notice's text.
+
+### What the tests can and cannot do, stated rather than implied
+
+`overlay_proc` is a Win32 callback that cannot run under `cargo test`, and the mutation run settled the
+question: **making `take_text` always return null — which would leave every overlay painting nothing — is
+caught by nothing.** So:
+
+- the executable tests pin the **shape** of the ownership rule — two windows get two buffers, a
+  `Box::into_raw` has one matching reclaim, the text is NUL-terminated with no interior NUL;
+- the **wiring** is guarded at the source level, the same technique as the service's log-sink guard
+  (entry 62).
+
+### And that guard was loose three times, each in the same direction
+
+It used `contains`:
+
+1. `contains("WM_NCDESTROY")` also matches `WM_NCDESTROY_NEVER`;
+2. `contains("SetWindowLongPtrW(window, GWLP_USERDATA")` also matches the **clearing** call in the destroy
+   handler, so deleting the store that attaches the text still passed;
+3. then, having fixed the first, `starts_with("WM_NCDESTROY")` — **a prefix check is a substring check
+   wearing a different hat**, and it matched `WM_NCDESTROY_NEVER` too.
+
+Only the third form — take the identifier as a token and compare it — catches the mutation. All three were
+found by running the mutations rather than by reading the guard. **This is the sixth time on this branch
+that a guard I wrote could not fail**, and the pattern in every one is the same: a check that answers a
+slightly different question from the one asked.
+
+### Verification
+
+Three mutations caught: the shared slot reintroduced, the store removed, and the reclaim renamed away.
+
+---
+
+## 72. P2-15: the overlay appeared on the primary monitor, outside the work area
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-15**. **Fixed** — for placement.
+
+### What was wrong
+
+`GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)` is the **primary** monitor, so on a laptop with an external
+display the notice appeared on the laptop's screen while the user was working on the external one. It is
+also the whole screen rather than the work area, which is why the placement subtracted a hardcoded 72
+pixels: an allowance for the taskbar that is wrong for a taskbar of any other size, wrong for one docked to
+the side, and wrong when there is none at all.
+
+### The fix
+
+`MonitorFromPoint(GetCursorPos())` + `GetMonitorInfoW().rcWork` answers both: the monitor the user is
+looking at, and its work area, which already excludes the taskbar. That is the same reasoning the tray menu
+uses for where it opens. `MONITOR_DEFAULTTONEAREST` means a cursor somewhere off every display — possible
+just after one is unplugged — still yields a rectangle rather than a null monitor.
+
+**The arithmetic is now a portable function, and that is the point.** `bottom_right_of` takes the work area
+as a value, so the placement can be tested without a display — and the arithmetic is where the bug was.
+`work_area()` is left as plumbing a reader can check by eye. The card's geometry (`WIDTH`, `MIN_HEIGHT`,
+`PAD`) moved to the module level for the same reason: they are facts about a card rather than about Win32,
+and having the only consumer reach into a `#[cfg(windows)]` module is what made this untestable to begin
+with.
+
+### Two mistakes of my own, both worth recording
+
+**I wrote 76 and 77 as the fallback screen metrics.** `SM_CXSCREEN` is 0 and `SM_CYSCREEN` is 1; 76 and 77
+are unrelated metrics. It compiled, it looked deliberate, and it would only have shown up on a machine
+where Windows refuses to name a monitor. The named constants are back.
+
+**I introduced a panic.** `work_area_height(None)` returned 0, and `measure` then did
+`wanted.clamp(MIN_HEIGHT, 0)`. `Ord::clamp` panics when its min exceeds its max, so on that same machine
+the overlay would have taken the tray process down rather than drawing a card in the wrong corner. The
+fallback is a parameter now, because only the Windows half can ask for the primary screen's height, and the
+test asserts the range can never invert.
+
+**A third, in the tests themselves:** the first version declared its own `PAD`, `CARD_W` and `CARD_H`,
+which shadowed the production constants — so the tests asserted against numbers the overlay does not draw
+with, and would have kept passing if the real ones changed. Clippy reporting them unused is what surfaced
+it. They read the production values now.
+
+### What was deliberately not done: DPI
+
+No awareness is declared for this process, so Windows virtualizes every coordinate it returns and every
+coordinate `CreateWindowExW` takes; the two agree, which is why the placement is correct without scaling.
+Declaring awareness is the half-fix that would break it — the font sizes are fixed points, so a notice on a
+200% display would render at a third of its intended size. Doing it properly means scaling every dimension
+in this file from the monitor's DPI, which is a change to the whole drawing path rather than to the
+placement. **Named on the coverage row so it is not read as closed.**
+
+### Verification
+
+Five mutations caught: the wrong corner, a guessed taskbar allowance, a card allowed off the top-left of a
+small work area, a zero fallback that inverts the clamp, and ignoring the monitor that was asked for.

@@ -125,10 +125,21 @@ STATUS = {
               "**verified open.** The ICS parser is the weakest component here and the finding lists distinct gaps: a bare `YYYYMMDD` `DTSTART` is not treated as all-day, so an all-day entry with no `DTEND` fails the overlap test and is dropped entirely; a negative `BYMONTHDAY` is discarded by `filter_map`, after which an empty list means *unconstrained*, which is fail-open; and recurrence is partial generally. **Not done**: each is a separate parser change with its own RFC cases, and doing one badly is worse than leaving all of them named"),
     "P2-11": ("open",
               "**verified open.** `curfew remove` deletes a window or calendar rule with no session-state query, while `README.md` and `INSTALL.txt` tell the user nothing short of the 24-hour release shortens a lock. The blast radius is bounded — a running session keeps its own copy — but the expectation the docs set is not met. **Not done**: `curfew-cli` depends only on `curfew-core`, so mirroring the uninstall refusal means giving the CLI an IPC path and a behaviour for *no service installed*, which is a first-class case rather than an error"),
-    "P2-14": ("open",
-              "**verified open.** Every overlay's text lives in one `thread_local` and `WM_PAINT` reads that slot, so a second `show()` overwrites it before the first window paints and the earlier notice renders the later text. **Not done**: Win32 window code with no test harness here, and the fix — per-window text rather than a shared slot — restructures the paint path rather than patching it"),
-    "P2-15": ("open",
-              "**verified open.** The overlay is positioned with `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`, the primary display in physical pixels, with no `MonitorFromPoint`/`GetMonitorInfoW` and no `WM_DPICHANGED`, so on a multi-monitor or scaled desk the notice can land on the wrong screen or off a scaled one. **Not done**: the same reason as P2-14 — placement that cannot be verified on this host, and a blind change would be worse than a named gap"),
+    "P2-14": ("fixed",
+              "**fixed** (entry 71). Each window owns its text through `GWLP_USERDATA`, handed over with "
+              "`Box::into_raw` and reclaimed on `WM_NCDESTROY`, instead of one `thread_local` that every "
+              "`show()` wrote and every paint read — a second notice overwrote the first before it had "
+              "painted. **The executable tests cannot catch a mutation of the fix**: `overlay_proc` is a "
+              "Win32 callback, so the wiring is guarded at the source level and the tests pin only the "
+              "ownership rule's shape"),
+    "P2-15": ("fixed",
+              "**fixed** (entry 72), for placement. `MonitorFromPoint(GetCursorPos())` plus "
+              "`GetMonitorInfoW().rcWork` puts the card on the monitor the user is looking at and inside "
+              "its work area, instead of on the primary monitor minus a guessed 72-pixel taskbar. The "
+              "arithmetic is a portable function, so it is tested without a display. **DPI awareness is "
+              "deliberately not declared**, and the row says so: the font sizes are fixed points, so "
+              "declaring it without scaling every dimension would render the notice at a third of its "
+              "size on a 200% display"),
     "P2-16": ("fixed",
               "**fixed** (entry 68), though not the way the review proposed. **Its suggested fix — move "
               "the watch into the service — cannot be done**: a service is in session 0, which has no "
