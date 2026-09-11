@@ -75,6 +75,7 @@ TOOLS_TO_KEEP = {
     "check_window.py",
     "check_workspace.py",
     "design_rows.py",
+    "open_rows.py",
     "publish_rows.py",
 }
 

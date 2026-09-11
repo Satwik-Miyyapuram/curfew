@@ -180,7 +180,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
 | P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
 | P1-12 | P1 | **fixed** (entry 62). `logging.rs` installs one sink at service startup writing to `%ProgramData%\Curfew\curfew.log` and to stderr, rolling at 2 MB with one previous file kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the startup call is guarded textually because that entry point cannot be exercised here |
-| P1-13 | P1 | **fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is adopted, so a config that would enforce less than a running session promised is refused. Two comments that claimed this already worked were false — `Session` has no rules field — and are corrected. **Android not covered**: `commitConfig` takes a weakening edit without the check |
+| P1-13 | P1 | **fixed** (entries 54 and 79). Windows refused a reload that would enforce less than a running session promised; **Android did not**, and `CurfewRuntime.commitConfig` wrote the config and reconciled with no check at all. The decision is now `Config::weakening_a_running_session`, shared so the two cannot disagree, and the guard sits on the three FFI calls that change rules — `remove_rule`, `upsert_rule`, `set_config` — because **Windows has a file/adopt split and Android does not**: the FFI *is* the config, so a check on the commit alone can never fire. `upsert_rule` was the gap the mutation run found: changing a rule's action weakens it while leaving the target listed |
 | P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
 | P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |
@@ -188,7 +188,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
 | P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
 | P2-7 | P2 | **fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, `Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so `refil = "daily"` was silently defaulting. Only the config: the state file and op-log are read by other versions, where refusing an unknown field would break forward compatibility |
-| P2-8 | P2 | **fixed** (entry 75) for the three defects the review lists in the code. A bare `YYYYMMDD` `DTSTART` is now recognised as all-day, so an entry with no `DTEND` is no longer a zero-length event that the overlap test drops. `BYMONTHDAY` is parsed as `i32` and negatives resolve against the month they are in. And an unparseable `BYDAY`/`BYMONTHDAY` token now **refuses the recurrence** rather than being dropped — dropping left the constraint list empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in two other crates; and `UNTIL` with a DATE value, which the review calls "parsed oddly" without saying what the right answer is |
+| P2-8 | P2 | **fixed** (entry 75) for the three defects the review lists in the code. A bare `YYYYMMDD` `DTSTART` is now recognised as all-day, so an entry with no `DTEND` is no longer a zero-length event that the overlap test drops. `BYMONTHDAY` is parsed as `i32` and negatives resolve against the month they are in. And an unparseable `BYDAY`/`BYMONTHDAY` token now **refuses the recurrence** rather than being dropped — dropping left the constraint list empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in two other crates; and `UNTIL` with a DATE value, which the review calls "parsed oddly" without saying what the right answer is. **And the fourth point is now done too**: the two `local_instant` helpers disagreed about `1440` — `schedule.rs` rolled to the next day at 00:00 and `budget.rs` clamped to 23:59 — so `budget.rs` delegates to the schedule's, which is one rule rather than two that agree today |
 | P2-9 | P2 | **fixed** (entry 65). Parse success only ever meant the text carried `BEGIN:VCALENDAR`, so a provider's auth-expiry placeholder or a truncated export replaced the last good copy and released every block it was driving. `curfew_ics::event_count` now tells the two apart, and a document with no events keeps the cache serving. **The false positive is deliberate and tested**: a genuinely emptied subscription keeps serving the old copy once one exists |
 | P2-10 | P2 | **fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing `Added` for a window it had discarded. **Android not covered**: the FFI still discards the outcome |
 | P2-11 | P2 | **fixed** (entry 76). `curfew remove` now refuses when a running session derives from the id, mirroring the uninstall refusal: `running_from` in the core is the decision, `curfew_cli::removal_target` names the id, and the service's dispatcher asks over the pipe it already uses for `Reload`. A service that is not running makes it a no-op, so the config-first workflow is untouched, and only a *running* session blocks a removal — otherwise the plan could not be edited without ending a lock first |
@@ -982,79 +982,62 @@ into the binary by `include_str!`, so a syntax error would be a compile error.
 
 ## Still open
 
-**Read the coverage table above the commit index first.** It is the authoritative list of what is left, per finding, with a verified status and a line reference for each — and it exists because this section, rewritten each round from memory, had left 18 of the review's 48 findings unmentioned (entry 46). What follows is the summary; the table is the detail.
+**The list below is generated from the coverage tables, not written from memory.** `tools/open_rows.py`
+rewrites it and `tools/check_log.py` verifies it matches them. That is because this section has been wrong
+**three times** — it left 18 of the review's 48 findings unmentioned once (entry 46), filed three P1s as P2
+once, and most recently still claimed *"F-18 (P0) — Windows cannot pair a device"* and *"F-2, F-34, F-48,
+F-49 — not re-assessed"* after all five were done (entries 77–80).
 
-Recorded here so the remaining work is a list rather than a memory. Rewritten after every round, and
-the entries it named as open in the previous revision — the whole Windows interaction set (F-22, F-24 to
-F-28), F-38, F-16, the control channel, the `%ProgramData%` ACL, the config-reload gap, the single
-message surface, and the read-failure findings (the config, the calendar and the app picker) — are all
-fixed above.
+Its own diagnosis of the first two was right, and it never applied it to itself: *"it kept grouping work by
+an assumption about how the work must be verified rather than by what the work is."* The table is the
+source; this is a view of it, and the same discipline that fixed the coverage tables fixes this.
 
-**A correction to the previous revision of this section.** It said *"P1 — one left"* and filed F-22,
-F-25 and F-26 under "P2 — the remaining interaction set". All three are **P1** in
-`UX_INTERACTION_REVIEW.md`. That is the second time this document understated or overstated remaining
-work, and the same mistake both times: grouping findings by where they live rather than by the severity
-the review assigned. The table above was right; this section was not.
-The severities below are taken from the reviews.
+<!-- open:begin — generated by tools/open_rows.py; do not edit by hand -->
 
-**P0 — none.** All four are fixed: the claimable `Timer`, the untrusted Windows clock, the obeyed `Stop`,
-and the Android UI's wall clock — plus the three P0s from the interaction review (F-1, F-16, F-17).
+- **Partly fixed** — 1: **P1-3**
 
-**P1 — none fixable as a finding.**
+<!-- open:end -->
 
-- **Entry 28 second half — Windows cannot pair a device.** The "Devices" page is not built because there
-  is nothing to build it on: the service runs a sync node and reads `peers.json`, but
-  `curfew_sync::pair`'s `offer`/`accept`/`revoke` have **no caller outside `curfew-ffi`**, so no Windows
-  surface can create a peer and the page would be empty on every machine. This is a key-exchange-and-
-  transport feature rather than a UI fix. See entry 28 for the greps.
+### A limit of the coverage tables, stated rather than implied
 
-**P2 — and this section has now been wrong twice in the same way**
+**The UX table has 19 rows for 48 findings.** It covers the ones entry 46 re-assessed and everything since;
+the other 29 were fixed in entries 1–45 and their status lives in those entries rather than in one table.
+`tools/check_log.py` verifies all 48 are *mentioned* somewhere in this document, which is not the same as
+being listed in one place — so a reader looking for the status of, say, F-16 has to find entry 6.
 
-The claim *"everything left needs hardware"* was wrong in the revision before last. This round it was wrong
-again, in a subtler form: it had separated the work by *"does this need eyes"*, which is **true of a screen
-that does not exist yet and false of a screen that already does.** F-39 and F-40 were not visual
-judgements — they were inconsistencies, and an inconsistency is a fact you read. Both are done (entry 45),
-and the correction is recorded in entry 36 rather than quietly dropped.
+That is a real gap and it is named rather than papered over. Closing it means adding 29 rows with verified
+statuses, which is transcription of things already recorded and would risk introducing errors in a document
+whose coverage claims have been wrong three times. The design table is complete (37 of 37) because
+`tools/design_rows.py` generates it.
 
-The pattern across all three corrections to this section: it kept grouping work by an **assumption about how**
-the work must be verified rather than by what the work **is**. So, plainly:
+### Items no table carries
 
-**Rewritten at entry 48, and the framing above is the reason.** Three of the four P1/P2 items this section
-listed as needing a device or "eyes" were settled by reading: F-11 was a comment and a doc, F-12 and F-13
-were two conditionals. What is left is genuinely small, and only one item needs hardware.
+- **F-44 (`Welcome`/`Setup`) — needs a device, and is the only item that does.** Designed and unbuilt. The
+  screens are drawn, but no device has rendered this component set, and a first-run flow is the one place
+  where being wrong is close to unrecoverable: the user meets it before anything else works. *(What
+  surrounded it is done — F-39, F-40, F-41, F-12, F-13 — so the first-run experience is no longer the hole
+  it was.)*
+- **F-45, the copy: 325 plain strings and 77 interpolated** (`untranslated-copy.txt`,
+  `untranslated-copy-interpolated.txt`). Not gated on hardware, only on volume. Two patterns are proven —
+  the permission table (`stringResource`) and `CurfewViewModel` (`getString`, plus the app's first
+  `<plurals>`) — so the remaining work is repetition rather than design. **The largest remaining item.**
+- **68 Material usages**, counted in `material-usage.txt` so the ratchet can only watch them shrink.
+  Component-by-component migrations.
 
-- **F-44 (`Welcome`/`Setup`) — needs a device, and is now the *only* item that does.** Designed and
-  unbuilt. The screens are drawn, but no device has ever rendered this component set, and a first-run flow
-  is the one place where being wrong is close to unrecoverable: the user meets it before anything else
-  works. *(What surrounded it is done — F-39, F-40, F-41, F-12, F-13 — entries 39, 45, 48, which is why the
-  first-run experience is no longer the hole it was.)*
-- **F-45 — the copy: 328 strings.** Not gated on hardware, only on volume. Two patterns are proven — the
-  permission table (Compose `stringResource`) and `CurfewViewModel` (`getString` on the application, plus
-  the app's first `<plurals>`). **The largest remaining item.**
-- **The 68 remaining Material usages.** Component-by-component migrations, counted in `material-usage.txt`
-  so the ratchet can only watch them shrink.
-- **F-18 (P0) — Windows cannot pair a device.** Genuinely a missing feature rather than a missing page (see
-  entry 28 for the greps), and the one P0 still open. It should have been in the table as a P0 two rounds
-  ago and was not, which is the coverage gap entry 46 exists to close.
-- **F-2, F-34, F-48, F-49 — not re-assessed.** Named in the coverage table with that status rather than a
-  guess. F-49 (the two platforms are not one product) is arguably a product decision rather than a defect.
-
-Also open, and small:
-
-- **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let the
-  README stop quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it was
-  left for a pass that can test it properly.
-
-**Fixed this round, having been listed as open in the previous revision:** the smallest half of F-45 (entry
-43) — and the previous revision's *reason* for leaving it open turned out to be wrong, which is recorded
-above rather than quietly dropped.
+  *Both ratchets are mutation-tested and regenerate with `CURFEW_UPDATE_COPY_ALLOWLIST=true` or
+  `CURFEW_UPDATE_MATERIAL_ALLOWLIST=true` — an environment variable rather than `-D`, which breaks
+  Gradle's task parsing.*
+- **The `curfew-cli` path default** (entry 7): making the config path optional would let the README stop
+  quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it was left for a
+  pass that can test it properly.
 
 ### Two things this pass learned about the repository, worth acting on separately
 
 1. **Robolectric-based unit tests cannot run on Windows ARM64.** Not a code fault — Conscrypt, which
    Robolectric 4.14's native runtime loads, ships no `windows-aarch_64` native build — but it means a
    maintainer on ARM64 Windows has no local test signal for anything that needs an Android runtime,
-   which is 121 of the 164 tests and the whole Compose layer. See the note above entry 1.
+   which is most of the Compose layer. Plain JUnit does run, and that is what the 72 executable Android
+   tests are. See the note above entry 1.
 2. **Nothing pins the JDK locally.** Gradle 8.14.3 rejects Java 25 with a bare `What went wrong:
    25.0.2`. CI pins 21 and never sees it. A `.java-version` or a Gradle toolchain declaration would
    turn that into an instruction.

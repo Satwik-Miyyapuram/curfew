@@ -152,7 +152,46 @@ def main():
     else:
         problems.append("the log cites no commits at all")
 
+    # 7. **The open list must equal what the tables say.** This section has been wrong four times, always
+    #    by being rewritten from memory rather than read off the table, and the generator exists so it
+    #    cannot be. The check runs that generator and compares rather than reimplementing the rule: a
+    #    check that reimplements its subject is a second place for the answer to be wrong.
+    begin = "<!-- open:begin"
+    end = "<!-- open:end -->"
+    if begin in text and end in text:
+        start = text.index(begin)
+        stop = text.index(end) + len(end)
+        in_doc = text[start:stop]
+        want = generated()
+        if want is None:
+            problems.append("tools/open_rows.py could not be run to check the open list")
+        elif want != in_doc:
+            problems.append(
+                "the 'Still open' list does not match the coverage tables — run "
+                "`python tools/open_rows.py`"
+            )
+        else:
+            notes.append("the open list matches the coverage tables")
+    else:
+        problems.append("the 'Still open' section has no generated block")
+
     return report()
+
+
+def generated():
+    """The block `tools/open_rows.py` would write, or `None` if it cannot be produced."""
+    out = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "open_rows.py")],
+        cwd=str(ROOT), capture_output=True, text=True,
+    )
+    if out.returncode != 0:
+        return None
+    # The generator prints only when it changes something, so ask it for the block rather than the log:
+    # read the log back after running it, which is what a reader would see.
+    text = read(ROOT / "FIXES.md")
+    start = text.index("<!-- open:begin")
+    stop = text.index("<!-- open:end -->") + len("<!-- open:end -->")
+    return text[start:stop]
 
 
 def report():
