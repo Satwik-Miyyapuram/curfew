@@ -43,7 +43,7 @@ must run.
 | 22 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
 | 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
 | 24 | Control channel unbounded read / serial accept (P1-1) | **P1** | **Fixed** (read cap + concurrency; read deadline still impossible — see entry 24) |
-| 25 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
+| 25 | `%ProgramData%\Curfew` had no explicit ACL (P1-0, second half) | **P1** | **Fixed** |
 | 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
 | 27 | A blocked site shows the browser's own error page (F-21) | **P1** | Pending |
 | 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | Pending |
@@ -66,7 +66,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `1a63581` | The emergency ration is enforced by the type, and the docs name the real config (entries 7, 10, 11) |
 | `668c6df` | Windows can start a block at last (entries 6, 14, 15, 16, 17) |
 | `44b3c63` | An edit to the config reaches the service that enforces it (entry 26) |
-| *(this commit)* | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
+| `dbdfb07` | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
+| *(this commit)* | The data directory is made what it was always claimed to be (entry 25) |
 
 ### A note on the Android verification environment
 
@@ -1005,3 +1006,69 @@ needed: a whole line; a line truncated by EOF; **an oversized request bounded at
 then failing to parse** (the assertion cannot hold under an unbounded read, so it is not vacuous); and
 a line split one byte at a time across buffers, with a *second* request read afterwards to prove the
 bounded read does not eat the rest of the stream. `cargo test -p curfew-svc`: 26 passed.
+
+---
+
+## 25. `%ProgramData%\Curfew` was not administrator-owned, and everything said it was
+
+**Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P1-0, **second half** (the first half — the spawn path —
+was entry 18).
+
+**What was wrong.** Two places asserted the directory is administrator-owned:
+
+- `watchdog.rs`: *"`%ProgramData%\Curfew` is administrator-owned, the same as the config and the state
+  file beside it, so running from here is no easier to tamper with than running from Program Files."*
+- `runner.rs:191-194` repeated the claim for the sync directory.
+
+**Nothing in the repository set that ACL.** `C:\ProgramData` grants `BUILTIN\Users` container-inherited
+`Write`, which is `FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY`. So an unprivileged user could create files in
+the directory holding the config, the state file, the cached calendars, the DNS record — and, before
+entry 18, the watchdog image the service executes as SYSTEM.
+
+Entry 18 closed the worst consequence by verifying the *image* before running it. This closes the rest:
+the directory now actually is what the comments claimed, so nothing can be planted in the first place.
+`dns-before.json` is the one worth naming — `give_back_remembered` restores the machine's DNS settings
+from it, so a planted copy is a way to point someone's resolver somewhere else.
+
+**What was changed.** A new `curfew_win::acl` module. `hardening_args` builds the `icacls` invocation
+and `harden` runs it; the service calls it on the way up, and `install` calls it after starting the
+service, so a machine whose service fails to start is still hardened.
+
+```
+icacls <dir> /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q /C
+```
+
+**Three deliberate choices.**
+
+1. **SIDs, not names.** `icacls SYSTEM:(OI)(CI)F` works only on an English Windows. These are well-known
+   and language-independent — the same class of mistake as the localized `netsh` parsing this project
+   has already been bitten by.
+2. **`icacls` rather than `SetNamedSecurityInfoW`.** A trade: one more process at install and start,
+   against a hand-built `EXPLICIT_ACCESS_W` array and a second place to get pointer lifetimes wrong in a
+   SYSTEM process. Only the *exit status* is read, never the output, which is localized.
+3. **`/inheritance:r` before `/grant:r`.** That pair is what makes the result exactly three grants
+   rather than three plus whatever was inherited — which is the entire bug.
+
+**Failure is reported, not fatal.** The service still enforces; refusing to start over a permission
+change would be a worse trade than running with the old ACL, and an install that aborted here would
+leave the user with nothing.
+
+**Verification — and this one was demonstrated, not just argued.**
+
+- 3 pure tests: the three grants and `/inheritance:r` are present, no non-administrator trustee is
+  granted write, `Everyone` is never named, and a missing directory is reported rather than silently
+  treated as done.
+- 1 live test: `harden` is actually run against a scratch directory, and `icacls` is asserted to accept
+  the arguments. That is the failure which would otherwise be found by a user whose install silently
+  hardened nothing.
+- **The resulting ACL was checked by hand**, because reading it back inside a test means parsing
+  localized `icacls` output. Before: the directory inherited two `Modify, Synchronize` grants and a
+  `FullControl` grant. After, exactly:
+
+  ```
+  NT AUTHORITY\SYSTEM       FullControl     (not inherited)
+  BUILTIN\Administrators    FullControl     (not inherited)
+  BUILTIN\Users             ReadAndExecute  (not inherited)
+  ```
+
+`cargo test --workspace`: 837 passed.

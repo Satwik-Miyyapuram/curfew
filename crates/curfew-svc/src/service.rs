@@ -102,6 +102,18 @@ fn run() -> windows_service::Result<()> {
     ))?;
 
     let state_path = state::default_path();
+    // Make the directory actually be what it is documented to be, before anything is read from it.
+    //
+    // Done here as well as at install, for two reasons: an install that predates this change never
+    // set the ACL and would otherwise stay writable by every user of the machine for ever, and the
+    // directory can be recreated or re-inherited by something else between installs. It is idempotent
+    // and cheap, and failure is reported rather than fatal — the service still enforces, and refusing
+    // to start over a permission change would be a worse trade than running with the old ACL.
+    if let Some(dir) = state_path.parent() {
+        if let Err(detail) = curfew_win::acl::harden(dir) {
+            eprintln!("curfew: {detail}");
+        }
+    }
     match crate::runner::build(
         &crate::runner::config_path(),
         &state_path,
@@ -195,6 +207,19 @@ pub fn install() -> windows_service::Result<()> {
         Err(e) => return Err(e),
     }
     allow_through_firewall();
+    // And make the data directory administrator-owned, which is what the watchdog module has always
+    // claimed it was and what nothing used to arrange. After `start`, because the service also does
+    // this on its way up and either one landing is enough; doing it here too means a machine whose
+    // service fails to start still gets a hardened directory.
+    if let Some(dir) = state::default_path().parent().map(std::path::Path::to_path_buf) {
+        // The directory is created by the service on first run, so it may legitimately not exist yet.
+        // `ensure_config` in the runner is what makes it, and it runs a moment later.
+        if dir.exists() {
+            if let Err(detail) = curfew_win::acl::harden(&dir) {
+                eprintln!("curfew: {detail}");
+            }
+        }
+    }
     Ok(())
 }
 

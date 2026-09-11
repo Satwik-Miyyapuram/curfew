@@ -5,6 +5,7 @@
 //! names must not resolve. Everything that can be decided without touching the machine is a pure
 //! function, so the parts that need a machine stay small enough to read.
 
+pub mod acl;
 pub mod blocked;
 pub mod calendar;
 pub mod credential;
