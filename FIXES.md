@@ -101,6 +101,7 @@ must run.
 | 83 | Two overlay notices shared one text slot, so the earlier rendered the later (P2-14) | **P2** | **Fixed** — each window owns its text via `GWLP_USERDATA` (entry 71) |
 | 84 | The overlay appeared on the primary monitor, outside the work area (P2-15) | **P2** | **Fixed** — cursor monitor + work area; DPI still undeclared (entry 72) |
 | 85 | A batch delivered in reverse order cost O(n²) Ed25519 verifications (P2-18) | **P2** | **Fixed** — 300 checks for 24 entries measured before, 24 after (entry 73) |
+| 86 | The FFI's restore payloads were unbounded, and the comments implied a guarantee they lacked (P1-3) | **P1** | **Partly fixed** — the cap and the bypasses are closed; forging the clock baseline remains possible (entry 74) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -162,7 +163,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-0 | P1 | entry 25 — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
 | P1-1 | P1 | entry 24 — the read is bounded and `serve` is concurrent |
 | P1-2 | P1 | **fixed** (entry 56). The extension guessed its own identity and fell back to `chrome.exe`, so a Zen, LibreWolf, Waterfox, Arc, Chromium or Opera GX user was never trusted under their real name and had the browser closed outright. The host now reads its own parent process, which *is* the browser, and overrides the message's claim |
-| P1-3 | P1 | **partly fixed** (entry 53). The lock-removing case is closed: `restore_sessions` can no longer end a running session. `observe_releases` still assigns `released` wholesale, which *adds* `PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the op-log signature checked at that boundary rather than a merge rule |
+| P1-3 | P1 | **partly fixed** (entries 53 and 74). The bypasses the review names are closed: `restore_sessions` goes through `restore_without_weakening`, so no payload can end a running session or shorten a lock whatever the caller sends, and all four restore methods now refuse an oversized payload **before parsing it**. **What is not closed, and cannot be from this boundary**: a caller can still install a `ClockWitness` baseline and `Boots`/`BootCounter` evidence of its choosing, which ends timer locks or satisfies a `Lock::RestartRequired` without restarting. The witness must survive a restart or *stop the app, set the clock, start the app* is a way out of every timed lock — the P0-2 bypass — and authenticating the blob needs a key stored beside it, which a root-capable adversary reads too. The doc comments now state the guarantee the code actually provides rather than implying more |
 | P1-4 | P1 | entry 11 — the ration is enforced by the type |
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
 | P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
@@ -286,6 +287,7 @@ this table is a reading aid.
 | `77c878f` | Each overlay window owns its text (entry 71) |
 | `742abcb` | Place the overlay on the user's monitor, inside its work area (entry 72) |
 | `262ea59` | Verify each entry once, and walk each chain once (entry 73) |
+| `c3c7266` | Bound the restore payloads, and stop implying a guarantee the code lacks (entry 74) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4153,3 +4155,73 @@ helper I invented, when the module already had `append`/`since`. And the unknown
 `DeviceId::new("stranger")` — a device id is a hash of a public key, so a stranger cannot be named, only
 generated. All three were caught by the compiler or by reading the helper that already existed, none by
 review.
+
+---
+
+## 74. P1-3: the FFI's restore payloads were unbounded, and the comments implied more than the code did
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-3**. **Partly fixed** — the cap is closed, the trust
+question is documented and named, and the row says which is which.
+
+### What was already closed (entry 53)
+
+`restore_sessions` no longer assigns the whole structure over the running one; it goes through
+`Sessions::restore_without_weakening`, which merges running sessions via `start` (a lattice join, so it
+can only strengthen), starts the ones that are not running, and **keeps** any the payload omits. No
+payload can end a running session or shorten a lock, whatever the caller sends.
+
+### What this entry closes
+
+**The size cap the review asks for.** `serde_json::from_str` allocates whatever it is handed, and these
+four methods are the only place this crate parses a payload it did not produce. A restore payload is a few
+kilobytes at most — sessions, a clock witness, a boot map, a pass ration — so the limit is a megabyte, and
+the check runs **before** the parse rather than after it, because the allocation is the thing being
+prevented. The same reasoning as `MAX_FRAME` on the sync transport and `MAX_MESSAGE` on the extension pipe
+(entry 66).
+
+At the cap is accepted, and there is a test for it: a cap that refuses its own boundary is a cap set one
+byte too low, and the value is a judgement rather than a fact.
+
+### What cannot be closed from this boundary
+
+The review asks that `restore_clock` never take a witness from the caller, and that `restore_boots` not
+accept unvalidated evidence. Both are right that a caller can forge what `proven()` consults:
+
+- a `trusted` set far forward ends every timer lock;
+- a `BootCounter` set forward makes `boots.evidence` claim a restart that never happened, which satisfies
+  a `Lock::RestartRequired`.
+
+**It cannot be fixed here, and the reason is structural.** The witness has to survive a process restart —
+without that, *stop the app, set the clock, start the app* is a way out of every timed lock, which is the
+P0-2 bypass the witness exists to close. Persisting it means accepting it from the only thing that can
+hold it, and on Android that is the platform. Authenticating the blob needs a key, and a key stored beside
+the blob is one a root-capable adversary reads too — which is the adversary the crate's own comment names:
+*"reachable from any code in the app process — and on a rooted device, from outside it."*
+
+Closing it needs either hardware-backed attestation or a deliberate decision that the platform's storage
+is trusted. **That decision is not this crate's to make**, and inventing a substitute here would be the
+same overstatement the review objected to.
+
+### The correction is the deliverable
+
+So the doc comments now state the guarantee the code actually provides:
+
+| Method | What is actually guaranteed |
+| :--- | :--- |
+| `restore_sessions` | **Cannot make things worse than the state already held**, whatever the caller sends |
+| `restore_clock` | Accepts a baseline. The defence against a forged one is the platform's storage, not this function |
+| `restore_boots` | Same terms as `restore_clock`. The size cap is the part enforceable here, and is |
+| `restore_passes` | Needs no trust: `Passes::merge` takes the more-spent of the two, so a ration cannot be bought back — the instance the review calls out as having got it right |
+
+**An implied guarantee the code does not provide is this branch's most common finding — thirteen now —
+and the fix has been the same every time: make the comment true, or make the code true.** Here it is the
+comment, and saying so plainly is the point rather than a retreat.
+
+### Verification
+
+991 Rust tests (was 987). Four mutations caught: the cap dropped, the cap set so high it never fires, the
+cap checked *after* the parse, and the cap applied to `sessions` only.
+
+**My first attempt at the ordering mutation was equivalent rather than uncaught** — it read
+`let _ = restoration(&json)?;`, and the `?` still propagates, so nothing changed. Worth recording because a
+mutation that changes nothing reads exactly like a gap in the tests, and I nearly recorded it as one.

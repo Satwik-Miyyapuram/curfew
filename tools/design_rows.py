@@ -25,10 +25,16 @@ STATUS = {
     "P1-4": ("have", "entry 11 — the ration is enforced by the type"),
     "P1-5": ("have", "entry 10 — `[emergency]` validated"),
     "P1-3": ("partial",
-             "**partly fixed** (entry 53). The lock-removing case is closed: `restore_sessions` can no longer "
-             "end a running session. `observe_releases` still assigns `released` wholesale, which *adds* "
-             "`PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the "
-             "op-log signature checked at that boundary rather than a merge rule"),
+             "**partly fixed** (entries 53 and 74). The bypasses the review names are closed: "
+             "`restore_sessions` goes through `restore_without_weakening`, so no payload can end a running "
+             "session or shorten a lock whatever the caller sends, and all four restore methods now refuse "
+             "an oversized payload **before parsing it**. **What is not closed, and cannot be from this "
+             "boundary**: a caller can still install a `ClockWitness` baseline and `Boots`/`BootCounter` "
+             "evidence of its choosing, which ends timer locks or satisfies a `Lock::RestartRequired` "
+             "without restarting. The witness must survive a restart or *stop the app, set the clock, "
+             "start the app* is a way out of every timed lock — the P0-2 bypass — and authenticating the "
+             "blob needs a key stored beside it, which a root-capable adversary reads too. The doc comments "
+             "now state the guarantee the code actually provides rather than implying more"),
     "P1-6": ("fixed",
             "**fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what "
             "a surface may offer, and `Status.offers` carries it per session — the shared verdict the "
