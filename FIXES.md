@@ -72,6 +72,9 @@ must run.
 | 51 | Simple mode was cited by a comment that contradicted itself and a plan that promises it (F-11) | **P1** | **Fixed** as documentation (entry 48) |
 | 52 | Two absences with no explanation: day one on Now, the comparison on Usage (F-12, F-13) | **P2** | **Fixed** (entry 48) |
 | 53 | The README advertised a pairing step the Windows build cannot do (F-18) | **P0** | **Partly fixed** — the advertisement is honest; the front door is scoped, not built (entry 49) |
+| 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
+| 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
+| 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
 | 57 | Windows could not state its sync state on any surface (F-18 step 5) | **P0** | **Fixed** — `SyncState` on every status, five phases in the window (entry 51) |
 | 58 | Ending a block raised an acknowledgement against the app's own principle 4 (F-8) | **P2** | **Fixed** (entry 52) |
 | 59 | **F-8 was missing from this log for five rounds**, and two edits truncated it | **P2** | **Fixed** — a structural checker now runs against the log (entry 52) |
@@ -109,9 +112,13 @@ must run.
 | 91 | Pairing had no Windows front door, though it is the advertised headline (F-18 step 4) | **P0** | **Fixed** — the Devices page, with its own nav item and four mutations caught (entry 78) |
 | 92 | Android took a config edit that stopped enforcing part of a running lock (P1-13) | **P1** | **Fixed** — the check moved into the core and Android now consults it (entry 79) |
 | 93 | `schedule.rs` and `budget.rs` disagreed about what minute 1440 means (P2-8's fourth point) | **P2** | **Fixed** — `budget` delegates, so there is one rule (entry 80) |
-| 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
-| 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
-| 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
+| 94 | A restored session could inject a delayed release already in the past, ending any lock | **P0** | **Fixed** — `LockSet::harden`, and two exploits reproduced first (entry 81) |
+| 95 | A restore could un-dismiss an ended occurrence by pushing the timestamp past its window | **P1** | **Fixed** — first-write-wins, with a pre-existing test that had asserted the bug (entry 81) |
+| 96 | The service's startup path adopted a config that parsed but enforced less, and overwrote the good copy | **P1** | **Fixed** — checked against the kept copy, which is not overwritten (entry 82) |
+| 97 | `remove_profile` / `remove_weekly` / `remove_calendar` weakened a running session through the FFI | **P1** | **Fixed** — guarded, with `running_from` for the schedules (entry 83) |
+| 98 | `restore_releases` parsed an unbounded caller payload; `every_restore_method_is_bounded` checked four of five | **P2** | **Fixed** — capped, plus a source scan so the next method cannot slip through (entry 83) |
+| 99 | A guard passed with the code commented out; `is_open` read `Not fixed` as closed; `check_log` rewrote its subject | **P2** | **Fixed** — comments stripped in one place, vocabulary read off the table, `--print` (entry 84) |
+| 100 | A restored `ClockWitness` could re-baseline trusted time forward, expiring every timer lock | **P0** | **Fixed** — `adoption_moves_forward`, both directions (entry 85) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -170,7 +177,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-0 | P1 | entry 25 — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
 | P1-1 | P1 | entry 24 — the read is bounded and `serve` is concurrent |
 | P1-2 | P1 | **fixed** (entry 56). The extension guessed its own identity and fell back to `chrome.exe`, so a Zen, LibreWolf, Waterfox, Arc, Chromium or Opera GX user was never trusted under their real name and had the browser closed outright. The host now reads its own parent process, which *is* the browser, and overrides the message's claim |
-| P1-3 | P1 | **partly fixed** (entries 53 and 74). The bypasses the review names are closed: `restore_sessions` goes through `restore_without_weakening`, so no payload can end a running session or shorten a lock whatever the caller sends, and all four restore methods now refuse an oversized payload **before parsing it**. **What is not closed, and cannot be from this boundary**: a caller can still install a `ClockWitness` baseline and `Boots`/`BootCounter` evidence of its choosing, which ends timer locks or satisfies a `Lock::RestartRequired` without restarting. The witness must survive a restart or *stop the app, set the clock, start the app* is a way out of every timed lock — the P0-2 bypass — and authenticating the blob needs a key stored beside it, which a root-capable adversary reads too. The doc comments now state the guarantee the code actually provides rather than implying more |
+| P1-3 | P1 | **partly fixed** (entries 53, 74 and 85). The bypasses the review names are closed: `restore_sessions` goes through `restore_without_weakening`, so no payload can end a running session or shorten a lock whatever the caller sends; all five restore methods refuse an oversized payload **before parsing it**; and a restored `ClockWitness` can no longer move trusted time **forward**, which is what let one call expire every timer lock. **What is not closed**: the *first* restore is the startup adoption, and the FFI has no clock of its own to check it against — the readings are passed in by the platform because this crate cannot take them — so a forged baseline, or a forged stored blob, is still believed. The witness must survive a restart or *stop the app, set the clock, start the app* is a way out of every timed lock, and authenticating it needs the platform keystore (Android Keystore/StrongBox, DPAPI on Windows), which is a cross-platform piece of work and cannot be verified on this host. `Boots`/`BootCounter` evidence of a caller's choosing is likewise still accepted. The earlier version of this row said none of this was fixable, and the review was right that part of it was |
 | P1-4 | P1 | entry 11 — the ration is enforced by the type |
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
 | P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
@@ -180,7 +187,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
 | P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
 | P1-12 | P1 | **fixed** (entry 62). `logging.rs` installs one sink at service startup writing to `%ProgramData%\Curfew\curfew.log` and to stderr, rolling at 2 MB with one previous file kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the startup call is guarded textually because that entry point cannot be exercised here |
-| P1-13 | P1 | **fixed** (entries 54 and 79). Windows refused a reload that would enforce less than a running session promised; **Android did not**, and `CurfewRuntime.commitConfig` wrote the config and reconciled with no check at all. The decision is now `Config::weakening_a_running_session`, shared so the two cannot disagree, and the guard sits on the three FFI calls that change rules — `remove_rule`, `upsert_rule`, `set_config` — because **Windows has a file/adopt split and Android does not**: the FFI *is* the config, so a check on the commit alone can never fire. `upsert_rule` was the gap the mutation run found: changing a rule's action weakens it while leaving the target listed |
+| P1-13 | P1 | **fixed** (entries 54, 79 and 82). Windows refused a reload that would enforce less than a running session promised; **Android did not**, and `CurfewRuntime.commitConfig` wrote the config and reconciled with no check at all. The decision is now `Config::weakening_a_running_session`, shared so the two cannot disagree, and it guards **a named set of paths, not "the config"**: the three FFI calls that change rules (`remove_rule`, `upsert_rule`, `set_config`), `remove_profile`, which deletes every rule behind a lock, the whole-document `commit_config`, and the service's startup path — where a config that *parses* with the rules deleted was previously adopted **and written over the good copy**. `upsert_rule`, `remove_profile`, `remove_weekly`, `remove_calendar` and the startup path were each found by mutation or by adversarial review after the row had already been called fixed, which is why it now enumerates rather than summarises |
 | P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
 | P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |
@@ -300,6 +307,11 @@ this table is a reading aid.
 | `ab4e0fd` | A Windows front door for pairing, steps 1-2 (entry 77) |
 | `2215ff8` | The Devices page, so pairing has a front door (entry 78) |
 | `47d5c2c` | One weakening check, and Android actually uses it (entry 79) |
+| `547cf0e` | A restore could end a running lock outright (entry 81) |
+| `19bc8fd` | The startup path took a config that enforced less (entry 82) |
+| `c1f814f` | Four more ways to weaken a running lock through the FFI (entry 83) |
+| `c874002` | Two guards that could not fail, and a checker that rewrote its subject (entry 84) |
+| `5c688ea` | A restored witness could expire every timer lock at once (entry 85) |
 | `a55e172` | One rule for minute 1440, not two (entry 80) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
@@ -4587,3 +4599,237 @@ on the next run as *"throwaway scaffolding in `tools/`"*. That guard was added i
 -A` swept a helper into a commit twice; this is the third time scaffolding has been left behind and the
 first time a tool said so before a human did. One more line of evidence that the fix for a recurring
 mistake is a check rather than resolve.
+
+---
+
+## 81. A restored session could end a running lock outright
+
+**Found by:** adversarial review of this branch. **Two lock bypasses**, both reproduced as failing tests
+before anything was changed.
+
+### The root cause, stated once
+
+`Sessions::restore_without_weakening` merged incoming state with `LockSet::merge`, which is a **lattice join
+over two trusted promises**. Restore is not a join: the incoming side is caller-supplied and the running side
+is authoritative.
+
+### Exploit 1 — end any lock immediately
+
+`merge` takes the *earlier* `delayed_release_at`, because a release already shown to the user is a commitment.
+But `min_opt(None, Some(t))` is `Some(t)`, so a payload with `delayed_release_at: Some(1)` handed a running
+lock a release that had already happened: `is_expired` returned true and `can_release` returned true with **no
+evidence at all**. Every condition on every lock, bypassed by one field.
+
+### Exploit 2 — un-dismiss an ended occurrence
+
+`dismissed` was merged by taking the *later* timestamp, on the theory that a later dismissal is the more
+recent fact. But `reconcile` only honours a dismissal that falls **inside** the occurrence it ended, so
+pushing the timestamp past the window's end defeated the dismissal and re-armed a window the user had
+explicitly ended.
+
+### The fix is a separate operation, not a changed one
+
+`LockSet::harden` is the join where `None` is top: conditions union, and the *later* of each optional time,
+with "until released" and "no automatic release" outlasting any concrete value. Restore uses `harden`; `merge`
+is untouched.
+
+The review recommended changing `min_opt` to `max_opt`. **That would have been wrong.** `min_opt` is exactly
+right for `LockSet::request_release`, where earlier-wins is the documented intent — *"calling it again never
+moves the time later, so spamming it cannot be used to reset anything"* — and right for `merge`'s own job of
+combining two concurrent sessions. The rule is now written at the fix: **use `merge` to combine promises, use
+`harden` to adopt untrusted state.**
+
+`dismissed` is first-write-wins, and a restore may still **add** a dismissal for a profile that has none.
+
+### Two things worth recording about how this was found
+
+**A comment asserted the opposite of the code, in a security path.** It read *"`LockSet::merge` can only add
+conditions and push the end time later, so a restore may strengthen a lock and cannot weaken one."* It could
+weaken one, in two ways. That comment is plausibly why this survived: the reasoning was written down,
+believed, and false.
+
+**A pre-existing test asserted the vulnerability as a feature.** `a_restore_cannot_un_dismiss_an_occurrence`
+ended with *"And a later dismissal wins, whichever side it came from"* and asserted the moved timestamp. A
+test that encodes a bug is worse than no test, because it makes the bug look deliberate.
+
+**Two of my own tests were too narrow, and mutation testing found them.** They only exercised the case where
+both sides had a concrete value, so `harden` taking `min` instead of `max` for the release, and `or` instead
+of `None` for the end time, both survived. Three tests added: a release may not be pulled forward, an "until
+released" lock may not acquire an end time, and a timed lock **may** become "until released" — without which
+"ignore `ends_at` entirely" would satisfy the others.
+
+**Five mutations caught.** `547cf0e`.
+
+---
+
+## 82. The service's startup path took a config that enforced less
+
+**Found by:** the same review, which observed that the P1-13 claim was true of the reload path and false of
+startup. **Reproduced as a failing test first.**
+
+### What was wrong
+
+`runner::build` accepted any config that *parsed*, and refusing an unparseable config is not enough — the
+interesting edit is a **valid document with the rules deleted**. Deleting them from `curfew.toml` and
+restarting the service left the lock running with nothing behind it, **and overwrote `curfew.toml.good` with
+the weakened document**, so the next restart adopted it as the baseline. The bypass was not merely unblocked,
+it was made permanent.
+
+### The fix
+
+At startup there is no in-memory config to compare against, so the baseline is the kept copy — the last config
+that parsed, and the only record of what was in force before this process existed. A weakening config is not
+adopted, **and the kept copy is deliberately not overwritten**, because without that the first restart would
+defer the bypass rather than refuse it.
+
+With no kept copy there is nothing to compare against and the config is adopted: a service that refuses to
+start enforces nothing at all, which is strictly worse.
+
+### Severity, stated honestly rather than inflated
+
+`%ProgramData%\Curfew` is ACL-hardened to `Users: read and execute`, so a standard user cannot write
+`curfew.toml` in the ordinary case — this is defence in depth, not a live bypass for an unprivileged user. But
+`service.rs` says in as many words that a failed `harden` is *"reported rather than fatal"* and that an
+install predating the ACL *"would otherwise stay writable by every user of the machine for ever"*. On such a
+machine the edit is available to any user, and this path was the way out.
+
+### And a flaw in my own harness
+
+Its compile-failure detector was a bare `"error[E" in text` substring check, which matched assertion *output*
+and reported "did not compile" for a mutation that compiled and was caught. Line-anchored now. A loose
+detector in a mutation harness is the same class of mistake as a loose guard in production: it reports the
+wrong thing and looks like evidence.
+
+**Three mutations caught.** `19bc8fd`.
+
+---
+
+## 83. Four more ways to weaken a running lock through the FFI
+
+**Found by:** the same review. Entry 79 had reasoned about *the* FFI call rather than enumerating the ones
+that change rules.
+
+### The four
+
+- **`remove_profile` deletes every rule behind the lock.** `rules_weakened_by` already reports this with no
+  special case — with the profile gone, `next.profile(id)` is `None` and every rule reads as lost — it was
+  simply never called. The most direct of the four: one call, all rules gone.
+- **`remove_weekly` and `remove_calendar` delete the schedule a session derives from.** The command line has
+  refused this since entry 76 through `curfew_core::session::running_from`; the FFI did not. Same predicate
+  here, not a second copy — only the wording differs, because a CLI sentence and an Android `Result` failure
+  are read in different places.
+- **`restore_releases` parsed an unbounded caller payload** while the other four restores go through
+  `restoration`.
+
+### The test that hid the last one
+
+`every_restore_method_is_bounded` checks a hand-written list of four, so the fifth was invisible while the
+name claimed a universal property — a test that reads as coverage and is not. Adding "releases" fixes today;
+a second test now **scans the crate's own source** for every `pub fn restore_` and requires each to mention
+`restoration`. Rust cannot enumerate its own methods at runtime, so the source scan is what makes "every" true
+by construction.
+
+### And the mutation run caught a gap of mine
+
+Removing the `refuse_schedule_removal` call from `remove_weekly`/`remove_calendar` changed no outcome: I had
+proved the `remove_profile` and `restore_releases` halves and assumed the third followed. There was not one
+test for it. Three added, using `reconcile` at a time inside `weekday-mornings` and, for the calendar rule, a
+Friday afternoon **outside** that window.
+
+### Two fixtures of mine were wrong in ways the code caught
+
+The `remove_profile` fixtures failed on a rule I had not noticed — the core refuses to remove a profile a
+*schedule* still references, which protects the config's internal consistency rather than the lock's promise,
+and fires first. And the calendar fixture ran at 09:30, inside the weekly window, so `reconcile` started a
+*weekly* session and the assertion passed for the wrong reason; its event was also titled "Standup" against a
+matcher of `title = "*focus*"`. The test now asserts the source really is the calendar rule, which is the
+property the first version assumed.
+
+**Four mutations caught**, one by each test written for it. `c1f814f`.
+
+---
+
+## 84. Two guards that could not fail, and a checker that rewrote its subject
+
+**Found by:** the same review. **Plus one I introduced while fixing them**, which is the point of the entry.
+
+### 1. The overlay guard passed with the code commented out
+
+It did `line.trim().trim_start_matches("//")` — deliberately stripping a leading `//` — so commenting out the
+whole `WM_NCDESTROY` arm left it passing, verified by doing it. The two `code.contains(...)` assertions above
+it had the same flaw without even the pretense of handling it.
+
+Fixed in the **helper**, not the one guard: `production_code()` drops comment lines, so every assertion in the
+module is immune. This guard has now been tightened in three directions — a prefix check matching
+`WM_NCDESTROY_NEVER`, a substring matching the *clearing* call, and comments satisfying it — which is one
+mistake in three costumes: **an assertion that can be satisfied by something other than the code it names.**
+
+### 2. `is_open` classified "Not fixed" as closed
+
+The rule was `"fixed" not in status`, so `"Not fixed"`, `"Unfixed"` and `"Open - not fixed"` all read as
+closed, and `"Deferred, see entry 4"` read as closed via `"entry"`. If the tables had used any of those
+phrasings, the generator would have printed *"Nothing. Every finding in both reviews is fixed"* and the
+checker would have agreed.
+
+The vocabulary is now **read off the table** — all 52 distinct statuses, derived not guessed — with negatives
+checked before the entry reference. That ordering is the actual fix: the old rule had no notion of a negative,
+so any status mentioning an entry was assumed closed. An unrecognised phrase now **stops** rather than
+guessing.
+
+### 3. `check_log.py` rewrote a tracked file
+
+A checker that mutates its subject reports a different answer on the second run and hides the discrepancy in
+CI. `open_rows.py` gained `--print`, and the checker compares against what the generator *would* write.
+
+### 4. And my first fix for (3) was itself vacuous
+
+I changed the checker to run `--check` and then **read the block back out of `FIXES.md`** — which returns the
+file's own content, so the comparison was `x == x` and could never fail. Verified: with the block deliberately
+corrupted the checker exited 0.
+
+That is the same defect class as the guard I had just fixed, introduced while fixing it, and it is the
+clearest evidence yet that the class is a recurring trap rather than a property of the earlier code. The fix
+is `--print`, so the comparison can disagree. Three corruptions now fail the check — a false open row
+injected, an open row removed, the block emptied — and in all three the file is **byte-identical afterwards**.
+
+**Four mutations on the overlay guard and three on the tooling, all caught.** `c874002`.
+
+---
+
+## 85. A restored `ClockWitness` could expire every timer lock at once
+
+**Found by:** the same review, which objected to the P1-3 row's claim that the clock baseline "cannot be
+helped". **It was right, and this is the part that was fixable.**
+
+### What was wrong
+
+`restore_clock` replaced the witness wholesale. `ClockWitness` accumulates — `now` only ever moves forward,
+and every lock is judged against it — so a caller could install one whose `trusted` was a year ahead and
+expire every timer lock in a single call. That is precisely what the clock design exists to prevent.
+
+### Two halves, and they are asymmetric
+
+- **`trusted` must not move forward.** It is what locks are judged against. The direct bypass.
+- **`last_wall` must not move backward.** `observe` computes `wall_delta = reading.wall - self.last_wall`
+  and, **across a reboot, credits a large positive delta to `trusted` as unverified** — because honest
+  downtime looks exactly like that. A smaller `last_wall` therefore manufactures a large forward jump on the
+  very next reading.
+
+**I wrote it the wrong way round first** — `incoming.last_wall > self.last_wall`, which refuses the harmless
+direction and allows the attack. A test written from the attack rather than from the code caught it. The same
+mistake inverted a second test: `a_witness_that_goes_backwards_is_allowed` asserted the safe direction, but a
+*stale* witness has `last_wall` smaller too, and that is the attack. It is now `a_stale_witness_is_refused`.
+
+Everything else is allowed, including a smaller `trusted`: that can only make a lock look *less* expired.
+
+### What is still not closed
+
+The *first* restore is the startup adoption, and the FFI has no clock of its own to check it against — the
+readings are passed in by the platform because this crate cannot take them. So a forged baseline, or a forged
+stored blob, is still believed. Closing that needs the witness **MAC'd with a key held in the platform
+keystore** (Android Keystore/StrongBox, DPAPI on Windows), which never leaves the TEE and so cannot be
+extracted even by root. That is a cross-platform piece of work — a UniFFI callback interface plus a platform
+implementation — and it **cannot be verified on this host**, so it is recorded rather than attempted.
+
+**Four mutations caught.** The mutation run also showed that nothing tested the `last_wall` half at all, so
+that test exists because of it. `5c688ea`.

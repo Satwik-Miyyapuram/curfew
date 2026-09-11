@@ -25,16 +25,20 @@ STATUS = {
     "P1-4": ("have", "entry 11 — the ration is enforced by the type"),
     "P1-5": ("have", "entry 10 — `[emergency]` validated"),
     "P1-3": ("partial",
-             "**partly fixed** (entries 53 and 74). The bypasses the review names are closed: "
+             "**partly fixed** (entries 53, 74 and 85). The bypasses the review names are closed: "
              "`restore_sessions` goes through `restore_without_weakening`, so no payload can end a running "
-             "session or shorten a lock whatever the caller sends, and all four restore methods now refuse "
-             "an oversized payload **before parsing it**. **What is not closed, and cannot be from this "
-             "boundary**: a caller can still install a `ClockWitness` baseline and `Boots`/`BootCounter` "
-             "evidence of its choosing, which ends timer locks or satisfies a `Lock::RestartRequired` "
-             "without restarting. The witness must survive a restart or *stop the app, set the clock, "
-             "start the app* is a way out of every timed lock — the P0-2 bypass — and authenticating the "
-             "blob needs a key stored beside it, which a root-capable adversary reads too. The doc comments "
-             "now state the guarantee the code actually provides rather than implying more"),
+             "session or shorten a lock whatever the caller sends; all five restore methods refuse an "
+             "oversized payload **before parsing it**; and a restored `ClockWitness` can no longer move "
+             "trusted time **forward**, which is what let one call expire every timer lock. **What is not "
+             "closed**: the *first* restore is the startup adoption, and the FFI has no clock of its own to "
+             "check it against — the readings are passed in by the platform because this crate cannot take "
+             "them — so a forged baseline, or a forged stored blob, is still believed. The witness must "
+             "survive a restart or *stop the app, set the clock, start the app* is a way out of every "
+             "timed lock, and authenticating it needs the platform keystore (Android Keystore/StrongBox, "
+             "DPAPI on Windows), which is a cross-platform piece of work and cannot be verified on this "
+             "host. `Boots`/`BootCounter` evidence of a caller's choosing is likewise still accepted. The "
+             "earlier version of this row said none of this was fixable, and the review was right that "
+             "part of it was"),
     "P1-6": ("fixed",
             "**fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what "
             "a surface may offer, and `Status.offers` carries it per session — the shared verdict the "
@@ -71,14 +75,17 @@ STATUS = {
               "kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the "
               "startup call is guarded textually because that entry point cannot be exercised here"),
     "P1-13": ("fixed",
-              "**fixed** (entries 54 and 79). Windows refused a reload that would enforce less than a "
+              "**fixed** (entries 54, 79 and 82). Windows refused a reload that would enforce less than a "
               "running session promised; **Android did not**, and `CurfewRuntime.commitConfig` wrote the "
               "config and reconciled with no check at all. The decision is now "
-              "`Config::weakening_a_running_session`, shared so the two cannot disagree, and the guard sits "
-              "on the three FFI calls that change rules — `remove_rule`, `upsert_rule`, `set_config` — "
-              "because **Windows has a file/adopt split and Android does not**: the FFI *is* the config, so "
-              "a check on the commit alone can never fire. `upsert_rule` was the gap the mutation run "
-              "found: changing a rule's action weakens it while leaving the target listed"),
+              "`Config::weakening_a_running_session`, shared so the two cannot disagree, and it guards **a "
+              "named set of paths, not \"the config\"**: the three FFI calls that change rules "
+              "(`remove_rule`, `upsert_rule`, `set_config`), `remove_profile`, which deletes every rule "
+              "behind a lock, the whole-document `commit_config`, and the service's startup path — where a "
+              "config that *parses* with the rules deleted was previously adopted **and written over the "
+              "good copy**. `upsert_rule`, `remove_profile`, `remove_weekly`, `remove_calendar` and the "
+              "startup path were each found by mutation or by adversarial review after the row had already "
+              "been called fixed, which is why it now enumerates rather than summarises"),
     "P2-1": ("fixed", "**fixed** (entry 53) — the config is re-read on a ten-second cadence"),
     "P2-2": ("fixed", "**fixed** (entry 53) — an identical redraw no longer rebuilds the body"),
     "P2-3": ("fixed", "**fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one"),

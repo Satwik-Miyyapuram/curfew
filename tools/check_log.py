@@ -123,6 +123,12 @@ def main():
     # 4. The status table's numbering is contiguous from 1. A gap means a row was lost.
     rows = [int(m.group(1)) for l in lines if (m := re.match(r"^\| (\d+) \|", l))]
     if rows:
+        # In document order as well as as a set — see the check below for why both are needed.
+        ordered = [
+            (int(m.group(1)), i)
+            for i, line in enumerate(lines, 1)
+            if (m := re.match(r"^\| (\d+) \|", line))
+        ]
         expected = set(range(1, max(rows) + 1))
         gaps = sorted(expected - set(rows))
         if gaps:
@@ -130,7 +136,20 @@ def main():
         dupes = sorted({n for n in rows if rows.count(n) > 1})
         if dupes:
             problems.append(f"status table has duplicate row(s): {', '.join(map(str, dupes))}")
-        notes.append(f"status table: {len(rows)} rows, 1..{max(rows)}")
+        # **And they must appear in that order.** Only the *set* was checked, so a table with 54-56
+        # sitting after row 93 passed — and every later append inherited the mistake, because a script
+        # inserting "after the last numbered line" then appends to the end of the wrong run. Contiguity is
+        # about the numbers; this is about the document.
+        numbers = [n for n, _ in ordered]
+        if numbers != sorted(numbers):
+            first = next(
+                (f"row {numbers[i]} after row {numbers[i - 1]}" for i in range(1, len(numbers))
+                 if numbers[i] < numbers[i - 1]),
+                "out of order",
+            )
+            problems.append(f"status table is out of document order ({first})")
+        else:
+            notes.append(f"status table: {len(rows)} rows, 1..{max(rows)}, in order")
     else:
         problems.append("the status table is gone")
 
