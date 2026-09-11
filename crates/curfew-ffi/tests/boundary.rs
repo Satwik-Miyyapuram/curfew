@@ -1143,3 +1143,121 @@ fn removing_a_weekly_nothing_is_running_under_is_allowed() {
     c.remove_weekly("weekday-mornings".into()).expect("nothing is running under it");
     assert!(!c.weekly_json().unwrap().contains("weekday-mornings"));
 }
+
+// --- the trusted clock cannot be re-baselined forward (P1-3) --------------------------------------
+//
+// `restore_clock` replaced the witness wholesale. Every lock is judged against the witness's `trusted`
+// time, so a caller that installs one whose `trusted` is ahead expires every timer lock at once — one
+// call, and the thing the whole clock design exists to prevent.
+//
+// The first restore is the startup adoption and cannot be checked from here (the FFI has no clock of its
+// own, see the note on the method). Every later one can, and that is what these pin.
+
+/// A witness as a caller would hand it over: serialized from a reading.
+fn witness_json(wall: i64, uptime: i64, boot_id: u64) -> String {
+    let reading = curfew_core::Reading { wall, uptime, boot_id };
+    serde_json::to_string(&curfew_core::ClockWitness::new(reading)).expect("a witness serializes")
+}
+
+/// **A second restore may not move trusted time forward.**
+#[test]
+fn a_restore_cannot_push_the_trusted_clock_forward() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("the first restore is the adoption");
+
+    // A year later, with no readings behind it.
+    let forged = witness_json(NOW + 365 * 86_400, 1_000, 7);
+    match c.restore_clock(forged).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And the lock the forged witness would have expired is still held.**
+///
+/// This is the consequence rather than the mechanism: the point of `trusted` is that a timer lock is
+/// judged against it, so the assertion that matters is that the lock survives.
+#[test]
+fn a_forged_witness_cannot_expire_a_timer_lock() {
+    let c = curfew();
+    let future = NOW + 3_600;
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(future));
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("adopted");
+
+    // The forgery: trusted time is now a year past the lock's end. It must not be adopted.
+    let _ = c.restore_clock(witness_json(NOW + 365 * 86_400, 1_000, 7));
+
+    // A real reading, and the trusted `now` it yields — which is what a lock is judged against, not the
+    // wall clock passed in.
+    let verdict: Value = serde_json::from_str(&c.observe_clock(NOW, 1_000, 7).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+
+    assert!(
+        c.active_profiles(trusted).contains(&"deep-work".to_string()),
+        "a forged witness expired a running timer lock (trusted time was {trusted})"
+    );
+    assert!(
+        trusted < future,
+        "the trusted clock jumped past the lock's end: {trusted} against {future}"
+    );
+}
+
+/// **Re-restoring the same witness is allowed**, because that is the ordinary retry and the adoption
+/// path a restart walks. Without this, "refuse every second restore" would satisfy the test above.
+#[test]
+fn restoring_the_same_witness_twice_is_allowed() {
+    let c = curfew();
+    let same = witness_json(NOW, 1_000, 7);
+    c.restore_clock(same.clone()).expect("the first");
+    c.restore_clock(same).expect("the second, which changes nothing");
+}
+
+/// **A stale witness is refused, and this test used to claim the opposite.**
+///
+/// It read *"a witness that goes backwards is allowed, which is the safe direction"* — but a stale witness
+/// has `last_wall` smaller as well, and that is the attack the test below describes. Only a smaller
+/// `trusted` is harmless; a smaller `last_wall` manufactures a large credit on the next reading. The rule
+/// is asymmetric, which is why the first version of it was wrong in one direction.
+#[test]
+fn a_stale_witness_is_refused() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("the first");
+
+    assert!(
+        c.restore_clock(witness_json(NOW - 600, 400, 7)).is_err(),
+        "an older witness was adopted, and its smaller last_wall is a forward jump on the next reading"
+    );
+}
+
+/// **A small `last_wall` is a forward jump one step removed**, and nothing tested it until a mutation run
+/// dropped the check and no outcome changed.
+///
+/// `trusted` is level with the running witness here, so a guard comparing only `trusted` adopts this. Then
+/// a reading that looks like a reboot — which the forged `boot_id` arranges — computes a wall delta of the
+/// whole gap, credits it as `unverified`, and adds it to `trusted`. The trusted clock jumps a century.
+#[test]
+fn a_restore_cannot_forge_a_small_last_wall_to_jump_forward_next_reading() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("adopted");
+
+    // Only `last_wall` is moved, and only backwards.
+    let mut forged: Value = serde_json::from_str(&witness_json(NOW, 1_000, 7)).unwrap();
+    forged["last_wall"] = json!(NOW - 100_000_000);
+    match c.restore_clock(forged.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    // And the trusted clock has not moved. A *different* boot id, which is what makes the wall delta
+    // credible as elapsed time rather than as tampering.
+    let verdict: Value = serde_json::from_str(&c.observe_clock(NOW, 1_000, 8).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+    assert!(
+        trusted <= NOW + curfew_core::clock::TOLERANCE_SECONDS,
+        "the trusted clock jumped to {trusted} on the reading after the forged witness"
+    );
+}

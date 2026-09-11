@@ -846,7 +846,23 @@ impl Curfew {
     pub fn restore_clock(&self, witness_json: String) -> Result<(), CurfewError> {
         let witness: ClockWitness =
             serde_json::from_str(restoration(&witness_json)?).map_err(payload)?;
-        *self.clock.write().expect("clock lock") = Some(witness);
+        let mut slot = self.clock.write().expect("clock lock");
+        // **A restore may not re-baseline the trusted clock forward** — P1-3. `ClockWitness` accumulates:
+        // `now` only ever moves forward, and every lock is judged against it. Replacing it wholesale let a
+        // caller install one whose `trusted` was a year ahead, which expires every timer lock at once —
+        // one call, and the exact thing the clock design exists to prevent.
+        if let Some(current) = slot.as_ref() {
+            if current.adoption_moves_forward(&witness) {
+                return Err(CurfewError::Payload {
+                    detail: "This witness is ahead of the one already running, so it would move the \
+                             trusted clock forward — which is how a lock is expired without any \
+                             condition being met. Restoring a witness may only ever move trusted time \
+                             backwards or leave it where it is."
+                        .to_string(),
+                });
+            }
+        }
+        *slot = Some(witness);
         Ok(())
     }
 
