@@ -74,7 +74,7 @@ it is corrected against `git log` whenever an entry is added.)*
 | `7f11fbe` | The nav and the toggle get hit areas that can be hit (entry 23) |
 | `8c41f09` | A blocked site's symptom is named where the user will read it (entry 27) |
 | `23dbd92` | The window gets the "Where time went" page the design always had (entry 28) |
-| *(this commit)* | The app picker stops claiming you block nothing when it cannot see (entry 29) |
+| `7a0bb4f` | The app picker stops claiming you block nothing when it cannot see (entry 29) |
 
 ### A note on the Android verification environment
 
