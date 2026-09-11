@@ -421,10 +421,18 @@ fn local_date(now: Timestamp, tz: Tz) -> Option<NaiveDate> {
     tz.timestamp_opt(now, 0).earliest().map(|d| d.date_naive())
 }
 
-/// The instant `minute` minutes after local midnight on `date`, resolving DST the same way budget
-/// windows do: ambiguous takes the earlier, nonexistent steps forward to the first time that
-/// exists. A schedule must never fail to start because the clock skipped its start time.
-fn local_instant(date: NaiveDate, minute: u32, tz: Tz) -> Option<Timestamp> {
+/// **The instant `minute` minutes after local midnight on `date`** — the one implementation.
+///
+/// Ambiguous (the clock went back) takes the earlier of the two; nonexistent (it jumped forward) steps
+/// forward to the first time that exists, because a schedule must never fail to start because the clock
+/// skipped its start time.
+///
+/// **`1440` means the next day at 00:00, and that is now the rule for both callers** — P2-8's fourth
+/// point. `budget.rs` used to clamp to `24 * 60 - 1`, so a refill at "24:00" happened a minute before a
+/// window ending at "24:00" did. Both are reachable from a user config, since `at_minute` is a plain
+/// `u32` with no validation, and two names for one minute is how a bug report nobody can reproduce gets
+/// filed. `pub(crate)` so there is one rule rather than two that agree today.
+pub(crate) fn local_instant(date: NaiveDate, minute: u32, tz: Tz) -> Option<Timestamp> {
     let minute = minute.min(24 * 60);
     let (date, minute) =
         if minute == 24 * 60 { (date + Duration::days(1), 0) } else { (date, minute) };
@@ -445,4 +453,50 @@ fn local_instant(date: NaiveDate, minute: u32, tz: Tz) -> Option<Timestamp> {
 pub fn local_minute_of_day(at: Timestamp, tz: Tz) -> Option<u32> {
     let dt = tz.timestamp_opt(at, 0).earliest()?;
     Some(dt.hour() * 60 + dt.minute())
+}
+
+#[cfg(test)]
+mod local_instant_tests {
+    use super::*;
+    use chrono_tz::UTC;
+
+    /// **`1440` is the next day at 00:00**, which is what "24:00" means for a window's end.
+    ///
+    /// A unit test because `local_instant` is private and widening it to assert one arithmetic rule
+    /// would be the wrong trade. `budget.rs` has the matching unit test for its side — the two used to
+    /// disagree by a minute here, and the property being pinned is that they agree.
+    #[test]
+    fn minute_1440_is_the_next_day_at_midnight() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let next = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
+
+        assert_eq!(
+            local_instant(day, 1440, UTC),
+            local_instant(next, 0, UTC),
+            "a window ending at 24:00 does not end at midnight"
+        );
+        assert_ne!(
+            local_instant(day, 1440, UTC),
+            local_instant(day, 23 * 60 + 59, UTC),
+            "1440 was clamped to 23:59, which is the divergence this fixes"
+        );
+    }
+
+    /// Anything past 1440 clamps to it rather than rolling into the following day, so a config nobody
+    /// validated cannot move a window by days.
+    #[test]
+    fn a_minute_past_1440_clamps_to_it() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        assert_eq!(local_instant(day, 99_999, UTC), local_instant(day, 1440, UTC));
+    }
+
+    /// And an ordinary minute is unaffected, which is the case that must not regress.
+    #[test]
+    fn an_ordinary_minute_is_unchanged() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        assert_eq!(
+            local_instant(day, 4 * 60, UTC),
+            Some(day.and_hms_opt(4, 0, 0).unwrap().and_utc().timestamp())
+        );
+    }
 }
