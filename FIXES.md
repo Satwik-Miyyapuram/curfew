@@ -99,7 +99,7 @@ it is corrected against `git log` whenever an entry is added.)*
 | `c9cdc5b` | `UX-FLOWS.md` corrected, and the log for that round (entry 42) |
 | `31bdd1b` | A ratchet on untranslated copy, and the permission table moved out (entry 43) |
 | `d69572b` | The copy detector was blind to a third of its subject, and the ViewModel slice (entries 43, 44) |
-| `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, three cross-references repointed after a round of renumbering, and the severity list corrected |
+| `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 
 ### A note on the Android verification environment
 
