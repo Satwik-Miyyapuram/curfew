@@ -453,3 +453,70 @@ fn history_older_than_thirty_days_is_dropped() {
     enforcer.tick(AFTER + 60 * 24 * 3600, 0, &[], &table);
     assert!(enforcer.history.is_empty());
 }
+
+// --- the figures the Time page shows ------------------------------------------------------------
+
+/// The request the window's "Where time went" page sends, answered over the real handler.
+///
+/// Before this existed the page could not exist: the design has carried a "Where time went" nav entry
+/// all along, the build had four pages, and on Windows the only route to your own usage data was
+/// `curfew stats` in a terminal. This pins the whole path — request in, typed figures out — rather
+/// than the arithmetic, which `curfew-core` already tests.
+#[test]
+fn the_time_page_gets_its_figures_over_the_wire() {
+    let (mut enforcer, _) = enforcer("stats-wire");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    enforcer.tick(AFTER, 0, &[], &table);
+    assert_eq!(enforcer.history.len(), 1, "the fixture did not record a session");
+
+    // Exactly the JSON the page builds, parsed by the real enum — the same contract test the Start
+    // button has, so a rename on either side is a failing test rather than a blank page.
+    let request: Request =
+        serde_json::from_str(r#"{"request":"stats","days":14}"#).expect("the page's own request");
+    match enforcer.handle(NOW, request) {
+        Response::Stats(stats) => {
+            assert_eq!(stats.days.len(), 14, "a fortnight was asked for");
+            assert_eq!(stats.total_sessions, 1);
+            assert!(
+                stats.total_blocked_seconds > 0,
+                "a session that ran was counted as no time at all"
+            );
+        }
+        other => panic!("the figures came back as {other:?}"),
+    }
+}
+
+/// And a machine that has never blocked anything answers with an empty fortnight rather than an
+/// error: a fresh install opening the page is not a fault.
+#[test]
+fn a_machine_with_no_history_still_answers() {
+    let (mut enforcer, _) = enforcer("stats-empty");
+
+    match enforcer.handle(NOW, Request::Stats { days: 14 }) {
+        Response::Stats(stats) => {
+            assert_eq!(stats.days.len(), 14);
+            assert_eq!(stats.total_sessions, 0);
+            assert_eq!(stats.total_blocked_seconds, 0);
+        }
+        other => panic!("an empty history was answered with {other:?}"),
+    }
+}
+
+/// The window omits `days` when it wants the default, so the field has to have one — and it must be
+/// the same fortnight the page's own chart labels, or the bars and the count would disagree.
+#[test]
+fn omitting_the_window_gives_the_same_fortnight_as_asking_for_it() {
+    let (mut enforcer, _) = enforcer("stats-default");
+
+    let request: Request =
+        serde_json::from_str(r#"{"request":"stats"}"#).expect("a request with no days");
+    match (enforcer.handle(NOW, request), enforcer.handle(NOW, Request::Stats { days: 14 })) {
+        (Response::Stats(omitted), Response::Stats(explicit)) => {
+            assert_eq!(omitted.days.len(), explicit.days.len());
+            assert_eq!(omitted.days.len(), 14);
+        }
+        other => panic!("the two answers differed in shape: {other:?}"),
+    }
+}

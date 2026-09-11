@@ -108,6 +108,24 @@ pub enum Request {
     /// "The user is opening this URL. May they?" The service decides; the extension only reports
     /// and obeys, so a tampered extension cannot invent an allow the core did not give.
     Check { browser: String, url: String },
+    /// What the blocking has added up to over the last `days` local days.
+    ///
+    /// The service answers this rather than the window reading the state file for itself, even
+    /// though the file is readable by the user: the service already holds the history in memory, it
+    /// is the only writer, and a second reader of a file being rewritten under it is how two views of
+    /// one fortnight start to disagree. Same reasoning as everything else on this channel.
+    ///
+    /// `days` is bounded by the caller and clamped by the core, so a bad number costs a smaller
+    /// answer rather than a large allocation.
+    Stats {
+        #[serde(default = "default_stats_days")]
+        days: u32,
+    },
+}
+
+/// A fortnight, which is what `curfew stats` defaults to and what the Time page charts.
+fn default_stats_days() -> u32 {
+    14
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +135,9 @@ pub enum Response {
     /// due, every warning — and it is one of a dozen variants the rest of which are a word and a
     /// timestamp. Without the box every response everywhere would be as large as the largest.
     Status(Box<Status>),
+    /// The figures for the Time page. Boxed for the same reason as [`Response::Status`]: a fortnight
+    /// of day rows is the largest thing on this channel after the status itself.
+    Stats(Box<curfew_core::stats::Stats>),
     Ok,
     /// Release lands at this instant, and not before.
     Release {

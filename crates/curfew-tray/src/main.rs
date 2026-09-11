@@ -121,6 +121,14 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
 pub fn describe(response: &Response) -> String {
     match response {
         Response::Ok => String::new(),
+        // Nothing on this menu asks for the figures, so this is unreachable in practice — but the
+        // match is exhaustive rather than wildcarded on purpose: that is why every other variant in
+        // this enum has a sentence, and a catch-all would let the next one arrive silently.
+        Response::Stats(stats) => format!(
+            "{} session(s) in the last {} day(s); `curfew stats` has the breakdown.",
+            stats.total_sessions,
+            stats.days.len(),
+        ),
         Response::Release { at } => format!(
             "The release has started. It lands at {}, and cannot be brought forward.",
             menu::when(*at)

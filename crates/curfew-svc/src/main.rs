@@ -487,6 +487,23 @@ fn when(ts: curfew_core::Timestamp) -> String {
 fn report(response: Response) -> i32 {
     match response {
         Response::Ok => 0,
+        // The figures, as the Time page gets them. Nothing on the command line asks for these —
+        // `curfew stats` reads the state file directly so that it works with no service running —
+        // but the arm is written rather than wildcarded so that adding a request later gets an
+        // answer instead of falling into a catch-all.
+        Response::Stats(stats) => {
+            println!(
+                "{} across {} session{} in the last {} days.",
+                span(stats.total_blocked_seconds),
+                stats.total_sessions,
+                if stats.total_sessions == 1 { "" } else { "s" },
+                stats.days.len(),
+            );
+            if stats.current_streak > 0 {
+                println!("Current streak: {} day(s).", stats.current_streak);
+            }
+            0
+        }
         Response::Release { at } => {
             println!("Release starts now and lands at {}. It cannot be brought forward.", when(at));
             0

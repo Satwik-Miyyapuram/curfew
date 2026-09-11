@@ -46,7 +46,8 @@ must run.
 | 25 | `%ProgramData%\Curfew` had no explicit ACL (P1-0, second half) | **P1** | **Fixed** |
 | 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
 | 27 | A blocked site shows the browser's own error page (F-21) | **P1** | **Fixed as far as the design allows** — the "serve a page" fix is already refused in-code (entry 27) |
-| 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | Pending |
+| 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | **Half fixed** — "Where time went" built; "Devices" turned out to be a missing feature, not a missing page (entry 28) |
+| 29 | `AppPickerScreen` shows every app unticked after a failed config read | **P2** | Pending |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -71,7 +72,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `34af161` | One place for the app to say something, on whatever screen raised it (entry 19) |
 | `cd1021f` | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
 | `7f11fbe` | The nav and the toggle get hit areas that can be hit (entry 23) |
-| *(this commit)* | A blocked site's symptom is named where the user will read it (entry 27) |
+| `8c41f09` | A blocked site's symptom is named where the user will read it (entry 27) |
+| *(this commit)* | The window gets the "Where time went" page the design always had (entry 28) |
 
 ### A note on the Android verification environment
 
@@ -741,44 +743,48 @@ into the binary by `include_str!`, so a syntax error would be a compile error.
 
 ## Still open
 
-Recorded here so the remaining work is a list rather than a memory. Severity from the two reviews.
+Recorded here so the remaining work is a list rather than a memory. Rewritten after every round, and
+the entries it named as open in the previous revision — F-16, F-38, the control channel, the
+`%ProgramData%` ACL, the wrong-password swallow, the config-reload gap, the single message surface, and
+the two read-failure findings — are all fixed above. What follows is what is actually left.
 
-**P0 (one left)**
+**P0 — none.** All four are fixed: the claimable `Timer`, the untrusted Windows clock, the obeyed
+`Stop`, and the Android UI's wall clock, plus the three P0s from the interaction review (F-1, F-16,
+F-17).
 
-- **Entry 6 — F-16: Windows has no way to start a block.** `Request::Start` still has exactly one
-  non-test sender: `crates/curfew-svc/src/main.rs:627`. The fix is a UI affordance plus
-  `design/win/Setup.dc.html` for first run, and it is the largest single item left. It is UI work on a
-  surface with no test coverage on this machine, which is why it is the one P0 not attempted here.
+**P1 — one, and it is not what the review said it was**
 
-**P1**
+- **Entry 28 second half — Windows cannot pair a device.** The "Devices" page is not built because
+  there is nothing to build it on: the service runs a sync node and reads `peers.json`, but
+  `curfew_sync::pair`'s `offer`/`accept`/`revoke` have **no caller outside `curfew-ffi`**, so no
+  Windows surface can create a peer and the page would be empty on every machine. This is a
+  key-exchange-and-transport feature rather than a UI fix, and it is the only P1 left. See entry 28
+  for the greps.
 
-- **Entry 17 — F-38: touch targets.** Nav tabs ~38dp, `Switch` 26dp, Fix/Grant 32dp, against the app's
-  own `PrimaryButton` at 52dp and WCAG 2.2 SC 2.5.8's 24px floor (48dp is the Material figure).
-  Mechanical but broad: it touches `Design.kt` and every screen that uses those components.
-- **Entry 18 — P1-1: the control channel.** `serve` reads an unbounded line with no timeout on a
-  single-threaded accept loop.
-  **Before attempting this, read the note in `DESIGN_AND_CODE_REVIEW_FULL.md`:** `interprocess` returns
-  `Unsupported` for `set_read_timeout` on Windows named-pipe streams, so the obvious fix does not
-  compile-and-work. It needs a supervisor thread or `PIPE_NOWAIT`. I did not want to land a change I
-  could not demonstrate works on a real pipe.
-- **Entry 20 — P1-0 second half: the `%ProgramData%\Curfew` ACL.** The spawn path is closed (entry 19),
-  but the directory still inherits `BUILTIN\Users: Write`, so `calendars/`, `dns-before.json` and the
-  state file can still be pre-created. Needs a change in `curfew install` (`icacls /inheritance:r`),
-  which means it is only observable on a real install.
-- **Entry 21 — the Windows interaction set (F-20, F-22, F-23, F-24, F-25, F-26, F-27, F-28).** The
-  silent wrong password, no feedback on block start, config edits not taking effect, the window's own
-  password box, mouse-only nav, the uncancellable freeze, the unreachable tray menu, and profile **id**
-  where the name belongs. Each is small; together they are a session's work on `app.html`,
-  `menu.rs` and `shell.rs`.
-- **Entry 12 — F-29: one message surface.** `UiState.message` is set from eight places and rendered on
-  two. A snackbar host in `CurfewApp` fixes the whole class — including `deleteProfile`'s invisible
-  refusal (entry 15) and peer revoke.
+**P2 — the remaining interaction set**
 
-**P2, and the rest**
-
-- Entry 13 (F-30: an unparseable config looks empty and Save would overwrite it), entry 14 (F-31: a
-  failed calendar read renders as an empty diary), entry 15 (F-32: delete-profile has no confirmation),
-  and the design-craft set (F-39–F-45, F-47).
+- **Entry 29 — `AppPickerScreen` after a failed config read.** It derives its tick state from
+  `state.configToml`, so a failed read shows every app unticked. **Display only**: the write path
+  re-reads the config from the runtime (`Policy.setBlockedApps(runtime.policy.configToml(), …)`) rather
+  than using the possibly-empty state, so a toggle either works on the real config or throws into the
+  banner. It is the one sub-item of entry 20/21 that was not closed, and it is listed rather than left
+  to look complete.
+- **F-22, F-24–F-28 — the rest of the Windows interaction set.** No feedback that a block has started;
+  the window asks for the Windows password in its own HTML form where the tray deliberately uses the OS
+  credential dialog (`prompt.rs:1-15` argues the case, and the louder surface is the one breaking the
+  rule — the two findings point in opposite directions and want one decision, not two patches);
+  mouse-only nav; an uncancellable freeze from the window; the tray menu unreachable when the service
+  is down; profile **id** shown where the name belongs. Each is small; together they are a session's
+  work on `app.html`, `menu.rs` and `shell.rs`.
+- **The design-craft set — F-39–F-45, F-47.** `DSheet` is the only surface without the app's glass
+  (F-39) while `NowScreen` uses Material `AlertDialog`s for all eight of its dialogs (F-40), so there
+  are two visual languages on the screen the user sees most; four duration formats and three clock
+  formats (F-41); amber's documented meaning broken in three places (F-42); `Welcome` and `Setup`
+  designed and unbuilt (F-44). These are real, and they are craft rather than correctness — which is
+  why they come after everything above.
+- **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let
+  the README stop quoting it at all. It changes argument parsing across
+  `curfew-cli/src/schedule.rs`, so it was left for a pass that can test it properly.
 
 ### Two things this pass learned about the repository, worth acting on separately
 
@@ -1221,7 +1227,8 @@ state from `state.configToml`, so with a failed read it shows everything unticke
 fault and not a destructive one** — I checked the write path: `Policy.setBlockedApps(runtime.policy.
 configToml(), …)` re-reads the config from the runtime rather than using the possibly-empty state, so a
 toggle after a failed read either works on the real config or throws into the banner. Guarding the
-picker's display is entry 27 below.
+picker's display is in the "Still open" list at the end of this document, as **entry 29** — it is the
+one sub-item of this fix that was not done, and it is listed there rather than left to look complete.
 
 **Verification.** `:app:compileDebugKotlin` clean, no warnings in the touched files. **Not covered by an
 executing test** — the Conscrypt limitation in entry 4. The write-path claim above was verified by
@@ -1390,3 +1397,85 @@ symptom is not Curfew's, so it is not mentioned). `node --check` clean on the wi
 **What is still missing, and cannot be fixed here.** A user who never opens the tray or the window still
 sees only the browser's error page. Closing that properly needs one of the two things Curfew has ruled
 out, so it is recorded as a genuine limitation rather than left to look like an oversight.
+
+---
+
+## 28. The window's nav was four pages where the design has six
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-19 (P1). **Half fixed** — one of the two pages is built, and
+the other turned out not to be a missing page at all. That distinction is the substance of this entry.
+
+**The claim.** *"Every `design/win/*.dc.html` carrying a nav renders six: Now · Plan · Apps & sites ·
+**Where time went** · **Devices** · Is it working. The build has four. Both exist on Android. On
+Windows the only route to the user's own usage data is `curfew stats` in a terminal."* All of that is
+correct, and it is the one finding this round that needed no correction.
+
+### "Where time went" — built
+
+The data was already there and had no way to reach it. `Enforcer::history` has held thirty days of
+`SessionRecord`s all along — *"kept for thirty days so `curfew stats` can say what the fortnight looked
+like"* — and `curfew_core::stats::summarize` is a pure function that turns them into a fortnight of
+days, streaks and totals. On Windows the only caller was the command line, so a user who never opened a
+terminal could not see what their own blocking had added up to.
+
+- **`Request::Stats { days }`** and **`Response::Stats(Box<Stats>)`** on the control channel. The
+  service answers rather than the window reading the state file for itself, even though the file is
+  readable: the service already holds the history in memory, it is the only writer, and a second reader
+  of a file being rewritten under it is how two views of one fortnight start to disagree. Same reasoning
+  as everything else on that channel. Boxed for the same reason `Status` is.
+- **`days` has a serde default of 14**, so the window can omit it — and a test pins that omitting it
+  gives the same fortnight as asking for it, because the chart's labels and its totals have to agree.
+- **The page** is a bar per day with the blocked time printed above each, plus totals and the streaks.
+  Two details are deliberate: **a day with any blocking at all gets a visible bar** (a minimum height,
+  not a proportional hairline), because a chart that rounds a real day down to nothing tells the user
+  they did nothing, which is the one thing this page must not get wrong; and **an empty day is a flat
+  stub in the line colour rather than a gap**, so a fortnight with a gap in it reads as a fortnight
+  rather than a broken chart.
+- The `total` in the subtitle and the bars are derived from the same array, so they cannot disagree.
+
+**A note on the escape hatch this needed.** The note at the foot of the page names `curfew stats`, and it
+was first written with backticks inside a JavaScript template literal — which does not parse.
+`cargo build` **succeeded anyway**, because `include_str!` checks only that the file is valid UTF-8; the
+only thing that caught it was `node --check` on the extracted script. Worth recording, because it is the
+same gap this document has already flagged twice: the window's HTML has no compile-time check beyond
+"it is text".
+
+### "Devices" — not a missing page, and this is the more useful finding
+
+I went looking for the peer state to build the page on, and it is not there. The Windows service **does**
+run a sync node: `start_sync()` opens `%ProgramData%\Curfew\sync`, reads `peers.json`, and starts a
+listener — but only when there is already at least one peer, and there is **no way to create one**.
+
+```
+$ git grep -rn "add_peer\|pair::\|Peers::" -- crates/curfew-svc/src crates/curfew-win/src \
+    crates/curfew-cli/src crates/curfew-tray/src crates/curfew-app/src
+(no matches)
+```
+
+`curfew_sync::pair` exposes `offer`, `accept`, `revoke`, `active`, `all` — and every caller of it is in
+`curfew-ffi`, Android's binding. So on Windows a `peers.json` can only arrive by being placed there, and
+a Devices page would be **permanently empty with no way to fill it**. The review's framing — "the nav is
+6 pages in the design and 4 in the build" — treats the two missing pages as the same kind of omission.
+They are not: one was a page over data that existed, and the other is a UI over a feature that was never
+built on this platform.
+
+**So it is not built, and it is recorded as a feature rather than a fix.** Building the page alone would
+produce the most misleading surface in the app: a "Devices" tab that is empty on every machine, with
+nothing to explain why. The honest options are to build Windows pairing (a key-exchange and transport
+feature, not a P1 UI fix) or to leave the nav at five and say why. This entry takes the second, and the
+item is in "Still open" below.
+
+**Verification.** Three new tests in `crates/curfew-win/tests/tick.rs`, all executable on this host
+because `Enforcer::handle` and the IPC enums are ordinary Rust:
+
+- `the_time_page_gets_its_figures_over_the_wire` — sends the **literal JSON the page builds**
+  (`{"request":"stats","days":14}`), after running a real session, and asserts a fortnight of days and a
+  non-zero total. The same contract-test shape the Start button has, so a rename on either side is a
+  failing test rather than an empty page.
+- `a_machine_with_no_history_still_answers` — a fresh install gets an empty fortnight, not an error.
+- `omitting_the_window_gives_the_same_fortnight_as_asking_for_it` — the serde default is pinned.
+
+`node --check` clean on the window's script. `cargo test --workspace`: **842 passed**; clippy and fmt
+clean. **The page's own rendering is not covered by an executing test**: it is DOM building rather than
+Compose, but it needs a browser, and see the Android verification note above entry 1 for why nothing in
+this project runs a UI on this host.

@@ -63,6 +63,7 @@ input{height:34px;width:100%;background:var(--sur2);border:1px solid var(--line)
     <div class="nav on" data-page="now"><span class="ic">&#9679;</span>Now</div>
     <div class="nav" data-page="plan"><span class="ic">&#9783;</span>Plan</div>
     <div class="nav" data-page="apps"><span class="ic">&#9635;</span>Apps &amp; sites</div>
+    <div class="nav" data-page="time"><span class="ic">&#9684;</span>Where time went</div>
     <div class="nav" data-page="health"><span class="ic">&#10003;</span>Is it working</div>
     <div class="sp"></div>
     <div id="livepill"></div>
@@ -185,6 +186,10 @@ function describeRefusal(refusal) {
 
 // ---- state ------------------------------------------------------------------------------------
 const state = { page: "now", status: null, trouble: null, config: null, configPath: null, configError: null, tab: "apps", profile: null,
+  // The figures behind the Time page, fetched alongside the status rather than when the page is
+  // opened: they come over the same pipe, and a page that asked on demand would show an empty chart
+  // for as long as the round trip took.
+  stats: null,
   // What the Start-a-block sheet is set to. `null` until it is opened, so the sheet's own defaults
   // apply the first time and a choice the user made survives the refresh that follows it.
   startProfile: null, startMinutes: null, startStrength: null };
@@ -206,6 +211,11 @@ async function refresh() {
   else { state.config = null; state.configError = config.detail; }
   // Kept even on failure, so a page can name the file that could not be read.
   state.configPath = config.path || null;
+  // The figures for the Time page. A failure leaves the previous answer in place rather than
+  // blanking the chart: these are a fortnight of history, so the last good copy is a better thing to
+  // show than an empty page, and the page says when it has nothing at all.
+  const figures = await askService({ request: "stats", days: 14 });
+  if (figures.ok && figures.value.response === "stats") state.stats = figures.value;
   draw();
 }
 
@@ -436,6 +446,71 @@ function pageApps() {
       : `<div class="row"><span class="meta">Nothing here in ${esc(profile.name)}.</span></div>`}</div>`;
 }
 
+// ---- where time went ---------------------------------------------------------------------------
+//
+// The fifth page, and the one the design has always had and the build did not: the nav in every
+// `design/win/*.dc.html` carries six entries and this window carried four, so on Windows the only
+// route to your own usage data was `curfew stats` in a terminal. Android has had this screen since it
+// shipped, which is what made the omission read as an oversight rather than a decision.
+//
+// The figures come from the service rather than from the window reading the state file, even though
+// the file is readable: the service already holds the history in memory, it is the only writer, and a
+// second reader of a file being rewritten under it is how two views of one fortnight start to
+// disagree. `Request::Stats` is that request.
+function pageTime() {
+  if (!state.stats) {
+    return `<h1>Where time went</h1>
+      <div class="sub">The service has not answered yet.</div>
+      <div style="height:18px"></div>${troubleCard()}`;
+  }
+  const s = state.stats;
+  // Bars and totals come from the same array, so the chart cannot disagree with the number under it.
+  const peak = Math.max(1, ...s.days.map((d) => d.blocked_seconds));
+  const bars = s.days.map((d) => {
+    // Height as a fraction of the busiest day, with a floor so a day with a few minutes on it is
+    // visible rather than a hairline. A chart that rounds a real day down to nothing is a chart that
+    // tells the user they did nothing, which is the one thing this page must not get wrong.
+    const full = d.blocked_seconds === 0 ? 3 : Math.max(8, Math.round((d.blocked_seconds / peak) * 96));
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0">
+      <div class="mono meta" style="font-size:10px">${d.blocked_seconds ? esc(clock(d.blocked_seconds)) : ""}</div>
+      <div style="width:100%;max-width:26px;height:${full}px;border-radius:5px;background:${d.blocked_seconds ? "var(--live)" : "var(--line)"}"></div>
+      <div class="meta" style="font-size:10px">${esc(dayLabel(d.date))}</div>
+    </div>`;
+  }).join("");
+
+  const total = s.days.reduce((sum, d) => sum + d.blocked_seconds, 0);
+  return `<h1>Where time went</h1>
+    <div class="sub">${total
+      ? `${esc(clock(total))} blocked across ${s.total_sessions} session${s.total_sessions === 1 ? "" : "s"}, over the last ${s.days.length} days.`
+      : `Nothing has been blocked in the last ${s.days.length} days.`}</div>
+    <div style="height:18px"></div>
+    <div class="card">
+      <div class="lbl">Blocked per day</div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:126px">${bars}</div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="strip">
+      <span class="pill">${esc(clock(total))} in total</span>
+      <span class="pill">${s.total_sessions} session${s.total_sessions === 1 ? "" : "s"}</span>
+      ${s.current_streak ? `<span class="pill" style="color:var(--ok)">${s.current_streak} day streak</span>` : ""}
+      ${s.longest_streak > s.current_streak ? `<span class="pill">best ${s.longest_streak} days</span>` : ""}
+    </div>
+    <div style="height:14px"></div>
+    <div class="note wrap">Counted from the sessions themselves, not from time the service happened to
+      be running, so a day with no session on it is a gap and not a zero. A day counts toward the
+      streak when any part of a session fell on it, and today is allowed to be empty without breaking
+      it, because a day you have not finished is not a day you failed. The same figures are on the
+      phone, and <span class="mono">curfew stats</span> prints them in a terminal.</div>`;
+}
+
+/** "Mon 3" — enough to find a day in a fortnight without reading a date twice. */
+function dayLabel(date) {
+  const parsed = new Date(`${date}T12:00:00`);
+  if (isNaN(parsed)) return date;
+  return parsed.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+}
+
 function pageHealth() {
   const s = state.status;
   const lines = [];
@@ -485,7 +560,7 @@ function pageHealth() {
 
 // ---- drawing ----------------------------------------------------------------------------------
 function draw() {
-  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, health: pageHealth };
+  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, health: pageHealth };
   document.getElementById("body").innerHTML = (pages[state.page] || pageNow)();
   for (const nav of document.querySelectorAll(".nav")) {
     nav.classList.toggle("on", nav.dataset.page === state.page);

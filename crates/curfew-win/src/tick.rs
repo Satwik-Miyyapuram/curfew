@@ -733,6 +733,15 @@ impl Enforcer {
                 }
             }
 
+            // Answered from memory, not by reading the state file: the service owns the history, and
+            // the window asking its own copy would be a second reader of the same file. `self.stats`
+            // includes running sessions counted up to `now`, so the day the user is in the middle of
+            // blocking shows as blocked.
+            Request::Stats { days } => match self.stats(now, days) {
+                Ok(stats) => Response::Stats(Box::new(stats)),
+                Err(detail) => Response::Error { detail },
+            },
+
             Request::Reload => match &self.config_path {
                 None => Response::Error { detail: "no config path is configured".into() },
                 Some(path) => match std::fs::read_to_string(path)
