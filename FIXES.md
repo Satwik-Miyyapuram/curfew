@@ -479,7 +479,7 @@ This is the first block a new user ever attempts, and `UX-FLOWS.md` principle 1 
 must happen in under a minute". The honest count with the permission detour was seven interactions and
 a Settings round-trip, with the app behaving as if the first five never happened.
 
-Separately (entry 22), the four-hour confirmation was checked **only** on the primary button. Both
+Separately (entry 13), the four-hour confirmation was checked **only** on the primary button. Both
 dialog paths skipped it, so "Start without it" would start the strongest lock in the app from a
 twelve-hour dial in one tap — the exact case `LONG_MINUTES` exists to catch.
 
@@ -609,7 +609,7 @@ strongest lock selected by default, that is an unbreakable twelve-hour block in 
 **What was changed.** Every route now goes through `begin(id)`, which performs that check. The same fix
 as entry 5, which is why they share a commit.
 
-**A pattern worth naming.** Entry 5, entry 22 and the original `Lock::Timer` bug are one shape: a check
+**A pattern worth naming.** Entry 5, entry 13 and the original `Lock::Timer` bug are one shape: a check
 that exists in one code path and not in its siblings. Where a rule matters, route every path through
 one function — and where a decision encodes a rule, make the **default** the safe answer, because the
 bug is always in the branch nobody wrote.
