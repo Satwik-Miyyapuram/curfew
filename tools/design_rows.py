@@ -113,8 +113,14 @@ STATUS = {
               "**fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front"),
     "P2-17": ("fixed",
               "**fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now"),
-    "P1-8": ("open",
-              "**verified open.** `git grep -i downtime -- crates/` finds only clock-credit code and `Status` carries no downtime field, so a service that was killed, refused to start or crashed leaves no record the user can see — while `ARCHITECTURE.md` promises the exact window is reported and Android implements it (`Downtime.kt`). **Not done**: a feature rather than a defect fix, needing a durable last-seen stamp, a `Status` field and a window surface"),
+    "P1-8": ("fixed",
+             "**fixed** (entry 69), the Windows half. `Downtime::detect` reads the gap between the last "
+             "trusted tick and now, `Enforcer::note_start` records it on the first pass — the one place "
+             "`now` is trusted and the boot counter still holds the previous run's numbering — and both "
+             "the Now page and the tray report it, cleared by `Request::DismissDowntime` and written to "
+             "the log. **Android's half of the finding is untouched**: it already implements this. The "
+             "review's second claim — that Android's polling is not adaptive — is **not done**: the "
+             "Windows tick is 2 s regardless of whether a session is running"),
     "P2-8": ("open",
               "**verified open.** The ICS parser is the weakest component here and the finding lists distinct gaps: a bare `YYYYMMDD` `DTSTART` is not treated as all-day, so an all-day entry with no `DTEND` fails the overlap test and is dropped entirely; a negative `BYMONTHDAY` is discarded by `filter_map`, after which an empty list means *unconstrained*, which is fail-open; and recurrence is partial generally. **Not done**: each is a separate parser change with its own RFC cases, and doing one badly is worse than leaving all of them named"),
     "P2-11": ("open",

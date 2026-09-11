@@ -96,6 +96,8 @@ must run.
 | 78 | One over-long URL killed the native host, and the browser was then closed (P2-13) | **P2** | **Fixed** — the frame is skipped rather than fatal, and the extension caps the URL (entry 66) |
 | 79 | A wedged service grew the window's threads without bound, and the service leaked its slots on a panic (P2-17) | **P2** | **Fixed** — a shared `Capacity` whose permit is released by `Drop` (entry 67) |
 | 80 | Hiding the tray silently stopped window-title and budget enforcement (P2-16) | **P2** | **Fixed** — the gap is named on `Status`, in the menu and in the quit text (entry 68) |
+| 81 | A killed service stopped enforcing and left no record the user could see (P1-8) | **P1** | **Fixed on Windows** — the gap is detected, logged and shown; Android already had it (entry 69) |
+| 82 | `git add -A` swept throwaway scaffolding into a commit, twice | **build** | **Fixed** — `tools/check_workspace.py` reports any script in `tools/` that does not belong (entry 70) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -162,7 +164,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
 | P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
 | P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
-| P1-8 | P1 | **verified open.** `git grep -i downtime -- crates/` finds only clock-credit code and `Status` carries no downtime field, so a service that was killed, refused to start or crashed leaves no record the user can see — while `ARCHITECTURE.md` promises the exact window is reported and Android implements it (`Downtime.kt`). **Not done**: a feature rather than a defect fix, needing a durable last-seen stamp, a `Status` field and a window surface |
+| P1-8 | P1 | **fixed** (entry 69), the Windows half. `Downtime::detect` reads the gap between the last trusted tick and now, `Enforcer::note_start` records it on the first pass — the one place `now` is trusted and the boot counter still holds the previous run's numbering — and both the Now page and the tray report it, cleared by `Request::DismissDowntime` and written to the log. **Android's half of the finding is untouched**: it already implements this. The review's second claim — that Android's polling is not adaptive — is **not done**: the Windows tick is 2 s regardless of whether a session is running |
 | P1-9 | P1 | **fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, which keeps the watchdog alive. Written before the state and removed last, so the worst a crash can do is the safe direction. **Honest limit**: deleting this file too gets the old behaviour, so it raises the cost by one file rather than preventing it |
 | P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
 | P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
@@ -276,6 +278,8 @@ this table is a reading aid.
 | `d5c1b54` | A long URL skips a frame instead of killing the host (entry 66) |
 | `ddfa83e` | Bound what a wedged service can hold, and release the slot on a panic (entry 67) |
 | `992db90` | Say what stops being enforced when the tray goes (entry 68) |
+| `2dd2ccb` | Report the window enforcement was down (entry 69) |
+| `435f24b` | Report scaffolding left in `tools/` (entry 70) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3875,3 +3879,96 @@ warning while the tray is alive, warning the moment it stops — which is one re
 a budget each dropped from `needs_foreground`), the enforcer (the gap never reported; the gap reported
 when no rule needs it, which is the crying-wolf direction), `Status` dropping the exposure, the tray
 dropping the pre-emptive warning, and the quit note reverting to its old claim.
+
+---
+
+## 69. P1-8: a killed service stopped enforcing and left no record the user could see
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-8**. **Fixed** — the Windows half.
+
+### What was wrong
+
+`ARCHITECTURE.md` §10 promises that a service which was killed, crashed or never started reports *"the
+exact window it was down. No silent failure."* Android has done this since `Downtime.kt`, with a
+dismissable banner on the Now screen. Windows had nothing: a service killed during a timer lock stopped
+enforcing everything behind it and left no record the user could see.
+
+**The case nothing caught is the one with no reboot in it.** `Persisted::last_tick` is a *trusted*
+instant — written from the clock witness — and it was only ever used to charge elapsed time, clamped to
+one tick. So killing the service for two hours inside one boot moved uptime forward as usual, the clock
+layer saw nothing wrong, and the two unenforced hours were silently discarded. A machine that was
+switched off is already reported by the clock layer as time credited across a shutdown; a *service* that
+was stopped is not.
+
+### The fix
+
+`curfew_win::downtime::Downtime::detect` reads that gap as a fact about enforcement rather than as a
+charging detail. `Enforcer::note_start` runs on the **first pass**, and both halves of that placement
+matter:
+
+- `now` is the **trusted** instant there. Measuring the gap against a wall clock somebody may have moved
+  would make the reported window fiction, and the notice exists to be trustworthy about the past.
+- The call happens **before `observe_clock` has observed the current uptime**, so `boot_counter` still
+  holds the previous run's numbering. Seeing that number change is what distinguishes a machine restart
+  from a service stop — and the two lead a user to different conclusions.
+
+Both surfaces report it: the Now page shows a banner at the top, because it is a statement about the
+trustworthiness of everything below it, and the tray adds a line of its own. It is cleared by
+`Request::DismissDowntime` rather than by a timer, because the notice exists to be *read* — Android
+dismisses its banner the same way. It is also written to the log the service now keeps (P1-12), since the
+architecture's promise is about the record as much as the banner.
+
+### Three judgement calls
+
+**A gap under five minutes is not reported.** The service restarts on upgrade, on a config change, after a
+crash the manager recovers from in seconds. Reporting every restart trains people to dismiss the notice
+without reading it, and the notice that matters says enforcement was off for two hours. Five minutes is
+Android's threshold.
+
+**`before > 0` is required for "this machine was restarted".** A boot counter of zero means *no record of
+a previous boot*, not a restart — and `BootCounter::observe` numbers the first reading it ever takes as
+boot 1, so treating `0 -> 1` as a reboot would have every first-ever run announce a machine restart it
+has no evidence for. Left false, the sentence says only that Curfew was not running, which is true either
+way: **the honest choice is the less specific one.** That branch was uncovered by the mutation run, and it
+is reachable rather than theoretical — it is what an upgrade from a build that persisted `last_tick` but
+not `boot_counter` produces, since the counter deserializes to zero by default. The test added for it uses
+exactly that state.
+
+**Nothing else about enforcement changes.** The gap does not extend a lock, punish anybody, or alter
+charging. `elapsed` is still clamped to one tick, deliberately, because charging two hours of downtime to
+a budget would empty an allowance overnight. This is an account of what happened, and only that.
+
+### What was deliberately not done
+
+The finding has a second half: *"Android's polling is not adaptive"* — the architecture promises pollers
+running at 1 s while a session is active and 15 s otherwise. **Not done, and named in the coverage row so
+it is not read as closed.** Android's polling intervals are a separate change in a module this branch has
+not otherwise touched.
+
+### Verification
+
+972 Rust tests (was 958): six on the detector, including that a future heartbeat is left to the clock layer
+rather than reported as a negative gap, and seven on the enforcer. **Seven mutations caught** — never
+reporting, reporting every short restart, treating a future heartbeat as a gap, guessing a restart from a
+missing boot record, never noticing a restart, recording the gap on every pass, and dismissing not clearing
+it. Plus **three in the window harness**: the notice dropped, a restart described as an ordinary stop, and
+the cost left out.
+
+---
+
+## 70. The workspace, again: `git add -A` swept scaffolding into a commit — twice
+
+**Not a review finding.** Recorded because it happened twice and neither time was noticed by anything.
+
+A patch script that had already failed on an assertion went into the P1-8 commit, and a temporary message
+file went into an earlier one. Both are one-shot: their content is the change they produced, and the tree
+keeps only what is meant to be run again.
+
+`tools/check_workspace.py` now reports any `.py` in `tools/` that is not in `TOOLS_TO_KEEP`, and names the
+scaffolding prefixes separately so the message says which kind it is. **Named by prefix rather than by an
+explicit deny-list**, because the next one will not be on the list either — the two that got through were
+called `add_p18_window2.py` and `msg59.tmp`.
+
+Verified both ways: a file called `add_something.py` is reported as scaffolding, an unlisted
+`newthing.py` is reported as a script that needs a decision rather than an accident, and the six that
+belong here pass.
