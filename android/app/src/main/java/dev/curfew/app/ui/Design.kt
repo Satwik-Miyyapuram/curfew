@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.setValue
@@ -59,6 +60,21 @@ object Dsn {
     /** A primary button, and the shorter secondary one that sits under a card. */
     val ButtonHeight = 52.dp
     val GhostHeight = 46.dp
+
+    /**
+     * The smallest a *touch* target may be, whatever it looks like.
+     *
+     * Material's figure, and the one this app's own buttons already meet at 52 and 46dp — so the
+     * number is the project's existing standard written down rather than a new rule. It is separate
+     * from visual size on purpose: a 44×26dp toggle and a 36dp day circle are the right *look* and
+     * the wrong *hit area*, and Material's `minimumInteractiveComponentSize` exists to hold both at
+     * once.
+     *
+     * WCAG 2.2 SC 2.5.8 (Level AA) asks for 24×24 CSS px and the app already clears that everywhere;
+     * 48dp is the stricter Material guidance, and the reason to prefer it here is that the controls
+     * below it are the ones used most — a nav tab every session, a plan toggle several times a day.
+     */
+    val MinTouch = 48.dp
 
     /**
      * Room under the last element so a scrolled screen clears the navigation bar.
@@ -319,27 +335,45 @@ fun DRow(
     }
 }
 
-/** The toggle on a plan row. Drawn rather than themed, so it matches the canvas exactly. */
+/**
+ * The toggle on a plan row. Drawn rather than themed, so it matches the canvas exactly.
+ *
+ * The drawn pill is 44×26dp — the artboard's size, and the right *look*. The touch target was not:
+ * at 26dp tall it was the shortest control in the app, less than half the 52dp primary button it
+ * usually sits opposite, and a miss on it is silent. A switch is the control that decides whether an
+ * app is blocked, so it is worth being able to hit.
+ *
+ * `minimumInteractiveComponentSize` is what separates the two: it expands the *measured* box to
+ * [Dsn.MinTouch] and leaves the drawing alone. A plain `padding` would have moved the pill inside the
+ * row and changed the layout instead of the hit area.
+ */
 @Composable
 fun Switch(on: Boolean, onChange: (Boolean) -> Unit) {
     Box(
         modifier = Modifier
-            .size(width = 44.dp, height = 26.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (on) Palette.Accent else Palette.Raised)
-            .then(
-                if (on) Modifier else Modifier.border(1.dp, Palette.Line, RoundedCornerShape(999.dp)),
-            )
+            .minimumInteractiveComponentSize()
             .clickable { onChange(!on) },
-        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
+        contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier
-                .padding(horizontal = 3.dp)
-                .size(20.dp)
+            modifier = Modifier
+                .size(width = 44.dp, height = 26.dp)
                 .clip(RoundedCornerShape(999.dp))
-                .background(if (on) Palette.Ink else Color(0xFF3B4553)),
-        )
+                .background(if (on) Palette.Accent else Palette.Raised)
+                .then(
+                    if (on) Modifier
+                    else Modifier.border(1.dp, Palette.Line, RoundedCornerShape(999.dp)),
+                ),
+            contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(
+                Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (on) Palette.Ink else Color(0xFF3B4553)),
+            )
+        }
     }
 }
 

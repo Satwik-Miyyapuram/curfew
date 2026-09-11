@@ -41,7 +41,7 @@ must run.
 | 20 | A failed config read looked empty; Save and Export destroyed it (F-30) | **P1** | **Fixed** |
 | 21 | A failed calendar read looked like an empty diary (F-31) | **P1** | **Fixed** |
 | 22 | Delete-profile: no confirm, refusal never read, screen left early (F-32) | **P1** | **Fixed** |
-| 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
+| 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | **Fixed, in part — the review's headline figure was wrong** (entry 23) |
 | 24 | Control channel unbounded read / serial accept (P1-1) | **P1** | **Fixed** (read cap + concurrency; read deadline still impossible — see entry 24) |
 | 25 | `%ProgramData%\Curfew` had no explicit ACL (P1-0, second half) | **P1** | **Fixed** |
 | 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
@@ -69,24 +69,70 @@ it is corrected against `git log` whenever an entry is added.)*
 | `dbdfb07` | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
 | `d1bc146` | The data directory is made what it was always claimed to be (entry 25) |
 | `34af161` | One place for the app to say something, on whatever screen raised it (entry 19) |
-| *(this commit)* | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
+| `cd1021f` | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
+| *(this commit)* | The nav and the toggle get hit areas that can be hit (entry 23) |
 
 ### A note on the Android verification environment
 
-The Android module **does** build and test on this machine, contrary to what the review assumed.
-`./gradlew :app:compileDebugKotlin` and `:app:testDebugUnitTest` both run green.
-
-It needed one thing that is not in the repository and not in CI: **a JDK the Gradle version
-supports.** This machine has only JDK 25 (`JAVA_HOME=C:\Program Files\Java\jdk-25.0.2`, and Android
-Studio's bundled JBR is 25.0.3 too), and Gradle 8.14.3 refuses it — it fails with a bare `What went
+The Android module **builds** on this machine, and `./gradlew :app:compileDebugKotlin` runs clean. It
+needed one thing that is not in the repository and not in CI: **a JDK the Gradle version supports.**
+This machine has only JDK 25 (`JAVA_HOME=C:\Program Files\Java\jdk-25.0.2`, and Android Studio's
+bundled JBR is 25.0.3 too), and Gradle 8.14.3 refuses it — it fails with a bare `What went
 wrong: 25.0.2`, which reads like a config error rather than a version ceiling. CI pins
 `java-version: '21'`, which is why CI has never seen this. Temurin 21 (aarch64, matching this
-machine) was fetched to `C:\jdk21` and every Android command below was run with
+machine) was fetched to `C:\jdk21`, and every Android command in this log was run with
 `JAVA_HOME=C:\jdk21\jdk-21.0.12.1+1`.
 
 **Worth fixing in the repo:** nothing enforces the JDK version locally. A `.java-version` file, or a
 toolchain declaration in `android/build.gradle.kts`, would turn "Gradle refused Java 25 with a
 one-line error" into an instruction.
+
+#### The unit suite does not run on this machine, and this note used to say it did
+
+An earlier revision of this section claimed `:app:testDebugUnitTest` "runs green". **That was wrong**,
+and it is corrected here rather than deleted, because it is the same class of mistake the status table
+was corrected for: a claim about verification that the verification did not support. The table is not
+the only place this document could overstate things, and this was the other one.
+
+What is actually true, measured in this session:
+
+```
+:app:testDebugUnitTest  →  121 of 164 fail, 43 pass
+all 121: java.lang.UnsatisfiedLinkError: no conscrypt_openjdk_jni-windows-aarch_64
+```
+
+**The cause is Robolectric, not the Rust core** — and the first attempt at this diagnosis got that
+wrong too. Entry 4 implied the native dependency came from `sqlcipher-android` pulling Conscrypt in
+for the desktop JVM. It does not. The isolation experiment:
+
+| Test class | Robolectric? | Result |
+| :--- | :--- | :--- |
+| `WordsTest`, `DialDragTest`, `ScheduleEditorTest` | no | **pass** (`BUILD SUCCESSFUL`) |
+| `EnforcerTest`, `CurfewRuntimeTest`, … | yes | fail, Conscrypt |
+
+Every failing class is a `@RunWith(RobolectricTestRunner::class)` class and every passing class is
+not, so **Robolectric 4.14's native runtime is what needs Conscrypt**, and it ships no
+`windows-aarch_64` build. The Rust core is not implicated: JNA 5.15.0 *does* ship
+`win32-aarch64/jnidispatch.dll`, and `curfew_ffi.dll` builds and loads.
+
+**Consequences, stated plainly.**
+
+- CI is unaffected: it runs `ubuntu-latest`, where Conscrypt has a `linux-x86_64` build, and `ci.yml`
+  does run `:app:testDebugUnitTest`.
+- On this host there is **no executable Android coverage of any kind** — not for the FFI, not for the
+  Compose UI. Every Android change in this log is therefore compile-verified and reasoned, and each
+  entry says so in its own words rather than inheriting a general green tick.
+- The 43 passing tests are the pure-logic ones, and they were used wherever they applied.
+
+**A test worth having, for whoever has a working host.** Compose layout can be measured in a unit test
+— `createComposeRule()` under Robolectric, `getUnclippedBoundsInRoot()`, then assert `>= Dsn.MinTouch`
+— and that would be a permanent CI guard on the whole F-38 class, which is exactly the kind of defect
+(right *look*, wrong *hit area*) with no other executable check. It was attempted here and abandoned:
+`androidx.compose.ui.test.junit4` was added to `testImplementation`, a measurement test was written,
+and it failed with the same
+`java.lang.UnsatisfiedLinkError: … conscrypt_openjdk_jni-windows-aarch_64`. **The dependency change was
+reverted rather than shipped**, because a test I cannot run is a test I cannot claim, and a red build in
+CI is a worse deliverable than an honest gap. The recipe is above.
 
 ---
 
@@ -376,11 +422,17 @@ java.lang.UnsatisfiedLinkError: no conscrypt_openjdk_jni-windows-aarch_64
     in java.library.path: ...
 ```
 
-That is **Conscrypt**, pulled in transitively for the desktop JVM by `sqlcipher-android`, and it
-**ships no Windows-ARM64 native build**. No amount of `jna.library.path` tuning reaches it; it is a
-missing binary inside a third-party artifact. (JNA itself is fine — 5.15.0 does contain
-`win32-aarch64/jnidispatch.dll` — and `curfew_ffi.dll` builds correctly at
+That is **Conscrypt**, and it **ships no Windows-ARM64 native build**. No amount of `jna.library.path`
+tuning reaches it; it is a missing binary inside a third-party artifact. (JNA itself is fine — 5.15.0
+does contain `win32-aarch64/jnidispatch.dll` — and `curfew_ffi.dll` builds correctly at
 `~/.cache/curfew-target/aarch64-pc-windows-msvc/release/`.)
+
+**Correction.** This entry first attributed Conscrypt to `sqlcipher-android` pulling it in for the
+desktop JVM. That was wrong, and the isolation experiment is in "A note on the Android verification
+environment" above: **every failing class is a Robolectric class and every passing class is not**, so
+the requirement comes from Robolectric 4.14's own native runtime. The practical consequence is the
+same — no Android tests run here — but the cause matters, because it rules out the fix the original
+wording implied (chasing the SQLCipher dependency) and points at the real one.
 
 **I confirmed this is pre-existing** by stashing both changed files and re-running the suite on the
 untouched tree: the same tests fail the same way. This change neither caused nor worsened it.
@@ -729,9 +781,10 @@ Recorded here so the remaining work is a list rather than a memory. Severity fro
 
 ### Two things this pass learned about the repository, worth acting on separately
 
-1. **The Android unit suite cannot run on Windows ARM64.** Not a code fault — Conscrypt ships no
-   `windows-aarch_64` native build — but it means a maintainer on ARM64 Windows has no local test
-   signal for the platform that carries most of the interaction risk. See the note above entry 1.
+1. **Robolectric-based unit tests cannot run on Windows ARM64.** Not a code fault — Conscrypt, which
+   Robolectric 4.14's native runtime loads, ships no `windows-aarch_64` native build — but it means a
+   maintainer on ARM64 Windows has no local test signal for anything that needs an Android runtime,
+   which is 121 of the 164 tests and the whole Compose layer. See the note above entry 1.
 2. **Nothing pins the JDK locally.** Gradle 8.14.3 rejects Java 25 with a bare `What went wrong:
    25.0.2`. CI pins 21 and never sees it. A `.java-version` or a Gradle toolchain declaration would
    turn that into an instruction.
@@ -1210,3 +1263,68 @@ reading the call sites, and that is stated as reading rather than as a test.
 **Verification.** `:app:compileDebugKotlin` clean, no warnings. **Not covered by an executing test** for
 the usual host reason; the callback-ordering change is a control-flow change in a coroutine, which is
 the part a test *would* have caught on a working host, and I am not claiming otherwise.
+
+---
+
+## 23. The nav and the toggle: one claim wrong, one claim right, one thing nobody mentioned
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-38 (P1). **Partly fixed, and the headline is refuted** — the
+first time in this pass that a P1's main claim did not survive checking, so the working is set out in
+full.
+
+**The claim.** *"F-38 (P1). The primary navigation has the smallest touch targets in the app."* The
+review measures a tab at **"roughly 38dp tall"** from `padding(horizontal = 10.dp, vertical = 4.dp)`
+around a 30dp icon plus a 10sp label.
+
+**Checked against the source, and the figure is a miscount.** The tab's clickable area is the whole
+`Column`, and the `Column` contains the 30dp icon Box **and** a 3dp gap **and** the label:
+
+```
+30 (icon box)  +  3 (Arrangement.spacedBy)  +  ~13 (10sp label)  =  ~46dp of content
+     + 4dp vertical padding, twice                              =  ~54dp clickable height
+width:  30 (icon box)  +  10dp horizontal padding, twice         =  ~50dp clickable width
+```
+
+The review stopped at `30 + 4 + 4 = 38` — the icon and the padding, without the label or the gap. Both
+axes are therefore **over** Material's 48dp, and the nav is one of the *larger* targets in the app rather
+than the smallest. This is the seventh finding refuted during this pass, recorded here rather than in
+§9 of the interaction review because the fix went in anyway, for the two reasons below.
+
+**What was genuinely wrong, and is now fixed.**
+
+1. **The nav had no press feedback at all.** `indication = null` in `GlassTab`, and a repo-wide grep
+   confirms it was **the only** such suppression in the app — `Switch`, `GhostButton` and every row body
+   show a ripple. It was there to stop Material's sliding pill, which is not what a ripple is: the reason
+   was sound and the remedy too broad. A tap that registered and a tap that missed felt identical, on the
+   control every user touches every session.
+2. **The toggle was 26dp tall.** `Switch` drew a 44×26dp pill and put the clickable on that same box, so
+   the control deciding whether an app is blocked was less than half the height of the 52dp primary
+   button it usually sits opposite — and a miss on a switch is silent.
+3. **And the part that was fine was fine by accident.** At 10sp the nav label clears 48dp; a shorter
+   label, a tighter `Arrangement`, or a smaller type token would have taken it under quietly, and nothing
+   would have said so. Same failure mode as the original `Lock::Confirm` bug: a property nobody wrote
+   down.
+
+**What was changed.** `Dsn.MinTouch = 48.dp` — the app's own standard written down, since its buttons are
+already 52 and 46dp — plus `Modifier.minimumInteractiveComponentSize()` on both. That modifier is
+Material's guarantee that the *touch* target is at least 48dp while the *visual* size stays whatever was
+drawn, and the distinction is the whole point: a 44×26dp pill and a 36dp day circle are the right look
+and the wrong hit area, so the fix is separating the two properties, not enlarging the drawing. The nav
+keeps its ripple, and the two now-unused imports (`MutableInteractionSource`, `remember`) were removed
+rather than left dead.
+
+**Deliberately not changed, with the reason.** The 36dp day circles on the profile editor
+(`ProfileEditScreen.kt:483`). WCAG 2.2 SC 2.5.8 asks for 24×24 CSS px and adds a *spacing* exception for
+undersized targets — seven circles at 36dp with 6dp between them pass it comfortably, because a 24dp
+circle centred on each does not intersect its neighbours. Taking them to 48dp needs
+`7 × 48 + 6 × 6 = 372dp` of width, more than a 360dp phone has inside a card, so the honest options were
+"redesign the row" or "leave it" — and leaving it is correct, because they already meet the standard that
+applies. That is a judgement about the exception, written down so the next reader need not re-derive it.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings in the touched files. **Not covered by an
+executing test** — and this is the finding where that costs most, because the defect class here is exactly
+"the layout looks right and measures wrong", which is what a measurement test is for. See the Android
+verification note above entry 1: `createComposeRule()` under Robolectric was tried for precisely this and
+hit the Conscrypt wall, so the recipe is recorded there for a host that can run it. The dimension claims
+above come from reading the modifier chain and the literal `dp` values, and they are offered as reading,
+not as measurement.

@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +15,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,10 +32,10 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -312,7 +313,27 @@ private fun GlassBar(
     }
 }
 
-/** One tab. The icon lights up rather than a pill sliding in behind it. */
+/**
+ * One tab. The icon lights up rather than a pill sliding in behind it.
+ *
+ * The hit area is pinned to [MIN_TOUCH] and the press feedback is back. Both were wrong, in opposite
+ * directions from what the review assumed:
+ *
+ * * It was **not** too small. The clickable spans the icon box plus padding plus the label, so it
+ *   measured roughly 50×55dp — comfortably over Material's 48dp, and the review's "roughly 38dp",
+ *   which counted the icon and the padding but not the label or the gap, was a miscount. What was
+ *   wrong is that the size was an *accident* of the label's line height: at 10sp it clears 48dp, and
+ *   a smaller label style or a shorter one would quietly take the most-touched control in the app
+ *   below the floor. It is now a stated minimum rather than a coincidence.
+ * * It had **no press feedback at all**. `indication = null` was the only such suppression in the
+ *   app, and it was there to stop Material's sliding pill, which is not what a ripple is. Every other
+ *   clickable on this screen — `Switch`, `GhostButton`, the row bodies — shows a ripple. The nav, the
+ *   control every user touches every session, showed nothing, so a tap that registered and a tap that
+ *   missed felt identical.
+ *
+ * `minimumInteractiveComponentSize` is the enforcement rather than a comment: it is Material's own
+ * guarantee that the *touch* target is at least 48dp while the visual size stays whatever was drawn.
+ */
 @Composable
 private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val lit by animateFloatAsState(if (selected) 1f else 0f, label = "tab")
@@ -322,11 +343,10 @@ private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            )
+            .clickable(onClick = onClick)
+            .minimumInteractiveComponentSize()
+            .heightIn(min = Dsn.MinTouch)
+            .widthIn(min = Dsn.MinTouch)
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .semantics(mergeDescendants = true) {
                 contentDescription = if (selected) tab.label + ", selected" else tab.label
