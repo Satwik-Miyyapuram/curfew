@@ -600,7 +600,7 @@ private fun SessionCard(
                         // Screen readers should hear the whole sentence, not a bare clock time.
                         .semantics {
                             contentDescription =
-                                "${session.profile} ends ${relative(endsAt, now)}"
+                                "$name ends ${relative(endsAt, now)}"
                         },
                 )
             }
@@ -659,7 +659,7 @@ private fun SessionCard(
                 Button(
                     onClick = onEnd,
                     modifier = Modifier.semantics {
-                        contentDescription = "End ${session.profile} now"
+                        contentDescription = "End $name now"
                     },
                 ) { Text("End now") }
                 // Only offered when there is no release already pending: asking twice must never
@@ -668,7 +668,7 @@ private fun SessionCard(
                     TextButton(
                         onClick = onRelease,
                         modifier = Modifier.semantics {
-                            contentDescription = "Ask to end ${session.profile} in 24 hours"
+                            contentDescription = "Ask to end $name in 24 hours"
                         },
                     ) { Text("Ask to end in 24 hours") }
                 }
@@ -681,7 +681,7 @@ private fun SessionCard(
                     TextButton(
                         onClick = onPresentTag,
                         modifier = Modifier.semantics {
-                            contentDescription = "Present a tag for ${session.profile}"
+                            contentDescription = "Present a tag for $name"
                         },
                     ) { Text("Present a tag") }
                 }
@@ -690,7 +690,7 @@ private fun SessionCard(
                         onClick = onEmergency,
                         modifier = Modifier.semantics {
                             contentDescription =
-                                "Use an emergency pass on ${session.profile}, $passesLeft left"
+                                "Use an emergency pass on $name, $passesLeft left"
                         },
                     ) { Text("Emergency pass ($passesLeft)") }
                 }

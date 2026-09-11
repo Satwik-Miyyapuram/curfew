@@ -302,6 +302,49 @@ fun requestRuntimePermission(context: Context, permission: String) {
     ActivityCompat.requestPermissions(activity, arrayOf(permission), PERMISSION_REQUEST_CODE)
 }
 
+/**
+ * Take the user to the page where a permission is granted — runtime dialog, or the system settings page.
+ *
+ * **One function because there were three, and all three behaved differently.** The "Fix" button on
+ * Health, the same button on Settings, and "Turn it on" on the Timer each resolved a grant to a page and
+ * launched it, and each had drifted into its own failure handling:
+ *
+ * | Site | On a device whose OEM build lacks the page |
+ * | :--- | :--- |
+ * | Health | `runCatching` with an App-info fallback — **correct** |
+ * | Timer | `runCatching`, failing silently — the tap does nothing and says nothing |
+ * | Settings | **no `runCatching` at all** — `ActivityNotFoundException` kills the screen |
+ *
+ * That third one is `UX_INTERACTION_REVIEW.md` **F-33** (P1), and it is the worst place in the app for
+ * it: the Settings screen is where a user goes *because* something is not working, and the failure mode
+ * was for the app to close. The comment on Health's copy already said this — *"an
+ * ActivityNotFoundException here would kill the one screen whose job is to fix permissions"* — and the
+ * fix was applied to the copy in front of it rather than to the behaviour.
+ *
+ * `App info` is the fallback because it resolves on every build: every app has an app-info page, and from
+ * there the permission is two taps away. Landing the user somewhere useful beats a crash and beats
+ * silence.
+ */
+fun openGrantPage(context: Context, grant: Grant) {
+    val permission = grant.runtimePermission()
+    if (permission != null) {
+        requestRuntimePermission(context, permission)
+        return
+    }
+    val settings = grant.settingsIntent(context)
+    val opened = settings != null && runCatching {
+        context.startActivity(settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+    // Nothing to open, or the page this OEM calls it by does not exist. App info always does.
+    if (!opened) {
+        runCatching {
+            context.startActivity(
+                RestrictedSettings.appInfoIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+}
+
 /** Android's accessibility page for one service, and the extra naming that service. API 31+. */
 private const val ACTION_ACCESSIBILITY_DETAILS = "android.settings.ACCESSIBILITY_DETAILS_SETTINGS"
 private const val EXTRA_ACCESSIBILITY_COMPONENT = "android.provider.extra.ACCESSIBILITY_COMPONENT_NAME"

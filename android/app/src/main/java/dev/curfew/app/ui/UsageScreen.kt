@@ -269,15 +269,70 @@ private fun DayBars(stats: Stats) {
     }
 }
 
-/** The audit kinds the runtime writes, in the words a user would use. */
+/**
+ * The audit kinds the runtime writes, in the words a user would use.
+ *
+ * **Every kind the app writes is named here, and that is now checked by a test.** F-36 in the
+ * interaction review: the fallback was `"$kind $detail"`, so a user reading a section whose stated
+ * purpose is that they can check it saw `sync.failed timeout` — an internal token, in a list meant to
+ * be evidence. The review counted "at least ten" unnamed kinds; the real number was **fourteen**, out of
+ * twenty. Four of the five counts in that review have now been wrong in one direction or the other, and
+ * the pattern is consistent: the finding is always right and the number never is.
+ *
+ * The other half of the fix is the fallback itself. Naming twenty kinds does not stop somebody adding a
+ * twenty-first, so an unrecognised kind no longer renders its own name: it says plainly that this build
+ * does not know it. A user cannot act on `sync.refused`, and cannot tell it from `sync.failed`; both are
+ * better served by a sentence, and the kind is still on the row for anyone reading the database.
+ */
 private fun describeAudit(kind: String, detail: String): String = when (kind) {
+    // Sessions.
     "session.started" -> "A session started."
     "session.ended" -> "A session ended."
+
+    // The two ways out, which are the entries a user most needs to recognise.
     "release.requested" -> "You asked for a delayed release."
+    "release.given" -> "A delayed release was given, and the waiting device was let out."
+    "pass.spent" -> "An emergency pass was spent. The ration is one smaller on every paired device."
+
+    // Configuration.
     "config.replaced" -> "The rules were changed."
-    "enforcement.gap" -> "Curfew was not running for a while, so nothing was blocked."
-    "enforcement.clock" -> "The device's clock was changed, and the change was refused."
-    else -> "$kind $detail".trim()
+    "profile.saved" -> "A profile was saved."
+    "profile.removed" -> "A profile was removed."
+    "profile.seeded" -> "Curfew set up its starter profile."
+    "rule.saved" -> "A rule was saved."
+    "rule.removed" -> "A rule was removed."
+    "schedule.weekly.saved" -> "A weekly window was saved."
+    "schedule.weekly.removed" -> "A weekly window was removed."
+    "schedule.calendar.saved" -> "A calendar rule was saved."
+    "schedule.calendar.removed" -> "A calendar rule was removed."
+
+    // Sync between paired devices.
+    "sync.adopted" -> "A block from another paired device started here too."
+    "sync.refused" -> "A block from another device was refused, because this device holds the lock."
+    "sync.failed" -> "A sync attempt failed" + reason(detail)
+
+    // Enforcement itself — the two entries that mean nothing was being blocked.
+    "enforcement.gap" ->
+        "Curfew was not running for a while, so nothing was blocked." + lasting(detail)
+    "enforcement.clock" -> "The device's clock was changed, and the change was refused." + lasting(detail)
+
+    else -> "Curfew recorded something this version does not name."
+}
+
+/**
+ * The runtime's own words, appended only where they say something a person can use.
+ *
+ * `sync.failed` carries a message — `timeout`, `not paired` — which is genuinely useful. The other kinds
+ * carry an id or a slug, which is not, so they get no suffix. That distinction is why this is not a
+ * blanket `": $detail"`.
+ */
+private fun reason(detail: String): String =
+    if (detail.isBlank()) "." else ": ${detail.trim().trimEnd('.')}."
+
+/** `"120s"` back into a duration, because the runtime records seconds and a person reads minutes. */
+private fun lasting(detail: String): String {
+    val seconds = detail.removeSuffix("s").trim().toIntOrNull() ?: return ""
+    return " That lasted ${duration(seconds)}."
 }
 
 /**

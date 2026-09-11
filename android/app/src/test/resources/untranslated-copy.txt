@@ -220,14 +220,8 @@ ProfileEditScreen.kt|open until the budget is spent, then close for the rest of 
 ProfileEditScreen.kt|} in this profile will 
 ScheduleEditor.kt|*focus*
 ScheduleEditor.kt|Anywhere
-ScheduleEditor.kt|Edit
-ScheduleEditor.kt|Edit
 ScheduleEditor.kt|Ignores the ones you are merely invited to.
-ScheduleEditor.kt|Locked: needs 
-ScheduleEditor.kt|Locked: needs 
 ScheduleEditor.kt|Only events marked busy
-ScheduleEditor.kt|Remove
-ScheduleEditor.kt|Remove
 ScheduleEditor.kt|Save
 ScheduleEditor.kt|Save
 ScheduleEditor.kt|Work

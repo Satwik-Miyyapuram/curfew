@@ -31,35 +31,31 @@ DevicesScreen.kt|${sync.nearby.size} of your devices in earshot.
 DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
 DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
 MainActivity.kt|${notice.text}. Tap to dismiss.
+NowScreen.kt|$name ends ${relative(endsAt, now)}
+NowScreen.kt|$name ends ${relative(endsAt, now)}
 NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
 NowScreen.kt|${duration(today)} away from the phone today
-NowScreen.kt|${session.profile} ends ${relative(endsAt, now)}
-NowScreen.kt|${session.profile} ends ${relative(endsAt, now)}
 NowScreen.kt|${state.audit.size} logged
 NowScreen.kt|${state.sync.active.size} peers
 NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
-NowScreen.kt|Ask to end ${session.profile} in 24 hours
+NowScreen.kt|Ask to end $name in 24 hours
 NowScreen.kt|Emergency pass ($passesLeft)
+NowScreen.kt|End $name now
 NowScreen.kt|End ${named(session.profile)}
 NowScreen.kt|End ${named(session.profile)}?
-NowScreen.kt|End ${session.profile} now
 NowScreen.kt|Ends ${relative(endsAt, now)} (${clockTime(endsAt)})
 NowScreen.kt|Let $id out
 NowScreen.kt|Let session $id out
-NowScreen.kt|Present a tag for ${session.profile}
+NowScreen.kt|Present a tag for $name
 NowScreen.kt|The tag that ends $profile
 NowScreen.kt|This ends ${named(session.profile)} now. It counts against your ration on 
-NowScreen.kt|Use an emergency pass on ${session.profile}, $passesLeft left
+NowScreen.kt|Use an emergency pass on $name, $passesLeft left
 NowScreen.kt|left · ends ${clockOf(it)}
 ProfileEditScreen.kt|$emoji $value
 ProfileEditScreen.kt|${apps.size} app${if (apps.size == 1) 
 ProfileEditScreen.kt|${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the 
 ProfileEditScreen.kt|Delete ${existing.name}?
-ScheduleEditor.kt|Edit the calendar rule for ${rule.profile}
-ScheduleEditor.kt|Edit the window for ${window.profile}
-ScheduleEditor.kt|Remove the calendar rule for ${rule.profile}
-ScheduleEditor.kt|Remove the window for ${window.profile}
 ScheduleScreen.kt|$note · paused
 ScheduleScreen.kt|Edit ${profile.name}
 ScheduleScreen.kt|Remove ${profile.name}

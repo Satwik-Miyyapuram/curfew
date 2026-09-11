@@ -334,11 +334,10 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                     // `pending` is deliberately NOT cleared here. It is what the resume effect
                     // watches, and clearing it was the whole bug: the user was sent to Settings and
                     // the timer they had configured was forgotten in the same breath.
-                    Grant.Accessibility.settingsIntent(context)?.let { intent ->
-                        runCatching {
-                            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }
-                    }
+                    //
+                    // And it goes through the shared path, which falls back to App info — this used to
+                    // swallow the failure, so on a build without the page the tap did nothing at all.
+                    openGrantPage(context, Grant.Accessibility)
                 }) { Text("Turn it on") }
             },
             dismissButton = {
@@ -390,19 +389,5 @@ fun BackRow(title: String, onBack: () -> Unit) {
             Text("‹", fontSize = 26.sp, color = Palette.Text)
         }
         Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
-    }
-}
-
-@Composable
-private fun Step(glyph: String, description: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(Palette.Raised)
-            .clickable(onClickLabel = description, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(glyph, fontSize = 19.sp, color = Palette.Text)
     }
 }

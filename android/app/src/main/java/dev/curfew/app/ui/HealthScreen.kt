@@ -157,25 +157,10 @@ fun HealthScreen(model: CurfewViewModel) {
                         )
                         if (!entry.granted) {
                             Grant {
-                                val permission = entry.grant.runtimePermission()
-                                val settings = entry.grant.settingsIntent(context)
-                                when {
-                                    permission != null ->
-                                        requestRuntimePermission(context, permission)
-                                    // Some of these pages do not exist on every OEM's build, and
-                                    // an ActivityNotFoundException here would kill the one screen
-                                    // whose job is to fix permissions. App info always resolves.
-                                    settings != null -> runCatching {
-                                        context.startActivity(
-                                            settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                        )
-                                    }.onFailure {
-                                        context.startActivity(
-                                            RestrictedSettings.appInfoIntent(context)
-                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                        )
-                                    }
-                                }
+                                // One shared implementation: this was the hardened copy of three that
+                                // had drifted, one of which crashed and one of which failed silently.
+                                // See `openGrantPage`.
+                                openGrantPage(context, entry.grant)
                             }
                         }
                     }

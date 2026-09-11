@@ -211,14 +211,14 @@ baseline that moved with usage would let a heavy week look like the starting poi
 mode could not reach).
 
 1. Settings states what is true now: paired or not, in earshot or not. **Sync now** and **Devices**.
-2. **Devices** → **Pair a device**: a QR code and six words. The other device scans, both show the
-   same six words, both confirm. No account and no server: the app holds `INTERNET`, and the only
+2. **Devices** → **Pair a device**: a code to read and six digits to compare. The other device scans, both show the
+   same six digits in two groups, both confirm. No account and no server: the app holds `INTERNET`, and the only
    traffic it carries is to devices you paired, over your own network.
 3. A block started on one device runs on both. Ending it needs the device that holds the lock —
    which is the point, and the screen says so rather than failing.
 
 **Gaps**
-- *(Gap 7, hardware only)* Pairing is **built** — the ceremony, the six words, confirm and answer, all
+- *(Gap 7, hardware only)* Pairing is **built** — the ceremony, the six digits, confirm and answer, all
   covered by tests. What has never happened is walking it on two real devices, which no amount of test
   coverage substitutes for.
 
@@ -261,7 +261,7 @@ as though they had not.
 | **Gap 2** — permissions asked at the moment of need, accessibility first | **Closed.** The Timer screen asks for the switch and starts the block when the user returns from Settings. |
 | **Gap 6** — the pre-Curfew baseline, and Usage rewritten around the comparison | **Closed.** `CurfewRuntime` takes the baseline once and never rewrites it; the Usage headline is a comparison. |
 | **Gap 3, 4, 5** — pause switch, calendar rules, per-profile enforcement | **Covered by tests**, and were when this list was written. What remains is a hardware pass: the switch under a finger, a real calendar provider, a real browser. See the two sections below for what has since been walked by hand. |
-| **Gap 7** — pairing | **Built.** The ceremony, the six words, confirm and answer, all covered by tests. Nothing in it has met a second real device. |
+| **Gap 7** — pairing | **Built.** The ceremony, the six digits, confirm and answer, all covered by tests. Nothing in it has met a second real device. |
 | Glass material on sheets, dialogs and the block screen | **Still open.** The block screen and the nav bar have it; `DSheet` does not, and `NowScreen` still uses eight Material `AlertDialog`s — so the screen a user sees most has two visual languages for corners, buttons and elevation. |
 
 ### How to read the rest of this document

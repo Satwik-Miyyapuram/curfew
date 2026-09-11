@@ -101,14 +101,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         // Sending the user to a Health screen to press a second button was the
                         // longest way round to the only thing they came here to do.
                         Fix {
-                            val permission = entry.grant.runtimePermission()
-                            val settings = entry.grant.settingsIntent(context)
-                            when {
-                                permission != null -> requestRuntimePermission(context, permission)
-                                settings != null -> context.startActivity(
-                                    settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }
+                            // Was a bare `startActivity`, which throws on a device whose OEM build
+                            // lacks the page — see `openGrantPage`. F-33.
+                            openGrantPage(context, entry.grant)
                         }
                     }
                 }
