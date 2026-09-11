@@ -121,6 +121,27 @@ const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(
   __answer = () => ({ type: "ok" });
   await beat();
   const beatAsk = calls.find((c) => c[0] === "ask" && c[1].type === "beat");
+  // --- P2-13: nothing sent may exceed the host's frame limit -------------------------------------
+  //
+  // A native message is capped at 64 KiB, and a frame past that used to kill the host — which closed
+  // the browser, because a browser whose host has died stops beating. A page can navigate to a URL of
+  // any length, so the cap has to be enforced here rather than hoped for.
+  calls.length = 0;
+  __answer = () => ({ type: "ok" });
+  const huge = "https://example.test/" + "a".repeat(200 * 1024);
+  await check(7, huge);
+  await settle();
+
+  const sent = calls.filter((c) => c[0] === "ask").map((c) => c[1].url || "");
+  assertThat("a huge URL is still sent, so the page is checked at all", sent.length > 0,
+             "the page was never reported, which is the bypass this avoids");
+  assertThat("and it is capped short of the host's frame limit",
+             sent.every((u) => u.length <= 8 * 1024),
+             `longest was ${Math.max(0, ...sent.map((u) => u.length))} bytes`);
+  assertThat("the cap keeps the host and path, so a real rule still matches",
+             sent.every((u) => u.startsWith("https://example.test/")),
+             "the prefix was lost, so no path rule could match");
+
   assertThat("a beat reports the focused page", !!beatAsk && beatAsk[1].url === "https://youtube.com/shorts/abc",
         beatAsk ? JSON.stringify(beatAsk[1]) : "no beat");
 
@@ -144,6 +165,16 @@ MUTATIONS = [
         "  if (windowId !== chrome.windows.WINDOW_ID_NONE) recheckFocused();\n"
         "});",
         "",
+    ),
+    (
+        "P2-13: send the URL uncapped, so a long one kills the host",
+        "  return url.length > MAX_URL ? url.slice(0, MAX_URL) : url;",
+        "  return url;",
+    ),
+    (
+        "P2-13: drop the URL entirely when it is too long",
+        "  return url.length > MAX_URL ? url.slice(0, MAX_URL) : url;",
+        "  return url.length > MAX_URL ? null : url;",
     ),
     (
         "stop acting on a blocked verdict",

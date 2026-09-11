@@ -73,6 +73,23 @@ function ask(message, timeoutMs = 1500) {
   });
 }
 
+// **Nothing this extension sends may exceed the host's frame limit** — P2-13. A native message is
+// capped at 64 KiB, and a frame past that used to kill the host — which closed the browser, because a
+// browser whose host has died stops beating. A page can navigate to a URL of any length, so the cap
+// has to be enforced here rather than hoped for.
+//
+// Truncation rather than omission, deliberately: a URL's host and path are at the *front*, so every
+// realistic rule — a domain, a path like `/shorts/` — still matches a prefix. Dropping the URL
+// entirely would mean the page was never checked at all, which is the bypass this is meant to avoid.
+// The limit is 8 KiB, far past any real URL and far short of the frame cap, leaving room for the JSON
+// envelope around it.
+const MAX_URL = 8 * 1024;
+
+function bounded(url) {
+  if (typeof url !== "string") return null;
+  return url.length > MAX_URL ? url.slice(0, MAX_URL) : url;
+}
+
 // The heartbeat carries the page in the focused tab, when one of this browser's windows is
 // focused at all: that is what the service charges web budgets against, since it cannot see a tab
 // from where it runs. A tab behind another program reports nothing and costs nothing.
@@ -85,12 +102,12 @@ async function beat() {
   } catch (e) {
     // No tabs permission, no window: a beat with no page is still a beat.
   }
-  ask({ type: "beat", browser: BROWSER, url });
+  ask({ type: "beat", browser: BROWSER, url: bounded(url) });
 }
 
 async function check(tabId, url) {
   if (!url || !/^https?:/i.test(url)) return;
-  const answer = await ask({ type: "check", browser: BROWSER, url });
+  const answer = await ask({ type: "check", browser: BROWSER, url: bounded(url) });
   if (!answer || answer.type !== "verdict" || !answer.blocked) return;
   const page = chrome.runtime.getURL("blocked.html");
   const query = `?url=${encodeURIComponent(url)}&reason=${encodeURIComponent(answer.reason || "")}`;

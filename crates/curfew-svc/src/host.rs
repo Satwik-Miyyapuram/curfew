@@ -6,7 +6,7 @@
 //! someone has edited can therefore lie about which URL is open, which only blocks them harder, but
 //! it cannot invent an allow, because it never gets to make one.
 
-use curfew_win::extension::{frame, read_message, FromExtension, ToExtension};
+use curfew_win::extension::{frame, read_message, Frame, FromExtension, ToExtension};
 use curfew_win::ipc::{Request, Response};
 use std::io::Write;
 
@@ -64,11 +64,22 @@ pub fn run() -> i32 {
     let launched_by = curfew_win::extension::browser_that_launched_us();
     loop {
         match read_message(&mut input) {
-            Ok(None) => return 0,
-            // A framing error means the other end is not the browser, or is not well. Either way
-            // the stream cannot be resynchronized, so the honest move is to stop.
+            Ok(Frame::Eof) => return 0,
+            // A framing error means the other end is not the browser, or is not well. Either way the
+            // stream cannot be resynchronized, so the honest move is to stop.
             Err(_) => return 1,
-            Ok(Some(message)) => {
+            // **Skipped, not fatal** — P2-13. An over-long frame carries its length, so the stream is
+            // perfectly resynchronisable; dying here killed the host over one long URL, and a browser
+            // whose host has died stops beating and is closed by the service. Logged, because a rule
+            // that stopped being evaluated is not something to be quiet about either.
+            Ok(Frame::TooLarge { length }) => {
+                crate::warn!(
+                    "the browser sent a {length}-byte message, past the {}-byte limit, so it was \
+                     dropped and the page was not checked",
+                    curfew_win::extension::MAX_MESSAGE
+                );
+            }
+            Ok(Frame::Message(message)) => {
                 if output.write_all(&respond(&message, launched_by.as_deref(), &mut ask)).is_err() {
                     return 1;
                 }
