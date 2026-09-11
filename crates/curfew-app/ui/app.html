@@ -194,7 +194,6 @@ function describeRefusal(refusal) {
     case "locked":
       return "Not yet: this session is locked by " +
         (refusal.missing || []).map(describeLock).join(" and ") + ".";
-    case "frozen": return "The machine is frozen. Nothing can be ended until it lifts.";
     default: return "The service refused: " + JSON.stringify(refusal);
   }
 }
@@ -344,23 +343,42 @@ function sessionCard(session) {
   const ends = session.lock?.ends_at ?? null;
   const left = ends === null ? null : ends - s.now;
   const conditions = session.lock?.conditions || [];
-  const releasable = (s.releasable || []).includes(session.id);
-  const released = (s.released || []).includes(session.id);
-  const delayed = session.lock?.delayed_release_at ?? null;
+  // **Read from the service, never re-derived here** — P1-6. This card used to work out for itself
+  // which release to offer, from `releasable` and `released`, and the answer was wrong in two ways:
+  // a `DeviceCredential` lock rendered *no release affordance at all*, so somebody who had locked a
+  // session with their Windows password and hidden the tray had no route to the last-resort exit from
+  // the product's primary surface; and the one button it did draw, "Release it", sent the immediate,
+  // **irrevocable** peer release with no confirmation — while the tray puts a dialog in front of the
+  // same action. The service now computes `Offers` once (`LockSet::offers`) and every surface renders
+  // it, so the tray, the window and the command line cannot disagree again.
+  const offers = (s.offers || {})[session.id] || {};
   const why = conditions.length === 0
     ? "You can end it whenever you like."
     : "Ends early only for " + conditions.map(describeLock).join(" and ") + ".";
+  // What is holding the lock that no button on this page can satisfy, named rather than summed up as
+  // "locked elsewhere": a tag to go and fetch is a different sentence from a restart.
+  const elsewhere = (offers.elsewhere || []).map(describeLock);
+  const controls = [];
+  if (offers.peer_released) {
+    controls.push('<span class="pill ok">Released by this device</span>');
+  } else if (offers.peer_release) {
+    // Confirmed, because it cannot be withdrawn. The tray already asks; the window did not.
+    controls.push(`<button class="btn ghost" data-act="release-ask" data-id="${esc(session.id)}">Release it&hellip;</button>`);
+  }
+  if (offers.delayed_release) {
+    controls.push(`<button class="btn ghost" data-act="delayed-ask" data-id="${esc(session.id)}">Start the 24-hour release</button>`);
+  }
   return `<div><h1>${esc(profileName(session.profile))} is running</h1>
     <div class="sub">Started ${esc(atTime(session.started_at))}${ends ? `, ends at ${esc(atTime(ends))}` : ""}. ${esc(why)}</div>
+    ${elsewhere.length ? `<div class="meta" style="margin-top:6px">Also needs ${esc(elsewhere.join(", "))} &mdash; this page cannot do that for you.</div>` : ""}
     <div style="height:18px"></div>
     <div class="card" style="display:flex;align-items:center;gap:22px">
       <div><div class="lbl">Time left</div>
         <div class="mono" style="font-size:44px;font-weight:700;letter-spacing:-1.5px;color:var(--live);line-height:1.1">${left === null ? "&mdash;" : esc(clock(left))}</div>
-        <div class="meta" style="margin-top:2px">${delayed ? `Delayed release lands ${esc(atTime(delayed))}` : ends ? `Ends at ${esc(atTime(ends))}` : "Runs until it is released"}</div>
+        <div class="meta" style="margin-top:2px">${offers.delayed_release_at ? `Delayed release lands ${esc(atTime(offers.delayed_release_at))}` : ends ? `Ends at ${esc(atTime(ends))}` : "Runs until it is released"}</div>
       </div>
       <div class="grow"></div>
-      ${released ? '<span class="pill ok">Released by this device</span>' :
-        releasable ? `<button class="btn ghost" data-act="release" data-id="${esc(session.id)}">Release it</button>` : ""}
+      ${controls.join("")}
       ${(s.passes_left || 0) > 0 ? `<button class="btn ghost" data-act="emergency" data-id="${esc(session.id)}">Emergency pass (${s.passes_left})</button>` : ""}
       <button class="btn" data-act="end" data-id="${esc(session.id)}">End it early</button>
     </div></div>`;
@@ -930,6 +948,39 @@ function confirmEnd(id) {
 }
 
 /**
+ * Confirm the peer release, because it cannot be taken back.
+ *
+ * "This device releases that session" goes out through the op-log, and the protocol is explicit that
+ * it cannot be withdrawn: a release a peer could take back would let one device shut a lock the user
+ * has already been told they are out of. The tray puts a Yes/No in front of it; the window used to
+ * send it on a single click, which made it the one control on this page whose mistake is unfixable.
+ */
+function confirmRelease(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Release this session from this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">This device is the one the lock asks. The release goes out to your other devices and <b>cannot be withdrawn</b> &mdash; the lock lifts everywhere.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Cancel</button>
+    <button class="btn" data-act="release" data-id="${esc(id)}">Release it</button></div>`);
+}
+
+/**
+ * Confirm the 24-hour release, and say plainly what it commits to.
+ *
+ * This is the last-resort exit every lock is meant to offer (GAPS D1). It is confirmed rather than
+ * immediate not because it can be undone — it cannot, deliberately, since `LockSet::request_release`
+ * only ever moves the deadline earlier-to-later and never clears it — but because a full day is the
+ * largest thing this page can start, and a mis-click that commits to it silently is worse than one
+ * extra press.
+ */
+function confirmDelayedRelease(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Start the 24-hour release?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">This is the exit of last resort, and it is deliberately slow. The lock lifts at this time tomorrow, and <b>that cannot be brought forward or cancelled</b>.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Not yet</button>
+    <button class="btn" data-act="request-release" data-id="${esc(id)}">Start it</button></div>`);
+}
+
+/**
  * Ask Windows for the password, rather than drawing a box for it.
  *
  * This page used to render a password input of its own, which contradicted the rule the tray states
@@ -1033,9 +1084,20 @@ async function activate(target) {
     // The button no longer reads a field, because there is no field: the host shows the system
     // prompt and this page never sees the password.
     case "unlock": return finishUnlock(id);
+    // **Both of these ask first, and the name says so** — P1-6. The old `case "release"` went straight
+    // to `Request::Release`, which the protocol documents as *"it cannot be withdrawn: a release a peer
+    // could take back would let one device shut a lock the user has already been told they are out
+    // of."* The tray put a Yes/No in front of the identical action; this page did not.
+    case "release-ask": return confirmRelease(id);
+    case "delayed-ask": return confirmDelayedRelease(id);
     case "release": {
       const answer = await askService({ request: "release", id });
       if (answer.ok && answer.value.response === "refused") say("Not released", describeRefusal(answer.value.refusal));
+      return refresh();
+    }
+    case "request-release": {
+      const answer = await askService({ request: "request_release", id });
+      if (answer.ok && answer.value.response === "refused") say("Not started", describeRefusal(answer.value.refusal));
       return refresh();
     }
     case "emergency": {

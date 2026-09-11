@@ -233,6 +233,18 @@ pub struct Status {
     /// release is given once and there is nothing further to press.
     #[serde(default)]
     pub released: Vec<String>,
+    /// **What each running session's lock allows a surface to offer**, keyed by session id.
+    ///
+    /// P1-6: the tray worked this out from `conditions`, the window worked it out from
+    /// `releasable`/`released` plus a string comparison, and neither offered `Challenge`. A dead
+    /// `State.lock` field was described in the review as "where a shared release verdict belongs",
+    /// which is what this is: [`curfew_core::LockSet::offers`] computed once by the service, so a
+    /// surface renders what it is told instead of deciding for itself.
+    ///
+    /// Carried rather than left to the caller because one input — whether *this* device is the one a
+    /// peer release names — is known only here.
+    #[serde(default)]
+    pub offers: std::collections::BTreeMap<String, curfew_core::Offers>,
     /// What this machine's sync is doing, as a fact rather than a promise.
     ///
     /// **Windows had no way to say this at all.** `Status` carried nothing about sync, so a user

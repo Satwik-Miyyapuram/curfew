@@ -58,6 +58,37 @@ pub enum ChallengeKind {
     Math,
 }
 
+/// **What a user interface may offer for a session under a lock.** See [`LockSet::offers`].
+///
+/// Exists so three surfaces cannot answer this question three different ways (P1-6). Every field is a
+/// separate *route*, because they are not interchangeable: one proves ownership with the operating
+/// system's own prompt, one is friction, one needs a physical object, one needs a restart, and one is
+/// the 24-hour exit of last resort. A surface that can serve only some of them offers only those, and
+/// says which of the others is holding the lock.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Offers {
+    /// Nothing to prove: an "End" button is all that is needed.
+    pub ends_on_request: bool,
+    /// Offer "end with your password/PIN" — proved by the OS prompt, never by us.
+    pub credential: bool,
+    /// Offer "end, confirming first" — friction rather than a barrier.
+    pub confirm: bool,
+    /// Conditions no local prompt can satisfy. Carried as values rather than a count so a surface can
+    /// name them: a tag to fetch, a challenge to answer, a restart to do.
+    pub elsewhere: Vec<Lock>,
+    /// This device is the one the lock names, and has not given the release yet.
+    pub peer_release: bool,
+    /// This device is the one the lock names, and *has* given it. Reported rather than offered: the
+    /// peer release is irrevocable, so offering it twice would suggest it could be redone.
+    pub peer_released: bool,
+    /// The 24-hour delayed release can be started. The last-resort exit, for every lock.
+    pub delayed_release: bool,
+    /// A delayed release already counting down, and when it lands. Never offered again, because asking
+    /// twice cannot move it.
+    pub delayed_release_at: Option<Timestamp>,
+}
+
 /// The set of conditions guarding one session, plus when it ends.
 ///
 /// A `LockSet` with no conditions is an unlocked session: it ends when its time is up and the user
@@ -85,6 +116,64 @@ impl LockSet {
 
     pub fn is_locked(&self) -> bool {
         !self.conditions.is_empty()
+    }
+
+    /// **What a user interface may offer for a session under this lock** — the one place that decides.
+    ///
+    /// P1-6: this question was answered independently in three places, three different ways. The tray
+    /// routed `DeviceCredential` and `PeerRelease`; the Windows window routed two variants *by
+    /// comparing their display strings*; and neither routed `Challenge`, though it exists here and
+    /// Android implements it. A user who locked a session with their Windows password and hid the tray
+    /// — an option the tray itself presents as harmless — had no way to reach the last-resort exit from
+    /// the product's primary surface.
+    ///
+    /// So the decision lives here, in the core both surfaces already depend on, and every surface reads
+    /// [`Offers`] rather than re-deriving it.
+    ///
+    /// `releasable` is whether *this device* is the one a [`Lock::PeerRelease`] names — the service
+    /// knows that and a UI cannot work it out. `released` is whether this device has already given that
+    /// release, which is a different thing from being able to.
+    pub fn offers(&self, releasable: bool, released: bool) -> Offers {
+        let has = |want: fn(&Lock) -> bool| self.conditions.iter().any(want);
+        let credential = has(|l| matches!(l, Lock::DeviceCredential));
+        let confirm = has(|l| matches!(l, Lock::Confirm));
+        // The conditions no local prompt can satisfy: a tag that is in another room, a challenge
+        // answered in the app, a restart. Named rather than merely counted, so a surface can say
+        // *which* one is holding the lock instead of "locked elsewhere".
+        //
+        // **`Timer` is excluded, and that is not a detail.** It is a condition in the set but it is
+        // never something "elsewhere": it is satisfied by the clock, and every surface already shows
+        // the end time beside it. The tray filtered it out before this predicate existed, and leaving
+        // it in made an expired timer render as "locked elsewhere" with no way to end it — caught by
+        // the tray's own `a_timer_that_has_run_out_can_be_ended_from_here`.
+        let elsewhere: Vec<Lock> = self
+            .conditions
+            .iter()
+            .filter(|l| {
+                !matches!(l, Lock::DeviceCredential | Lock::Confirm | Lock::Timer)
+                    // A peer release this device holds is not "elsewhere" either: it is offered right
+                    // here, and calling it elsewhere is what made the window hide it.
+                    && !(releasable && matches!(l, Lock::PeerRelease { .. }))
+            })
+            .cloned()
+            .collect();
+
+        Offers {
+            // Zero conditions means there is nothing to prove, so the session ends on request.
+            ends_on_request: self.conditions.is_empty(),
+            credential,
+            confirm,
+            elsewhere,
+            peer_release: releasable && !released,
+            peer_released: releasable && released,
+            // The last-resort exit. Offered whenever the lock has conditions and no release is already
+            // counting down — which is every lock that is actually holding somebody, including the
+            // ones no local prompt can satisfy. Deliberately *not* conditioned on `credential`: the
+            // tray never required that either, and a user whose only condition is a tag kept in
+            // another room still needs a way out that is not "wait 24 hours with no option shown".
+            delayed_release: !self.conditions.is_empty() && self.delayed_release_at.is_none(),
+            delayed_release_at: self.delayed_release_at,
+        }
     }
 
     /// True when this set constrains nothing at all: no conditions, no end time, no pending

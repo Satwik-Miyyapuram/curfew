@@ -478,3 +478,158 @@ fn restoring_twice_changes_nothing_the_second_time() {
     assert_eq!(s.running.len(), after_first, "a second restore duplicated a session");
     assert_eq!(after_first, 1);
 }
+
+// --- what a surface may offer (P1-6) -------------------------------------------------------------
+//
+// Three user interfaces each answered this question their own way. The tray routed `DeviceCredential`
+// and `PeerRelease`; the Windows window routed two variants by comparing display *strings* and
+// rendered no release at all for a credential lock; and neither routed `Challenge`, which exists in
+// this crate and which Android implements. So the decision lives here now and every surface reads it.
+
+/// **The finding.** A credential lock must still offer the exit of last resort, because that is what
+/// the architecture promises and what the window did not do.
+#[test]
+fn a_credential_lock_offers_the_password_and_the_24_hour_release() {
+    let lock = LockSet::new([Lock::DeviceCredential], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert!(offers.credential, "the password route was not offered");
+    assert!(!offers.ends_on_request, "a credential lock is not free to end");
+    assert!(
+        offers.delayed_release,
+        "no 24-hour release: this is the gap that left a user with no way out from the window"
+    );
+    assert!(offers.elsewhere.is_empty(), "a credential is not an elsewhere condition");
+}
+
+/// And a lock whose only condition is a tag in another room. The tray only offered the 24-hour
+/// release when `credential || others`; here `elsewhere` is non-empty, so both agree — but the
+/// predicate is what decides, not the surface.
+#[test]
+fn a_lock_no_local_prompt_can_satisfy_offers_where_it_is_and_the_way_out() {
+    let lock = LockSet::new([Lock::Token { id: "t1".into() }], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert!(!offers.credential && !offers.confirm, "a tag is not a prompt this surface can show");
+    assert_eq!(offers.elsewhere, vec![Lock::Token { id: "t1".into() }]);
+    assert!(offers.delayed_release, "the last-resort exit was withheld");
+}
+
+/// A challenge is a route Android supports and Windows did not route at all. It must be named as
+/// "elsewhere" rather than silently omitted, so a surface can say what is holding the lock.
+#[test]
+fn a_challenge_is_reported_as_an_elsewhere_condition() {
+    use curfew_core::ChallengeKind;
+    let lock = LockSet::new([Lock::Challenge { challenge: ChallengeKind::Math }], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert_eq!(offers.elsewhere.len(), 1, "the challenge was dropped rather than reported");
+    assert!(matches!(offers.elsewhere[0], Lock::Challenge { .. }));
+    assert!(offers.delayed_release);
+}
+
+/// An unlocked session ends on request and needs no exit of last resort — there is nothing to exit.
+#[test]
+fn an_unlocked_session_ends_on_request_and_offers_no_last_resort() {
+    let lock = LockSet::new([], None);
+    let offers = lock.offers(false, false);
+
+    assert!(offers.ends_on_request);
+    assert!(
+        !offers.delayed_release,
+        "a 24-hour delay was offered for a session that can simply be ended"
+    );
+}
+
+/// **The peer release.** A lock naming *this* device is offered here; naming another device it is not.
+/// This is the one input a surface cannot work out for itself, which is why the service computes it.
+#[test]
+fn a_peer_release_is_offered_only_to_the_device_it_names() {
+    let lock = LockSet::new([Lock::PeerRelease { device_id: "PHONE7".into() }], None);
+
+    let ours = lock.offers(true, false);
+    assert!(ours.peer_release, "the named device was not offered the release");
+    assert!(!ours.peer_released);
+    assert!(ours.elsewhere.is_empty(), "a release we can give is not an elsewhere condition");
+
+    let theirs = lock.offers(false, false);
+    assert!(!theirs.peer_release, "a device that was not named was offered the release");
+    assert_eq!(theirs.elsewhere.len(), 1, "the peer lock should be reported as elsewhere");
+}
+
+/// Given already: reported, never offered again. The release cannot be withdrawn, so a button would
+/// suggest it could be redone.
+#[test]
+fn a_peer_release_already_given_is_reported_rather_than_offered() {
+    let lock = LockSet::new([Lock::PeerRelease { device_id: "PHONE7".into() }], None);
+    let offers = lock.offers(true, true);
+
+    assert!(!offers.peer_release, "a release already given was offered again");
+    assert!(offers.peer_released, "a release already given was not reported");
+    assert!(
+        offers.elsewhere.is_empty(),
+        "the device holding the release should not be told the lock is elsewhere"
+    );
+}
+
+/// A release already counting down is never offered again, because asking twice cannot move it.
+#[test]
+fn a_delayed_release_already_running_is_reported_and_never_offered_twice() {
+    let mut lock = LockSet::new([Lock::DeviceCredential], None);
+    lock.delayed_release_at = Some(NOW + curfew_core::DELAYED_RELEASE_SECONDS);
+
+    let offers = lock.offers(false, false);
+    assert!(!offers.delayed_release, "a running release was offered again");
+    assert_eq!(offers.delayed_release_at, Some(NOW + curfew_core::DELAYED_RELEASE_SECONDS));
+}
+
+/// **An expired timer is not "locked elsewhere".** It is a condition in the set but it is satisfied
+/// by the clock, and the tray filters it out for exactly that reason. Leaving it in made an expired
+/// timer render as unreachable from the tray — caught by the tray's own suite, and pinned here so the
+/// shared predicate cannot regress on its own.
+#[test]
+fn a_timer_is_never_an_elsewhere_condition() {
+    let expired = LockSet::new([Lock::Timer], Some(NOW - 1));
+    let offers = expired.offers(false, false);
+
+    assert!(offers.elsewhere.is_empty(), "an expired timer was reported as elsewhere");
+    assert!(offers.delayed_release);
+
+    // And a timer still running is the same: it is a time, not a place.
+    let running = LockSet::new([Lock::Timer], Some(NOW + 3600));
+    assert!(running.offers(false, false).elsewhere.is_empty());
+}
+
+/// A confirmation is friction, not a barrier, and is a route this surface can serve.
+#[test]
+fn a_confirmation_is_offered_rather_than_reported_as_elsewhere() {
+    let offers = LockSet::new([Lock::Confirm], Some(NOW + 3600)).offers(false, false);
+
+    assert!(offers.confirm);
+    assert!(offers.elsewhere.is_empty());
+    assert!(offers.delayed_release);
+}
+
+/// Every condition together, so a surface that renders all of them has something to render.
+#[test]
+fn every_condition_is_accounted_for() {
+    use curfew_core::ChallengeKind;
+    let lock = LockSet::new(
+        [
+            Lock::DeviceCredential,
+            Lock::Confirm,
+            Lock::Challenge { challenge: ChallengeKind::Typing },
+            Lock::RestartRequired,
+            Lock::Timer,
+        ],
+        Some(NOW + 60),
+    );
+    let offers = lock.offers(false, false);
+
+    assert!(offers.credential && offers.confirm);
+    // The challenge and the restart, and *not* the credential, the confirmation or the timer.
+    assert_eq!(offers.elsewhere.len(), 2, "got {:?}", offers.elsewhere);
+    assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::RestartRequired)));
+    assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::Challenge { .. })));
+    assert!(offers.delayed_release);
+}

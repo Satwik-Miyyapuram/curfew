@@ -140,11 +140,15 @@ pub fn menu(status: &Status) -> Vec<Item> {
         // Everything else (a tag scanned, a challenge answered in the app, a restart, a peer) lives
         // somewhere this menu cannot reach, and an item that opened a prompt leading nowhere would be
         // worse than no item at all.
-        let credential = conditions.iter().any(|lock| matches!(lock, Lock::DeviceCredential));
-        let confirm = conditions.iter().any(|lock| matches!(lock, Lock::Confirm));
-        let others =
-            conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential | Lock::Confirm));
-        let releasable = status.releasable.contains(&session.id);
+        // **One predicate, shared with the window and the command line** — P1-6. This menu used to
+        // work this out for itself, the Windows window worked it out a different way (comparing lock
+        // display strings), and neither routed `Challenge`. The service now computes `Offers` once
+        // (`LockSet::offers`) and every surface reads it.
+        let offers = status.offers.get(&session.id).cloned().unwrap_or_default();
+        let credential = offers.credential;
+        let confirm = offers.confirm;
+        let others = !offers.elsewhere.is_empty();
+        let releasable = offers.peer_release || offers.peer_released;
 
         // Said before the actions, because it is the answer to "why can I not end this?" and it is
         // the one condition the user satisfies by doing something to the whole machine.
@@ -218,15 +222,18 @@ pub fn menu(status: &Status) -> Vec<Item> {
             });
         }
 
-        match session.lock.delayed_release_at {
-            // Already running, and never offered twice: asking again cannot move it, so an item that
-            // looked like it might would be a lie.
-            Some(at) => items.push(Item::Note(format!("    release lands {}", when(at)))),
-            None if credential || others => items.push(Item::Release {
+        // The last-resort exit, offered for **every** lock that is holding somebody rather than only
+        // for the ones this menu cannot otherwise satisfy. `ARCHITECTURE.md` promises it is "visible
+        // from the moment the lock starts", and the predicate is where that promise is kept.
+        if let Some(at) = offers.delayed_release_at {
+            // Never offered twice: asking again cannot move it, so an item that looked like it might
+            // would be a lie.
+            items.push(Item::Note(format!("    release lands {}", when(at))));
+        } else if offers.delayed_release {
+            items.push(Item::Release {
                 id: session.id.clone(),
                 label: "Start the 24-hour release".to_string(),
-            }),
-            None => {}
+            });
         }
     }
 
@@ -390,7 +397,23 @@ mod tests {
     }
 
     fn status(running: Vec<Session>) -> Status {
-        Status { now: NOW, running, ..Default::default() }
+        // **`offers` is filled the way the service fills it** — P1-6. The menu no longer derives which
+        // controls are available; it reads what the service computed, so a fixture leaving this empty
+        // would be testing a menu the service can never produce. Deriving it here from
+        // `LockSet::offers` means every assertion below now pins the *shared* predicate, which is the
+        // point of moving the decision out of this file.
+        let offers = running
+            .iter()
+            .map(|session| {
+                // `PC1` is the device these tests use for "this machine", matching the fixtures that
+                // name a peer.
+                let mine = session.lock.conditions.iter().any(
+                    |lock| matches!(lock, Lock::PeerRelease { device_id } if device_id == "PC1"),
+                );
+                (session.id.clone(), session.lock.offers(mine, false))
+            })
+            .collect();
+        Status { now: NOW, running, offers, ..Default::default() }
     }
 
     /// The same, with the profile's id and name deliberately different.

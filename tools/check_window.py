@@ -69,6 +69,9 @@ global.clearInterval = () => {};
 const replies = { configReads: 0, statusCalls: 0, statusSeq: 0, held: [] };
 let holdNextStatus = false;
 let running = [];
+// What the service computes per session (`LockSet::offers`). Empty by default, which is what a status
+// for an unlocked session looks like.
+let offers = {};
 
 function buildReply(message) {
   if (message.kind === "config") {
@@ -79,7 +82,7 @@ function buildReply(message) {
   if (request === "status") {
     replies.statusCalls++;
     const now = ++replies.statusSeq;
-    const reply = { ok: true, value: { response: "status", now, running: running.slice() } };
+    const reply = { ok: true, value: { response: "status", now, running: running.slice(), offers } };
     if (holdNextStatus) {
       // Held rather than answered, so a test can let a later call overtake this one.
       holdNextStatus = false;
@@ -196,6 +199,91 @@ async function testRefreshOrdering() {
         `status.now is ${state.status.now}, expected ${winner}`);
 }
 
+
+// --- P1-6: what the card offers comes from the service ----------------------------------------
+//
+// Three surfaces each answered "what can be done about this lock" their own way. The window's answer
+// was wrong in two directions: a `DeviceCredential` lock rendered **no release affordance at all**,
+// so somebody who locked a session with their Windows password and hid the tray had no route to the
+// last-resort exit from the product's primary surface; and the one button it did draw sent
+// `Request::Release` — the immediate, irrevocable peer release — with no confirmation, while the tray
+// put a dialog in front of the identical action.
+
+async function testOffersDriveTheCard() {
+  // A credential lock, which is the case the window could not reach. No local prompt can satisfy it
+  // from a web page, so what it must offer is the 24-hour exit and a plain statement of what else is
+  // holding it.
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [{ kind: "device_credential" }] } }];
+  offers = { s1: { ends_on_request: false, credential: true, confirm: false, elsewhere: [],
+                   peer_release: false, peer_released: false, delayed_release: true,
+                   delayed_release_at: null } };
+  // Through `refresh()`, not `draw()` alone: `draw()` renders `state.status`, and these globals only
+  // feed the service's reply. The first version of this test set them and called `draw()`, so every
+  // assertion below rendered the *previous* status and failed for a reason that was not the code's.
+  await refresh();
+  const credential = body.innerHTML;
+  check("a credential lock offers the 24-hour release",
+        credential.includes("Start the 24-hour release"),
+        "the window still renders no way out for a lock it cannot satisfy locally");
+  check("and offers no peer release it does not hold",
+        !credential.includes("Release it"),
+        "a peer release was offered for a lock that does not name this device");
+
+  // The peer release, which this device does hold — and which must ask first.
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [{ kind: "peer_release", device_id: "PC1" }] } }];
+  offers = { s1: { ends_on_request: false, credential: false, confirm: false, elsewhere: [],
+                   peer_release: true, peer_released: false, delayed_release: true,
+                   delayed_release_at: null } };
+  await refresh();
+  const peer = body.innerHTML;
+  check("a held peer release is offered", peer.includes("Release it"));
+  check("and it is the *asking* button, not the immediate one",
+        peer.includes('data-act="release-ask"'),
+        "the irrevocable release is one click away again");
+  check("the delayed release is the asking button too",
+        peer.includes('data-act="delayed-ask"'),
+        "the 24-hour release is started without confirmation");
+
+  // Already given: reported, never offered again.
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [] } }];
+  offers = { s1: { ends_on_request: false, credential: false, confirm: false, elsewhere: [],
+                   peer_release: false, peer_released: true, delayed_release: true,
+                   delayed_release_at: null } };
+  await refresh();
+  const given = body.innerHTML;
+  check("a release already given is reported", given.includes("Released by this device"));
+  check("and not offered again", !given.includes("Release it"),
+        "the release was offered a second time, though it cannot be undone");
+
+  // A condition no page can satisfy, named rather than summed up as "locked elsewhere".
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [] } }];
+  offers = { s1: { ends_on_request: false, credential: false, confirm: false,
+                   elsewhere: [{ kind: "token", id: "t1" }], peer_release: false,
+                   peer_released: false, delayed_release: true, delayed_release_at: null } };
+  await refresh();
+  check("an elsewhere condition is named on the card",
+        body.innerHTML.includes("Also needs"),
+        "the card does not say what else is holding the lock");
+
+  // A running delayed release: reported, and never offered twice.
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [] } }];
+  offers = { s1: { ends_on_request: false, credential: true, confirm: false, elsewhere: [],
+                   peer_release: false, peer_released: false, delayed_release: false,
+                   delayed_release_at: 200000 } };
+  await refresh();
+  const counting = body.innerHTML;
+  check("a release already counting down is not offered again",
+        !counting.includes("Start the 24-hour release"),
+        "asking twice cannot move it, so the button is a lie");
+  check("and the card says when it lands", counting.includes("Delayed release lands"));
+}
+
+
 // --- P2-1: the config is not re-read on every tick ---------------------------------------------
 async function testConfigCadence() {
   reset();
@@ -225,6 +313,7 @@ async function testConfigCadence() {
   await testPillStillUpdates();
   await testRefreshOrdering();
   await testConfigCadence();
+  await testOffersDriveTheCard();
   console.log();
   console.log(failures === 0 ? "window polling: OK" : `window polling: ${failures} problem(s)`);
   process.exit(failures === 0 ? 0 : 1);
@@ -297,6 +386,31 @@ MUTATIONS = [
     (
         "P2-1: re-read the config on every tick",
         "  if (ticksSinceConfig >= CONFIG_EVERY) {",
+        "  if (true) {",
+    ),
+    (
+        "P1-6: render no release for a lock the page cannot satisfy locally",
+        "  if (offers.delayed_release) {",
+        "  if (offers.delayed_release && offers.credential && false) {",
+    ),
+    (
+        "P1-6: send the irrevocable peer release on one click again",
+        'controls.push(`<button class="btn ghost" data-act="release-ask" data-id="${esc(session.id)}">Release it&hellip;</button>`);',
+        'controls.push(`<button class="btn ghost" data-act="release" data-id="${esc(session.id)}">Release it</button>`);',
+    ),
+    (
+        "P1-6: start the 24-hour release without asking",
+        'controls.push(`<button class="btn ghost" data-act="delayed-ask" data-id="${esc(session.id)}">Start the 24-hour release</button>`);',
+        'controls.push(`<button class="btn ghost" data-act="request-release" data-id="${esc(session.id)}">Start the 24-hour release</button>`);',
+    ),
+    (
+        "P1-6: swallow the elsewhere conditions instead of naming them",
+        "  const elsewhere = (offers.elsewhere || []).map(describeLock);",
+        "  const elsewhere = [];",
+    ),
+    (
+        "P1-6: offer the delayed release again while one is counting down",
+        "  if (offers.delayed_release) {",
         "  if (true) {",
     ),
 ]

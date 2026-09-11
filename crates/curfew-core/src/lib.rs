@@ -27,7 +27,7 @@ pub use config::{
 pub use emergency::{EmergencyPolicy, Pass, PassRefusal, Passes};
 pub use engine::{decide, BlockReason, Decision, State};
 pub use frozen::{Countdown, Origin};
-pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
+pub use lock::{ChallengeKind, Lock, LockSet, Offers, DELAYED_RELEASE_SECONDS};
 pub use proof::{Proofs, PROOF_SECONDS};
 pub use schedule::{
     active_at, next_change_after, Activation, ActivationSource, CalendarEvent, CalendarSchedule,

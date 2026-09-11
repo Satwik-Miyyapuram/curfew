@@ -320,6 +320,26 @@ impl Enforcer {
             .collect()
     }
 
+    /// **What a surface may offer for each running session** — one answer, computed once (P1-6).
+    ///
+    /// The decision itself is [`curfew_core::LockSet::offers`]; this only supplies the two facts a
+    /// lock cannot know about itself. Which device a `PeerRelease` names is the service's business —
+    /// a UI has no way to work it out, which is why the window previously rendered no release
+    /// affordance at all for a lock this device *could* release, and none for the 24-hour exit either.
+    pub fn offers(&self) -> std::collections::BTreeMap<String, curfew_core::Offers> {
+        let releasable = self.releasable();
+        self.sessions
+            .running
+            .iter()
+            .map(|session| {
+                let id = session.id.clone();
+                let mine = releasable.contains(&id);
+                let given = self.releases.contains(&id);
+                (id, session.lock.offers(mine, given))
+            })
+            .collect()
+    }
+
     /// Note that the sessions running now are the sessions running now.
     ///
     /// Called after restoring state, so a session that ends while the service is stopped is still
@@ -532,6 +552,7 @@ impl Enforcer {
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
                 released: self.releases.iter().cloned().collect(),
+                offers: self.offers(),
                 sync: self.sync.clone(),
             })),
 
