@@ -46,6 +46,10 @@ thread_local! {
     /// Apps already announced as waiting, so one wait is one notice.
     static WAITING: RefCell<std::collections::BTreeSet<String>> =
         const { RefCell::new(std::collections::BTreeSet::new()) };
+    /// Profiles running as of the previous poll, so a session that has just begun is announced once
+    /// and a session that was already running when the tray started is not announced at all.
+    static STARTED: RefCell<std::collections::BTreeSet<String>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
     /// When the last notice went up, for the rate limit.
     static LAST_SHOWN: std::cell::Cell<Option<curfew_core::Timestamp>> =
         const { std::cell::Cell::new(None) };
@@ -222,7 +226,41 @@ fn watch_closures(window: HWND) {
     let newly = CLOSED.with(|slot| crate::overlay::newly_closed(&slot.borrow(), &status.closed));
     CLOSED.with(|slot| *slot.borrow_mut() = status.closed.clone());
 
+    // A session that has just begun, announced separately from the closes it causes.
+    //
+    // The order matters: a schedule coming round both starts a session and closes the apps it covers,
+    // and the close card ("Steam was closed…") explains the *what* while this explains the *why*. So a
+    // close takes precedence — it is the more immediate thing and it already names the profile — and a
+    // start notice is shown only when nothing was just closed. Sharing the `LAST_SHOWN` rate limit
+    // means a start cannot preempt a close either.
+    //
+    // The first poll seeds and says nothing. `STARTED` begins empty, so without this every launch of
+    // the tray would announce whatever happened to be running as if it had just started — a session
+    // that may be hours old, presented as news. Seeding costs the notice for a session that starts in
+    // the half-second before the tray launches, which is the right way round.
+    let first = STARTED.with(|slot| slot.borrow().is_empty()) && !status.running.is_empty();
+    let started = if first {
+        Vec::new()
+    } else {
+        STARTED.with(|slot| crate::overlay::newly_started(&slot.borrow(), &status.running))
+    };
+    STARTED.with(|slot| {
+        *slot.borrow_mut() = status.running.iter().map(|s| s.profile.clone()).collect()
+    });
+
     let last = LAST_SHOWN.with(|slot| slot.get());
+    if newly.is_empty()
+        && !started.is_empty()
+        && crate::overlay::should_show(&started, last, status.now)
+    {
+        let text = crate::overlay::started_message(&started, &status);
+        if !text.is_empty() {
+            LAST_SHOWN.with(|slot| slot.set(Some(status.now)));
+            crate::overlay::show(&text, crate::overlay::dwell_for(&text));
+            return;
+        }
+    }
+
     if !crate::overlay::should_show(&newly, last, status.now) {
         return;
     }
@@ -231,19 +269,17 @@ fn watch_closures(window: HWND) {
 }
 
 fn show_menu(window: HWND) {
-    let status = match ask(&Request::Status) {
-        Ok(curfew_win::ipc::Response::Status(status)) => status,
-        Ok(other) => {
-            say(window, &describe(&other));
-            return;
-        }
-        Err(detail) => {
-            say(window, &detail);
-            return;
-        }
+    // A menu is opened even when the service does not answer.
+    //
+    // It used to `say(...)` and return, so the whole menu — including "Why Windows warned about
+    // this…" and "Hide this icon", neither of which needs the service — was unreachable exactly when
+    // someone was trying to work out what was wrong. The explanation is now the first thing *in* the
+    // menu, and the static items are still there to press.
+    let items = match ask(&Request::Status) {
+        Ok(curfew_win::ipc::Response::Status(status)) => menu::menu(&status),
+        Ok(other) => menu::unreachable(&describe(&other)),
+        Err(detail) => menu::unreachable(&detail),
     };
-
-    let items = menu::menu(&status);
     let handle: HMENU = unsafe { CreatePopupMenu() };
     if handle.is_null() {
         return;

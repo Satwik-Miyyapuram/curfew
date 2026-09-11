@@ -264,13 +264,44 @@ pub fn menu(status: &Status) -> Vec<Item> {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
 
-    items.push(Item::Separator);
-    // Above the two "explain something" items, because it is the only one that *does* something:
-    // starting a block is the product's whole verb, and this icon is the surface most people see.
-    items.push(Item::OpenWindow);
-    items.push(Item::Details);
-    items.push(Item::About);
-    items.push(Item::Quit);
+    items.extend(static_tail());
+    items
+}
+
+/// The items that do not depend on the service answering: everything from the separator down.
+///
+/// Split out so [`unreachable`] can build a menu with no status at all and still carry them. The two
+/// lists were the same five lines twice, which is how one of them would eventually have lost an item.
+fn static_tail() -> Vec<Item> {
+    vec![
+        Item::Separator,
+        // Above the two "explain something" items, because it is the only one that *does* something:
+        // starting a block is the product's whole verb, and this icon is the surface most people see.
+        Item::OpenWindow,
+        Item::Details,
+        Item::About,
+        Item::Quit,
+    ]
+}
+
+/// The menu when the service cannot be reached at all.
+///
+/// There is nothing to say about sessions or schedules, because none is known — but the rest of the
+/// menu has nothing to do with the service, and the menu used to *not open at all* in this case:
+/// `show_menu` popped a message box and returned, so "Why Windows warned about this…" and "Hide this
+/// icon" were unreachable exactly when someone was trying to diagnose a problem. The card that
+/// explains the failure is excellent copy; it just could not be read from the menu.
+///
+/// So the explanation becomes the first items and everything static stays. "What is blocked…" is kept
+/// rather than hidden: it re-asks when pressed and shows the same reason, and removing an item the
+/// user can see in every other state would make the failure harder to recognise, not easier.
+pub fn unreachable(detail: &str) -> Vec<Item> {
+    let mut items = vec![
+        Item::Note("The Curfew service is not answering.".to_string()),
+        Item::Note("    blocks may not be enforced right now".to_string()),
+        Item::Note(format!("    {detail}")),
+    ];
+    items.extend(static_tail());
     items
 }
 
@@ -833,5 +864,66 @@ mod tests {
             !items.iter().any(|i| matches!(i, Item::PeerRelease { .. } | Item::End { .. })),
             "a lock for another device offered a way out here: {items:?}"
         );
+    }
+
+    /// The menu still opens when the service is down.
+    ///
+    /// It used to pop a message box and return, so every item that needs nothing from the service —
+    /// opening the window, the welcome, and above all "Hide this icon" — was unreachable exactly when
+    /// the user was trying to diagnose a problem. The explanation is now *in* the menu rather than
+    /// instead of it.
+    #[test]
+    fn a_service_that_does_not_answer_still_gets_a_menu() {
+        let items = unreachable("the pipe has been ended");
+
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(t) if t.contains("not answering"))),
+            "the menu does not say the service is down: {items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(t) if t.contains("the pipe has been ended"))),
+            "the service's own reason was dropped: {items:?}"
+        );
+
+        // And everything that never needed the service is still reachable.
+        for (what, found) in [
+            ("the window", items.iter().any(|i| matches!(i, Item::OpenWindow))),
+            ("the welcome", items.iter().any(|i| matches!(i, Item::About))),
+            ("hide-the-icon", items.iter().any(|i| matches!(i, Item::Quit))),
+        ] {
+            assert!(found, "{what} is unreachable when the service is down: {items:?}");
+        }
+    }
+
+    /// The static tail is one list, not two copies.
+    ///
+    /// `menu` and `unreachable` end with the same five items. They were written twice before this and
+    /// would eventually have drifted apart; this pins that both finish the same way.
+    #[test]
+    fn both_menus_end_with_the_same_static_items() {
+        let live = menu(&status(vec![]));
+        let dead = unreachable("no service");
+
+        /// A name for the five items that need no service, or `None` for anything else.
+        fn tail_name(item: &Item) -> Option<&'static str> {
+            match item {
+                Item::Separator => Some("separator"),
+                Item::OpenWindow => Some("window"),
+                Item::Details => Some("details"),
+                Item::About => Some("about"),
+                Item::Quit => Some("quit"),
+                _ => None,
+            }
+        }
+        let tail = |items: &[Item]| -> Vec<&'static str> {
+            items.iter().rev().take(5).filter_map(tail_name).collect()
+        };
+
+        let live_tail = tail(&live);
+        // Asserted outright as well as against each other: two menus could agree on being wrong.
+        assert_eq!(live_tail, vec!["quit", "about", "details", "window", "separator"]);
+        assert_eq!(live_tail, tail(&dead), "the two menus no longer end alike");
     }
 }

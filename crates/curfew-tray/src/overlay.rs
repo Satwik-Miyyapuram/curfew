@@ -38,6 +38,62 @@ pub fn newly_closed(previous: &BTreeSet<String>, current: &BTreeSet<String>) -> 
     current.difference(previous).cloned().collect()
 }
 
+/// Profile names whose sessions have appeared since the previous poll.
+///
+/// The other half of "the block started and nobody said so". Every close gets a sentence, but the
+/// *reason* for the close — a session beginning — was announced nowhere: a schedule came round, apps
+/// started disappearing, and the first thing the user saw was a card about Steam. This is what lets
+/// that card be preceded by, or replaced with, the sentence that explains it.
+///
+/// Keyed on the profile rather than the session id, because a schedule that restarts a session under
+/// a new id is not news to the person reading the screen. Returned sorted and de-duplicated so the
+/// sentence is stable.
+pub fn newly_started(previous: &BTreeSet<String>, current: &[curfew_core::Session]) -> Vec<String> {
+    let now: BTreeSet<&str> = current.iter().map(|s| s.profile.as_str()).collect();
+    now.difference(&previous.iter().map(String::as_str).collect())
+        .map(|id| (*id).to_string())
+        .collect()
+}
+
+/// The sentence for a session that has just begun.
+///
+/// Says the name, says when it ends, and says what it is doing — the three things a person wants on
+/// finding their windows closing. Deliberately not a wall: the overlay does not take the keyboard and
+/// leaves on its own, so this is information rather than an interruption.
+pub fn started_message(profiles: &[String], status: &Status) -> String {
+    let names: Vec<String> = profiles.iter().map(|id| status.name_of(id).to_string()).collect();
+    let who = match names.as_slice() {
+        [] => return String::new(),
+        [one] => one.clone(),
+        [first, second] => format!("{first} and {second}"),
+        many => format!("{} and {} others", many[0], many.len() - 1),
+    };
+
+    // The end time of the session that just started, which is the one the user is now inside. When
+    // several started at once they usually share a window, so the latest end is the useful answer.
+    let ends = status
+        .running
+        .iter()
+        .filter(|s| profiles.contains(&s.profile))
+        .filter_map(|s| s.lock.ends_at)
+        .max();
+
+    let mut text = match ends {
+        Some(ends) => format!("{who} is running now, until {}.", crate::menu::when(ends)),
+        None => format!("{who} is running now."),
+    };
+    text.push_str(
+        "\nThis is the block you asked for. Anything it covers will close if you open it.",
+    );
+    if status.running.iter().any(|s| {
+        profiles.contains(&s.profile)
+            && s.lock.conditions.iter().any(|l| !matches!(l, curfew_core::Lock::Timer))
+    }) {
+        text.push_str("\nThe Curfew icon can end it early, or start the 24-hour release.");
+    }
+    text
+}
+
 /// A pretty name for an executable: what the user calls the thing, not what the file is called.
 fn app_name(exe: &str) -> String {
     let stem = exe.strip_suffix(".exe").unwrap_or(exe);
@@ -637,5 +693,80 @@ mod tests {
         let text = message(&["steam.exe".into()], &Status { now: NOW, ..Default::default() });
         assert!(text.contains("was closed by Curfew"));
         assert!(!text.contains("during"));
+    }
+
+    fn running(profile: &str, ends_at: Option<Timestamp>) -> Session {
+        Session {
+            id: format!("s-{profile}"),
+            profile: profile.into(),
+            source: SessionSource::Weekly { schedule: "mornings".into() },
+            started_at: NOW,
+            lock: LockSet::new([Lock::Timer], ends_at),
+        }
+    }
+
+    /// A session that has just begun is noticed once, and only once.
+    ///
+    /// The close cards explain *what* disappeared; nothing said *why*. A schedule came round, apps
+    /// started vanishing, and the first sentence the user read was about Steam.
+    #[test]
+    fn a_session_that_has_just_started_is_noticed_exactly_once() {
+        let sessions = vec![running("deep-work", Some(NOW + 3600))];
+        assert_eq!(newly_started(&set(&[]), &sessions), vec!["deep-work".to_string()]);
+
+        // On the next poll it is no longer new, which is what stops the notice repeating for as long
+        // as the session runs.
+        assert!(newly_started(&set(&["deep-work"]), &sessions).is_empty());
+    }
+
+    /// A session already running when the tray starts is not announced.
+    ///
+    /// The first poll has an empty "previous", so without the seeding rule below every launch of the
+    /// tray would announce whatever happened to be running — an event that could be hours old,
+    /// presented as news. The cost is that a session starting in the half-second before the tray
+    /// launches is missed, which is the right way round.
+    #[test]
+    fn the_first_poll_does_not_announce_what_was_already_running() {
+        // This is what `shell.rs` does on its first poll.
+        let sessions = vec![running("deep-work", Some(NOW + 3600))];
+        let seeded: BTreeSet<String> = sessions.iter().map(|s| s.profile.clone()).collect();
+        assert!(newly_started(&seeded, &sessions).is_empty());
+    }
+
+    /// The sentence names the profile the way its owner does, and says when it ends.
+    #[test]
+    fn the_started_sentence_names_the_profile_and_when_it_ends() {
+        let mut status = Status {
+            now: NOW,
+            running: vec![running("deep-work", Some(NOW + 3600))],
+            ..Default::default()
+        };
+        status.profile_names.insert("deep-work".into(), "Deep work".into());
+
+        let text = started_message(&["deep-work".to_string()], &status);
+
+        assert!(text.contains("Deep work"), "the id was used instead of the name: {text}");
+        assert!(!text.contains("deep-work"), "the slug leaked into the notice: {text}");
+        assert!(text.contains("until"), "the notice does not say when it ends: {text}");
+        // It says what is happening, not merely that something is.
+        assert!(text.contains("block you asked for"), "{text}");
+    }
+
+    /// A session with only a timer gets no invented way out.
+    ///
+    /// Saying "the icon can end it early" about a session whose whole lock is a timer would promise an
+    /// exit the service then refuses — the exact failure this file exists to prevent.
+    #[test]
+    fn a_started_session_with_only_a_timer_is_not_offered_an_early_exit() {
+        let status =
+            Status { now: NOW, running: vec![running("deep-work", None)], ..Default::default() };
+        let text = started_message(&["deep-work".to_string()], &status);
+        assert!(!text.contains("end it early"), "an exit was promised that does not exist: {text}");
+    }
+
+    /// Nothing new means nothing to say, rather than a card with an empty sentence.
+    #[test]
+    fn no_new_sessions_means_no_sentence() {
+        assert!(started_message(&[], &Status { now: NOW, ..Default::default() }).is_empty());
     }
 }
