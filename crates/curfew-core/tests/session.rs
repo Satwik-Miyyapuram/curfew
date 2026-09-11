@@ -908,17 +908,78 @@ fn a_restore_cannot_give_an_until_released_lock_an_end_time() {
     );
 }
 
-/// And the converse holds: a restore **may** turn a timed lock into an "until released" one, because that
-/// is strictly stronger. Without this, "ignore `ends_at` entirely" would satisfy the test above.
+/// **A restore may push an end time later, which is the strengthening that is safe.**
+///
+/// This replaces a test I wrote earlier in this branch,
+/// `a_restore_may_strengthen_a_timed_lock_into_an_until_released_one`, which asserted that adopting an
+/// incoming `None` over a running timer is desirable because "until released" is stronger. It is stronger
+/// in duration and it is a **trap** in practice: with `conditions = [Timer]` — not claimable since entry 1 —
+/// there is no end time and no satisfiable condition, so nothing can open the lock.
+///
+/// The reasoning behind that test was too simple: if weakening is forbidden, strengthening must be fine.
+/// But **a bound is not only a limit, it is also the exit**, so removing one is not the mirror image of
+/// adding a condition. Pushing a bound later is the strengthening that a restore may safely adopt.
 #[test]
-fn a_restore_may_strengthen_a_timed_lock_into_an_until_released_one() {
+fn a_restore_may_push_an_end_time_later() {
     let mut sessions = Sessions::default();
     sessions.start(session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 60))));
 
-    let stronger = session("s1", "deep-work", LockSet::new([Lock::Timer], None));
+    let stronger = session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 7200)));
     sessions.restore_without_weakening(Sessions { running: vec![stronger], ..Default::default() });
 
     let held = sessions.running.first().expect("still running");
-    assert_eq!(held.lock.ends_at, None, "a strengthening restore was dropped");
-    assert!(!held.lock.is_expired(NOW + 86_400), "the lock still expires on a timer");
+    assert_eq!(
+        held.lock.ends_at,
+        Some(NOW + 7200),
+        "a restore that pushed the end time later was dropped"
+    );
+    assert!(!held.lock.is_expired(NOW + 60), "the lock expires earlier than it should");
+}
+
+/// **A restore cannot cancel a delayed release the user has already asked for.**
+///
+/// `harden` treated `None` as the top of the lattice for `delayed_release_at`, so an incoming `None`
+/// overwrote a running `Some(t)`. That is "stronger" in duration — the lock no longer ends on its own — but
+/// it cancels a 24-hour release the user has asked for, and `LockSet::request_release`'s own doc says *"it
+/// cannot be cancelled"*. The delayed release is the guarantee that this tool cannot trap you, so it is the
+/// one commitment a restore must not take away.
+#[test]
+fn a_restore_cannot_cancel_a_delayed_release() {
+    let mut sessions = Sessions::default();
+    let mut mine = LockSet::new([Lock::DeviceCredential], None);
+    let release = mine.request_release(NOW);
+    sessions.start(session("s1", "deep-work", mine));
+
+    // The payload promises no automatic release at all.
+    let forged = session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], None));
+    assert_eq!(forged.lock.delayed_release_at, None, "the fixture must have no release");
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.delayed_release_at,
+        Some(release),
+        "a restore cancelled the release the user asked for, so the lock no longer ends"
+    );
+}
+
+/// **And a restore cannot manufacture an unbounded commitment either.** The same `None`-as-top rule let an
+/// incoming "until released" end time replace a running timer, which with conditions that cannot be
+/// satisfied (`Lock::Timer` is not claimable) is a lock with no way out at all.
+#[test]
+fn a_restore_cannot_remove_a_running_end_time() {
+    let mut sessions = Sessions::default();
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    // "Until released", from the untrusted side.
+    let forged = session("s1", "deep-work", LockSet::new([Lock::Timer], None));
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.ends_at,
+        Some(NOW + 3600),
+        "a restore removed the running lock's end time, and a Timer condition cannot be claimed, so \
+         nothing can open it"
+    );
 }

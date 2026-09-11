@@ -40,6 +40,7 @@ def rows(text):
 # **Negatives are checked before the entry reference**, which is the actual fix: the old rule had no notion
 # of a negative, so any status mentioning an entry was assumed to be closed. A status that is just
 # `entry 12 — ...` *is* closed, because that is how the UX table records an earlier round's fix.
+# **Explicit negatives**, checked before anything positive: "not fixed" contains "fixed".
 OPEN_WORDS = (
     "not fixed",
     "unfixed",
@@ -49,13 +50,59 @@ OPEN_WORDS = (
     "not re-assessed",
     "unaddressed",
     "blocked",
+    "left open",
+    "open pending",
+    # **"not done" earns its place**: it is how these tables say a review claim is still outstanding, and
+    # adding it surfaced two rows marked `fixed` whose own text said otherwise (P1-8, P2-8). Only two rows
+    # in the table contain it and both were genuinely partial, so it cannot mask anything.
+    #
+    # **"pending" is deliberately absent.** P2-18 uses it as a technical term — *"every pending entry"* in
+    # the op-log — so the word says nothing about the row's status. That is the difference between a
+    # vocabulary and a word list, and it is why each entry here is checked against the table first.
+    "not done",
+    "still to do",
+    # Verified safe by scanning all 52 statuses in the table: none of these appears in a closed row. The
+    # exclusion of "pending" (a technical term in P2-18) and of "to do"/"todo" (which read as "how to do X"
+    # in prose) is deliberate — a word list that is too keen turns a check into noise.
+    "working on",
+    "still being",
+    "not yet",
+    "unfinished",
+    "outstanding",
+    "incomplete",
+    "unresolved",
+    "awaiting",
+    "needs work",
+    "revisit",
 )
 CLOSED_WORDS = ("fixed", "not a defect", "assessed")
 ENTRY_REF = re.compile(r"^\s*\**(entry|entries)\s+\d+")
+# A bare "open", as a whole word — `\b` so "opened" does not match. Three statuses in the table contain
+# "opened" and all three are closed, which is why this is not a substring test.
+BARE_OPEN = re.compile(r"\bopen\b", re.IGNORECASE)
 
 
 def classify(status):
     """`"closed"`, `"partly"` or `"open"` — or raises on a phrase this file does not know.
+
+    **The order matters, and each step earns its place:**
+
+    1. *partly* — because "partly fixed" contains "fixed".
+    2. *explicit negatives* — because "not fixed" contains "fixed".
+    3. *explicit positives* — because three statuses containing "opened" are closed.
+    4. *a bare "open"* — catches "left open" and "open pending", which is what a row citing an entry
+       often says, and which the entry-reference fallback below used to swallow.
+    5. *an entry reference* — `entry 1 — Lock::Timer removed from claimable` is how the UX table records
+       an earlier round's fix, so this stays, but only as the **last** resort.
+
+    Stepping straight from (2) to (5) — checking `CLOSED_WORDS or ENTRY_REF` together — classified
+    `entry 14 — investigated and left open` as closed, which is the defect this ordering fixes.
+
+    **The residual, stated rather than implied.** Step 5 is a wildcard: an `entry N — ...` status is closed
+    unless one of the words above appears. So an incompleteness phrasing nobody listed reads as done. This
+    narrows that; it does not close it, and no vocabulary over free prose can. The mitigation is that every
+    word here was checked against the table before being added, and that a status matching *nothing* stops
+    the tool instead of guessing.
 
     **Raises rather than guessing.** An unrecognised status word is the one case where stopping is right:
     treating it as open inflates the list, treating it as closed hides work, and either way the tool is
@@ -64,10 +111,13 @@ def classify(status):
     low = status.lower()
     if "partly fixed" in low or "partial" in low:
         return "partly"
-    # Negatives first: `not fixed` must beat `fixed`, and `deferred, see entry 4` must beat `entry`.
     if any(w in low for w in OPEN_WORDS):
         return "open"
-    if any(w in low for w in CLOSED_WORDS) or ENTRY_REF.match(status):
+    if any(w in low for w in CLOSED_WORDS):
+        return "closed"
+    if BARE_OPEN.search(status):
+        return "open"
+    if ENTRY_REF.match(status):
         return "closed"
     raise SystemExit(
         f"tools/open_rows.py does not recognise the status {status!r}.\n"

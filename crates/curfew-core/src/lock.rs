@@ -210,8 +210,17 @@ impl LockSet {
 
     /// **The stronger of the two locks, in every component** — never weaker than `self`.
     ///
-    /// This is the lattice join, with `None` as the top element for both optional times: no end time
-    /// ("until released") outlasts any concrete one, and no delayed release outlasts any concrete time.
+    /// **`None` is deliberately not treated as the top element for either bound.** As a lattice that would
+    /// be right — "until released" and "no automatic release" are both the longest-lived options — but it
+    /// produced a lock nobody can open rather than a stronger one:
+    ///
+    ///  - an incoming `None` **cancelled** a running delayed release, which is the user's guaranteed way
+    ///    out and which [`request_release`](Self::request_release) documents as cancellable by nothing; and
+    ///  - an incoming `None` **removed** a running end time, which with a condition that cannot be claimed
+    ///    (`Lock::Timer` is not claimable, since entry 1) leaves a lock with no exit at all.
+    ///
+    /// So this takes the later of two concrete values and otherwise keeps what is already running. A
+    /// restore may make a lock last longer; it may not take a bound away.
     ///
     /// **Why this exists next to [`merge`], which looks similar.** `merge` combines two genuinely
     /// concurrent sessions' locks, where both sides are trusted; for `delayed_release_at` it deliberately
@@ -223,15 +232,23 @@ impl LockSet {
     ///
     /// So the rule is: **use `merge` to combine promises, use `harden` to adopt untrusted state.**
     pub fn harden(&self, other: &LockSet) -> LockSet {
+        // **`None` is not top here, deliberately — see the doc comment.** Adopting an unbounded value from
+        // the untrusted side removes a bound, which is how a restore traps the user rather than releasing
+        // them: a cancelled delayed release, or an end time replaced by "until released" on a lock whose
+        // only condition is `Timer` (not claimable since entry 1, so nothing can open it).
+        //
+        // So: the later of two concrete values, and otherwise **keep what the running session already
+        // has**. Nothing legitimate is lost, because an until-released session reaches a machine that is
+        // not running one through `start()`, not through this function.
         let ends_at = match (self.ends_at, other.ends_at) {
             (Some(a), Some(b)) => Some(a.max(b)),
-            // "Until released" outlasts any concrete end time.
-            _ => None,
+            (Some(a), None) => Some(a),
+            (None, _) => None,
         };
         let delayed_release_at = match (self.delayed_release_at, other.delayed_release_at) {
             (Some(a), Some(b)) => Some(a.max(b)),
-            // No automatic release outlasts any concrete release time.
-            _ => None,
+            (Some(a), None) => Some(a),
+            (None, _) => None,
         };
         Self {
             conditions: self.conditions.union(&other.conditions).cloned().collect(),

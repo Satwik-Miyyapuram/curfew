@@ -103,11 +103,20 @@ impl ClockWitness {
     ///    The first version of this check had the comparison the other way round, which refused the
     ///    harmless direction and allowed the attack; a test written from the attack rather than from the
     ///    code caught it.
+    ///  - **`last_uptime` must not move backward on the same boot id.** `observe`'s same-boot branch is
+    ///    `elapsed = reading.uptime - self.last_uptime`, and `rebooted` is
+    ///    `boot_id != last_boot_id || uptime < last_uptime` — that second clause is exactly what catches an
+    ///    uptime counter going backwards. A forged witness with a small `last_uptime` **disables that
+    ///    check**, so the next reading computes an enormous `elapsed` and credits all of it. This was the
+    ///    third direction, and the first version of this guard missed it.
     ///
     /// Everything else is allowed, including a smaller `trusted`: that can only make a lock look *less*
     /// expired, which buys an attacker nothing.
     pub fn adoption_moves_forward(&self, incoming: &Self) -> bool {
-        incoming.trusted > self.trusted || incoming.last_wall < self.last_wall
+        incoming.trusted > self.trusted
+            || incoming.last_wall < self.last_wall
+            || (incoming.last_boot_id == self.last_boot_id
+                && incoming.last_uptime < self.last_uptime)
     }
 
     /// Take a reading and decide what it is worth.

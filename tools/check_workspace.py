@@ -47,6 +47,25 @@ RESOURCE_DIRS = [
 
 STRAY_NAMES = {"desktop.ini", ".DS_Store", "Thumbs.db"}
 
+# **Directories that are build output rather than source, anywhere in the tree.** `__pycache__` is not a
+# cloud-sync artefact like the others in `STRAY_NAMES`: it is Python's own cache, it appears the moment a
+# script in `tools/` imports another one, and `git add -A` will commit it. Found by creating one and
+# watching this checker say "ok" — it scans `SOURCE_DIRS`, and `tools/` is deliberately not among them.
+STRAY_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+
+
+def find_stray_dirs():
+    """Every build-cache directory in the tree, excluding anything under `.git`."""
+    found = []
+    for path in ROOT.rglob("*"):
+        if not path.is_dir():
+            continue
+        if path.name in STRAY_DIRS and ".git" not in path.parts:
+            found.append(path)
+    return sorted(found)
+
+
+
 ALLOWED_RESOURCE_SUFFIXES = {".xml", ".png", ".webp", ".jpg", ".jpeg"}
 
 # Where a stray hurts worst, and it is not the source tree. A cloud-sync client writing into `.git`
@@ -144,6 +163,14 @@ def main():
                     path.relative_to(ROOT).as_posix(),
                     "a script in `tools/` that is not in TOOLS_TO_KEEP — add it there if it belongs",
                 )
+
+    # Build-cache directories, anywhere in the tree. Reported as directories rather than by walking them,
+    # because the fix is `rm -rf` on the directory and listing forty `.pyc` files would bury the point.
+    for path in find_stray_dirs():
+        found.setdefault(
+            path.relative_to(ROOT).as_posix() + "/",
+            "a build cache, which `git add -A` will commit",
+        )
 
     if not found:
         print("  ok   no strays in the build's input directories")

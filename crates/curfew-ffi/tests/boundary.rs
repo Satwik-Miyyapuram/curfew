@@ -1261,3 +1261,45 @@ fn a_restore_cannot_forge_a_small_last_wall_to_jump_forward_next_reading() {
         "the trusted clock jumped to {trusted} on the reading after the forged witness"
     );
 }
+
+/// **A forged `last_uptime` jumps the trusted clock on the next reading** — the third direction, and the
+/// one the first fix missed.
+///
+/// `observe`'s same-boot branch computes `elapsed = reading.uptime - self.last_uptime`. `rebooted` is
+/// `boot_id != last_boot_id || uptime < last_uptime`, so a witness with the **same** boot id and a
+/// `last_uptime` of zero makes `rebooted` false and `elapsed` the entire uptime — ten hours here. Trusted
+/// time is what every lock is judged against, so every timer lock shorter than that expires at once.
+///
+/// The forgery is built as JSON because `ClockWitness` is `Serialize + Deserialize`: three fields are the
+/// honest current values and only `last_uptime` is moved, which is what a forged stored blob looks like.
+#[test]
+fn a_restore_cannot_forge_a_small_last_uptime_to_jump_forward_next_reading() {
+    let c = curfew();
+    // Ten hours of uptime on boot 7, adopted honestly.
+    c.restore_clock(witness_json(NOW, 36_000, 7)).expect("adopted");
+
+    // Same trusted, same last_wall, same boot id — only the uptime counter is rewound.
+    let forged = json!({
+        "last_wall": NOW,
+        "last_uptime": 0,
+        "last_boot_id": 7,
+        "trusted": NOW,
+    });
+    match c.restore_clock(forged.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    // And the trusted clock has not moved on the reading that follows.
+    let verdict: Value =
+        serde_json::from_str(&c.observe_clock(NOW + 1, 36_001, 7).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+    assert_eq!(
+        trusted,
+        NOW + 1,
+        "the trusted clock jumped by the forged uptime: {trusted} against {}",
+        NOW + 1
+    );
+}

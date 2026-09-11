@@ -130,24 +130,29 @@ STATUS = {
               "**fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front"),
     "P2-17": ("fixed",
               "**fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now"),
-    "P1-8": ("fixed",
-             "**fixed** (entry 69), the Windows half. `Downtime::detect` reads the gap between the last "
-             "trusted tick and now, `Enforcer::note_start` records it on the first pass — the one place "
-             "`now` is trusted and the boot counter still holds the previous run's numbering — and both "
-             "the Now page and the tray report it, cleared by `Request::DismissDowntime` and written to "
-             "the log. **Android's half of the finding is untouched**: it already implements this. The "
-             "review's second claim — that Android's polling is not adaptive — is **not done**: the "
-             "Windows tick is 2 s regardless of whether a session is running"),
-    "P2-8": ("fixed",
-             "**fixed** (entry 75) for the three defects the review lists in the code. A bare `YYYYMMDD` "
-             "`DTSTART` is now recognised as all-day, so an entry with no `DTEND` is no longer a "
-             "zero-length event that the overlap test drops. `BYMONTHDAY` is parsed as `i32` and negatives "
-             "resolve against the month they are in. And an unparseable `BYDAY`/`BYMONTHDAY` token now "
-             "**refuses the recurrence** rather than being dropped — dropping left the constraint list "
-             "empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's "
-             "fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in "
-             "two other crates; and `UNTIL` with a DATE value, which the review calls \"parsed oddly\" "
-             "without saying what the right answer is. **And the fourth point is now done too**: the two `local_instant` helpers disagreed about `1440` — `schedule.rs` rolled to the next day at 00:00 and `budget.rs` clamped to 23:59 — so `budget.rs` delegates to the schedule's, which is one rule rather than two that agree today"),
+    "P1-8": ("partial",
+             "**partly fixed** (entry 69). The review makes two claims. **The first is done for Windows**: "
+             "`Downtime::detect` reads the gap between the last trusted tick and now, `Enforcer::note_start` "
+             "records it on the first pass — the one place `now` is trusted and the boot counter still holds "
+             "the previous run's numbering — and both the Now page and the tray report it, cleared by "
+             "`Request::DismissDowntime` and written to the log; Android already implemented this and is "
+             "untouched. **The second is not done**: the review says Android's polling is not adaptive, and "
+             "the Windows tick is 2 s regardless of whether a session is running. This row said `fixed` "
+             "while its own text named that as not done, which the status classifier surfaced and which is "
+             "the honest correction"),
+    "P2-8": ("partial",
+             "**partly fixed** (entries 75 and 80). Three defects the review lists in the code are done "
+             "(entry 75): a bare `YYYYMMDD` `DTSTART` is recognised as all-day, so an entry with no "
+             "`DTEND` is no longer a zero-length event the overlap test drops; `BYMONTHDAY` is parsed as "
+             "`i32` and negatives resolve against the month they are in; and an unparseable "
+             "`BYDAY`/`BYMONTHDAY` token **refuses the recurrence** rather than being dropped, which left "
+             "the constraint list empty and *empty means unconstrained*, so the rule widened. **The "
+             "fourth point is done too** (entry 80): `budget.rs` now delegates to `schedule.rs`'s "
+             "`local_instant`, so `1440` means one thing instead of two a minute apart. **Still not "
+             "done**: `UNTIL` with a DATE value, which the review calls \"parsed oddly\" without saying "
+             "what the right answer is. This row previously said *\"Not done: the fourth point\"* and "
+             "*\"the fourth point is now done too\"* in the same cell, because the entry-80 append added "
+             "the second without removing the first"),
     "P2-11": ("fixed",
               "**fixed** (entry 76). `curfew remove` now refuses when a running session derives from the "
               "id, mirroring the uninstall refusal: `running_from` in the core is the decision, "
