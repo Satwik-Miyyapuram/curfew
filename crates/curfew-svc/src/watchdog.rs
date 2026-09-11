@@ -127,7 +127,7 @@ pub fn run(name: &str, state_path: &Path) {
                 if let Err(e) = sys::start(name) {
                     // Worth saying and not worth stopping for: the next pass tries again, and the
                     // usual cause is the manager being busy stopping the service we are starting.
-                    eprintln!("curfew: watchdog could not start the service: {e}");
+                    crate::warn!("watchdog could not start the service: {e}");
                 }
             }
             Action::Retire => return,
@@ -185,14 +185,14 @@ pub fn spawn() -> std::io::Result<std::process::Child> {
 fn refresh(from: &Path, to: &Path) -> bool {
     if let Some(parent) = to.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("curfew: watchdog image directory unavailable: {e}");
+            crate::note!("watchdog image directory unavailable: {e}");
             return false;
         }
     }
     let current = match std::fs::read(from) {
         Ok(bytes) => bytes,
         Err(e) => {
-            eprintln!("curfew: could not read this build to check the watchdog image: {e}");
+            crate::warn!("could not read this build to check the watchdog image: {e}");
             return false;
         }
     };
@@ -205,7 +205,7 @@ fn refresh(from: &Path, to: &Path) -> bool {
         Err(e) => {
             // Most often a previous watchdog still running from this path. Reported rather than
             // fatal, but it does mean the image is not this build and must not be spawned.
-            eprintln!("curfew: watchdog image could not be replaced ({e})");
+            crate::warn!("watchdog image could not be replaced ({e})");
             false
         }
     }

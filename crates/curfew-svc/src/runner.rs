@@ -162,7 +162,7 @@ pub fn build(
             if let Err(e) =
                 std::fs::write(config_backup_path(state_path), config.to_toml().unwrap_or_default())
             {
-                eprintln!("curfew: could not keep a copy of the config ({e})");
+                crate::warn!("could not keep a copy of the config ({e})");
             }
             config
         }
@@ -177,16 +177,16 @@ pub fn build(
                     // The good case: locks keep running *and* keep being enforced by the rules they
                     // were started under. Said out loud, because the user's edit is not in force and
                     // nothing else would tell them.
-                    eprintln!(
-                        "curfew: config unreadable while locks are running ({detail}); enforcing the \
+                    crate::warn!(
+                        "config unreadable while locks are running ({detail}); enforcing the \
                          last config that parsed ({})",
                         backup.display()
                     );
                     config
                 }
                 Err(also) => {
-                    eprintln!(
-                        "curfew: config unreadable while locks are running ({detail}), and the last \
+                    crate::warn!(
+                        "config unreadable while locks are running ({detail}), and the last \
                          good copy is unusable too ({also}). The sessions are still held, but no \
                          rule is being enforced."
                     );
@@ -230,20 +230,19 @@ fn start_resolver(config: &Config) -> Option<curfew_win::dns::Proxy> {
     let upstream = match config.resolver.upstream.parse() {
         Ok(upstream) => upstream,
         Err(e) => {
-            eprintln!("curfew: {} is not a resolver address ({e})", config.resolver.upstream);
+            crate::note!("{} is not a resolver address ({e})", config.resolver.upstream);
             return None;
         }
     };
     match curfew_win::dns::Proxy::start(curfew_win::dns::LISTEN, upstream) {
         Ok(mut proxy) => {
             if let Err(e) = proxy.take_over(Some(dns_record())) {
-                eprintln!("curfew: the resolver is running but nothing is asking it ({e})");
+                crate::note!("the resolver is running but nothing is asking it ({e})");
             }
             Some(proxy)
         }
         Err(e) => {
-            eprintln!(
-                "curfew: could not start the resolver ({e}). Something else is answering DNS on                  this machine. The hosts file is still blocking the exact names."
+            crate::warn!("could not start the resolver ({e}). Something else is answering DNS on                  this machine. The hosts file is still blocking the exact names."
             );
             None
         }
@@ -323,12 +322,12 @@ fn start_sync() -> SyncStart {
     let (shared, complaints) = match curfew_sync::store::open(&root, &name) {
         Ok(opened) => opened,
         Err(e) => {
-            eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
+            crate::note!("sync is off ({e}). This device still enforces its own locks.");
             return SyncStart::Failed(e.to_string());
         }
     };
     for complaint in complaints {
-        eprintln!("curfew: {complaint}");
+        crate::note!("{complaint}");
     }
     let paired = shared.peers.lock().map(|peers| peers.active_ids().count()).unwrap_or(0);
     if paired == 0 {
@@ -338,7 +337,7 @@ fn start_sync() -> SyncStart {
     match curfew_sync::node::Node::start(shared) {
         Ok(node) => SyncStart::Up(node, root, paired),
         Err(e) => {
-            eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
+            crate::note!("sync is off ({e}). This device still enforces its own locks.");
             SyncStart::Failed(e.to_string())
         }
     }
@@ -358,7 +357,7 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
         last_tick: Some(last_tick),
     };
     if let Err(e) = state::save(state_path, &snapshot) {
-        eprintln!("curfew: could not save state: {e}");
+        crate::warn!("could not save state: {e}");
     }
 }
 
@@ -534,7 +533,7 @@ pub fn run(
         let served = Arc::clone(&enforcer);
         std::thread::spawn(move || {
             if let Err(e) = serve(served) {
-                eprintln!("curfew: control channel unavailable: {e}");
+                crate::note!("control channel unavailable: {e}");
             }
         });
     }
@@ -542,7 +541,7 @@ pub fn run(
     // The watchdog is only worth having when there is a service for it to restart, so a console run
     // does without one.
     let mut watchdog = match guarded {
-        true => crate::watchdog::spawn().map_err(|e| eprintln!("curfew: no watchdog: {e}")).ok(),
+        true => crate::watchdog::spawn().map_err(|e| crate::warn!("no watchdog: {e}")).ok(),
         false => None,
     };
 
@@ -625,8 +624,8 @@ pub fn run(
                             // Reported every time rather than once: a subscription that has been
                             // failing for a week is worth being noisy about, and the alternative is
                             // a block quietly running on a stale calendar with nobody told.
-                            eprintln!(
-                                "curfew: calendar '{id}' could not be read ({detail}){}",
+                            crate::warn!(
+                                "calendar '{id}' could not be read ({detail}){}",
                                 if still_serving {
                                     "; the last copy that worked is still in force"
                                 } else {
@@ -690,7 +689,7 @@ pub fn run(
                 if pass.published + said + said_passes + said_releases > 0 {
                     node.push_all(now);
                     if let Err(e) = curfew_sync::store::save(root, node.shared()) {
-                        eprintln!("curfew: could not save the sync log: {e}");
+                        crate::warn!("could not save the sync log: {e}");
                     }
                 }
             }

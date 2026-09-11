@@ -7,6 +7,10 @@
 
 mod feeds;
 mod host;
+// Where diagnostics go. An SCM-started service has null standard handles, so before this every
+// `eprintln!` in this crate was silently discarded (P1-12).
+#[macro_use]
+mod logging;
 mod runner;
 // The service control manager is Windows and nothing else, and every caller of `service` is
 // already behind the same gate, so this costs no `cfg` at the call sites; without it a Linux
@@ -139,7 +143,7 @@ fn main() {
             0
         }
         other => {
-            eprintln!("curfew: no such command: {other}\n\n{USAGE}");
+            crate::note!("no such command: {other}\n\n{USAGE}");
             2
         }
     };
@@ -155,7 +159,7 @@ fn extension(args: &[String]) -> i32 {
     use curfew_win::extension::{manifest, Browser};
 
     let (Some(name), Some(id)) = (args.first(), args.get(1)) else {
-        eprintln!(
+        crate::note!(
             "usage: curfew extension <browser> <extension-id>
 
              The id is shown on the browser's extensions page. Chromium browsers give a long 
@@ -164,22 +168,22 @@ fn extension(args: &[String]) -> i32 {
         return 2;
     };
     let Some(browser) = Browser::parse(name) else {
-        eprintln!("curfew: I do not know how to register with {name}.");
+        crate::note!("I do not know how to register with {name}.");
         return 2;
     };
 
     let Ok(exe) = std::env::current_exe() else {
-        eprintln!("curfew: could not work out where this program lives.");
+        crate::warn!("could not work out where this program lives.");
         return 1;
     };
     let directory = state::default_path().with_file_name("hosts");
     if let Err(e) = std::fs::create_dir_all(&directory) {
-        eprintln!("curfew: could not create {}: {e}", directory.display());
+        crate::warn!("could not create {}: {e}", directory.display());
         return 1;
     }
     let path = directory.join(browser.manifest_file());
     if let Err(e) = std::fs::write(&path, manifest(browser.family(), &exe, id)) {
-        eprintln!("curfew: could not write {}: {e}", path.display());
+        crate::warn!("could not write {}: {e}", path.display());
         return 1;
     }
 
@@ -200,11 +204,11 @@ fn extension(args: &[String]) -> i32 {
             0
         }
         Ok(status) => {
-            eprintln!("curfew: reg add {key} failed ({status}).");
+            crate::warn!("reg add {key} failed ({status}).");
             1
         }
         Err(e) => {
-            eprintln!("curfew: could not run reg ({e}).");
+            crate::warn!("could not run reg ({e}).");
             1
         }
     }
@@ -220,7 +224,7 @@ fn extension(args: &[String]) -> i32 {
 /// this prints the same days the phone shows.
 fn stats(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("usage: curfew stats <config.toml> [--days <n>] [--csv | --json]");
+        crate::note!("usage: curfew stats <config.toml> [--days <n>] [--csv | --json]");
         return 2;
     };
     let mut days: u32 = 14;
@@ -231,14 +235,14 @@ fn stats(args: &[String]) -> i32 {
             "--days" => match rest.next().and_then(|v| v.parse::<u32>().ok()) {
                 Some(n) if (1..=365).contains(&n) => days = n,
                 _ => {
-                    eprintln!("curfew: --days wants a number of days, up to 365.");
+                    crate::note!("--days wants a number of days, up to 365.");
                     return 2;
                 }
             },
             "--csv" => format = "csv",
             "--json" => format = "json",
             other => {
-                eprintln!("curfew: {other} is not a flag this command takes.");
+                crate::note!("{other} is not a flag this command takes.");
                 return 2;
             }
         }
@@ -250,14 +254,14 @@ fn stats(args: &[String]) -> i32 {
     {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
     let zone = match config.tz() {
         Ok(zone) => zone,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
@@ -268,12 +272,12 @@ fn stats(args: &[String]) -> i32 {
     let persisted = match state::load(&state::default_path()) {
         state::Loaded::Ok(state) => state,
         state::Loaded::Recovered { state, detail } => {
-            eprintln!("curfew: {detail}; these figures come from the backup copy.");
+            crate::note!("{detail}; these figures come from the backup copy.");
             state
         }
         state::Loaded::Fresh => Default::default(),
         state::Loaded::Lost { detail } => {
-            eprintln!("curfew: the state file could not be read ({detail}).");
+            crate::warn!("the state file could not be read ({detail}).");
             Default::default()
         }
     };
@@ -295,7 +299,7 @@ fn stats(args: &[String]) -> i32 {
         "json" => match serde_json::to_string_pretty(&summary) {
             Ok(text) => println!("{text}"),
             Err(e) => {
-                eprintln!("curfew: {e}");
+                crate::note!("{e}");
                 return 1;
             }
         },
@@ -345,7 +349,7 @@ fn span(seconds: u64) -> String {
 /// answer says so here rather than at the moment it was supposed to block something.
 fn upcoming(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("usage: curfew upcoming <config.toml> [--hours <n>]");
+        crate::note!("usage: curfew upcoming <config.toml> [--hours <n>]");
         return 2;
     };
     let mut hours: i64 = 36;
@@ -355,12 +359,12 @@ fn upcoming(args: &[String]) -> i32 {
             "--hours" => match rest.next().and_then(|v| v.parse::<i64>().ok()) {
                 Some(n) if (1..=336).contains(&n) => hours = n,
                 _ => {
-                    eprintln!("curfew: --hours wants a number of hours, up to 336 (two weeks).");
+                    crate::note!("--hours wants a number of hours, up to 336 (two weeks).");
                     return 2;
                 }
             },
             other => {
-                eprintln!("curfew: {other} is not a flag this command takes.");
+                crate::note!("{other} is not a flag this command takes.");
                 return 2;
             }
         }
@@ -372,14 +376,14 @@ fn upcoming(args: &[String]) -> i32 {
     {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
     let zone = match config.tz() {
         Ok(zone) => zone,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
@@ -402,8 +406,8 @@ fn upcoming(args: &[String]) -> i32 {
     );
     for outcome in outcomes {
         if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } = outcome {
-            eprintln!(
-                "curfew: calendar '{id}' could not be read ({detail}){}",
+            crate::warn!(
+                "calendar '{id}' could not be read ({detail}){}",
                 if still_serving { "; showing the last copy that worked" } else { "" }
             );
         }
@@ -464,8 +468,8 @@ fn upcoming(args: &[String]) -> i32 {
 /// Ask the service, and turn "the service is not running" into the sentence that actually helps.
 fn ask(request: Request) -> Result<Response, i32> {
     runner::ask(&request).map_err(|e| {
-        eprintln!(
-            "curfew: could not reach the Curfew service ({e}).\n\
+        crate::warn!(
+            "could not reach the Curfew service ({e}).\n\
              It may not be installed yet — `curfew install` registers it — or it may have been \
              stopped, in which case starting it again is the fix: `sc start Curfew`."
         );
@@ -535,7 +539,7 @@ fn report(response: Response) -> i32 {
             1
         }
         Response::Error { detail } => {
-            eprintln!("curfew: {detail}");
+            crate::note!("{detail}");
             1
         }
         Response::NoPass { refusal } => {
@@ -669,11 +673,11 @@ fn status() -> i32 {
 
 fn start(args: &[String]) -> i32 {
     let (Some(profile), Some(minutes)) = (args.first(), args.get(1)) else {
-        eprintln!("curfew: usage: curfew start <profile> <minutes> [--credential]");
+        crate::note!("usage: curfew start <profile> <minutes> [--credential]");
         return 2;
     };
     let Ok(minutes) = minutes.parse::<u32>() else {
-        eprintln!("curfew: {minutes} is not a number of minutes");
+        crate::note!("{minutes} is not a number of minutes");
         return 2;
     };
     let locks = if args.iter().any(|a| a == "--credential") {
@@ -739,7 +743,7 @@ fn started_message(profile: &str, minutes: u32, locked: bool) -> String {
 
 fn end(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew end <id>");
+        crate::note!("usage: curfew end <id>");
         return 2;
     };
     // Nothing is claimed as satisfied here. Credential checks belong to the tray, which can show
@@ -757,7 +761,7 @@ fn end(args: &[String]) -> i32 {
 /// paired device. Naming it after what it costs is the honest way to offer it.
 fn emergency(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew emergency <id>");
+        crate::note!("usage: curfew emergency <id>");
         return 2;
     };
     match ask(Request::Emergency { id: id.clone() }) {
@@ -774,7 +778,7 @@ fn emergency(args: &[String]) -> i32 {
 /// token locks at all, and because the honest place to say so is here, in the tool's own help.
 fn scan(args: &[String]) -> i32 {
     let (Some(id), Some(payload)) = (args.first(), args.get(1)) else {
-        eprintln!("curfew: usage: curfew scan <id> <payload>");
+        crate::note!("usage: curfew scan <id> <payload>");
         return 2;
     };
     match ask(Request::Token { id: id.clone(), payload: payload.clone() }) {
@@ -790,7 +794,7 @@ fn scan(args: &[String]) -> i32 {
 /// pretending the second answer could change something.
 fn peer_release(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew peer-release <id>");
+        crate::note!("usage: curfew peer-release <id>");
         return 2;
     };
     match ask(Request::Release { id: id.clone() }) {
@@ -853,7 +857,7 @@ fn mint() -> String {
 
 fn release(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew release <id>");
+        crate::note!("usage: curfew release <id>");
         return 2;
     };
     match ask(Request::RequestRelease { id: id.clone() }) {
@@ -875,13 +879,13 @@ fn run_in_console() -> i32 {
     // A machine with no config yet gets the starter one rather than an error naming a file the
     // user has never heard of.
     if let Err(e) = runner::ensure_config(&runner::config_path()) {
-        eprintln!("curfew: could not write a starting config ({e}).");
+        crate::warn!("could not write a starting config ({e}).");
     }
     let enforcer =
         match runner::build(&runner::config_path(), &state::default_path(), runner::hosts_path()) {
             Ok(enforcer) => enforcer,
             Err(detail) => {
-                eprintln!("curfew: {detail}");
+                crate::note!("{detail}");
                 return 1;
             }
         };
@@ -895,7 +899,7 @@ fn service_entry() -> i32 {
     match service::start_dispatch() {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("curfew: not started by the service control manager: {e}");
+            crate::note!("not started by the service control manager: {e}");
             1
         }
     }
@@ -903,7 +907,7 @@ fn service_entry() -> i32 {
 
 #[cfg(not(windows))]
 fn service_entry() -> i32 {
-    eprintln!("curfew: services are a Windows thing; use `curfew run`");
+    crate::note!("services are a Windows thing; use `curfew run`");
     1
 }
 
@@ -915,8 +919,8 @@ fn install() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!(
-                "curfew: could not install the service ({e}).\n\
+            crate::warn!(
+                "could not install the service ({e}).\n\
                  This needs an administrator prompt: run the same command from a terminal opened \
                  with \"Run as administrator\"."
             );
@@ -968,7 +972,7 @@ fn uninstall() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("curfew: could not remove the service ({e}). Try an administrator prompt.");
+            crate::warn!("could not remove the service ({e}). Try an administrator prompt.");
             1
         }
     }
@@ -991,13 +995,13 @@ fn refused_uninstall(service_says_running: bool, state_says_locked: bool) -> boo
 
 #[cfg(not(windows))]
 fn install() -> i32 {
-    eprintln!("curfew: services are a Windows thing");
+    crate::note!("services are a Windows thing");
     1
 }
 
 #[cfg(not(windows))]
 fn uninstall() -> i32 {
-    eprintln!("curfew: services are a Windows thing");
+    crate::note!("services are a Windows thing");
     1
 }
 
