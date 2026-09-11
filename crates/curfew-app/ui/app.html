@@ -209,8 +209,31 @@ const state = { page: "now", status: null, trouble: null, config: null, configPa
   // apply the first time and a choice the user made survives the refresh that follows it.
   startProfile: null, startMinutes: null, startStrength: null };
 
+// The ticket of the newest refresh, and the one a run belongs to. See `refresh` for why.
+let refreshTicket = 0;
+
+// How often the config is re-read, in ticks. See `refresh`.
+//
+// Ten seconds against a one-second tick. **The window cannot change the config** — `Call` is `Ipc`,
+// `Config` and `Unlock`, and `Request` has no config-mutating variant at all — so the only way it ever
+// changes is somebody running `curfew` in a terminal or an administrator editing the file. Ten seconds
+// is far below the time it takes to notice, and it takes a full TOML read, parse, validate and
+// re-serialize off the one-second path (P2-1).
+const CONFIG_EVERY = 10;
+let ticksSinceConfig = CONFIG_EVERY;
+
 async function refresh() {
+  // **A ticket, so a slow run cannot overwrite a fresh one** (P2-3).
+  //
+  // This is fired every second *and* awaited after every action, and it performs three round trips
+  // before assigning shared state. Two overlapping runs complete in whatever order the pipe answers
+  // them, so after a successful "End it early" an in-flight older refresh could repaint the
+  // running-session card for a session that had just ended — the window showing a lock that is gone.
+  // Only the newest run is allowed to write.
+  const mine = ++refreshTicket;
+
   const answer = await askService({ request: "status" });
+  if (mine !== refreshTicket) return;
   if (answer.ok && answer.value.response === "status") {
     state.status = answer.value;
     state.trouble = null;
@@ -221,17 +244,34 @@ async function refresh() {
     state.status = null;
     state.trouble = answer;
   }
-  const config = await readConfig();
-  if (config.ok) { state.config = config.value; state.configError = null; }
-  else { state.config = null; state.configError = config.detail; }
-  // Kept even on failure, so a page can name the file that could not be read.
-  state.configPath = config.path || null;
+
+  // The config, on its own slower cadence, and always on the first run.
+  ticksSinceConfig += 1;
+  if (ticksSinceConfig >= CONFIG_EVERY) {
+    ticksSinceConfig = 0;
+    const config = await readConfig();
+    if (mine !== refreshTicket) return;
+    if (config.ok) { state.config = config.value; state.configError = null; }
+    else { state.config = null; state.configError = config.detail; }
+    // Kept even on failure, so a page can name the file that could not be read.
+    state.configPath = config.path || null;
+  }
+
   // The figures for the Time page. A failure leaves the previous answer in place rather than
   // blanking the chart: these are a fortnight of history, so the last good copy is a better thing to
   // show than an empty page, and the page says when it has nothing at all.
   const figures = await askService({ request: "stats", days: 14 });
+  if (mine !== refreshTicket) return;
   if (figures.ok && figures.value.response === "stats") state.stats = figures.value;
   draw();
+}
+
+/// Force the next refresh to re-read the config.
+///
+/// For the one caller that knows the config may have changed underneath it: a page change, where the
+/// user is about to read the plan and a ten-second-old copy would be the thing they are reading.
+function refreshConfigSoon() {
+  ticksSinceConfig = CONFIG_EVERY;
 }
 
 // What the service is doing, and why the pages cannot say anything if it is not.
@@ -643,16 +683,42 @@ function pageHealth() {
 }
 
 // ---- drawing ----------------------------------------------------------------------------------
+// The HTML currently in the body, so an identical redraw can be skipped. See `draw`.
+let drawnHtml = null;
+
 function draw() {
   const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, health: pageHealth };
   const body = document.getElementById("body");
-  body.innerHTML = (pages[state.page] || pageNow)();
-  // After every redraw, because every redraw replaces the nodes that need it.
-  makeInteractive(body);
+  const html = (pages[state.page] || pageNow)();
+
+  // **Only replace the DOM when the markup actually changed** (P2-2).
+  //
+  // This runs every second, and `innerHTML =` throws away and rebuilds every node. Two things follow
+  // from that, both of them things a user notices: the scrolling container's `scrollTop` resets, so a
+  // long page — "Is it working" is the long one — snaps back to the top once a second and cannot be
+  // read past the fold; and any text selection is destroyed, so a failure message cannot be selected
+  // to copy. The page exists to be *read* and *reported from*, and it could not do either.
+  //
+  // Comparing the two strings first costs a string compare per tick and skips the rebuild entirely
+  // when nothing on the page has changed, which on a quiet machine is most ticks. The countdown is
+  // what changes most often, and while one is running the page genuinely does change every second —
+  // which is correct, and the user is watching the number rather than scrolling.
+  //
+  // **The guard covers the body rebuild and nothing else.** The first version returned here, which
+  // skipped the live pill below — and the pill is the *countdown in the sidebar*, regenerated every
+  // tick rather than living in the page markup. Returning early would have frozen it, which is a worse
+  // bug than the one being fixed: a stalled clock is the thing this app exists to be trusted about.
+  // The nav classes are outside `#body` too, so they are refreshed unconditionally for the same reason.
+  if (html !== drawnHtml) {
+    drawnHtml = html;
+    body.innerHTML = html;
+    // After every redraw, because every redraw replaces the nodes that need it.
+    makeInteractive(body);
+  }
+
   for (const nav of document.querySelectorAll(".nav")) {
     nav.classList.toggle("on", nav.dataset.page === state.page);
   }
-  makeInteractive(document.querySelector(".side"));
   const running = state.status?.running || [];
   const pill = document.getElementById("livepill");
   if (running.length) {

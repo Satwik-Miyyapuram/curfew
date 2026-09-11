@@ -26,7 +26,16 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOG = ROOT / "FIXES.md"
-REVIEW = ROOT / "UX_INTERACTION_REVIEW.md"
+
+# **Two reviews, and this tool checked one of them for a round.** The goal names both. The UX review
+# numbers its findings `F-n`; the design review numbers its `P0-n`, `P1-n`, `P2-n`, one heading each.
+# Checking only the first reported "all 48 findings mentioned" while **29 of the design review's 37
+# appeared nowhere** — the same blind spot as F-8, one review over. A completeness check that covers
+# half its subject is the thing it exists to catch.
+REVIEWS = {
+    "UX_INTERACTION_REVIEW.md": (r"^\*\*F-(\d+)", r"^### (P\d+-\d+)\."),
+    "DESIGN_AND_CODE_REVIEW_FULL.md": (r"^### (P\d+-\d+)\.", r"^\*\*F-(\d+)"),
+}
 
 problems = []
 notes = []
@@ -73,24 +82,39 @@ def main():
         else:
             notes.append(f"nothing lost against HEAD ({len(before)} headings before)")
 
-    # 2. Every finding the review defines must appear somewhere in the log. This is the coverage
-    #    guarantee from entry 46; it is the whole reason the log can be trusted about completeness.
-    review = read(REVIEW)
-    if review:
-        defined = {f"F-{n}" for n in re.findall(r"\*\*F-(\d+)", review)}
-        missing = sorted(defined - set(re.findall(r"\bF-\d+\b", text)), key=lambda s: int(s[2:]))
+    # 2. Every finding **either** review defines must appear somewhere in the log. This is the coverage
+    #    guarantee from entry 46, and it is the whole reason the log can be trusted about completeness.
+    #
+    #    Both reviews are checked, and each against its own numbering. The first version checked only
+    #    the UX review and reported success while 29 design-review findings were absent; an identifier
+    #    that appears in the log counts, and so does one that appears in a *cross-reference* - which is
+    #    how several of these were actually closed, under the other review's number for the same defect.
+    for filename, (mine, _other) in REVIEWS.items():
+        path = ROOT / filename
+        if not path.is_file():
+            problems.append(f"{filename} is missing")
+            continue
+        body = path.read_text(encoding="utf-8")
+        defined = {m.group(1) if m.group(1).startswith("P") else f"F-{m.group(1)}"
+                   for m in re.finditer(mine, body, re.M)}
+        if not defined:
+            problems.append(f"no findings found in {filename} — the pattern is wrong")
+            continue
+        missing = sorted(defined - set(re.findall(r"\bF-\d+\b|\bP\d+-\d+\b", text)),
+                         key=lambda s: (s[0], int(s.split("-")[0].lstrip("FP") or 0),
+                                        int(s.split("-")[1]) if "-" in s else 0))
         if missing:
-            problems.append(f"{len(missing)} finding(s) from the review appear nowhere: "
-                            f"{', '.join(missing)}")
+            problems.append(f"{len(missing)}/{len(defined)} finding(s) from {filename} appear "
+                            f"nowhere: {', '.join(missing)}")
         else:
-            notes.append(f"all {len(defined)} findings from the review are mentioned")
+            notes.append(f"all {len(defined)} findings from {filename} are mentioned")
 
-    # 3. The coverage table has one row per finding it names, and no "not re-assessed" left.
-    coverage = [l for l in lines if re.match(r"^\| F-\d+ \| ", l)]
+    # 3. The coverage tables have one row per finding they name, and no "not re-assessed" left.
+    coverage = [l for l in lines if re.match(r"^\| (F-\d+|P\d+-\d+) \| ", l)]
     if not coverage:
-        problems.append("the coverage table is gone")
+        problems.append("the coverage tables are gone")
     else:
-        notes.append(f"coverage table has {len(coverage)} rows")
+        notes.append(f"coverage tables have {len(coverage)} rows")
         unassessed = [l.split("|")[1].strip() for l in coverage if "Not re-assessed" in l]
         if unassessed:
             notes.append(f"{len(unassessed)} row(s) still 'not re-assessed': "
