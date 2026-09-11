@@ -119,6 +119,33 @@ fn restoration(json: &str) -> Result<&str, CurfewError> {
     Ok(json)
 }
 
+/// **Refuse to remove a schedule a running lock derives from** — the command line's decision, in the FFI.
+///
+/// `remove_weekly` and `remove_calendar` deleted the schedule a session was started from, with no check.
+/// The command line has refused this since entry 76 through [`curfew_core::session::running_from`], and
+/// this is the same predicate rather than a second copy of the rule — only the wording differs, because a
+/// CLI sentence and an Android `Result` failure are read in different places.
+///
+/// Removing the schedule does not take the rules away (those live on the profile), so this is not the
+/// weakening check. It is the other objection the command line makes: the lock stays in force and the plan
+/// no longer explains why it is running.
+fn refuse_schedule_removal(curfew: &Curfew, schedule: &str) -> Result<(), CurfewError> {
+    let running = curfew.sessions.read().expect("sessions lock").running.clone();
+    let held = curfew_core::session::running_from(&running, schedule);
+    if held.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&str> = held.iter().map(|s| s.profile.as_str()).collect();
+    Err(CurfewError::Payload {
+        detail: format!(
+            "{} is running under this schedule right now, so it cannot be removed. End the session \
+             first — the lock's conditions decide how — or leave it: it stops on its own at the end of \
+             its window, and the removal will go through then.",
+            names.join(", ")
+        ),
+    })
+}
+
 /// **Refuse an edit that would take a rule away from a session that is running** — P1-13.
 ///
 /// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated here:
@@ -315,11 +342,14 @@ impl Curfew {
     /// Refused while a schedule still names it, carrying the core's sentence saying which ones, so
     /// the screen can tell the user what to remove first rather than only that it will not work.
     pub fn remove_profile(&self, id: String) -> Result<(), CurfewError> {
-        self.config
-            .write()
-            .expect("config lock")
-            .remove_profile(&id)
-            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+        // **Deleting the profile deletes every rule behind the lock.** `rules_weakened_by` reports that
+        // correctly without any special case — with the profile gone, `next.profile(id)` is `None` and
+        // every rule reads as lost — it was simply never consulted here.
+        let mut next = self.config.read().expect("config lock").clone();
+        next.remove_profile(&id).map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
     }
 
     /// Add or replace a weekly window. `window_json` is a serialized `WeeklySchedule`.
@@ -362,8 +392,10 @@ impl Curfew {
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
-    pub fn remove_weekly(&self, id: String) {
+    pub fn remove_weekly(&self, id: String) -> Result<(), CurfewError> {
+        refuse_schedule_removal(self, &id)?;
         self.config.write().expect("config lock").remove_weekly(&id);
+        Ok(())
     }
 
     /// Add or replace a calendar rule. `rule_json` is a serialized `CalendarSchedule`.
@@ -376,8 +408,10 @@ impl Curfew {
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
-    pub fn remove_calendar(&self, id: String) {
+    pub fn remove_calendar(&self, id: String) -> Result<(), CurfewError> {
+        refuse_schedule_removal(self, &id)?;
         self.config.write().expect("config lock").remove_calendar(&id);
+        Ok(())
     }
 
     /// Every weekly window, as a serialized `Vec<WeeklySchedule>`, for the editor to list.
@@ -552,7 +586,12 @@ impl Curfew {
     }
 
     pub fn restore_releases(&self, releases_json: String) -> Result<(), CurfewError> {
-        let stored: BTreeSet<String> = serde_json::from_str(&releases_json).map_err(payload)?;
+        // **Capped like the other four.** This one was added later and missed `restoration`, so a
+        // caller-supplied payload was deserialized at whatever size it arrived — the doc on
+        // `restoration` says a megabyte is generous and anything larger is "either a mistake or an
+        // attempt to make the app allocate", which is exactly what this allowed.
+        let releases_json = restoration(&releases_json)?;
+        let stored: BTreeSet<String> = serde_json::from_str(releases_json).map_err(payload)?;
         self.releases.write().expect("releases lock").extend(stored);
         Ok(())
     }

@@ -810,6 +810,9 @@ fn every_restore_method_is_bounded() {
         ("clock", c.restore_clock(huge.clone())),
         ("boots", c.restore_boots(huge.clone())),
         ("passes", c.restore_passes(huge.clone())),
+        // **`releases` was missing here**, so the method was unbounded and this test — which names a
+        // universal property — read as coverage of it.
+        ("releases", c.restore_releases(huge.clone())),
     ] {
         match result {
             Err(CurfewError::Payload { detail }) => assert!(
@@ -818,6 +821,49 @@ fn every_restore_method_is_bounded() {
             ),
             other => panic!("restore_{name} accepted a {}-byte payload: {other:?}", huge.len()),
         }
+    }
+}
+
+/// **Every `restore_` method takes the cap, including ones added later.**
+///
+/// A hand-written list cannot keep the promise in the test above: `restore_releases` was missing from it
+/// for exactly that reason. Rust cannot enumerate its own methods at runtime, so this reads the crate's
+/// own source and requires each `pub fn restore_*` to mention `restoration` — which is what makes
+/// "every" true by construction rather than by maintenance. The same technique `overlay.rs` uses for a
+/// Win32 message it cannot execute.
+#[test]
+fn every_restore_method_in_the_source_takes_the_cap() {
+    let source = include_str!("../src/lib.rs");
+
+    // Each `pub fn restore_x(&self, ...)` up to the closing brace of its body.
+    let mut found = Vec::new();
+    let mut rest = source;
+    while let Some(at) = rest.find("pub fn restore_") {
+        let body = &rest[at..];
+        let name: String = body["pub fn ".len()..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        // The body runs to the next close-brace at method indentation.
+        let finish = body.find("\n    }").unwrap_or(body.len());
+        let text = &body[..finish];
+        assert!(
+            text.contains("restoration("),
+            "{name} does not go through `restoration`, so a caller-supplied payload is unbounded"
+        );
+        found.push(name);
+        rest = &rest[at + finish..];
+    }
+
+    assert!(
+        found.len() >= 5,
+        "the scan found only {} restore methods, so it is not reading what it thinks it is: {found:?}",
+        found.len()
+    );
+    for expected in
+        ["restore_sessions", "restore_clock", "restore_boots", "restore_passes", "restore_releases"]
+    {
+        assert!(found.iter().any(|f| f == expected), "the scan missed {expected}");
     }
 }
 
@@ -975,4 +1021,125 @@ fn the_same_upsert_is_allowed_when_nothing_is_running() {
     });
     c.upsert_rule("deep-work".into(), softer.to_string())
         .expect("nothing is running, so the edit is the user's to make");
+}
+
+// --- every FFI call that can weaken a running session, not just the obvious one (review finding) ----
+//
+// Entry 79 put the guard on `remove_rule`, `upsert_rule` and `set_config`. The review found three more
+// that change the config without it — `remove_profile`, `remove_weekly`, `remove_calendar` — and all
+// three weaken a running session just as directly: deleting the profile deletes every rule behind the
+// lock, and deleting the schedule deletes the reason it is running.
+
+/// **Removing a profile takes every rule behind a running lock with it.**
+#[test]
+fn removing_a_profile_that_a_session_is_running_is_refused() {
+    let c = curfew();
+    // `deep-work` is referenced by `weekday-mornings` and `work-focus`, and the core refuses to remove a
+    // referenced profile before it considers anything else. Clearing those first is what makes this test
+    // about the *weakening* guard rather than about that separate consistency rule.
+    c.remove_weekly("weekday-mornings".into()).unwrap();
+    c.remove_calendar("work-focus".into()).unwrap();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    match c.remove_profile("deep-work".into()).unwrap_err() {
+        CurfewError::Payload { detail } => assert!(
+            detail.contains("running now"),
+            "the refusal should say what is happening: {detail}"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(!c.rules_json("deep-work".into()).unwrap().is_empty(), "the rules went anyway");
+}
+
+/// **And it is still allowed when the profile is not running**, or an idle machine could not be tidied.
+#[test]
+fn removing_a_profile_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    // Both schedules have to go first — see the test above for why.
+    c.remove_weekly("weekday-mornings".into()).unwrap();
+    c.remove_calendar("work-focus".into()).unwrap();
+    c.remove_profile("deep-work".into()).expect("nothing is running");
+}
+
+/// **Exploit 5.** `restore_releases` parses a caller-supplied payload with no size cap, while the other
+/// four restore methods all go through `restoration`. The test named `every_restore_method_is_bounded`
+/// covers four of the five, so the gap is invisible.
+#[test]
+fn restore_releases_is_bounded_like_the_others() {
+    let c = curfew();
+    let huge = "x".repeat(2 * 1024 * 1024);
+
+    match c.restore_releases(huge) {
+        Err(CurfewError::Payload { detail }) => {
+            assert!(detail.contains("past the"), "refused, but not by the cap: {detail}")
+        }
+        other => panic!("restore_releases accepted a 2 MiB payload: {other:?}"),
+    }
+}
+
+/// **A schedule a session is running under cannot be removed** — the command line's rule (entry 76),
+/// which the FFI did not apply at all.
+///
+/// This test exists because a mutation run showed removing the check from `remove_weekly` changed no
+/// outcome: I had proved the `remove_profile` half and assumed this one followed from it.
+#[test]
+fn removing_a_weekly_a_session_is_running_under_is_refused() {
+    let c = curfew();
+    // Inside the golden config's `weekday-mornings` window, so this starts a session **from that
+    // schedule** — which is what `running_from` looks for.
+    let started = c.reconcile(FRIDAY_0930, String::new(), "seed".into()).expect("reconciled");
+    assert!(!started.is_empty(), "the fixture did not start a scheduled session");
+
+    match c.remove_weekly("weekday-mornings".into()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("running"), "the refusal should say why: {detail}");
+            assert!(detail.contains("deep-work"), "and name the profile: {detail}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    // And the schedule is still there, so the plan still explains the lock.
+    assert!(c.weekly_json().unwrap().contains("weekday-mornings"));
+}
+
+/// The same for a calendar rule, which is the other source `running_from` recognises.
+#[test]
+fn removing_a_calendar_rule_a_session_is_running_under_is_refused() {
+    let c = curfew();
+    // **Friday afternoon**, which is outside `weekday-mornings` (Mon-Fri 09:00-12:00 London) and outside
+    // `overnight` — otherwise `reconcile` starts a *weekly* session and this test passes for the wrong
+    // reason. The first version of this fixture used 09:30 and did exactly that.
+    const FRIDAY_1430: i64 = FRIDAY_0930 + 5 * 3600;
+    // And the title has to match the rule's matcher: `title = "*focus*", calendar = "Work",
+    // busy_only = true`. "Standup" matched none of it.
+    let events = json!([{
+        "id": "ev1",
+        "title": "Focus block",
+        "start": FRIDAY_1430,
+        "end": FRIDAY_1430 + 3600,
+        "calendar": "Work",
+        "busy": true,
+    }])
+    .to_string();
+    let started = c.reconcile(FRIDAY_1430, events, "seed".into()).expect("reconciled");
+    assert!(!started.is_empty(), "the fixture did not start a calendar session");
+    // The fixture's own property: the source really is the calendar rule.
+    assert!(
+        c.active_profiles(FRIDAY_1430).contains(&"deep-work".to_string()),
+        "the calendar rule did not start deep-work, so this tests the wrong source"
+    );
+
+    match c.remove_calendar("work-focus".into()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("running"), "the refusal should say why: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And a schedule nothing is running under is still removable**, or the plan could never be edited.
+#[test]
+fn removing_a_weekly_nothing_is_running_under_is_allowed() {
+    let c = curfew();
+    c.remove_weekly("weekday-mornings".into()).expect("nothing is running under it");
+    assert!(!c.weekly_json().unwrap().contains("weekday-mornings"));
 }
