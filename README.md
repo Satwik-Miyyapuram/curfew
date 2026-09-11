@@ -17,12 +17,17 @@ without a subscription, without a cloud account, and with your data never leavin
 | | Freedom | Cold Turkey | StayFocusd | Curfew |
 |---|---|---|---|---|
 | Android + PC | yes | PC only | browser only | yes |
-| Cross-device session sync | yes (their cloud) | no | no | **yes, P2P, no account** |
+| Cross-device session sync | yes (their cloud) | no | no | **yes, P2P, no account** \* |
 | Calendar-driven blocking | no | no | no | **yes** |
 | Allowances / budgets | limited | yes | yes | yes |
 | Hard locks + challenges | yes | yes | yes | yes |
 | Open source | no | no | no | **AGPL-3.0** |
 | Cost | subscription | paid | free | free |
+
+> **\* The sync itself is real and account-free; the *pairing* is Android-only today (F-18).** Once two
+> devices are paired the PC syncs normally. But the PC cannot yet start a pairing — the window has no
+> Devices page, so pairing a second PC, or a PC and a phone, has to begin on the phone. See step 4 under
+> [Using it](#using-it).
 
 ## Install
 
@@ -51,6 +56,17 @@ The two devices are set up the same way, in the same order:
 4. **Pair the devices**, if you have both — *Devices → Pair*, scanning a QR from the other one.
    Sessions, budgets and calendar events then travel between them over a shared folder, with no
    server in the middle.
+
+   > **Pairing is Android-only today (F-18).** The *Devices → Pair* step above is a phone screen; the
+   > Windows window has no pairing page, so **two PCs, or a PC and a phone, cannot yet be paired from
+   > the PC.** This is a gap in the Windows build and not a limit of the design: the sync engine, the
+   > invitation format and the six-digit comparison all exist and are tested, and the service already
+   > runs a sync node once a peer exists. What is missing is the front door on Windows — a Devices page
+   > in the window, and the three messages it would send. Steps 1–3 have `curfew` commands for that
+   > reason and this step does not yet.
+   >
+   > Once paired — on a phone, or by an existing peer's config — the PC syncs normally, including
+   > receiving blocks and spending a ration shared with the other device.
 
 `curfew schedules "<config>"` and `curfew blocks "<config>"` print back everything that is set.
 
