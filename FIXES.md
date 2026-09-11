@@ -48,6 +48,13 @@ must run.
 | 27 | A blocked site shows the browser's own error page (F-21) | **P1** | **Fixed as far as the design allows** — the "serve a page" fix is already refused in-code (entry 27) |
 | 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | **Half fixed** — "Where time went" built; "Devices" turned out to be a missing feature, not a missing page (entry 28) |
 | 29 | `AppPickerScreen` showed every app unticked after a failed config read | **P2** | **Fixed** |
+| 30 | The window's navigation was mouse-only (F-25) | **P1** | **Fixed** |
+| 31 | A freeze was shown in the window with no way to cancel it (F-26) | **P1** | **Fixed** |
+| 32 | The profile **id** was printed where the name belongs (F-28) | **P2** | **Fixed** |
+| 33 | Nothing anywhere said that a block had started (F-22) | **P1** | **Fixed** |
+| 34 | The tray menu did not open when the service was unreachable (F-27) | **P2** | **Fixed** |
+| 35 | The window drew its own password box (F-24) | **P2** | **Fixed** |
+| 36 | The design-craft set: `DSheet`, duration formats, amber, `Welcome` (F-39–F-45, F-47) | **P2** | Pending |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -75,6 +82,10 @@ it is corrected against `git log` whenever an entry is added.)*
 | `8c41f09` | A blocked site's symptom is named where the user will read it (entry 27) |
 | `23dbd92` | The window gets the "Where time went" page the design always had (entry 28) |
 | `7a0bb4f` | The app picker stops claiming you block nothing when it cannot see (entry 29) |
+| `1f9543f` | Names instead of slugs, keyboard access, and a way out of a freeze (entries 30, 31, 32) |
+| `5e21ecb` | Say when a block starts, and open the menu when the service is down (entries 33, 34) |
+| `3eafae8` | The window asks Windows for the password instead of drawing a box (entry 35) |
+| `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log corrected against `git log`: a stale placeholder hash, and three cross-references left pointing at the wrong entry after a round of renumbering |
 
 ### A note on the Android verification environment
 
@@ -746,42 +757,42 @@ into the binary by `include_str!`, so a syntax error would be a compile error.
 ## Still open
 
 Recorded here so the remaining work is a list rather than a memory. Rewritten after every round, and
-the entries it named as open in the previous revision — F-16, F-38, the control channel, the
-`%ProgramData%` ACL, the wrong-password swallow, the config-reload gap, the single message surface, and
-the read-failure findings — all three of them: the config, the calendar, and the app picker — are all
-fixed above. What follows is what is actually left.
+the entries it named as open in the previous revision — the whole Windows interaction set (F-22, F-24 to
+F-28), F-38, F-16, the control channel, the `%ProgramData%` ACL, the config-reload gap, the single
+message surface, and the read-failure findings (the config, the calendar and the app picker) — are all
+fixed above.
 
-**P0 — none.** All four are fixed: the claimable `Timer`, the untrusted Windows clock, the obeyed
-`Stop`, and the Android UI's wall clock, plus the three P0s from the interaction review (F-1, F-16,
-F-17).
+**A correction to the previous revision of this section.** It said *"P1 — one left"* and filed F-22,
+F-25 and F-26 under "P2 — the remaining interaction set". All three are **P1** in
+`UX_INTERACTION_REVIEW.md`. That is the second time this document understated or overstated remaining
+work, and the same mistake both times: grouping findings by where they live rather than by the severity
+the review assigned. The table above was right; this section was not.
+The severities below are taken from the reviews.
 
-**P1 — one, and it is not what the review said it was**
+**P0 — none.** All four are fixed: the claimable `Timer`, the untrusted Windows clock, the obeyed `Stop`,
+and the Android UI's wall clock — plus the three P0s from the interaction review (F-1, F-16, F-17).
 
-- **Entry 28 second half — Windows cannot pair a device.** The "Devices" page is not built because
-  there is nothing to build it on: the service runs a sync node and reads `peers.json`, but
-  `curfew_sync::pair`'s `offer`/`accept`/`revoke` have **no caller outside `curfew-ffi`**, so no
-  Windows surface can create a peer and the page would be empty on every machine. This is a
-  key-exchange-and-transport feature rather than a UI fix, and it is the only P1 left. See entry 28
-  for the greps.
+**P1 — none fixable as a finding.**
 
-**P2 — the remaining interaction set**
+- **Entry 28 second half — Windows cannot pair a device.** The "Devices" page is not built because there
+  is nothing to build it on: the service runs a sync node and reads `peers.json`, but
+  `curfew_sync::pair`'s `offer`/`accept`/`revoke` have **no caller outside `curfew-ffi`**, so no Windows
+  surface can create a peer and the page would be empty on every machine. This is a key-exchange-and-
+  transport feature rather than a UI fix. See entry 28 for the greps.
 
-- **F-22, F-24–F-28 — the rest of the Windows interaction set.** No feedback that a block has started;
-  the window asks for the Windows password in its own HTML form where the tray deliberately uses the OS
-  credential dialog (`prompt.rs:1-15` argues the case, and the louder surface is the one breaking the
-  rule — the two findings point in opposite directions and want one decision, not two patches);
-  mouse-only nav; an uncancellable freeze from the window; the tray menu unreachable when the service
-  is down; profile **id** shown where the name belongs. Each is small; together they are a session's
-  work on `app.html`, `menu.rs` and `shell.rs`.
-- **The design-craft set — F-39–F-45, F-47.** `DSheet` is the only surface without the app's glass
-  (F-39) while `NowScreen` uses Material `AlertDialog`s for all eight of its dialogs (F-40), so there
-  are two visual languages on the screen the user sees most; four duration formats and three clock
-  formats (F-41); amber's documented meaning broken in three places (F-42); `Welcome` and `Setup`
-  designed and unbuilt (F-44). These are real, and they are craft rather than correctness — which is
-  why they come after everything above.
-- **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let
-  the README stop quoting it at all. It changes argument parsing across
-  `curfew-cli/src/schedule.rs`, so it was left for a pass that can test it properly.
+**P2 — two things, one of them a set**
+
+- **Entry 36 — the design-craft set (F-39–F-45, F-47).** All visual, and nothing on this host can render
+  any of it. Recorded rather than guessed at; entry 36 has the reasoning and names F-41's clock
+  inconsistency as the one functional defect in the set.
+- **The `curfew start` silence.** `curfew start` prints a pre-flight warning when the block carries a
+  credential lock and then nothing on success. The tray now announces a session beginning (entry 33), so
+  this is the remaining half of F-22 and a small one — the command line is not where a scheduled block
+  starts. It needs `report(Response::Ok)` to say something for this command only, since silence is right
+  for the others.
+- **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let the
+  README stop quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it
+  was left for a pass that can test it properly.
 
 ### Two things this pass learned about the repository, worth acting on separately
 
@@ -1522,3 +1533,240 @@ executing test** — the Conscrypt limitation in the note above entry 1, and thi
 any case. That this log now has a P2 entry whose only evidence is "it compiles" is itself worth stating:
 it is the honest description of what can be checked on this host for Compose code, and the reason the
 Android verification note sits at the front of this document rather than in an appendix.
+
+---
+
+## 30. The window's navigation was mouse-only
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-25 (P1).
+
+**What was wrong.** Every control on the page was a `div` or a `span` with a click handler and nothing
+else — no `role`, no `tabindex`, no key handler. The review's summary is the sharpest way to put it: a
+keyboard user **could not reach the pages that explain what is blocked, but could tab to "End it
+early"**. That is the wrong way round for a program whose whole promise is that the exits are deliberate.
+
+Three more things in the same finding, all real:
+
+- The modal had no `role="dialog"`, no `aria-modal` and no Escape handler, so a screen reader read it as
+  more page text and a keyboard user had no way to dismiss it.
+- `user-select:none` was global, which stopped anyone copying the one thing this window prints *in order
+  to be copied*: the config path and the command on the Plan page. Telling someone to run a command they
+  cannot select is not an instruction.
+- Focus was never moved into the sheet, so Tab continued through the page *underneath* the visible
+  dialog.
+
+**What was changed, and why this shape.**
+
+- The click handler became one `activate(target)` that both the mouse and the keyboard dispatch into.
+  This is the fix rather than an implementation detail: a control added later gets Enter and Space for
+  free, and there is no second wiring to forget. A key handler per control is exactly how the mouse-only
+  state arose.
+- `makeInteractive()` marks what is tappable with `role`, `tabindex` and `aria-current`/`aria-pressed`,
+  and runs after **every** redraw, because every redraw replaces the nodes. Applied from one place rather
+  than written into the markup: the nav is static and the tabs are regenerated, so an attribute typed by
+  hand in one place would simply be missing in the other.
+- Escape closes the modal. Focus moves to the first useful control (an `input` before a button, so a
+  password sheet would put the caret in the box) and is restored on close — closing a sheet should not
+  drop the user back at the top of the document.
+- `user-select:none` keeps its job on the chrome and is lifted for `.body`, `.sheet`, `.mono`, `.card`
+  and `.flush`.
+- A `:focus-visible` ring, because the window is now usable from the keyboard and an invisible caret is
+  the same as no keyboard support at all.
+
+**Verification.** `node --check` clean on the page's extracted script, plus four page assertions in
+`curfew-app` (`the_page_can_be_driven_from_the_keyboard`). **Those were mutation-tested and two of them
+were vacuous on the first attempt**: `role="dialog"` also appears in the comment above the code that sets
+it, and `user-select:text` also appears on the unrelated input rule, so both matched prose rather than the
+thing under test. Both are now anchored to code-only strings. This is the second round in a row where a
+plausible-looking guard turned out to be inert, which is why every guard in this round's commits was
+mutation-checked before it was committed.
+
+---
+
+## 31. A freeze was shown in the window with no way to cancel it
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-26 (P1).
+
+**What was wrong.** `app.html` rendered `A freeze is counting down` as a pill — no duration, no action. So
+the window told a user their whole machine was about to close and offered them nothing, while the tray
+puts **"Cancel the freeze" first in its own menu** and the design's `Overlay.dc.html` shows both a
+countdown and a Dismiss button. Cancel existed in exactly two places, and the window — the surface a user
+is most likely to have open when a freeze is announced — was not one of them.
+
+**What was changed.** A card above everything else on the Now page, with the time left, who asked for it,
+what runs afterwards, and a **Cancel the freeze** button. It reads the countdown the service reported
+rather than guessing at it.
+
+Sent with no confirmation, deliberately: cancelling is free, reversible in the only direction that
+matters (the freeze can be started again), and it is the one action on this page whose whole purpose is to
+*not* lock something. A dialog in front of it would be the app arguing with the user about their own
+machine. On success it says so, and says how to undo it.
+
+**Verification.** Three page assertions plus a wire contract test,
+`the_windows_page_can_ask_for_everything_else_over_the_wire`, which parses the page's literal JSON for
+`cancel_freeze` and eight other requests into the real `Request` enum. All mutation-checked.
+
+---
+
+## 32. The profile **id** was printed where the name belongs
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-28 (P2). Landed in the same commit as 30 and 31 because they
+share the page and the test file.
+
+**What was wrong.** `Session.profile` is the **id** from the config, and every Windows surface printed it
+raw. The review's example is the sharpest: the starter config's id is `"distractions"`, so the overlay
+said *"Steam is blocked during distractions."* where the Android block screen says *"Distractions"*.
+Also affected: the tray tooltip, every tray menu label, the extension's block page, and the CLI. **Only
+the window resolved the name.**
+
+Why it survived is worth naming: `distractions` reads enough like a word that nobody noticed. A profile
+called `deep-work` would have made it obvious immediately — which is why every fixture here uses an id
+and a name that differ.
+
+**What was changed.**
+
+- `Status` carries `profile_names` — id to name — rebuilt from the config on every status, so a profile
+  renamed by an edit is a name the very next status is already using. A handful of short strings once a
+  second, against every consumer re-reading a file only the service knows the path of.
+- `Status::name_of` and `running_name` are the only way to ask, so the fallback is written once. Falling
+  back to the **id** is deliberate: a profile deleted while a session from it is still running has no name
+  to look up, and the id beats an empty string or a panic in a UI thread.
+- The extension's `explain` became `explain_named`, taking a resolver — a parameter rather than a config
+  this module has no business holding. The block page is shown *inside a browser*, where a slug looks
+  like a leak from somebody's config file rather than the name the user chose.
+
+**The existing test was guarding the bug.** `control.rs` asserted that the block page's reason contains
+`"deep-work"` — the id. It now requires the name and **forbids** the id, which is the assertion that
+should have been there. Same shape as the `Lock::Timer` test in entry 1, and both times the suite was
+actively holding a defect in place.
+
+**Verification.** Seven name-resolution sites (overlay freeze note, overlay running note, and the unlock,
+confirm, plain-end, emergency and tooltip labels), each reverted one at a time. **The first version of
+this guard was vacuous** — one fixture, a credential lock, which reaches `Item::Unlock` and no other
+label — so reverting the `End` label passed. It now iterates one fixture per branch, each asserted
+independently.
+
+---
+
+## 33. Nothing anywhere said that a block had started
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-22 (P1).
+
+**What was wrong.** Every close got a card explaining **what** disappeared, and nothing explained **why**.
+A schedule came round, apps began vanishing, and the first sentence the user read was about Steam.
+`overlay::show` existed and fired for freeze, wait, close and welcome — every event except the one the
+product is for.
+
+**What was changed.** `newly_started` detects a session that has appeared since the last poll, and
+`started_message` says its name, when it ends, and that it is the block the user asked for. Three
+judgement calls, each with a reason:
+
+- **The first poll seeds and says nothing.** `STARTED` begins empty, so without this every launch of the
+  tray would announce whatever happened to be running as if it had just started — something possibly hours
+  old, presented as news. The cost is missing a session that begins in the half-second before the tray
+  launches, which is the right way round. My first draft wrote the test for this rule *before*
+  implementing it, which would have shipped a test asserting behaviour the code did not have; the wiring
+  is in `shell.rs` now.
+- **A close takes precedence over a start.** A schedule coming round does both, and the close card is more
+  immediate — and it already names the profile, so the user is not left uninformed. Both share the
+  existing ten-second rate limit, so neither can turn the tray into a popup machine.
+- **The early-exit line appears only when there is a real way out.** A session whose entire lock is a
+  timer gets no promise the service would then refuse.
+
+**Verification.** Five tests on the pure functions — noticed once and not again, the first-poll rule, the
+sentence naming the profile and when it ends, no invented early exit, and nothing new meaning nothing
+said. Mutation-checked.
+
+**What is still not covered.** `curfew start` on a machine with no tray prints the pre-flight warning and
+then silence on success. That is a smaller gap than the one closed here — the command line is not where a
+scheduled block starts — and it is listed in "Still open" rather than quietly left.
+
+---
+
+## 34. The tray menu did not open at all when the service was unreachable
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-27 (P2).
+
+**What was wrong.** `show_menu` called `say(...)` and returned. So the *entire* menu — including
+**"Why Windows warned about this…"** and **"Hide this icon"**, neither of which needs the service — was
+unreachable exactly when someone was trying to work out what was wrong. The review's own note is the
+point: *"The card's own copy is excellent; it just cannot be reached from the menu."*
+
+**What was changed.** `menu::unreachable(detail)` builds a menu whose first items are the explanation and
+whose tail is the same static items as always. "What is blocked…" is kept rather than hidden: it
+re-raises when pressed and shows the same reason, and removing an item present in every other state would
+make the failure harder to recognise, not easier.
+
+The five static items had been written out twice — once in `menu` and once in the new `unreachable` — so
+they are one `static_tail()`, with a test that both menus end with it. Two lists that agree by
+coincidence eventually do not.
+
+**Verification.** Two tests: the reason is in the menu and the static items are reachable; and both menus
+end with the same five items, asserted outright as well as against each other, because two menus could
+agree on being wrong. Mutation-checked.
+
+---
+
+## 35. The window drew its own password box
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-24 (P2).
+
+**What was wrong.** The window rendered an HTML password field and sent the typed value over the bridge,
+while the tray deliberately uses the operating system's credential dialog and documents why
+(`prompt.rs`: *"Curfew never draws a password box of its own… a user can tell it from a phishing box drawn
+by an application"*). **The bigger, more prominent surface was the one breaking the rule.**
+
+**Worth more than consistency.** A password typed into that page lives in a DOM, in the page's form state,
+and in whatever the rendering process does with it. A password typed into the system dialog stays in a
+buffer the host wipes on drop — and **the page never sees it at all**, because the host shows the prompt
+and sends the result to the service itself. There is no field left to read and no request carrying a
+password across the bridge; a test asserts both absences *and* the presence of the call that replaced
+them, because checking only the absences would pass on a page with no unlock path at all.
+
+**What was changed.** `curfew_win::prompt` is where the prompt now lives, moved out of `curfew-tray` so
+both callers can reach it — a module only one of two callers can reach is precisely how the inconsistency
+arose, and `curfew-app` already depended on `curfew-win`. The window's sheet now explains that Windows will
+ask, and its button opens the system prompt. A cancelled prompt says **nothing**: closing the dialog means
+"never mind", and the session staying locked is what the user just asked for. A rejected password still
+reports, which is the fix from entry 16 and must not regress.
+
+**The move brought three `windows-sys` features with it**, one decidedly non-obvious: `CREDUI_INFOW`
+carries an `HBITMAP` banner field and is gated on `Win32_Graphics_Gdi`, so the missing feature surfaced as
+an unresolved import that has nothing to do with credentials. `cargo build --workspace` succeeds without
+it, because the tray enables the feature and Cargo unifies features across the graph — the kind of latent
+breakage that appears only when one crate is built alone, which is how it was found.
+
+**The limitation, in the code as well as here.** The dialog has **no owner window**: `answer` runs on a
+worker thread with no access to the handle, so `CredUIPromptForWindowsCredentialsW` gets a null parent. It
+still appears and is still modal, but it is not pinned above the window and on a multi-monitor desk can
+open on another screen. Threading a handle through would mean shared mutable state between the UI thread
+and every worker, which is a worse trade for a dialog that appears once in a while.
+
+**Verification.** Four page assertions, mutation-checked — four deliberate reversions, all caught. One
+caught something first: the guard was initially **vacuous** because the comment above the function quoted
+the very markup the test forbids, so the comment now describes it instead of quoting it. That is the third
+vacuous guard found this round, and the reason the assertions in these entries read more specifically than
+they look like they need to.
+
+---
+
+## 36. The design-craft set — not attempted, and why
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-39 to F-45, F-47 (all P2). The only remaining P2 work.
+
+**What they are.** `DSheet` is the only surface without the app's own glass (F-39) while `NowScreen` uses
+Material `AlertDialog`s for all eight of its dialogs (F-40), so there are two visual languages for corners,
+buttons, typography and elevation on the screen the user sees most. Four duration formats and three clock
+formats (F-41), one of which is a real user-visible bug: the same remaining duration reads `14m` on Now
+and `14:00` on the block screen. Amber's documented meaning — *"a block is running right now"* — broken in
+three places (F-42). `Welcome` and `Setup` designed and unbuilt (F-44).
+
+**Why they are last, and why they are still open.** These are craft rather than correctness, and nearly
+every one is a *visual* judgement: whether a Material dialog beside a glass sheet reads as two languages
+depends on looking at it. **Nothing on this host can render any of it** — the Android suite that would
+measure a composition cannot run here (see the note above entry 1), and the Windows overlay is a GDI
+window I cannot screenshot. Landing a visual change whose only evidence is "it compiles" is how a review's
+craft findings turn into a regression, so they are recorded rather than guessed at.
+
+The one item in the set with a *functional* rather than visual defect is F-41's clock inconsistency, and
+it is the first thing to do when this set is picked up.
