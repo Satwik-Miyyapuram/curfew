@@ -78,6 +78,7 @@ must run.
 | 60 | The window rebuilt its whole body every second, re-read the config every second, and let a stale refresh win (P2-1, P2-2, P2-3) | **P2** | **Fixed** (entry 53) |
 | 61 | `restore_sessions` could end every running lock, with no proof (P1-3) | **P1** | **Partly fixed** — the lock-removing case is closed; `observe_releases` needs the op-log signature checked (entry 53) |
 | 62 | **29 of the design review's 37 findings were missing from this log**, including eight P1s | **P1-P2** | **Reconciled** — a second coverage table, 15 left un-assessed (entry 53) |
+| 63 | A config reload could stop enforcing a rule while the session and its lock carried on (P1-13) | **P1** | **Fixed on Windows**; Android still takes a weakening edit (entry 54) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -149,7 +150,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-10 | P1 | **verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while sessions are running — fail open. Locks survive, but every rule behind them stops |
 | P1-11 | P1 | **verified open.** `runner.rs:558` calls `feeds.events(…)` while holding the enforcer mutex, and that same mutex is what `serve()` needs. `TIMEOUT` is 20s against a 2s tick, so one slow subscription stalls the control channel — including `Status` and the 24-hour release |
 | P1-12 | P1 | **verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so every diagnostic it emits goes to stderr of a service nobody reads |
-| P1-13 | P1 | **verified open, and two comments are false.** `Session` has no rules field (`session.rs:47`), so editing the config removes enforcement while the lock survives — `config.rs:300` claims otherwise ('the session holds its own copy of what it blocks') and so does `GAPS.md:169` |
+| P1-13 | P1 | **Fixed on Windows** (entry 54). Config::rules_weakened_by is consulted before a reload is adopted, so a config that would enforce less than a running session promised is refused. **Android not covered** — commitConfig takes a weakening edit without the check. Two comments that claimed this already worked were false and are corrected |
 | P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
 | P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |
@@ -242,6 +243,7 @@ this table is a reading aid.
 | `b0888e8` | Stop acknowledging a block the user just watched end, and a checker for this log (entry 52) |
 | `4220904` | The window stops rebuilding itself every second (entry 53) |
 | `af30446` | A restore cannot end a lock any more (entry 53) |
+| `92c6ff0` | A reload may not weaken a running session (entry 54) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3115,3 +3117,68 @@ its own rules when `Session` has no rules field** (P1-13).
 
 **878 Rust tests** (was 872); fmt and clippy clean. `python tools/check_log.py` reports both reviews
 covered and the structure sound. `python tools/check_window.py` passes in both modes.
+---
+
+## 54. P1-13: a reload may not weaken a running session
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-13**. **Fixed on Windows**; Android is not covered, and
+says so below.
+
+### Two comments claimed this already worked. Neither was true.
+
+`Config::remove_profile` said *"the session holds its own copy of what it blocks"*. **`Session` has no
+rules field at all** (`session.rs:47`: `id`, `profile`, `source`, `started_at`, `lock`).
+
+`GAPS.md` D6 said *"edits that would weaken an active session are refused outright until the lock ends"*.
+**Nothing refused them, anywhere.**
+
+And the gap underneath is real: `Engine::decide` reads the rules from the live `Config` on every pass — it
+takes `config` as an argument (`engine.rs:64`). So a rule removed from the config stops being enforced
+immediately while the session and its lock carry on. The surface says a lock is running; the machine blocks
+nothing. That is the worst state this product can be in, and the review names the reachable path:
+*"`curfew unblock` removes enforcement while every surface still reports a healthy lock — and the two
+doc-comments that say otherwise are wrong."*
+
+This is the **ninth** claim on this branch that was right in the code's intention and false in its
+description. The difference here is that correcting the prose would not have been enough: the prose was
+describing a property the product is supposed to have.
+
+### The fix is the review's second option
+
+The review offers two: *"Make a session hold its own rules, **or** refuse config edits that weaken a running
+one."* The second is the one that does not require every session to carry a copy of the rules, and it is
+what this does.
+
+`Config::rules_weakened_by(next, profile)` compares a candidate config against the running one for one
+profile, using the identity `upsert_rule` already keys on — the target's key plus the platform set — so it
+catches three shapes at once: a rule **removed**, a rule that no longer covers the **platform**, and a rule
+whose **action** changed. `Request::Reload` consults it before adopting.
+
+**Refusing the adoption rather than the edit is the part that matters.** The file is never touched: the
+user's edit stands and the service declines to adopt it while something is running, and the refusal names
+the profile as the user knows it and the target that would be lost. That also means an administrator
+editing the config directly gets the same protection, which a check inside `curfew` would not have given
+them.
+
+It is **deliberately conservative in one direction**: changing an action counts as a loss even when the new
+one is stricter, because telling "stricter" from "weaker" per action kind needs a lattice this does not
+have. Refusing a strengthening edit until the lock ends is an annoyance; accepting a weakening one is the
+bug. That trade is written into the function's doc comment rather than left for somebody to rediscover.
+
+### Verification
+
+Four tests. **Two catch the guard being removed** — the mutation disables the refusal, and
+`a_reload_that_removes_a_running_sessions_rule_is_refused` and
+`a_reload_that_weakens_a_running_sessions_action_is_refused` both fail. The other two pin the legitimate
+direction, so a future tightening cannot break the ordinary cases: **adding** a rule is adopted, and
+weakening is fine when nothing is running — without which the check would make the config uneditable
+between sessions.
+
+**882 Rust tests** (was 878); fmt and clippy clean.
+
+### What is not covered
+
+**Android.** `CurfewRuntime`'s `commitConfig` path takes a weakening edit with no equivalent check, so the
+finding is half closed. The core helper is platform-neutral and already lives in `curfew-core`, so the
+Android side is a call site rather than a design question — but it is a real gap and it is recorded in both
+this table and the `GAPS.md` correction rather than implied by the Windows fix.
