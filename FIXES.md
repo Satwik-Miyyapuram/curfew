@@ -91,6 +91,7 @@ must run.
 | 73 | One slow calendar subscription stalled the whole control channel (P1-11) | **P1** | **Fixed** — the fetch is hoisted out of the enforcer lock; a failing source backs off (entry 61) |
 | 74 | Every service diagnostic was silently discarded (P1-12) | **P1** | **Fixed** — a rolling log sink, 62 call sites redirected (entry 62) |
 | 75 | A typo in the config was silently ignored, including inside an action (P2-7) | **P2** | **Fixed** — `deny_unknown_fields` on ten config types (entry 63) |
+| 76 | The window could not reach the 24-hour release, and its one release button was the irrevocable one (P1-6) | **P1** | **Fixed** — one shared `Offers` predicate in the core, read by the window and the tray (entry 64) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -155,7 +156,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-3 | P1 | **partly fixed** (entry 53). The lock-removing case is closed: `restore_sessions` can no longer end a running session. `observe_releases` still assigns `released` wholesale, which *adds* `PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the op-log signature checked at that boundary rather than a merge rule |
 | P1-4 | P1 | entry 11 — the ration is enforced by the type |
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
-| P1-6 | P1 | **verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented last-resort exit and the primary Windows surface cannot reach it |
+| P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
 | P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
 | P1-8 | P1 | **Not re-assessed** — nobody has read this one against the code |
 | P1-9 | P1 | **fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, which keeps the watchdog alive. Written before the state and removed last, so the worst a crash can do is the safe direction. **Honest limit**: deleting this file too gets the old behaviour, so it raises the cost by one file rather than preventing it |
@@ -266,6 +267,7 @@ this table is a reading aid.
 | `cca75eb` | A slow calendar no longer stalls the control channel (entry 61) |
 | `f26a157` | A log sink, so the service's diagnostics survive (entry 62) |
 | `2e87f60` | A typo in the config is refused, not silently ignored (entry 63) |
+| `1037b26` | One predicate decides what a lock offers, and the window reads it (entry 64) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3566,3 +3568,88 @@ while testing nothing about typos.
 ### Verification
 
 Twelve tests. **All ten mutations caught**, one per guarded type.
+
+
+---
+
+## 64. P1-6: the window could not reach the last-resort exit, and its one release button was the wrong one
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-6**. **Fixed.**
+
+### What was wrong
+
+`ARCHITECTURE.md` promises that *"every lock, at every strictness level, can be released by starting a
+24-hour delayed release… visible from the moment the lock starts."* The tray honoured it. The Windows
+window — the product's primary surface — did not, in both directions at once:
+
+- A `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock rendered **no release affordance
+  at all**. Somebody who locked a session with their Windows password and hid the tray — an option the
+  tray itself presents as harmless — had no route to the last-resort exit from the product's primary
+  surface.
+- The one button it did draw, "Release it", sent `Request::Release`: the immediate, **irrevocable** peer
+  release, with no confirmation, while the tray put a Yes/No in front of the identical action. The
+  protocol is explicit that it *"cannot be withdrawn: a release a peer could take back would let one
+  device shut a lock the user has already been told they are out of."*
+
+The review's diagnosis is the real finding: **three surfaces each answered this question their own way**.
+The tray routed `DeviceCredential` and `PeerRelease`; the window routed two variants *by comparing their
+display strings*; and neither routed `Challenge`, though it exists in the core and Android implements it.
+
+### The fix
+
+**The decision moved into the core, where the surfaces already meet.**
+
+`LockSet::offers(releasable, released) -> Offers` is now the only place it is made. `Status` carries the
+answer per session — the shared verdict the review said belonged where the dead `State.lock` field sat.
+`tick::offers()` supplies the one input a surface cannot work out for itself: whether *this* device is the
+one a `PeerRelease` names.
+
+`Offers` keeps the routes separate rather than collapsing them to a boolean, because they are not
+interchangeable: a password prompt, a confirmation, a tag to fetch, a restart, a peer release and the
+24-hour exit are six different sentences. `elsewhere` carries the **values** rather than a count, so a
+surface can name what is holding the lock instead of saying "locked elsewhere".
+
+The window now: offers the 24-hour release for every lock that is holding somebody, started through a new
+confirm sheet and sent as `Request::RequestRelease`; asks before the peer release, which is the one control
+on that page whose mistake is unfixable; names the conditions no page can satisfy; and does not offer a
+release that is already counting down.
+
+The tray reads the same predicate, so it is a change of *source* rather than of behaviour — except in one
+place, and it is a fix: the 24-hour release is no longer conditioned on `credential || others`, so a lock
+whose only condition is a token kept in another room offers the last-resort exit too. That is what the
+architecture promises.
+
+### One real bug, caught by a test that already existed
+
+`Lock::Timer` is a condition in the set, so my first `elsewhere` classified it as one — and an expired
+timer rendered as "locked elsewhere" with no way to end it. A timer is satisfied by the clock, not by
+going somewhere, and the tray had always filtered it out for exactly that reason.
+`a_timer_that_has_run_out_can_be_ended_from_here` failed. **This is the second time on this branch that
+an existing test caught a regression I introduced while fixing something else**, which is the argument for
+the tray suite having been written at that granularity in the first place.
+
+### What was deliberately not changed
+
+`Offers` is computed by the service and carried on `Status`, so a surface renders what it is told. It is
+**not** a permission: it says what may be *offered*, and every request is re-checked by the service as
+before. A caller that ignores `Offers` and sends `Request::Release` anyway gets the same answer it always
+did — the predicate is a description, not a gate.
+
+### Verification
+
+934 Rust tests (was 924), including nine new ones over `offers`: a credential lock offering the 24-hour
+exit, a peer release offered only to the device it names, a release already given reported rather than
+offered, a challenge reported as `elsewhere`, and an expired timer *not* being elsewhere.
+
+The window harness grew ten assertions and **five new mutations, all caught** — rendering no release for a
+locally unsatisfiable lock, sending the irrevocable release on one click, skipping either confirmation, and
+swallowing the elsewhere conditions. The tray's `status` fixture now fills `offers` the way the service
+does, so its 64 existing assertions pin the shared predicate rather than the old local derivation.
+
+### A process note worth keeping
+
+My first two attempts at the window assertions called `draw()` after setting the harness's
+`running`/`offers` globals. `draw()` renders `state.status`, and those globals only feed the *service
+reply* — so every assertion rendered the **previous** status and failed for a reason that was not the
+code's. Going through `refresh()` exercises the real path, which is what the harness is for. Recorded
+because "the test failed" and "the test was asking the wrong question" look identical from the outside.

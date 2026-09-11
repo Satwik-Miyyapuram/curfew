@@ -29,10 +29,14 @@ STATUS = {
              "end a running session. `observe_releases` still assigns `released` wholesale, which *adds* "
              "`PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the "
              "op-log signature checked at that boundary rather than a merge rule"),
-    "P1-6": ("open",
-             "**verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` "
-             "has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented "
-             "last-resort exit and the primary Windows surface cannot reach it"),
+    "P1-6": ("fixed",
+            "**fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what "
+            "a surface may offer, and `Status.offers` carries it per session — the shared verdict the "
+            "review said belonged where the dead `State.lock` field sat. The window used to render **no "
+            "release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, "
+            "and sent the irrevocable peer release on one click with no confirmation. It now offers the "
+            "24-hour release through a confirm sheet, asks before the peer release, and names the "
+            "conditions no page can satisfy. The tray reads the same predicate"),
     "P1-7": ("fixed",
              "**fixed** (entry 58). `assembleRelease` now signs when given a key via "
              "`keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is "
