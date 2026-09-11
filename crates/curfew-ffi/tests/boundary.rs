@@ -756,3 +756,95 @@ fn releases_survive_the_app_being_killed() {
     back.restore_releases(c.releases_json().unwrap()).unwrap();
     assert!(back.releases_json().unwrap().contains("s1"));
 }
+
+// --- a restore payload is bounded before it is parsed (P1-3) --------------------------------------
+//
+// These four methods are the only place this crate parses a payload it did not produce, and
+// `serde_json::from_str` allocates whatever it is handed. The review asks for a cap; this is it.
+//
+// What the cap does **not** do is authenticate the caller, and these tests do not pretend otherwise — see
+// the doc comment on `restore_clock`. An oversized payload is a mistake or an attempt to make the app
+// allocate, and both are refused.
+
+/// A payload past the cap is refused **without being parsed**, which is the whole point: the allocation is
+/// what the cap exists to prevent, so a check that ran after `from_str` would be useless.
+#[test]
+fn an_oversized_restore_payload_is_refused_before_it_is_parsed() {
+    let c = curfew();
+    // Valid JSON, and far past the limit. If the cap did not fire, this would either parse (if it were
+    // shaped like sessions) or fail as a *parse* error — so the assertion below is on the error kind.
+    let huge =
+        format!(r#"{{"running":[],"dismissed":{{}},"pad":"{}"}}"#, "x".repeat(2 * 1024 * 1024));
+
+    match c.restore_sessions(huge).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("past the"), "the message should name the cap: {detail}");
+            // And it must not claim to be a parse failure, which is what would happen if the cap ran
+            // second.
+            assert!(
+                !detail.contains("expected") && !detail.contains("EOF"),
+                "the payload was parsed and then rejected: {detail}"
+            );
+        }
+        other => panic!("expected a payload error, got {other:?}"),
+    }
+}
+
+/// All four, because the review names all four. `restore_passes` is the one that merges rather than
+/// replaces, and it still must not be handed an unbounded string.
+#[test]
+fn every_restore_method_is_bounded() {
+    let c = curfew();
+    let huge = "x".repeat(2 * 1024 * 1024);
+
+    for (name, result) in [
+        ("sessions", c.restore_sessions(huge.clone())),
+        ("clock", c.restore_clock(huge.clone())),
+        ("boots", c.restore_boots(huge.clone())),
+        ("passes", c.restore_passes(huge.clone())),
+    ] {
+        match result {
+            Err(CurfewError::Payload { detail }) => assert!(
+                detail.contains("past the"),
+                "restore_{name} was refused, but not by the cap: {detail}"
+            ),
+            other => panic!("restore_{name} accepted a {}-byte payload: {other:?}", huge.len()),
+        }
+    }
+}
+
+/// **A payload at the cap is still parsed.** A cap that refused the boundary would be a cap set one byte
+/// too low, and the value it is set to is a judgement rather than a fact — so the boundary is asserted
+/// rather than assumed, the same as `read_capped` on the shared folder.
+#[test]
+fn a_payload_at_the_cap_is_still_accepted() {
+    let c = curfew();
+    // Real sessions JSON, padded with a field serde ignores so it sits exactly at the limit.
+    let base = r#"{"running":[],"dismissed":{}}"#;
+    let pad = 1024 * 1024 - base.len() - r#","padding":"""#.len() - 1;
+    let at_cap = format!(r#"{{"running":[],"dismissed":{{}},"padding":"{}"}}"#, "x".repeat(pad));
+    assert!(
+        (at_cap.len() as i64 - 1024 * 1024).abs() <= 4,
+        "the fixture is not at the cap: {} bytes",
+        at_cap.len()
+    );
+
+    c.restore_sessions(at_cap).expect("a payload at the cap should be accepted");
+}
+
+/// And an ordinary payload is unaffected, which is the case that must not regress.
+#[test]
+fn an_ordinary_restore_still_works() {
+    let c = curfew();
+    let saved = c.sessions_json().expect("the sessions serialize");
+    c.restore_sessions(saved).expect("a normal payload restores");
+
+    // `None` before the first observation, which is the honest state rather than an empty string — so
+    // the fixture observes first, then round-trips what that produced.
+    c.observe_clock(1_788_510_600, 1_000, 1).expect("a reading is taken");
+    let witness = c
+        .clock_witness_json()
+        .expect("the witness serializes")
+        .expect("a witness exists after a reading");
+    c.restore_clock(witness).expect("a normal witness restores");
+}

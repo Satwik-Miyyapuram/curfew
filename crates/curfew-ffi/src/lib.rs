@@ -97,6 +97,28 @@ fn claimable(lock: &Lock) -> bool {
     matches!(lock, Lock::Confirm | Lock::Challenge { .. })
 }
 
+/// The largest restore payload the FFI will parse.
+///
+/// These four methods are the only place this crate parses a payload it did not produce, and
+/// `serde_json::from_str` allocates whatever it is handed. A restore payload is a few kilobytes at most —
+/// sessions, a clock witness, a boot map, a pass ration — so a megabyte is generous and anything larger is
+/// either a mistake or an attempt to make the app allocate. The same reasoning as `MAX_FRAME` on the sync
+/// transport and `MAX_MESSAGE` on the extension pipe (P2-13).
+const MAX_RESTORE_BYTES: usize = 1024 * 1024;
+
+/// Refuse a restore payload before parsing it, rather than after it has been allocated.
+fn restoration(json: &str) -> Result<&str, CurfewError> {
+    if json.len() > MAX_RESTORE_BYTES {
+        return Err(CurfewError::Payload {
+            detail: format!(
+                "a restore payload of {} bytes is past the {MAX_RESTORE_BYTES}-byte limit",
+                json.len()
+            ),
+        });
+    }
+    Ok(json)
+}
+
 impl Curfew {
     /// Everything this device can prove about a session's lock without being told.
     ///
@@ -470,9 +492,17 @@ impl Curfew {
         .map_err(payload)
     }
 
+    /// **Trusts its caller**, on the same terms as [`Curfew::restore_clock`] (P1-3).
+    ///
+    /// `Boots` and `BootCounter` are the evidence `proven()` consults for a `Lock::RestartRequired`, so a
+    /// caller who forges both can satisfy a restart lock without restarting. The same argument applies as
+    /// above: the counter has to survive a restart or the lock becomes unsatisfiable, and nothing this
+    /// crate holds can authenticate the value it is given.
+    ///
+    /// The size cap is the part that *can* be enforced here, and is.
     pub fn restore_boots(&self, boots_json: String) -> Result<(), CurfewError> {
         let (boots, counter): (curfew_core::Boots, curfew_core::BootCounter) =
-            serde_json::from_str(&boots_json).map_err(payload)?;
+            serde_json::from_str(restoration(&boots_json)?).map_err(payload)?;
         *self.boots.write().expect("boots lock") = boots;
         *self.boot_counter.write().expect("boot lock") = counter;
         Ok(())
@@ -537,8 +567,12 @@ impl Curfew {
     /// Restore the spent ration after a restart. Merged rather than replaced: a device that has
     /// heard about a peer's pass since the file was written must not forget it by reading an older
     /// copy of its own.
+    /// The one restore that needs no trust: `Passes::merge` takes the **more spent** of the two, so a
+    /// caller cannot use this to buy back a ration however the payload is crafted (P1-3, and the review
+    /// calls this one out as the instance that got it right).
     pub fn restore_passes(&self, passes_json: String) -> Result<(), CurfewError> {
-        let stored: curfew_core::Passes = serde_json::from_str(&passes_json).map_err(payload)?;
+        let stored: curfew_core::Passes =
+            serde_json::from_str(restoration(&passes_json)?).map_err(payload)?;
         self.passes.write().expect("passes lock").merge(&stored);
         Ok(())
     }
@@ -606,8 +640,19 @@ impl Curfew {
     /// (which the lattice can only make stricter), a session in the incoming set is started, and a
     /// session running here but absent from the incoming set is **kept**. Deleting the file is
     /// therefore not a way out, which is the case that matters.
+    /// **Trusts its caller, deliberately and with a limit** (P1-3).
+    ///
+    /// `restore_without_weakening` is what makes this safe against the *payload*: a caller cannot use it
+    /// to end a running session or shorten a lock, which is the bypass the review found. What it cannot
+    /// do is make the caller honest — the FFI has no way to tell the platform's own persistence from a
+    /// forged blob, and any key that authenticated one would live beside it, where a root-capable
+    /// adversary reads both. So the guarantee is: **this cannot make things worse than the state already
+    /// held, whatever the caller sends.**
+    ///
+    /// Android is the only caller, and it reads this from its own private store.
     pub fn restore_sessions(&self, sessions_json: String) -> Result<(), CurfewError> {
-        let sessions: Sessions = serde_json::from_str(&sessions_json).map_err(payload)?;
+        let sessions: Sessions =
+            serde_json::from_str(restoration(&sessions_json)?).map_err(payload)?;
         self.sessions.write().expect("sessions lock").restore_without_weakening(sessions);
         Ok(())
     }
@@ -665,8 +710,20 @@ impl Curfew {
     }
 
     /// Restore a witness written by [`Curfew::clock_witness_json`].
+    /// **Installs a trusted-clock baseline, which the caller can therefore choose** (P1-3).
+    ///
+    /// The review asks that this never take a witness from the caller, and it is right that a caller who
+    /// sets `trusted` far forward ends every timer lock. It cannot be fixed from here: the baseline has
+    /// to survive a process restart, or "stop the app, set the clock, start the app" is a way out of
+    /// every timed lock — which is the P0-2 bypass this witness exists to close. Persisting it means
+    /// accepting it from the only thing that can hold it, and the platform is that thing.
+    ///
+    /// So the honest statement is what the code does: this accepts a baseline, and the defence against a
+    /// forged one is the platform's storage rather than this function. Recorded here rather than left as
+    /// an implied guarantee, because an implied guarantee is precisely what the review objected to.
     pub fn restore_clock(&self, witness_json: String) -> Result<(), CurfewError> {
-        let witness: ClockWitness = serde_json::from_str(&witness_json).map_err(payload)?;
+        let witness: ClockWitness =
+            serde_json::from_str(restoration(&witness_json)?).map_err(payload)?;
         *self.clock.write().expect("clock lock") = Some(witness);
         Ok(())
     }
