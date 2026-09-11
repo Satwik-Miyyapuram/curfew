@@ -144,7 +144,7 @@ for the desktop JVM. It does not. The isolation experiment:
 
 | Test class | Robolectric? | Result |
 | :--- | :--- | :--- |
-| `WordsTest`, `DialDragTest`, `ScheduleEditorTest` | no | **pass** (`BUILD SUCCESSFUL`) |
+| `WordsTest`, `DialDragTest`, `ScheduleEditorTest`, `ChallengeTest`, `WidgetFaceTest` | no | **pass** (`BUILD SUCCESSFUL`) |
 | `EnforcerTest`, `CurfewRuntimeTest`, … | yes | fail, Conscrypt |
 
 Every failing class is a `@RunWith(RobolectricTestRunner::class)` class and every passing class is
@@ -152,14 +152,23 @@ not, so **Robolectric 4.14's native runtime is what needs Conscrypt**, and it sh
 `windows-aarch_64` build. The Rust core is not implicated: JNA 5.15.0 *does* ship
 `win32-aarch64/jnidispatch.dll`, and `curfew_ffi.dll` builds and loads.
 
-**Consequences, stated plainly.**
+**Consequences, stated plainly — and this bullet list was too pessimistic as first written.**
 
 - CI is unaffected: it runs `ubuntu-latest`, where Conscrypt has a `linux-x86_64` build, and `ci.yml`
   does run `:app:testDebugUnitTest`.
-- On this host there is **no executable Android coverage of any kind** — not for the FFI, not for the
-  Compose UI. Every Android change in this log is therefore compile-verified and reasoned, and each
-  entry says so in its own words rather than inheriting a general green tick.
-- The 43 passing tests are the pure-logic ones, and they were used wherever they applied.
+- On this host there is **no executable coverage of the Compose UI** — nothing can render a
+  composition, measure a layout or screenshot anything. Every Android *visual* change in this log is
+  compile-verified and reasoned, and each entry says so in its own words rather than inheriting a
+  general green tick.
+- **But "no executable Android coverage of any kind" was wrong, and entries 43–45 disprove it.** A
+  test does not have to render anything to guard something real. `UntranslatedCopyTest`,
+  `StringFormatArgsTest` and `MaterialUsageTest` read the **source and the resources** and assert
+  invariants over them, and they run here as plain JUnit: 320 untranslated strings that can only
+  shrink, 81 competing Material usages that can only shrink, and every format-argument arity checked
+  against its resource. Three of those guards have already caught real defects on this branch —
+  including two defects in the guards themselves. The distinction to keep is **UI-rendering
+  coverage**, which this host cannot have, and **source-level coverage**, which it can and now does.
+- **52 tests pass**, all pure-logic or source-reading, and they were used wherever they applied.
 
 **A test worth having, for whoever has a working host.** Compose layout can be measured in a unit test
 — `createComposeRule()` under Robolectric, `getUnclippedBoundsInRoot()`, then assert `>= Dsn.MinTouch`
