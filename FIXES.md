@@ -59,8 +59,9 @@ must run.
 | 38 | `curfew start` said nothing on success (the F-22 CLI half) | **P2** | **Fixed** |
 | 39 | Four duration formats and three clock formats (F-41) | **P2** | **Fixed** |
 | 40 | Amber's documented meaning, broken in four places plus two in the Material scheme (F-42) | **P2** | **Fixed** |
-| 41 | `strings.xml` is effectively unused; app copy is not translatable (F-45) | **P2** | Pending |
+| 41 | `strings.xml` is effectively unused; app copy is not translatable (F-45) | **P2** | **Partly fixed, and now ratcheted** — tooling in place, 30 of 306 moved (entry 43) |
 | 42 | `PLAN-mobile-polish.md` is stale in both directions (F-47) | **P2** | **Fixed** (entry 42) |
+| 43 | Continued: the string ratchet and the permission table (the rest of F-45) | **P2** | **Fixed as far as it goes** — 275 strings remain, listed (entry 43) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -94,7 +95,9 @@ it is corrected against `git log` whenever an entry is added.)*
 | `a292c44` | The design canvas is complete and the generator cannot silently revert an artboard (entry 37) |
 | `91dc438` | `curfew start` says what it did (entry 38) |
 | `710edce` | One countdown rule, one clock rule, and amber that means what it says (entries 39, 40) |
-| `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log corrected against `git log`: a stale placeholder hash, and three cross-references left pointing at the wrong entry after a round of renumbering |
+| `c9cdc5b` | `UX-FLOWS.md` corrected, and the log for that round (entry 42) |
+| `31bdd1b` | A ratchet on untranslated copy, and the permission table moved out (entry 43) |
+| `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, three cross-references repointed after a round of renumbering, and the severity list corrected |
 
 ### A note on the Android verification environment
 
@@ -789,27 +792,34 @@ and the Android UI's wall clock — plus the three P0s from the interaction revi
   surface can create a peer and the page would be empty on every machine. This is a key-exchange-and-
   transport feature rather than a UI fix. See entry 28 for the greps.
 
-**P2 — three things, all needing a device**
+**P2 — two things, separated by what actually gates them**
 
-Everything left in this document now needs hardware to finish honestly. That is not a coincidence: the
-findings that could be settled by reading code have been, and what remains is work whose verification is
-"look at it" or "walk it".
+The claim *"everything left needs hardware"* was **wrong in the previous revision**, and this round disproved
+it: it filed F-45 as needing a device, and F-45 turned out to be mechanical edits with a test that runs on
+this host. What it needed was a detector — a thing that could be written here. So the remaining two are
+separated by what really blocks them rather than by an assumption:
 
-- **Entry 36 — F-39, F-40, F-44: the visual craft.** `DSheet` lacks the glass the nav bar and block screen
-  have (F-39); `NowScreen` still uses eight Material `AlertDialog`s, so the screen a user sees most has two
-  visual languages (F-40); `Welcome` and `Setup` are designed and unbuilt, and the first-run card sits for
-  up to 40 seconds (F-44). Every one is a judgement about how something looks, and nothing on this host can
-  render a Compose composition or screenshot the GDI overlay. F-41 — the one *functional* defect in the set
-  — is done, as entry 39.
-- **Entry 41 — F-45: externalise the strings.** 122 literals across a dozen files. Purely mechanical, no
-  visual judgement, but no executable check is available here beyond "it compiles", and the failure mode of
-  doing it carelessly is a screen showing `%1$s` where a sentence was. The largest single remaining item.
+- **Entry 36 — F-39, F-40, F-44: the visual craft, and this one does need eyes.** `DSheet` is a **bottom
+  sheet**; the fourteen `AlertDialog`s it would replace are **centred modals**. Swapping them is a change of
+  interaction, not a reskin, and no amount of compile-verification tells you whether a bottom-anchored sheet
+  is the right shape for "End this session?" — `NowScreen` alone has five of them, on the screen a user sees
+  most. Nothing on this host can render a Compose composition or screenshot the GDI overlay, so it stays open
+  rather than guessed at. (F-41, the one *functional* defect in that set, is done — entry 39.)
+- **Entry 43 — F-45: the rest of the copy.** 275 strings, and **not gated on hardware at all** — only on
+  volume. The ratchet is in place and the pattern is proven on the permission table; the next slice should be
+  `CurfewViewModel` (19), because it is the one that needs a *new* pattern rather than a repeat of the
+  existing one, and having it makes the rest routine. The largest remaining item, and the best candidate for
+  the next round.
+
+Also open, and small:
+
 - **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let the
   README stop quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it was
   left for a pass that can test it properly.
 
-**Fixed this round, having been listed as open in the previous revision:** `curfew start`'s silence (entry
-38), the design canvas (entry 37), `UX-FLOWS.md` (entry 42), and F-41 and F-42 (entries 39, 40).
+**Fixed this round, having been listed as open in the previous revision:** the smallest half of F-45 (entry
+43) — and the previous revision's *reason* for leaving it open turned out to be wrong, which is recorded
+above rather than quietly dropped.
 
 ### Two things this pass learned about the repository, worth acting on separately
 
@@ -1993,3 +2003,92 @@ was done and names the claims that were wrong.
 **Verification.** Each verdict is a grep or a read of the named file, and the whole document was re-read for
 other `Gap` references and for the internet claim — `git grep` for the latter now returns only the three
 comments that *explain* the correction.
+
+---
+
+## 43. `strings.xml` is effectively unused — tooling done, first slice moved
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-45 (P2). **Partly fixed**, and the part that is done is the part
+that makes the rest safe.
+
+**What was wrong.** `strings.xml` held **13** strings and six were consumed, all by non-Compose surfaces —
+the manifest labels, the notification channel, the tile. Every sentence a person reads on a screen was a
+Kotlin literal, so the app's copy is good and simply not translatable. `GAPS.md:191` E6 asks for
+externalisation "from day one".
+
+### The ratchet, which is the durable part
+
+`UntranslatedCopyTest` scans the source for copy in a text position and compares it against an allowlist.
+**Both halves of that comparison are load-bearing:**
+
+- a literal that is not listed **fails**, so new copy cannot be added without externalising it;
+- a listed entry that is no longer found **also fails**, so every externalised string must have its line
+  deleted.
+
+The second half is what makes the first worth having. Without it the allowlist becomes a list nobody prunes,
+and this log has already produced several of exactly that — a build list with three finished items on it, a
+doc claiming a permission the manifest declares, a canvas missing an artboard. A count you cannot trust is
+worse than no count, which is why the failure message tells you to delete the line rather than merely
+reporting a size difference.
+
+**Android's own lint does not help here.** It has `HardcodedText`, and it reads compiled resources per layout
+file. Compose has no layouts, so it never sees a `Text("…")` call — which is every string in this app. The
+check has to read the source.
+
+**Why the number is bigger than the review's.** The review says "at least 122 literals in text positions".
+This finds **249 + 57 = 306** before this change. The difference is scope rather than disagreement: the
+review counted positional text arguments; this also counts copy carried by named parameters, and counts each
+*occurrence* rather than each distinct string.
+
+**And the first version of the parameter list was guessed, which is the instructive part.** It missed
+`because` and `cost` — the nine-entry permission table that `UX_INTERACTION_REVIEW.md` names *by name* when
+it raises this finding. A scanner that cannot see the example the finding is about reports a number nobody
+should trust, so the list was rebuilt by enumerating every `name = "literal"` in the tree and keeping the
+ones that carry prose. That correction took Permissions.kt from 9 to 27 on its own. **A detector is a
+measurement, and an unmeasured detector is a guess with a decimal point.**
+
+### The first slice: the permission story
+
+`Permissions.kt`, `HealthScreen.kt` and `SettingsScreen.kt` — **30 strings** — because it is the copy the
+review names and the one that explains what Curfew is asking for and what is lost without it.
+
+- The 27 long paragraphs in the `Grant` enum were moved **by script rather than retyped**. A lost word in
+  this particular table means a permission list quietly misinforming somebody about their own device, and no
+  proofread catches a missing "not" reliably. `Grant.title`/`because`/`cost` are now `@StringRes Int`.
+- The four sentences the screens **build** around a grant became whole resources with numbered arguments, and
+  that is the point of doing them rather than a detail of style:
+  `"Nothing is being blocked. " + costs.joinToString(" ")` is not awkward to translate, it is
+  **untranslatable** — the clause order and the punctuation between a lead-in and its list belong to the
+  language. Moving the parts would not have been enough; a sentence assembled with `+` in Kotlin can never
+  be anything but English.
+
+**Two things the compiler taught me, both now in comments where they bite.** `stringResource` cannot be
+called inside `.semantics { }`, which is not a composable scope, so the row's description is resolved before
+it. And `joinToString` is not `inline` while `map` is, so the list has to be resolved with `map` first —
+resolving inside the join is a compile error, which is how it was found.
+
+**Regeneration is a supported switch, not a hand edit:**
+`CURFEW_UPDATE_COPY_ALLOWLIST=true ./gradlew :app:testDebugUnitTest`. The diff it produces **is** the
+review — it should contain only lines you meant to remove, and a line you did not expect means a string moved
+or changed rather than was externalised. The allowlist is read from the filesystem rather than the classpath
+for exactly this reason: Gradle copies test resources before the tests run, so a mid-test rewrite would be
+invisible and regeneration would appear to do nothing.
+
+### What is left
+
+**219 plain + 56 interpolated = 275 strings**, down from 306. The remaining work is mechanical and the ratchet
+now holds the line while it happens. The largest files are NowScreen (34), ProfileEditScreen (32),
+DevicesScreen (27), ScheduleScreen (27), and **CurfewViewModel (19) — which is the hardest, because those are
+`say(…)` calls in a ViewModel rather than Composable text, so they need a `getString` path through an
+application context rather than `stringResource`.** That one is a small refactor rather than a move, and it is
+worth doing first so the pattern exists for the rest.
+
+### Verification
+
+**Mutation-tested three ways:** a new un-externalised literal is caught, a stale allowlist entry is caught,
+and disabling the comment stripper is caught. That last one matters because this codebase's comments quote the
+copy they explain, so a scanner reading comments reports them as untranslated strings — the same trap that
+made three assertions in this project vacuous earlier.
+
+These are plain JUnit tests reading source files, so they run on this host without Robolectric. **45 Android
+tests pass across 6 classes**; `:app:compileDebugKotlin` clean; the Rust suite untouched at **861 passed**.
