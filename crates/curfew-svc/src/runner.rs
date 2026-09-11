@@ -107,11 +107,31 @@ pub fn wall_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// Where the last config that parsed is kept, beside the state file.
+///
+/// Same idea as `state.json.locked` and the calendar cache: a companion file that exists so a failure
+/// of the real one does not become a failure of enforcement.
+pub fn config_backup_path(state_path: &Path) -> PathBuf {
+    state_path.with_file_name("curfew.toml.good")
+}
+
 /// Build the enforcer the service will run, restoring whatever the last run left behind.
 ///
 /// A config that will not parse is fatal *only* on a fresh start with no sessions: if locks are
-/// running, the service carries on enforcing the config it cannot re-read rather than releasing
-/// them, because "break the config file" must not be a way out.
+/// running, the service carries on enforcing rather than releasing them, because "break the config
+/// file" must not be a way out.
+///
+/// **And "carries on enforcing" used to mean an empty config — P1-10.** The old code fell back to
+/// `Config::default()`, which keeps the sessions and honours their locks while enforcing *none of
+/// their rules*: every domain, app, path and budget behind them stops, and the only signal is a line
+/// on stderr of a service nobody is reading. That is fail-open on the config file, and the review is
+/// right that it is the same class as the other ways out this branch has closed.
+///
+/// The fallback is now [`config_backup_path`] — the last config that *did* parse, written on every
+/// successful load. An empty config remains the last resort, because a machine whose config and
+/// config-backup are both unreadable still has to start and still has to honour the sessions it is
+/// holding; but it is no longer the *first* answer, and it comes with a warning that says which rules
+/// are not being enforced rather than one that only says the file was unreadable.
 pub fn build(
     config_path: &Path,
     state_path: &Path,
@@ -136,14 +156,43 @@ pub fn build(
     };
 
     let config = match config {
-        Ok(config) => config,
+        Ok(config) => {
+            // Remember it while it is good. Best-effort: a machine that cannot write this still runs,
+            // it just has no fallback if the config later breaks.
+            if let Err(e) =
+                std::fs::write(config_backup_path(state_path), config.to_toml().unwrap_or_default())
+            {
+                eprintln!("curfew: could not keep a copy of the config ({e})");
+            }
+            config
+        }
         Err(detail) if persisted.sessions.running.is_empty() => return Err(detail),
-        // Locks are running and the config is gone. Nothing here can be enforced by rule any more,
-        // but the sessions still exist and still have to be honoured, so the service starts with an
-        // empty config and says so rather than quietly releasing them.
         Err(detail) => {
-            eprintln!("curfew: config unreadable while locks are running ({detail})");
-            Config::default()
+            let backup = config_backup_path(state_path);
+            match std::fs::read_to_string(&backup)
+                .map_err(|e| e.to_string())
+                .and_then(|text| Config::from_toml(&text).map_err(|e| e.to_string()))
+            {
+                Ok(config) => {
+                    // The good case: locks keep running *and* keep being enforced by the rules they
+                    // were started under. Said out loud, because the user's edit is not in force and
+                    // nothing else would tell them.
+                    eprintln!(
+                        "curfew: config unreadable while locks are running ({detail}); enforcing the \
+                         last config that parsed ({})",
+                        backup.display()
+                    );
+                    config
+                }
+                Err(also) => {
+                    eprintln!(
+                        "curfew: config unreadable while locks are running ({detail}), and the last \
+                         good copy is unusable too ({also}). The sessions are still held, but no \
+                         rule is being enforced."
+                    );
+                    Config::default()
+                }
+            }
         }
     };
 
@@ -753,5 +802,134 @@ mod pipe_acl_tests {
         use interprocess::os::windows::security_descriptor::SecurityDescriptor;
         let sddl = widestring::U16CString::from_str(super::PIPE_SDDL).unwrap();
         SecurityDescriptor::deserialize(&sddl).expect("the pipe's SDDL is not valid");
+    }
+}
+
+/// P1-10: an unparseable config while locks are running must not stop enforcing the rules.
+///
+/// The old fallback was `Config::default()`, which keeps the sessions and honours their locks while
+/// enforcing none of their rules — every domain, app, path and budget behind them stops, and the only
+/// signal is a line on stderr of a service nobody reads. That is fail-open on the config file.
+///
+/// The fallback is now the last config that parsed, kept beside the state. These tests drive `build`
+/// directly, which is why its three paths are parameters rather than the globals the service uses.
+#[cfg(test)]
+mod config_fallback_tests {
+    use super::{build, config_backup_path};
+    use curfew_core::Config;
+    use curfew_win::state::{self, Persisted};
+    use std::path::PathBuf;
+
+    const CONFIG: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+"#;
+
+    /// A scratch directory of its own, because these share `std::env::temp_dir()` with every other
+    /// test in the binary and a leftover `curfew.toml.good` would make the "no fallback" case pass
+    /// for the wrong reason.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("curfew-build-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A locked machine on disk, so `build` takes the "locks are running" branch.
+    fn write_locked_state(state_path: &std::path::Path) {
+        let mut sessions = curfew_core::Sessions::default();
+        sessions.start(curfew_core::Session {
+            id: "s1".into(),
+            profile: "deep-work".into(),
+            source: curfew_core::session::SessionSource::Manual,
+            started_at: 1_788_510_600,
+            lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(1_788_513_600)),
+        });
+        state::save(state_path, &Persisted { sessions, ..Default::default() }).unwrap();
+    }
+
+    #[test]
+    fn a_good_config_is_kept_for_later() {
+        let dir = scratch("keeps-good");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+
+        let kept = config_backup_path(&state_path);
+        assert!(kept.is_file(), "the last good config was not kept");
+        assert!(Config::from_toml(&std::fs::read_to_string(&kept).unwrap()).is_ok());
+    }
+
+    /// **The finding.** Break the config while a lock runs and the rules must survive.
+    #[test]
+    fn a_broken_config_while_locked_still_enforces_the_last_good_one() {
+        let dir = scratch("broken-while-locked");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+
+        // One good start, which is what keeps the copy.
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+        write_locked_state(&state_path);
+
+        // Now the file is nonsense — and the old code started with `Config::default()`.
+        std::fs::write(&config_path, "this is not toml = = =").unwrap();
+        let enforcer = build(&config_path, &state_path, dir.join("hosts"))
+            .expect("a broken config with locks running must not stop the service");
+
+        assert_eq!(
+            enforcer.config.profiles.len(),
+            1,
+            "the profile was lost, so nothing behind the lock is being enforced"
+        );
+        assert_eq!(
+            enforcer.config.profiles[0].rules.len(),
+            1,
+            "the rule was lost, so the block is not running"
+        );
+        assert_eq!(enforcer.sessions.running.len(), 1, "the lock itself was dropped");
+    }
+
+    /// With nothing running, a broken config is still fatal: there is no promise to keep, and the
+    /// user needs to know rather than have the service start enforcing nothing.
+    #[test]
+    fn a_broken_config_with_nothing_running_is_still_fatal() {
+        let dir = scratch("broken-idle");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, "not toml = = =").unwrap();
+
+        assert!(build(&config_path, &state_path, dir.join("hosts")).is_err());
+    }
+
+    /// And when the backup is unusable too, the service still starts — a machine holding a lock must
+    /// not refuse to run — but it is the last resort rather than the first answer.
+    #[test]
+    fn a_broken_config_with_no_usable_backup_still_starts() {
+        let dir = scratch("no-fallback");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+        write_locked_state(&state_path);
+
+        // Both the config and the kept copy are unusable.
+        std::fs::write(&config_path, "not toml = = =").unwrap();
+        std::fs::write(config_backup_path(&state_path), "also not toml").unwrap();
+
+        let enforcer = build(&config_path, &state_path, dir.join("hosts"))
+            .expect("a machine holding a lock must still start");
+        assert!(enforcer.config.profiles.is_empty(), "there was nothing usable to enforce");
+        assert_eq!(enforcer.sessions.running.len(), 1, "the lock itself was dropped");
     }
 }
