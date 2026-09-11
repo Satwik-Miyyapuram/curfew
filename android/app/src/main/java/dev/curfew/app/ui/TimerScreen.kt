@@ -235,8 +235,20 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
         Gap(18.dp)
         SectionLabel("If you change your mind")
         Gap(10.dp)
+        // A strength the device cannot satisfy is not offered at all.
+        //
+        // `Lock.DeviceCredential` on a phone with no screen lock is **a lock with no exit**:
+        // `Auth.prove` reports `false` because there is no keyguard to raise, the core then refuses
+        // the end for an unmet condition, and the session runs to its end with the user unable to do
+        // anything about it. The choice was offered anyway, because the enum is a list of strengths
+        // and nothing connected it to whether the device could keep them. That is F-6 in the
+        // interaction review, and the reason it is worth a comment is that a silent omission here
+        // would be indistinguishable from a bug.
+        val satisfiable = Strength.entries.filter {
+            it != Strength.Credential || Auth.isAvailable(context)
+        }
         DCardFlush {
-            Strength.entries.forEachIndexed { index, option ->
+            satisfiable.forEachIndexed { index, option ->
                 if (index > 0) Rule()
                 Row(
                     modifier = Modifier
@@ -264,6 +276,20 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                         Text(option.note, fontSize = 12.sp, color = Palette.Muted)
                     }
                 }
+            }
+            // Said out loud, next to where it would have been. A missing option with no explanation
+            // reads as a bug, and the user's next step — set a screen lock — is theirs to take.
+            if (satisfiable.size != Strength.entries.size) {
+                Rule()
+                Text(
+                    "Fingerprint or PIN is not offered, because this phone has no screen lock set. " +
+                        "Curfew cannot ask for one that does not exist, and a lock nothing can open " +
+                        "would hold you until it ran out.",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = Palette.Muted,
+                    modifier = Modifier.padding(14.dp),
+                )
             }
         }
 

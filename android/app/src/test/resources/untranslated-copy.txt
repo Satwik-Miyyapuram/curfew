@@ -129,6 +129,7 @@ NowScreen.kt| days in a row
 NowScreen.kt| this week
 NowScreen.kt|1 peer
 NowScreen.kt|Another of your devices has a session only this one can end.
+NowScreen.kt|Ask for it
 NowScreen.kt|Ask to end in 24 hours
 NowScreen.kt|Blocking now
 NowScreen.kt|Check the schedules now
@@ -161,6 +162,7 @@ NowScreen.kt|Tag
 NowScreen.kt|The clock jumped backwards
 NowScreen.kt|The clock jumped forward
 NowScreen.kt|The clock moved backwards
+NowScreen.kt|This is the way out of a lock nothing here can end. It cannot be taken back, and 
 NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
 NowScreen.kt|Ticks on time
 NowScreen.kt|Upcoming · next 24h
@@ -286,6 +288,8 @@ SettingsScreen.kt|Your other devices
 SettingsScreen.kt|account, no cloud, and nothing you record leaves the devices you paired.
 SettingsScreen.kt|earshot. Blocks follow you between them.
 TimerScreen.kt|Curfew can only replace a blocked app if it is allowed to see which app is 
+TimerScreen.kt|Curfew cannot ask for one that does not exist, and a lock nothing can open 
+TimerScreen.kt|Fingerprint or PIN is not offered, because this phone has no screen lock set. 
 TimerScreen.kt|Go back
 TimerScreen.kt|Go back
 TimerScreen.kt|If you change your mind
@@ -302,6 +306,7 @@ TimerScreen.kt|first — a timer needs to know what it is switching off.
 TimerScreen.kt|in front.\n\n
 TimerScreen.kt|is on.
 TimerScreen.kt|tap to use another profile
+TimerScreen.kt|would hold you until it ran out.
 TimerScreen.kt|your only profile
 UsageScreen.kt| else 
 UsageScreen.kt|Before Curfew

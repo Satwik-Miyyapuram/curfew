@@ -73,6 +73,19 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // device opens the moment this one says yes, and there is no way to say no afterwards.
     var confirmingRelease by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * Asking for the 24-hour release, which was the one irreversible act here that was **not** asked
+     * about.
+     *
+     * `confirmingPass` above says a pass "takes something scarce, shared with every paired device, and
+     * impossible to give back", and `confirmingRelease` says the other device "opens the moment this
+     * one says yes". Both have a confirmation. This one — the strongest route out of the strongest
+     * lock, which cannot be withdrawn once asked for — was a single tap on a button sitting directly
+     * beside "End now", and the two look alike. That is F-7 in the interaction review, and the reason
+     * it survived is that each of the three was reasoned about on its own instead of being one rule.
+     */
+    var confirmingDelayed by remember { mutableStateOf<Session?>(null) }
+
     // The session a tag is being presented to, if any. The tag itself lives inside the dialog and
     // is never lifted into this state, so a recomposition cannot leave it lying around.
     var presenting by remember { mutableStateOf<Session?>(null) }
@@ -231,7 +244,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
                 onEnd = { end(session) },
-                onRelease = { model.requestRelease(session) },
+                onRelease = { confirmingDelayed = session },
                 onEmergency = { confirmingPass = session },
                 onPresentTag = { presenting = session },
             )
@@ -357,6 +370,23 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 val chosen = session
                 confirmingPass = null
                 model.spendPass(chosen)
+            },
+        )
+    }
+
+    confirmingDelayed?.let { session ->
+        DConfirm(
+            title = "Ask to end ${named(session.profile)} in 24 hours?",
+            body = "This is the way out of a lock nothing here can end. It cannot be taken back, and " +
+                "it cannot be asked for twice, so the landing time is now and stays where it is.",
+            dismiss = "Not yet",
+            confirm = "Ask for it",
+            destructive = true,
+            onDismiss = { confirmingDelayed = null },
+            onConfirm = {
+                val chosen = session
+                confirmingDelayed = null
+                model.requestRelease(chosen)
             },
         )
     }

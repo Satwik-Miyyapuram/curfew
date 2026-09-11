@@ -86,7 +86,7 @@ problem rather than a number in it.
 | Finding | Sev | Status, as verified in entry 46 |
 | :--- | :--- | :--- |
 | F-2 | P2 | **Not re-assessed.** First run seeds a starter profile; whether it says so was not checked |
-| F-3 | P2 | **Open, verified.** `TimerScreen.kt:41` `DEFAULT_MINUTES = 90`; the design says 30 |
+| F-3 | P2 | **Not a defect — the review is wrong.** It says "the design says 30"; `design/Timer.dc.html:71` shows the accented (selected) pill as **`1h 30m`**, against `PRESETS = listOf(25, 50, 90, 180)`. The code matches the design authority. **Deliberately not changed** — see entry 46 |
 | F-6 | P1 | **Open, verified.** `Auth.isAvailable` exists but is only consulted *at prove time* (`Auth.kt:55`), so the choice is still offered on a phone with no screen lock |
 | F-7 | P1 | **Open, verified.** `NowScreen.kt:669` calls `onRelease` straight from the button; the 24-hour release has no confirmation |
 | F-9 | P1 | **Fixed earlier, unlogged.** `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
@@ -103,6 +103,23 @@ problem rather than a number in it.
 | F-37 | P3 | **Fixed** (entry 46) |
 | F-48 | P1 | **Not re-assessed** |
 | F-49 | P1 | **Not re-assessed.** Windows and Android are still disjoint in interaction model; this is a product decision rather than a defect to patch |
+
+### One finding was rejected rather than fixed
+
+**F-3 says "The default duration is 90 minutes; the design says 30."** The code half is right —
+`TimerScreen.kt:41` is `DEFAULT_MINUTES = 90`. **The design half is wrong.** `design/Timer.dc.html:71`
+renders the preset row as `25m · 50m · 1h 30m · 3h` with **`1h 30m` carrying the accent styling that marks
+the selected one**, and the button below it reads "Lock it in for 1h 30m". The canvas agrees with the code
+exactly, including the preset list.
+
+So the review read `PRESETS = listOf(25, 50, 90, 180)` correctly and then asserted a mismatch with a design
+it described as saying 30. **There is no such design.** Had this been "fixed" to 30 minutes, the app would
+have been moved *away* from its own design authority on the strength of a claim nobody checked.
+
+This is worth recording separately from the counts, because the failure is a different kind. The four wrong
+counts were approximations that under- or over-stated real work. This is a **finding that should not be
+actioned at all**, and acting on it would have been a regression. Findings are evidence, and evidence gets
+checked before it is used — which is the same rule this log applies to its own numbers.
 
 **"Not re-assessed" is a real status and not a soft one.** Five findings were left unexamined this round
 because checking each properly takes the same work as fixing it, and claiming a status for them from

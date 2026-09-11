@@ -40,6 +40,7 @@ NowScreen.kt|${state.sync.active.size} peers
 NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
 NowScreen.kt|Ask to end $name in 24 hours
+NowScreen.kt|Ask to end ${named(session.profile)} in 24 hours?
 NowScreen.kt|Emergency pass ($passesLeft)
 NowScreen.kt|End $name now
 NowScreen.kt|End ${named(session.profile)}
