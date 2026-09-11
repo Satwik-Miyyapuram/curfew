@@ -8,6 +8,7 @@
 pub mod acl;
 pub mod blocked;
 pub mod calendar;
+pub mod capacity;
 pub mod credential;
 pub mod delay;
 pub mod dns;

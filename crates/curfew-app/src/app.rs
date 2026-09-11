@@ -8,6 +8,19 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
 
+/// How many service calls the window will have in flight at once.
+///
+/// **P2-17.** `ipc::ask` cannot take a deadline — `interprocess`'s Windows named-pipe stream returns
+/// `Unsupported` for `set_read_timeout`, as `curfew_svc::runner` already records — so a service that
+/// is *connected but wedged* blocks every ask for ever. The page issues two calls a second and each
+/// one used to spawn a thread, so a wedged service grew threads without bound.
+///
+/// Bounding the count is the same answer the service gives on its own side, and it is the one that
+/// works without a deadline: the number of stuck threads is capped, the window stays responsive, and
+/// the page is told rather than left waiting. Small, because this is a local pipe that either answers
+/// in milliseconds or is not answering at all — there is no useful middle ground to leave room for.
+const MAX_IN_FLIGHT: usize = 8;
+
 /// The document. Compiled in rather than loaded from disk: a window that reads its own UI from a
 /// file next to the binary is a window whose UI an unprivileged process can rewrite, and this one
 /// is allowed to send `End` and `Unlock` to the service.
@@ -215,19 +228,49 @@ pub fn run() {
         // The page is a local string with no origin and the design loads nothing remote, so there
         // is nothing here for a network permission to be for.
         .with_devtools(cfg!(debug_assertions))
-        .with_ipc_handler(move |request| {
-            let body = request.body().to_string();
-            let proxy = proxy.clone();
-            // Off the UI thread: a service that has wedged must not take the window with it.
-            std::thread::spawn(move || {
-                let script = match serde_json::from_str::<Envelope>(&body) {
-                    Ok(envelope) => reply_script(envelope.id, &answer(envelope.call)),
-                    // A malformed call is this program's bug, not the user's, and silence would
-                    // leave the page waiting on a promise that never settles.
-                    Err(e) => format!("console.error({:?});", e.to_string()),
+        .with_ipc_handler({
+            // Shared across every message, so the cap is a property of the window rather than of one
+            // handler.
+            let in_flight = curfew_win::capacity::Capacity::new(MAX_IN_FLIGHT);
+            move |request| {
+                let body = request.body().to_string();
+                let proxy = proxy.clone();
+
+                // **Refused rather than queued** — P2-17. At the cap the service is not answering, and
+                // a ninth thread would not change that; what it would change is how much of the machine
+                // this window is holding while it waits. The page is answered immediately so it can
+                // say so, instead of leaving two hundred promises unsettled.
+                let Some(permit) = in_flight.take() else {
+                    let script = match serde_json::from_str::<Envelope>(&body) {
+                        Ok(envelope) => reply_script(
+                            envelope.id,
+                            &serde_json::json!({
+                                "ok": false,
+                                "kind": "error",
+                                "detail": "The Curfew service is not answering. Nothing has been \
+                                           changed; this window will keep trying."
+                            }),
+                        ),
+                        Err(e) => format!("console.error({:?});", e.to_string()),
+                    };
+                    let _ = proxy.send_event(Ev::Reply(script));
+                    return;
                 };
-                let _ = proxy.send_event(Ev::Reply(script));
-            });
+
+                // Off the UI thread: a service that has wedged must not take the window with it.
+                std::thread::spawn(move || {
+                    // The permit rides with the thread and is given back by `Drop`, so a panic in a
+                    // handler cannot leak a slot and wedge this window for good. See `capacity`.
+                    let _permit = permit;
+                    let script = match serde_json::from_str::<Envelope>(&body) {
+                        Ok(envelope) => reply_script(envelope.id, &answer(envelope.call)),
+                        // A malformed call is this program's bug, not the user's, and silence would
+                        // leave the page waiting on a promise that never settles.
+                        Err(e) => format!("console.error({:?});", e.to_string()),
+                    };
+                    let _ = proxy.send_event(Ev::Reply(script));
+                });
+            }
         })
         .build(&window);
     let webview = match webview {

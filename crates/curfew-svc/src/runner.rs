@@ -12,7 +12,6 @@ use interprocess::local_socket::traits::ListenerExt as _;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -475,22 +474,26 @@ fn read_request(reader: &mut impl BufRead) -> std::io::Result<String> {
 /// Recorded here rather than discovered later.
 fn serve(enforcer: Arc<Mutex<Enforcer>>) -> std::io::Result<()> {
     let listener = control_listener()?;
-    let live = Arc::new(AtomicUsize::new(0));
+    // **The same counted limit the window uses for its calls to this service** (`curfew_win::capacity`).
+    // It was a hand-written `AtomicUsize` here and a second one there, which is two places for the
+    // release to be written and the branch's recurring lesson is that one of them will be wrong.
+    let live = curfew_win::capacity::Capacity::new(MAX_CONNECTIONS);
     for connection in listener.incoming() {
         let Ok(stream) = connection else { continue };
-        // The accept loop is one thread, so load-then-add is exact here: nothing else increments.
-        if live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
-            // Dropping the stream closes it. An answer would be kinder, but a client that has been
-            // refused for queueing too many connections is not one this service owes a sentence to.
-            continue;
-        }
-        live.fetch_add(1, Ordering::SeqCst);
+        // Dropping the stream closes it. An answer would be kinder, but a client that has been refused
+        // for queueing too many connections is not one this service owes a sentence to.
+        let Some(permit) = live.take() else { continue };
         let served = Arc::clone(&enforcer);
-        let held = Arc::clone(&live);
         std::thread::spawn(move || {
+            // **Held by a `Drop` guard, not released by a statement.** This read
+            // `held.fetch_sub(1, ...)` *after* `answer_one(...)`, under a comment saying "released
+            // whatever happened, so a panic in the handler cannot leak a slot for ever" — and a panic
+            // unwinds straight past that line, so the slot *was* leaked. `answer_one` takes a `Mutex`
+            // with `.expect(...)`, which panics on a poisoned lock, and then runs a large `handle`.
+            // After `MAX_CONNECTIONS` such panics the service accepted no connections at all — the
+            // total wedge the slot was introduced to prevent, arrived at through the slot itself.
+            let _permit = permit;
             answer_one(stream, &served);
-            // Released whatever happened, so a panic in the handler cannot leak a slot for ever.
-            held.fetch_sub(1, Ordering::SeqCst);
         });
     }
     Ok(())
