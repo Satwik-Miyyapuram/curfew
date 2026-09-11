@@ -150,7 +150,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-10 | P1 | **verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while sessions are running — fail open. Locks survive, but every rule behind them stops |
 | P1-11 | P1 | **verified open.** `runner.rs:558` calls `feeds.events(…)` while holding the enforcer mutex, and that same mutex is what `serve()` needs. `TIMEOUT` is 20s against a 2s tick, so one slow subscription stalls the control channel — including `Status` and the 24-hour release |
 | P1-12 | P1 | **verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so every diagnostic it emits goes to stderr of a service nobody reads |
-| P1-13 | P1 | **Fixed on Windows** (entry 54). Config::rules_weakened_by is consulted before a reload is adopted, so a config that would enforce less than a running session promised is refused. **Android not covered** — commitConfig takes a weakening edit without the check. Two comments that claimed this already worked were false and are corrected |
+| P1-13 | P1 | **fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is adopted, so a config that would enforce less than a running session promised is refused. Two comments that claimed this already worked were false — `Session` has no rules field — and are corrected. **Android not covered**: `commitConfig` takes a weakening edit without the check |
 | P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
 | P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |

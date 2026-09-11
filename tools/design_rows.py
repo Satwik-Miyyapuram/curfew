@@ -50,10 +50,11 @@ STATUS = {
     "P1-12": ("open",
              "**verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so "
              "every diagnostic it emits goes to stderr of a service nobody reads"),
-    "P1-13": ("open",
-             "**verified open, and two comments are false.** `Session` has no rules field (`session.rs:47`), "
-             "so editing the config removes enforcement while the lock survives — `config.rs:300` claims "
-             "otherwise ('the session holds its own copy of what it blocks') and so does `GAPS.md:169`"),
+    "P1-13": ("partial",
+             "**fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is "
+             "adopted, so a config that would enforce less than a running session promised is refused. Two "
+             "comments that claimed this already worked were false — `Session` has no rules field — and are "
+             "corrected. **Android not covered**: `commitConfig` takes a weakening edit without the check"),
     "P2-1": ("fixed", "**fixed** (entry 53) — the config is re-read on a ten-second cadence"),
     "P2-2": ("fixed", "**fixed** (entry 53) — an identical redraw no longer rebuilds the body"),
     "P2-3": ("fixed", "**fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one"),
