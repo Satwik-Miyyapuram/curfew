@@ -17,10 +17,17 @@
 
 mod menu;
 mod overlay;
-mod prompt;
 #[cfg(windows)]
 mod shell;
 mod welcome;
+
+// The credential prompt lives in `curfew-win` now, because the window needs it too.
+//
+// It used to be here, and the window drew a password box of its own in HTML — the bigger, more
+// prominent surface breaking the rule the smaller one documents. A module that only one of the two
+// callers can reach is how that happens; `curfew-app` already depends on `curfew-win`, so the prompt
+// moves to where both can use it.
+use curfew_win::prompt;
 
 use curfew_win::ipc::{self, Request, Response};
 

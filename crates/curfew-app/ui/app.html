@@ -108,6 +108,9 @@ window.__curfewReply = function (id, json) {
 };
 const askService = (payload) => call({ kind: "ipc", payload });
 const readConfig = () => call({ kind: "config" });
+// Ends a session by proving ownership of the machine. No password crosses this bridge — the host
+// shows the system prompt and talks to the service itself. See `password()`.
+const askUnlock = (id) => call({ kind: "unlock", id });
 
 // ---- words ------------------------------------------------------------------------------------
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -820,18 +823,52 @@ function confirmEnd(id) {
     <button class="btn" data-act="confirm-end" data-id="${esc(id)}">End it</button></div>`);
 }
 
-// The password is typed here and checked by the service with LogonUser. This window never sees
-// whether it was right, and never stores it.
+/**
+ * Ask Windows for the password, rather than drawing a box for it.
+ *
+ * This page used to render a password input of its own, which contradicted the rule the tray states
+ * and follows: *"Curfew never draws a password box of its own… a user can tell it from a phishing box
+ * drawn by an application"*. The window is the bigger and more prominent surface, so it was the one
+ * breaking the rule.
+ *
+ * (The paragraph above deliberately does not quote the markup it removed. The host asserts that this
+ * page contains none of it, and an assertion short enough to appear in prose is one that can match
+ * prose — which is how two guards in the same test module were vacuous on their first attempt.)
+ *
+ * Worth more than consistency, too. A password typed into this page lives in a DOM, in the page's form
+ * state, and in whatever the rendering process does with it. A password typed into the system dialog
+ * stays in a buffer the host wipes on drop, and **this page never sees it at all** — the host shows the
+ * prompt and sends the result to the service itself. There is no field here to read.
+ */
 function password(id) {
   sheet(`<div style="font-size:17px;font-weight:650">Your Windows password</div>
-    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You chose to have this asked for. Windows checks it, not Curfew.</div>
-    <div style="height:14px"></div>
-    <input id="user" placeholder="User name" value="${esc(window.__curfewUser || "")}">
-    <div style="height:8px"></div><input id="pw" type="password" placeholder="Password">
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You chose to have this
+    asked for. Windows will ask you for it, and Windows checks it — Curfew never draws a password box
+    and never sees what you type.</div>
     <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
     <button class="btn ghost" data-act="close">Cancel</button>
-    <button class="btn" data-act="unlock" data-id="${esc(id)}">Unlock</button></div>`);
-  setTimeout(() => document.getElementById("pw")?.focus(), 0);
+    <button class="btn" data-act="unlock" data-id="${esc(id)}">Open the Windows prompt</button></div>`);
+}
+
+/** What came back from the system prompt, once the host has shown it. */
+async function finishUnlock(id) {
+  const answer = await askUnlock(id);
+  sheet("");
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  const value = answer.value || {};
+  // A cancelled prompt is not a failure: the user closed the dialog, so nothing is said and the
+  // session stays locked, which is what closing it meant.
+  if (value.response === "cancelled") return;
+  // A rejected password comes back as `error`, not as a refusal — `LogonUser` said no rather than the
+  // core declining a policy. Handling only `refused` here once meant the sheet closed and nothing
+  // appeared: a user who mistyped watched the dialog vanish and concluded the button was broken.
+  if (value.response === "error") return say("Not unlocked", value.detail);
+  if (value.response === "refused") {
+    // The password satisfied one condition. The lock may want a confirmation as well, and that is
+    // still reachable — so ask again rather than reporting defeat.
+    return end(id);
+  }
+  return refresh();
 }
 
 /**
@@ -887,24 +924,9 @@ async function activate(target) {
       if (answer.ok && answer.value.response === "error") return say("That could not be done", answer.value.detail);
       return refresh();
     }
-    case "unlock": {
-      const username = document.getElementById("user").value;
-      const pw = document.getElementById("pw").value;
-      const answer = await askService({ request: "unlock", id, username, domain: "", password: pw });
-      sheet("");
-      if (!answer.ok) return say("The service did not answer", answer.detail);
-      // A rejected password comes back as `error`, not as a refusal — `LogonUser` said no rather than
-      // the core declining a policy. Handling only `refused` here meant the sheet closed and nothing
-      // appeared at all: a user who mistyped their password saw the dialog vanish and concluded the
-      // button was broken. The tray has always handled this correctly; the window did not.
-      if (answer.value.response === "error") return say("Not unlocked", answer.value.detail);
-      if (answer.value.response === "refused") {
-        // The password satisfied one condition. The lock may want a confirmation as well, and that
-        // is still reachable — so ask again rather than reporting defeat.
-        return end(id);
-      }
-      return refresh();
-    }
+    // The button no longer reads a field, because there is no field: the host shows the system
+    // prompt and this page never sees the password.
+    case "unlock": return finishUnlock(id);
     case "release": {
       const answer = await askService({ request: "release", id });
       if (answer.ok && answer.value.response === "refused") say("Not released", describeRefusal(answer.value.refusal));

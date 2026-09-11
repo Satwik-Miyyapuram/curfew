@@ -46,6 +46,26 @@ enum Call {
     Ipc { payload: Request },
     /// Read the config file from disk, for the pages that describe the plan rather than the moment.
     Config,
+    /// End a session by proving ownership of the machine.
+    ///
+    /// The password never reaches the page. The host shows the operating system's own credential
+    /// dialog and sends the result to the service itself, so no password is ever typed into — or
+    /// stored by — the WebView.
+    ///
+    /// The window used to draw a password box of its own in HTML, which contradicted the rule the
+    /// tray states and follows (`curfew_win::prompt`: *"Curfew never draws a password box of its own…
+    /// a user can tell it from a phishing box drawn by an application"*). The bigger, more prominent
+    /// surface was the one breaking it. A password typed into a browser engine lives in a DOM, in
+    /// form state, and in whatever the rendering process does with it; a password typed into the
+    /// system dialog lives in a buffer this process wipes on drop.
+    ///
+    /// **The dialog has no owner window.** `answer` runs on a worker thread with no access to the
+    /// window handle, so `CredUIPromptForWindowsCredentialsW` gets a null parent and the prompt is
+    /// owned by the desktop rather than by the window. It still appears and is still modal; it is not
+    /// pinned above the window, so on a multi-monitor desk it can open on another screen. Threading a
+    /// handle through would mean shared mutable state between the UI thread and every worker, which is
+    /// a worse trade for a dialog that appears once in a while.
+    Unlock { id: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +129,31 @@ fn answer(call: Call) -> serde_json::Value {
                     "detail": detail,
                     "path": shown,
                 }),
+            }
+        }
+        Call::Unlock { id } => {
+            // Cancelled means the user changed their mind. That is not a failure and must not be
+            // reported as one: the page shows nothing and the session stays locked, which is what
+            // they just asked for by closing the dialog.
+            let Some(credential) = curfew_win::prompt::ask(
+                std::ptr::null_mut(),
+                "Curfew needs to know it is you before it ends this session early.",
+            ) else {
+                return serde_json::json!({ "ok": true, "value": { "response": "cancelled" } });
+            };
+            let request = Request::Unlock {
+                id,
+                username: credential.username.clone(),
+                domain: credential.domain.clone(),
+                password: credential.password.clone(),
+            };
+            match ask(&request) {
+                // The credential is dropped here, which wipes the password. It is never serialized,
+                // never returned to the page, and never written anywhere.
+                Ok(response) => serde_json::json!({ "ok": true, "value": response }),
+                Err(e) => {
+                    serde_json::json!({ "ok": false, "kind": "error", "detail": e.to_string() })
+                }
             }
         }
     }
@@ -282,6 +327,52 @@ mod page_tests {
         assert!(
             PAGE.contains("function freezeSentence("),
             "the freeze is described by a bare pill again, with no time on it"
+        );
+    }
+
+    /// The window never handles a password.
+    ///
+    /// It used to draw its own `<input type="password">` and send the typed value over the bridge —
+    /// contradicting the rule the tray states and follows, and putting a password into a DOM. Now the
+    /// host shows the system prompt and talks to the service itself, so there is nothing here to read.
+    ///
+    /// Asserted both ways, because either half alone is easy to satisfy by accident: the page must
+    /// contain no password field and no hand-built unlock request, *and* the bridge must still carry
+    /// the call that replaced them. A test that checked only the first would pass on a page with no
+    /// unlock path at all.
+    #[test]
+    fn no_password_is_ever_typed_into_the_window() {
+        assert!(
+            !PAGE.contains(r#"type="password""#),
+            "the window draws a password box again; the system prompt is the only one it may use"
+        );
+        assert!(
+            !PAGE.contains(r#"getElementById("pw")"#),
+            "the window reads a password field again"
+        );
+        assert!(
+            !PAGE.contains(r#"request: "unlock""#),
+            "a password is crossing the bridge again — the host sends it, not the page"
+        );
+        assert!(
+            PAGE.contains(r#"call({ kind: "unlock", id })"#),
+            "the page has no way to ask for the system prompt, so the lock has no way out"
+        );
+        assert!(
+            PAGE.contains("function finishUnlock("),
+            "the prompt's answer is not handled, so a refusal would say nothing"
+        );
+    }
+
+    /// A cancelled system prompt says nothing at all.
+    ///
+    /// Closing the dialog means "never mind", and the session staying locked is what the user just
+    /// asked for. Reporting that as a failure — or as a success — would both be wrong.
+    #[test]
+    fn a_cancelled_prompt_is_not_reported_as_a_failure() {
+        assert!(
+            PAGE.contains(r#"value.response === "cancelled""#),
+            "a cancelled prompt is not distinguished, so closing the dialog reports something"
         );
     }
 

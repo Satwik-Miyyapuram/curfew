@@ -21,6 +21,13 @@ interprocess = "2.4"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Security",
+    # The credential prompt moved here from `curfew-tray` so the window can use it too rather than
+    # drawing a password box of its own. These features came with it — `Win32_Graphics_Gdi` is not
+    # obviously related, but `CREDUI_INFOW` carries an `HBITMAP` banner field and is gated on it.
+    "Win32_Security_Credentials",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
