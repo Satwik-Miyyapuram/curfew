@@ -59,9 +59,10 @@ must run.
 | 38 | `curfew start` said nothing on success (the F-22 CLI half) | **P2** | **Fixed** |
 | 39 | Four duration formats and three clock formats (F-41) | **P2** | **Fixed** |
 | 40 | Amber's documented meaning, broken in four places plus two in the Material scheme (F-42) | **P2** | **Fixed** |
-| 41 | `strings.xml` is effectively unused; app copy is not translatable (F-45) | **P2** | **Partly fixed, and now ratcheted** — tooling in place, 30 of 306 moved (entry 43) |
+| 41 | `strings.xml` is effectively unused; app copy is not translatable (F-45) | **P2** | **Partly fixed, and now ratcheted** — 69 of 453 moved (entries 43, 44) |
 | 42 | `PLAN-mobile-polish.md` is stale in both directions (F-47) | **P2** | **Fixed** (entry 42) |
-| 43 | Continued: the string ratchet and the permission table (the rest of F-45) | **P2** | **Fixed as far as it goes** — 275 strings remain, listed (entry 43) |
+| 43 | The string ratchet and the permission table (the first slice of F-45) | **P2** | **Fixed as far as it goes** (entry 43) |
+| 44 | The copy detector was blind to 159 literals; the arity guard was vacuous twice | **P2** | **Fixed** (entry 44) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -97,6 +98,7 @@ it is corrected against `git log` whenever an entry is added.)*
 | `710edce` | One countdown rule, one clock rule, and amber that means what it says (entries 39, 40) |
 | `c9cdc5b` | `UX-FLOWS.md` corrected, and the log for that round (entry 42) |
 | `31bdd1b` | A ratchet on untranslated copy, and the permission table moved out (entry 43) |
+| `d69572b` | The copy detector was blind to a third of its subject, and the ViewModel slice (entries 43, 44) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, three cross-references repointed after a round of renumbering, and the severity list corrected |
 
 ### A note on the Android verification environment
@@ -805,11 +807,11 @@ separated by what really blocks them rather than by an assumption:
   is the right shape for "End this session?" — `NowScreen` alone has five of them, on the screen a user sees
   most. Nothing on this host can render a Compose composition or screenshot the GDI overlay, so it stays open
   rather than guessed at. (F-41, the one *functional* defect in that set, is done — entry 39.)
-- **Entry 43 — F-45: the rest of the copy.** 275 strings, and **not gated on hardware at all** — only on
-  volume. The ratchet is in place and the pattern is proven on the permission table; the next slice should be
-  `CurfewViewModel` (19), because it is the one that needs a *new* pattern rather than a repeat of the
-  existing one, and having it makes the rest routine. The largest remaining item, and the best candidate for
-  the next round.
+- **Entry 43 — F-45: the rest of the copy.** **408 strings**, and **not gated on hardware at all** — only on
+  volume. The ratchet is in place and two patterns are proven: the permission table (Compose `stringResource`)
+  and `CurfewViewModel` (`getString` on the application, plus the app's first `<plurals>`). The remaining
+  files are all Compose text, so they are repeats of the first pattern. The largest remaining item, and the
+  best candidate for the next round.
 
 Also open, and small:
 
@@ -2036,9 +2038,11 @@ file. Compose has no layouts, so it never sees a `Text("…")` call — which is
 check has to read the source.
 
 **Why the number is bigger than the review's.** The review says "at least 122 literals in text positions".
-This finds **249 + 57 = 306** before this change. The difference is scope rather than disagreement: the
-review counted positional text arguments; this also counts copy carried by named parameters, and counts each
-*occurrence* rather than each distinct string.
+**This entry first reported 249 + 57 = 306; that was wrong, and entry 44 explains why — the detector could
+not see a literal that was not directly after a call's parenthesis, which hid 159 more. The true figure at
+this point was 368 + 85 = 453.** Either way the difference from the review is scope rather than disagreement:
+the review counted positional text arguments; this also counts copy carried by named parameters and every
+literal inside a call's argument list, and counts each *occurrence* rather than each distinct string.
 
 **And the first version of the parameter list was guessed, which is the instructive part.** It missed
 `because` and `cost` — the nine-entry permission table that `UX_INTERACTION_REVIEW.md` names *by name* when
@@ -2076,12 +2080,17 @@ invisible and regeneration would appear to do nothing.
 
 ### What is left
 
-**219 plain + 56 interpolated = 275 strings**, down from 306. The remaining work is mechanical and the ratchet
-now holds the line while it happens. The largest files are NowScreen (34), ProfileEditScreen (32),
-DevicesScreen (27), ScheduleScreen (27), and **CurfewViewModel (19) — which is the hardest, because those are
-`say(…)` calls in a ViewModel rather than Composable text, so they need a `getString` path through an
-application context rather than `stringResource`.** That one is a small refactor rather than a move, and it is
-worth doing first so the pattern exists for the rest.
+**Correction, and it is the reason entry 44 exists.** This section first said *"219 plain + 56 = 275
+strings, down from 306"*. **Those numbers were wrong.** The scanner was blind to any literal not directly
+after a call's parenthesis, so it could not see `say(it.message ?: "…")` — 159 literals, most of the
+app's error copy. The true count at that point was **368 + 85 = 453**.
+
+The error was in the flattering direction: it made the remaining pile look a third smaller than it is.
+The numbers in this entry are corrected and the detector is fixed; entry 44 has the details.
+
+**329 plain + 79 interpolated = 408 after this round's work**, down from 453. The remaining files are
+NowScreen (56), DevicesScreen (54), ProfileEditScreen (46), ScheduleScreen (40), AppPickerScreen (32),
+SettingsScreen (20) and CalendarScreen (18), plus 79 interpolated. `CurfewViewModel` is at **zero**.
 
 ### Verification
 
@@ -2092,3 +2101,68 @@ made three assertions in this project vacuous earlier.
 
 These are plain JUnit tests reading source files, so they run on this host without Robolectric. **45 Android
 tests pass across 6 classes**; `:app:compileDebugKotlin` clean; the Rust suite untouched at **861 passed**.
+
+---
+
+## 44. The copy detector was blind to a third of its subject
+
+**Findings:** my own, from entry 43. Not in either review — this is a defect in the *measurement* the
+previous round reported.
+
+**What was wrong.** The scanner looked for a string literal **directly after** a text call's opening
+parenthesis. So it saw `say("Sync is not running on this device.")` and did not see
+`say(it.message ?: "That invite could not be made.")` — which is how most of the app's error copy is
+written. **159 literals.** The number reported last round was wrong because of it.
+
+This is the **second** time the same scanner has had to be widened after finding its own blind spot. The
+first was entry 43's: the parameter list was guessed and missed `because`/`cost`, the permission table the
+review names *by name* when raising F-45. Both times the detector failed in the direction that made the work
+look closer to done than it was, and both times a mutation check or a cross-check surfaced it rather than
+reading the code.
+
+**The numbers, corrected.** Entry 43 reported *"275 strings, down from 306"*. The truth at that moment was
+**368 + 85 = 453**. After this round's work it is **329 + 79 = 408**. The earlier figure was wrong by about
+65%, always in the flattering direction.
+
+**What was changed.** The scan now walks a call's **whole argument list** with balanced parentheses. Balanced,
+because `(application as Application)` inside an argument list contains parentheses, and a scanner stopping
+at the first `)` would end the list early and miss everything after it — the same class of error one level
+down.
+
+### And the arity guard, which was vacuous twice
+
+Externalising copy introduces a failure mode nothing else catches: `"%1$s ended."` called with no argument
+compiles perfectly and then throws `IllegalFormatException` **at the moment the user is being told something
+went wrong** — so the app crashes instead of explaining.
+
+`StringFormatArgsTest` compares every call site's arity against its resource. **It passed everything, twice,
+before it worked.** Four versions in total:
+
+1. The argument index came from `"%1\$s".drop(1).dropLast(1)`, which is `"1\$"` — and `toIntOrNull()` on that
+   is null. Every resource appeared to need zero arguments.
+2. With the index fixed it still passed everything: the resource **body** was being dropped, because the
+   pattern matched only as far as the name attribute of `<string name="…">`. Every resource was recorded as
+   its own opening tag, with no specifiers in it.
+3. With the body read, it reported **healthy screens as broken** — it knew the ViewModel's `str`/`plural`
+   helpers but not `stringResource` or `getString`. A false positive is a far better failure than a false
+   negative, and it is what showed the matcher was too narrow.
+4. And it still missed one call whose resource name sits on the next line, because it matched line by line.
+
+The file now carries **a test of its own arithmetic** — `counting arguments handles every form the app uses`
+and `the resource file is read with its bodies` — which is the piece missing every time. Three deliberate
+breakages went undetected across the first two versions, and only a mutation check found any of it.
+
+**Mutation-tested, all four caught:** a two-argument resource called with one; a resource that gains an
+argument nobody passes; a plural that loses its count; and a Compose `stringResource` call that loses its
+argument.
+
+**A note on the shape of this.** Three rounds now have produced guards that were inert on the first attempt —
+`role="dialog"` matching a comment, `user-select:text` matching an unrelated rule, and this one twice over.
+The common factor is that all of them were *written* rather than *tested*: each looked obviously correct, and
+each was found only by deliberately breaking the code it protects. Writing a guard and watching it pass is
+not evidence that it guards anything.
+
+### Verification
+
+`:app:compileDebugKotlin` clean; **50 Android tests pass across 7 classes**; the Rust suite untouched at
+**861 passed**; clippy and fmt clean.
