@@ -1,0 +1,63 @@
+# Interpolated copy: these need numbered format arguments, not a plain move.
+#
+# One entry per occurrence: File.kt|the literal exactly as it appears.
+# Delete a line when you move that string into strings.xml. The length
+# of this file is the number the project quotes, so a stale line is a lie.
+#
+# Regenerate: ./gradlew :app:testDebugUnitTest -Dcurfew.updateCopyAllowlist=true
+AppPickerScreen.kt|${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites 
+AppPickerScreen.kt|${visible.size - APP_LIMIT} more. Search to narrow the list.
+AppPickerScreen.kt|Changes apply the next time ${nameOf(state, current)} starts — never to a block 
+AppPickerScreen.kt|Copy ${donor.name}'s list?
+AppPickerScreen.kt|Stop blocking ${rule.target.label()}
+BlockActivity.kt|$name is blocked
+BlockActivity.kt|Open $target
+CalendarScreen.kt|$kept of $total
+CalendarScreen.kt|Block during ${event.title}
+CalendarScreen.kt|Blocks $profile
+CalendarScreen.kt|No event matches “$query”.
+ChallengeDialog.kt|${challenge.question} = ?
+ChallengeDialog.kt|What is ${challenge.question.replace(
+CurfewViewModel.kt|${session.profile} ended with an emergency pass.
+CurfewViewModel.kt|${session.profile} ended.
+CurfewViewModel.kt|${session.profile} ended.
+CurfewViewModel.kt|Release for ${session.profile} lands ${relative(it, runtime.clock.now())}.
+CurfewViewModel.kt|Took in ${pass.accepted} update(s), left ${pass.written} behind.
+CurfewViewModel.kt|Took up ${pass.adopted.size} block(s) from another device.
+DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what it 
+DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
+MainActivity.kt|${notice.text}. Tap to dismiss.
+NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
+NowScreen.kt|${session.profile} ends ${relative(endsAt, now)}
+NowScreen.kt|${state.audit.size} logged
+NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.
+NowScreen.kt|A release you asked for lands ${relative(at, now)}.
+NowScreen.kt|Ask to end ${session.profile} in 24 hours
+NowScreen.kt|Emergency pass ($passesLeft)
+NowScreen.kt|End ${session.profile}
+NowScreen.kt|End ${session.profile} now
+NowScreen.kt|End ${session.profile}?
+NowScreen.kt|Ends ${relative(endsAt, now)} (${clockTime(endsAt)})
+NowScreen.kt|Let $id out
+NowScreen.kt|Let session $id out
+NowScreen.kt|Present a tag for ${session.profile}
+NowScreen.kt|The tag that ends $profile
+NowScreen.kt|This ends ${session.profile} now. It counts against your ration on every 
+NowScreen.kt|Use an emergency pass on ${session.profile}, $passesLeft left
+ProfileEditScreen.kt|$emoji $value
+ProfileEditScreen.kt|${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the 
+ProfileEditScreen.kt|Delete ${existing.name}?
+ScheduleEditor.kt|Edit the calendar rule for ${rule.profile}
+ScheduleEditor.kt|Edit the window for ${window.profile}
+ScheduleEditor.kt|Remove the calendar rule for ${rule.profile}
+ScheduleEditor.kt|Remove the window for ${window.profile}
+ScheduleScreen.kt|Edit ${profile.name}
+ScheduleScreen.kt|Remove ${profile.name}
+ScheduleScreen.kt|Remove ${profile.name}?
+TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
+TimerScreen.kt|That is ${spellDuration(minutes)}
+TimerScreen.kt|until ${endsAt(minutes)}
+UsageScreen.kt|${day.day}: ${duration(day.blockedSeconds)}
+UsageScreen.kt|${describeTarget(key)}: ${duration(seconds)}
+UsageScreen.kt|Android's own figures, averaged over the last ${comparison.recentDays} whole days.
+UsageScreen.kt|Best so far: ${stats.longestStreak}. 

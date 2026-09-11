@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import dev.curfew.app.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -63,26 +65,30 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
+                // Resolved outside the semantics block, which is not a composable scope, and
+                // composed from resources with numbered arguments rather than concatenated — the
+                // same reason as on the health screen: a sentence built with `+` is English only.
+                val name = stringResource(entry.grant.title)
+                val cost = stringResource(entry.grant.cost)
+                val described = if (entry.granted) {
+                    context.getString(R.string.settings_grant_allowed, name)
+                } else {
+                    context.getString(R.string.settings_grant_refused, name, cost)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 17.dp, vertical = 15.dp)
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = if (entry.granted) {
-                                "${entry.grant.title}, allowed"
-                            } else {
-                                "${entry.grant.title}, not allowed. ${entry.grant.cost}"
-                            }
-                        },
+                        .semantics(mergeDescendants = true) { contentDescription = described },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Mark(entry.granted)
                     Column(Modifier.weight(1f)) {
-                        Text(entry.grant.title, fontSize = 15.sp, color = Palette.Text)
+                        Text(name, fontSize = 15.sp, color = Palette.Text)
                         if (!entry.granted) {
                             Text(
-                                entry.grant.cost,
+                                cost,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp,
                                 color = Palette.Muted,

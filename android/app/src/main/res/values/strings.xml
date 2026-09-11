@@ -17,4 +17,58 @@
 
     <string name="widget_description">Shows whether Curfew is blocking anything, and how many days in a row you have kept.</string>
     <string name="tile_idle">Standing by</string>
+
+    <!-- The permission table. Moved here from the Grant enum in Permissions.kt, which is the
+         copy a translator most needs: it is what Curfew is asking for and what is lost without it.
+         Emitted from the source rather than retyped, so no word differs from the original. -->
+    <string name="perm_accessibility_title">Accessibility service</string>
+    <string name="perm_accessibility_because">Curfew needs to see which app is in front to replace it when it is blocked.</string>
+    <string name="perm_accessibility_cost">Nothing is blocked at all: this is the only way to act on an app the moment it opens.</string>
+    <string name="perm_usage_access_title">Usage access</string>
+    <string name="perm_usage_access_because">Time budgets are counted from the system\'s own usage figures, which survive Curfew being killed.</string>
+    <string name="perm_usage_access_cost">Budgets and launch limits stop counting; blocks and schedules still work.</string>
+    <string name="perm_overlay_title">Display over other apps</string>
+    <string name="perm_overlay_because">Some launchers refuse to show the block screen from the background without it.</string>
+    <string name="perm_overlay_cost">A blocked app may flash into view for a moment before it is replaced.</string>
+    <string name="perm_notifications_title">Notifications</string>
+    <string name="perm_notifications_because">The ongoing notification is how you can always tell that enforcement is running.</string>
+    <string name="perm_notifications_cost">Enforcement still runs, but Android may show its own generic notice instead.</string>
+    <string name="perm_exact_alarms_title">Exact alarms</string>
+    <string name="perm_exact_alarms_because">A session that should start at 09:00 has to start at 09:00, not whenever the system next wakes.</string>
+    <string name="perm_exact_alarms_cost">Sessions can start up to a few minutes late.</string>
+    <string name="perm_calendar_title">Calendar</string>
+    <string name="perm_calendar_because">Calendar rules read event titles to decide when a profile should run.</string>
+    <string name="perm_calendar_cost">Calendar rules never match; weekly schedules are unaffected.</string>
+    <string name="perm_notification_access_title">Notification access</string>
+    <string name="perm_notification_access_because">Silencing an app\'s notifications is the one thing Android will not let Curfew do without it.</string>
+    <string name="perm_notification_access_cost">Rules that mute notifications do nothing; everything else is unaffected. Granting it lets Curfew see every notification on the device, so leave it off unless you use a mute rule.</string>
+    <string name="perm_battery_unrestricted_title">Unrestricted battery use</string>
+    <string name="perm_battery_unrestricted_because">Aggressive battery savers kill background services, and a blocker that is killed blocks nothing.</string>
+    <string name="perm_battery_unrestricted_cost">Curfew may be stopped by the system and stop enforcing without warning.</string>
+    <string name="perm_uninstall_protection_title">Uninstall protection (device admin)</string>
+    <string name="perm_uninstall_protection_because">Android will not uninstall an app that is an active device admin, which closes the last easy way out of a running lock. Curfew already holds its own settings and uninstall pages shut through the accessibility service; this is the stricter version of the same idea.</string>
+    <string name="perm_uninstall_protection_cost">Nothing inside Curfew changes: every block, schedule and lock works the same either way. The cost is outside it — many banking and payment apps refuse to run while any device admin is active, so leave this off if you use one. Curfew asks for no admin powers beyond being active: it cannot erase, lock or unlock the device, or touch any password, and you can turn it off whenever no lock is running.</string>
+
+    <!--
+      The sentences the health and settings screens build around a grant's own copy.
+
+      These are whole sentences with numbered arguments rather than the string concatenation
+      they replaced, and that is the point of doing them at all rather than a detail of style.
+      `"Nothing is being blocked. " + costs.joinToString(" ")` is not merely awkward to
+      translate — it is untranslatable, because the order of a clause and its list, and the
+      punctuation between them, differ by language. A sentence assembled with `+` in Kotlin can
+      never be anything but English, so moving the parts would not have been enough.
+    -->
+    <string name="health_can_enforce">Curfew can enforce</string>
+    <string name="health_cannot_enforce">Curfew cannot enforce</string>
+    <string name="health_all_in_place">Everything it needs to block an app is in place.</string>
+    <string name="health_nothing_blocked">Nothing is being blocked. %1$s</string>
+    <string name="health_restricted_title">Android is blocking the accessibility switch</string>
+    <string name="health_open_app_info">Open App info</string>
+    <string name="health_every_permission">Every permission, and what it buys</string>
+    <string name="health_grant_allowed">%1$s, allowed. %2$s</string>
+    <string name="health_grant_refused">%1$s, not allowed. %2$s Without it: %3$s</string>
+    <string name="health_without_it">Without it: %1$s</string>
+    <string name="settings_grant_allowed">%1$s, allowed</string>
+    <string name="settings_grant_refused">%1$s, not allowed. %2$s</string>
 </resources>
