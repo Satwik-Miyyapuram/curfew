@@ -109,6 +109,34 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   check(details.tabId, details.url);
 });
 
+// **A rule that starts while a matching page is already open** (P2-12).
+//
+// The two listeners above only fire on navigation, so a tab that was already sitting on a matching
+// URL was never checked again: start a path rule with the page open and nothing happens, and the
+// browser is not closed either, because the extension *is* beating. The user's only way out was to
+// reload the page, which is not a thing anyone would think to try.
+//
+// Switching to the tab or bringing the browser forward is the moment the user is looking at the page
+// and expecting the rule to be in force, so those are the two events to re-check on. Together they
+// cover the ordinary route — the phone or the config changes, the user comes back to the browser —
+// without polling every tab on every beat, which would spend a `check()` per open tab per beat and
+// put the whole rule set on the wire sixty times a minute.
+async function recheckFocused() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab && tab.id !== undefined) check(tab.id, tab.url);
+  } catch (e) {
+    // No tabs permission, no window: nothing to re-check.
+  }
+}
+
+chrome.tabs.onActivated.addListener(recheckFocused);
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  // `WINDOW_ID_NONE` means the browser lost focus to another program, which is not a moment anybody
+  // is reading a blocked page.
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) recheckFocused();
+});
+
 chrome.alarms.create("curfew-beat", { periodInMinutes: BEAT_SECONDS / 60 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "curfew-beat") beat();

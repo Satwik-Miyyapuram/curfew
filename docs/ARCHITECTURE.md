@@ -45,7 +45,7 @@ No accounts, no servers, no telemetry.
                                                                     | native messaging
                                                      +--------------v---------------+
                                                      |  Browser extension (MV3)     |
-                                                     |  - URL/path/in-page rules    |
+                                                     |  - URL/path rules            |
                                                      +------------------------------+
 ```
 
@@ -150,7 +150,17 @@ setup, nothing that can make a device unrecoverable.
 | Service + process watcher | admin install | exes, window titles, files/folders |
 | Hosts file | admin | domains (coarse) |
 | WFP filters (phase 2) | admin + driver-free WFP API | domains, per-app network, DoH |
-| Browser extension | user install | URL paths, in-page elements, search keywords |
+| Browser extension | user install | URL and path rules, rechecked on navigation, SPA history changes, and tab activation |
+
+> **Corrected (P2-12).** This row used to read *"URL paths, in-page elements, search keywords"* — three
+> capabilities, of which **one and a half exist**. `extension/manifest.json` declares `nativeMessaging`,
+> `webNavigation`, `tabs` and `alarms`: there is no `content_scripts`, no `scripting` and no
+> `declarativeNetRequest`, so **in-page element blocking is not implementable with the code present**.
+> Search keywords are reachable only because they appear in the URL, which is what `tabs` gives.
+>
+> The extension blocks by redirecting the tab after `onBeforeNavigate`, i.e. once the load has begun —
+> the same limitation `GAPS.md` uses to dismiss a competitor's extension. The honest claim is the one
+> now in the row. Implement DNR plus a content script if the original three are wanted.
 | Lock screen / Frozen mode | none | whole device |
 | Watchdog pair + ACLs | admin | tamper resistance |
 
