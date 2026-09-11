@@ -149,8 +149,14 @@ STATUS = {
               "`foreground_warning` names the profiles that stopped being enforced, `Status` carries both "
               "so a surface can warn *before* the action, and `QUIT_NOTE` no longer claims the service "
               "\"keeps enforcing everything you asked for\""),
-    "P2-18": ("open",
-              "**verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one"),
+    "P2-18": ("fixed",
+              "**fixed** (entry 73). `receive` verified each entry once up front and then walked each "
+              "author's chain in one ascending pass, instead of calling `accept` on every pending entry "
+              "every pass. **Measured rather than argued**: with the old loop restored and a test-only "
+              "counter in place, 24 entries delivered backwards cost 300 checks — exactly n(n+1)/2 — "
+              "against 24 for the fix. `Log::apply` is the seam: everything `accept` does except verify, "
+              "documented as requiring an already-verified entry, so the public entry point keeps its "
+              "guarantee"),
 }
 
 NOTES = {}

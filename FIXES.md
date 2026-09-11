@@ -100,6 +100,7 @@ must run.
 | 82 | `git add -A` swept throwaway scaffolding into a commit, twice | **build** | **Fixed** — `tools/check_workspace.py` reports any script in `tools/` that does not belong (entry 70) |
 | 83 | Two overlay notices shared one text slot, so the earlier rendered the later (P2-14) | **P2** | **Fixed** — each window owns its text via `GWLP_USERDATA` (entry 71) |
 | 84 | The overlay appeared on the primary monitor, outside the work area (P2-15) | **P2** | **Fixed** — cursor monitor + work area; DPI still undeclared (entry 72) |
+| 85 | A batch delivered in reverse order cost O(n²) Ed25519 verifications (P2-18) | **P2** | **Fixed** — 300 checks for 24 entries measured before, 24 after (entry 73) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -189,7 +190,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-15 | P2 | **fixed** (entry 72), for placement. `MonitorFromPoint(GetCursorPos())` plus `GetMonitorInfoW().rcWork` puts the card on the monitor the user is looking at and inside its work area, instead of on the primary monitor minus a guessed 72-pixel taskbar. The arithmetic is a portable function, so it is tested without a display. **DPI awareness is deliberately not declared**, and the row says so: the font sizes are fixed points, so declaring it without scaling every dimension would render the notice at a third of its size on a 200% display |
 | P2-16 | P2 | **fixed** (entry 68), though not the way the review proposed. **Its suggested fix — move the watch into the service — cannot be done**: a service is in session 0, which has no interactive desktop, so the user session's foreground window is not addressable from there. The only process that can answer is the tray, and the tray is what is gone. So the gap is reported instead: `Rule::needs_foreground` says which rules depend on it, `foreground_warning` names the profiles that stopped being enforced, `Status` carries both so a surface can warn *before* the action, and `QUIT_NOTE` no longer claims the service "keeps enforcing everything you asked for" |
 | P2-17 | P2 | **fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now |
-| P2-18 | P2 | **verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one |
+| P2-18 | P2 | **fixed** (entry 73). `receive` verified each entry once up front and then walked each author's chain in one ascending pass, instead of calling `accept` on every pending entry every pass. **Measured rather than argued**: with the old loop restored and a test-only counter in place, 24 entries delivered backwards cost 300 checks — exactly n(n+1)/2 — against 24 for the fix. `Log::apply` is the seam: everything `accept` does except verify, documented as requiring an already-verified entry, so the public entry point keeps its guarantee |
 | P2-19 | P2 | **fixed** (entry 57). Every read from the shared folder went through `std::fs::read` with no size cap, unlike the LAN path. `read_capped` is now the only reader, sharing `lan::MAX_FRAME` |
 | P2-20 | P2 | **fixed** (entry 56). `total_sessions` was the sum of the per-day session counters, so a session across midnight counted twice in the number the UI prints as blocks kept. A test had enshrined the bug as intent; both corrected |
 
@@ -284,6 +285,7 @@ this table is a reading aid.
 | `435f24b` | Report scaffolding left in `tools/` (entry 70) |
 | `77c878f` | Each overlay window owns its text (entry 71) |
 | `742abcb` | Place the overlay on the user's monitor, inside its work area (entry 72) |
+| `262ea59` | Verify each entry once, and walk each chain once (entry 73) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4089,3 +4091,65 @@ placement. **Named on the coverage row so it is not read as closed.**
 
 Five mutations caught: the wrong corner, a guessed taskbar allowance, a card allowed off the top-left of a
 small work area, a zero fallback that inverts the clamp, and ignoring the monitor that was asked for.
+
+---
+
+## 73. P2-18: a batch delivered in reverse order cost O(n²) Ed25519 verifications
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-18**. **Fixed.**
+
+### What was wrong
+
+Two separate O(n²)s in `receive`, and the mutation run measured the first one exactly.
+
+**The cryptography.** `Log::accept` verifies the Ed25519 signature *before* it looks at anything else —
+before checking whether the entry is already held, and before checking whether its predecessor has
+arrived. So the retry loop re-verified every entry it had already rejected, once per pass. A batch of n
+delivered in reverse order — which is what a shared folder produces, since a sync client does not promise
+an order — is accepted one entry per pass, giving `n + (n-1) + … = n(n+1)/2` verifications.
+
+**Measured, not argued.** With the old loop restored and a counter in place, 24 entries arriving backwards
+cost **300 checks** — exactly `24·25/2`. With the fix, it is **24**. `MAX_FRAME` permits 8 MiB of JSON, so
+a single paired peer could have pinned a thread for minutes with only eight threads available to it.
+
+**The loop.** Even with the cryptography fixed, `retain` over the pending list each pass is another O(n²).
+
+### The fix
+
+`Log::apply` is the seam: everything `accept` does *except* verify, documented as requiring an
+already-verified entry. `accept` stays as verify-then-apply, so the public entry point keeps its guarantee
+and the trusted boundary is explicit rather than implied.
+
+The ordering side is **one ascending pass per author**, not a fixed-point loop. A chain's order is total
+and the predecessor check is per-author, so sorting each author's entries by sequence and walking them once
+reaches exactly the state the retry loop converged to: the contiguous run above the current head is
+accepted, and anything past a gap is refused.
+
+### A test-only counter was needed, and that is the substance
+
+**Nothing else in the suite distinguishes a linear `receive` from a quadratic one** — both end with every
+entry accepted and nothing refused. The number of Ed25519 checks *is* the observable, so it had to be made
+countable. `Peers::verify` bumps a counter under `cfg(test)`.
+
+It is **thread-local rather than a global atomic**, and that detail matters: `cargo test` runs tests in
+parallel, so a shared counter would be bumped by whichever test happened to be verifying at the same
+moment. The assertion would be flaky, and worse, it would read as a bug in `receive` rather than in the
+counter — the same class of self-referential mistake as the vacuous guards earlier on this branch.
+
+### Verification
+
+Five tests: reverse order, redelivery, a gap refusing only what depends on it, a bad signature refused once
+rather than retried, and an unknown author refused once.
+
+**Four mutations caught:** the old retry loop restored (300 checks against 24), the sort dropped,
+verification done inside the walk as well as up front, and a verify failure counted as accepted. Grouping
+by author has no dedicated mutation — the existing two-device convergence test exercises it, and saying so
+is more useful than a mutation written to make a number look better.
+
+### Three mistakes of my own, all mechanical
+
+The tests were first appended *after* `mod tests` closed, so nothing was in scope. They called a `chain()`
+helper I invented, when the module already had `append`/`since`. And the unknown-author fixture tried
+`DeviceId::new("stranger")` — a device id is a hash of a public key, so a stranger cannot be named, only
+generated. All three were caught by the compiler or by reading the helper that already existed, none by
+review.
