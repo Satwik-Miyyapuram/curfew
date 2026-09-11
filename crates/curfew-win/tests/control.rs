@@ -1118,3 +1118,100 @@ fn a_release_for_a_session_this_device_has_never_heard_of_is_still_recorded() {
     assert_eq!(e.handle(NOW, Request::Release { id: "elsewhere".into() }), Response::Ok);
     assert!(e.releases.contains("elsewhere"));
 }
+
+// --- a reload may not weaken a running session (P1-13) ------------------------------------------
+//
+// `Engine::decide` reads the rules from the live config on every pass, so adopting a config that has
+// dropped a rule stops enforcing it immediately while the session and its lock carry on. The surface
+// would say a lock is running and the machine would be blocking nothing. The review names the
+// reachable path: `curfew unblock` removes enforcement while every screen reports a healthy lock.
+//
+// The check refuses the *adoption*, not the edit, so an administrator changing the file directly gets
+// the same protection as someone using the CLI.
+
+/// A config with a profile, and a rule the caller controls.
+fn config_with_rule(id: &str, name: &str, rule: &str) -> String {
+    format!(
+        "schema_version = 1\ntimezone = \"Europe/London\"\n\n[[profiles]]\nid = \"{id}\"\nname = \"{name}\"\n\n{rule}\n"
+    )
+}
+
+const REDDIT: &str =
+    "[[profiles.rules]]\ntarget = { kind = \"domain\", domain = \"reddit.com\" }\naction = { kind = \"block\" }";
+
+/// A whole profile gone is the largest weakening there is.
+#[test]
+fn a_reload_that_removes_a_running_sessions_rule_is_refused() {
+    let mut e = enforcer("reload-drops-rule");
+    let path = dir("reload-drops-rule").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    // The same profile, with the rule removed — `curfew unblock reddit.com`, in effect.
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", "")).unwrap();
+    let response = e.handle(NOW, Request::Reload);
+
+    let Response::Error { detail } = response else {
+        panic!("a weakening reload was adopted: {response:?}")
+    };
+    assert!(detail.contains("reddit.com"), "the refusal should name what would be lost: {detail}");
+    assert!(
+        detail.contains("Deep work"),
+        "the refusal should name the profile the user knows: {detail}"
+    );
+    assert!(e.config.profiles[0].rules.len() == 1, "the running config was replaced anyway");
+    assert_eq!(e.sessions.running.len(), 1, "the session was ended by a reload");
+}
+
+/// An **action** change is a weakening too: a budget cut from an hour to a minute keeps the target.
+#[test]
+fn a_reload_that_weakens_a_running_sessions_action_is_refused() {
+    let mut e = enforcer("reload-weakens-action");
+    let path = dir("reload-weakens-action").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    let budget = "[[profiles.rules]]\ntarget = { kind = \"domain\", domain = \"reddit.com\" }\n\
+                  action = { kind = \"budget\", seconds = 60 }";
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", budget)).unwrap();
+
+    assert!(
+        matches!(e.handle(NOW, Request::Reload), Response::Error { .. }),
+        "a changed action was adopted"
+    );
+}
+
+/// And the legitimate direction still works: a reload that adds a rule is adopted.
+#[test]
+fn a_reload_that_only_adds_a_rule_is_adopted() {
+    let mut e = enforcer("reload-adds-rule");
+    let path = dir("reload-adds-rule").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    let extra = format!(
+        "{REDDIT}\n\n[[profiles.rules]]\ntarget = {{ kind = \"domain\", domain = \"youtube.com\" }}\n\
+         action = {{ kind = \"block\" }}"
+    );
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", &extra)).unwrap();
+
+    assert_eq!(e.handle(NOW, Request::Reload), Response::Ok, "a strengthening reload was refused");
+    assert_eq!(e.config.profiles[0].rules.len(), 2);
+}
+
+/// With nothing running, a weakening reload is nobody's business and must go through — otherwise the
+/// check would make the config uneditable between sessions.
+#[test]
+fn a_reload_that_weakens_is_adopted_when_nothing_is_running() {
+    let mut e = enforcer("reload-idle");
+    let path = dir("reload-idle").join("curfew.toml");
+    e.config_path = Some(path.clone());
+
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", "")).unwrap();
+
+    assert_eq!(e.handle(NOW, Request::Reload), Response::Ok);
+    assert_eq!(e.config.profiles[0].rules.len(), 0, "the edit was not adopted");
+}

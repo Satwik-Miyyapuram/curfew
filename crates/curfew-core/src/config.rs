@@ -127,6 +127,56 @@ impl Config {
         self.profiles.iter().find(|p| p.id == id)
     }
 
+    /// What `next` would take away from a running session on `profile` — P1-13.
+    ///
+    /// **A session does not hold its own rules.** `Engine::decide` reads them from the live `Config`
+    /// on every pass (`engine.rs:64` takes `config` as an argument), so a rule removed from the config
+    /// stops being enforced immediately while the session — and its lock — carries on. The user sees a
+    /// lock still running and nothing being blocked, which is the worst state this product has: the
+    /// surface says yes and the machine does no.
+    ///
+    /// Two comments in this repository claim otherwise and both were wrong: `Config::remove_profile`
+    /// below says *"the session holds its own copy of what it blocks"* and `GAPS.md` D6 says *"edits
+    /// that would weaken an active session are refused outright until the lock ends"*. Neither was
+    /// true. This function is the second of those claims, made true.
+    ///
+    /// A rule is identified the way [`Config::upsert_rule`] identifies it — the target's key plus the
+    /// platform set — so this catches a rule removed, a rule that no longer covers the platform, and a
+    /// rule whose **action** changed (a budget cut from an hour to a minute keeps its target and is
+    /// still a weakening).
+    ///
+    /// Deliberately conservative in one direction: **changing** an action counts as a loss even when
+    /// the new one is stricter, because telling "stricter" from "weaker" per action kind needs a
+    /// lattice this does not have. Refusing a strengthening edit until the lock ends is an annoyance;
+    /// accepting a weakening one is the bug.
+    ///
+    /// Returns one sentence per loss, so a caller can say exactly what it would not adopt.
+    pub fn rules_weakened_by(&self, next: &Config, profile: &str) -> Vec<String> {
+        let Some(before) = self.profile(profile) else {
+            // The profile is not in the config that is running. Nothing of its was ever enforced, so
+            // there is nothing to lose — a session outliving its profile is the case `remove_profile`
+            // documents, and it is not this function's to judge.
+            return Vec::new();
+        };
+        let after = next.profile(profile);
+
+        let mut lost = Vec::new();
+        for rule in &before.rules {
+            let key = rule.target.key();
+            let found = after.and_then(|p| {
+                p.rules.iter().find(|r| r.target.key() == key && r.platforms == rule.platforms)
+            });
+            match found {
+                None => lost.push(format!("{key} is no longer blocked")),
+                Some(new) if new.action != rule.action => {
+                    lost.push(format!("{key} is enforced differently now"))
+                }
+                Some(_) => {}
+            }
+        }
+        lost
+    }
+
     /// Add a rule to a profile, or replace the one already pointing at the same thing.
     ///
     /// Keyed on the target's own identity rather than on the whole rule, because "block
@@ -296,8 +346,15 @@ impl Config {
     /// rejects, and discovering that at the next launch is discovering it with no blocker running.
     /// The schedules are named in the error so the user knows what to remove first.
     ///
-    /// As everywhere else, a session this profile started keeps running. Its rules are gone from
-    /// the config, but the session holds its own copy of what it blocks.
+    /// As everywhere else, a session this profile started keeps running. Its rules are gone from the
+    /// config — **and the session does not hold a copy of them**, which this comment used to claim and
+    /// which was false. `Engine::decide` reads the rules from the live `Config` on every pass, so a
+    /// session whose profile is removed keeps its lock and blocks nothing.
+    ///
+    /// What stops that being a way out is the *adoption* side rather than this one:
+    /// [`Config::rules_weakened_by`] is consulted before a reload is taken, and the service refuses a
+    /// config that would enforce less than a running session promised. So the order is: the lock ends
+    /// first, then the profile goes.
     pub fn remove_profile(&mut self, id: &str) -> Result<(), ConfigError> {
         let mut used: Vec<&str> = self
             .weekly

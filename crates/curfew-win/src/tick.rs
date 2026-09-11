@@ -782,6 +782,51 @@ impl Enforcer {
                     // they are: an unparseable file must not be a way out either.
                     Err(detail) => Response::Error { detail },
                     Ok(config) => {
+                        // **A reload may not weaken a running session** — P1-13.
+                        //
+                        // `Engine::decide` reads the rules from the live config on every pass, so
+                        // adopting a config that has dropped a rule stops enforcing it immediately
+                        // while the session and its lock carry on. The surface would say a lock is
+                        // running and the machine would be blocking nothing, which is the worst state
+                        // this product can be in — and the review names the reachable path:
+                        // `curfew unblock` removes enforcement while every screen still reports a
+                        // healthy lock.
+                        //
+                        // This is the "refuse config edits that weaken a running one" half of the
+                        // review's remediation, and the half that does not require every session to
+                        // carry its own copy of the rules.
+                        //
+                        // The file itself is untouched: the user's edit stands and the service simply
+                        // does not adopt it while anything is running. Refusing the *adoption* rather
+                        // than the *edit* also means an administrator editing the file directly gets
+                        // the same protection, which a check inside `curfew` would not have given them.
+                        let mut lost: Vec<String> = Vec::new();
+                        for session in &self.sessions.running {
+                            // The name the user gave the profile, not the slug — the refusal is a
+                            // sentence somebody reads. Same lookup the browser verdict uses.
+                            let named = self
+                                .config
+                                .profiles
+                                .iter()
+                                .find(|p| p.id == session.profile)
+                                .map(|p| p.name.clone())
+                                .unwrap_or_else(|| session.profile.clone());
+                            for detail in self.config.rules_weakened_by(&config, &session.profile) {
+                                lost.push(format!("{named}: {detail}"));
+                            }
+                        }
+                        if !lost.is_empty() {
+                            lost.sort();
+                            lost.dedup();
+                            return Response::Error {
+                                detail: format!(
+                                    "not adopting this config while a session is running, because it \
+                                     would enforce less than the session promised: {}. Nothing was \
+                                     changed on disk, and the lock ends on its own.",
+                                    lost.join("; "),
+                                ),
+                            };
+                        }
                         self.config = config;
                         // A delay the user has just rewritten should not be governed by a countdown
                         // started under the old rule.
