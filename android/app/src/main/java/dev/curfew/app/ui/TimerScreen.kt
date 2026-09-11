@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
@@ -96,6 +97,42 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     // only one. A missing profile is the one thing this screen cannot invent.
     val chosen = profile ?: state.profiles.firstOrNull()?.id
     val chosenProfile = state.profiles.firstOrNull { it.id == chosen }
+
+    // The one gate every route to "start this timer" goes through.
+    //
+    // There are three of them — the primary button, the return from the accessibility switch, and
+    // "Start without it" — and before this they disagreed: the primary button checked the four-hour
+    // threshold and the other two did not, so "Start without it" would start the strongest lock in
+    // the app from a twelve-hour dial with no confirmation at all. One function means a route added
+    // later cannot quietly skip a check the others make.
+    fun begin(id: String) {
+        if (minutes >= LONG_MINUTES) {
+            confirming = id
+            return
+        }
+        model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+        onDone()
+    }
+
+    // Coming back from the accessibility switch, finish what the user asked for.
+    //
+    // This is the fix for the worst first-run experience in the app. "Turn it on" is the *primary*
+    // button in that dialog, and all it did was open Settings — the timer was never started on the
+    // way back, so a user who did exactly what they were asked ended up with no block, no receipt,
+    // and a Now screen saying nothing was blocked. Declining ("Start without it") worked; complying
+    // did not, which is the wrong way round.
+    //
+    // `strength` and `minutes` are read when resuming rather than captured, so a value the user
+    // changed before leaving is the one that takes effect — and `begin` means the long-timer check
+    // still applies on this route.
+    LifecycleResumeEffect(pending) {
+        val id = pending
+        if (id != null && Grant.Accessibility.isGranted(context)) {
+            pending = null
+            begin(id)
+        }
+        onPauseOrDispose { }
+    }
 
     Screen(spacing = 0.dp) {
         BackRow("Start now", onDone)
@@ -247,12 +284,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 pending = id
                 return@PrimaryButton
             }
-            if (minutes >= LONG_MINUTES) {
-                confirming = id
-                return@PrimaryButton
-            }
-            model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-            onDone()
+            begin(id)
         }
     }
 
@@ -291,12 +323,17 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             text = {
                 Text(
                     "Curfew can only replace a blocked app if it is allowed to see which app is " +
-                        "in front. Without it the timer will run and nothing will be blocked.",
+                        "in front.\n\n" +
+                        "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
+                        "come back. Or start it now, and nothing will be blocked until the switch " +
+                        "is on.",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    pending = null
+                    // `pending` is deliberately NOT cleared here. It is what the resume effect
+                    // watches, and clearing it was the whole bug: the user was sent to Settings and
+                    // the timer they had configured was forgotten in the same breath.
                     Grant.Accessibility.settingsIntent(context)?.let { intent ->
                         runCatching {
                             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -310,8 +347,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 // it is not enforcing, is one they come back to and fix.
                 TextButton(onClick = {
                     pending = null
-                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-                    onDone()
+                    begin(id)
                 }) { Text("Start without it") }
             },
         )
