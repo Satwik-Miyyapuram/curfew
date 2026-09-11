@@ -94,7 +94,15 @@ pub fn hosts_path() -> PathBuf {
     }
 }
 
-pub fn now() -> i64 {
+/// The machine's own wall clock, exactly as it reports it. **Untrusted.**
+///
+/// This is what a person would read off the taskbar, and it is user-settable, so it must never be
+/// the time a lock is judged against. Enforcement takes its instant from
+/// [`curfew_win::Enforcer::observe_clock`], which refuses any part of this that the monotonic uptime
+/// does not support. Kept for the two honest uses — reporting to a human, and stamping a log line —
+/// and named so that reading it in an enforcement path is a visible mistake rather than an
+/// invisible one.
+pub fn wall_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
@@ -145,6 +153,10 @@ pub fn build(
     enforcer.passes = persisted.passes;
     enforcer.boots = persisted.boots;
     enforcer.boot_counter = persisted.boot_counter;
+    // The clock's baseline comes back with it. Without this, stopping the service, moving the clock
+    // and starting it again would be a way out of every timer lock: the witness would begin life
+    // trusting whatever the machine then claimed.
+    enforcer.clock = persisted.clock;
     enforcer.releases = persisted.releases;
     enforcer.history = persisted.history;
     // A session that ended while the service was stopped has to be noticed by the first pass, so
@@ -250,6 +262,7 @@ fn persist(enforcer: &Enforcer, state_path: &Path, last_tick: i64) {
         passes: enforcer.passes.clone(),
         boots: enforcer.boots.clone(),
         boot_counter: enforcer.boot_counter.clone(),
+        clock: enforcer.clock.clone(),
         releases: enforcer.releases.clone(),
         history: enforcer.history.clone(),
         last_tick: Some(last_tick),
@@ -312,7 +325,15 @@ fn serve(enforcer: Arc<Mutex<Enforcer>>) -> std::io::Result<()> {
             continue;
         }
         let response = match parse_request(&line) {
-            Ok(request) => enforcer.lock().expect("enforcer").handle(now(), request),
+            Ok(request) => {
+                let mut guard = enforcer.lock().expect("enforcer");
+                // Trusted time, not the wall clock. `can_release` grants a release as soon as
+                // `is_expired(now)` holds, so answering `End` with a wall clock the user has wound
+                // forward would end a timer lock just as surely as claiming the timer had run out —
+                // the same bypass through a different door.
+                let now = guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds());
+                guard.handle(now, request)
+            }
             Err(detail) => Response::Error { detail },
         };
         let mut stream = reader.into_inner();
@@ -383,7 +404,18 @@ pub fn run(
     let mut peer_events: Vec<curfew_core::CalendarEvent> = Vec::new();
     let mut previous = last_tick;
     while !stop() {
-        let now = now();
+        // Trusted time, and the only time this loop may judge anything against.
+        //
+        // The wall clock is read here and handed to the witness, which refuses whatever the
+        // monotonic uptime does not support. Reading `SystemTime` directly was the cheapest bypass
+        // in the product: setting the clock forward ended every timer lock, gave every blocked name
+        // back, and emptied the resolver — and it left no trace, because the ended session was
+        // written to history as one that had genuinely run out. Its own short lock, so the rest of
+        // the pass is unchanged by it.
+        let now = {
+            let mut guard = enforcer.lock().expect("enforcer");
+            guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds())
+        };
         // Elapsed is clamped to the tick interval. A gap larger than that is the machine having
         // been asleep or off, and time the machine was off is not time the user spent on anything:
         // charging it to a budget would empty an allowance overnight.
@@ -424,7 +456,9 @@ pub fn run(
             let mut events = events;
             events.extend(peer_events.iter().cloned());
             events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
-            guard.observe_boot(curfew_win::windows::uptime_seconds());
+            // No `observe_boot` here: `observe_clock` above already folded this pass's uptime in,
+            // and it has to, because the witness compares its reading against the boot id. Doing it
+            // twice would be harmless but would suggest the ordering does not matter, and it does.
             let tick = guard.tick(now, elapsed, &events, &SystemProcesses::default());
             if let Some(resolver) = &resolver {
                 resolver.set(tick.domains.clone());

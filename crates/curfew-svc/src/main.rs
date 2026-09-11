@@ -261,7 +261,10 @@ fn stats(args: &[String]) -> i32 {
         ended_at: None,
     }));
 
-    let now = runner::now();
+    // A wall clock is right for a statistics report: the user asked what their week looked like,
+    // and the answer is about the days they remember, not about what a lock should be judged
+    // against. Enforcement never uses this.
+    let now = runner::wall_now();
     let summary = curfew_core::stats::summarize(&records, now, zone, days);
     match format {
         "csv" => print!("{}", summary.to_csv()),
@@ -357,7 +360,7 @@ fn upcoming(args: &[String]) -> i32 {
         }
     };
 
-    let now = runner::now();
+    let now = runner::wall_now();
     // Fetched into the same cache directory the service uses, so previewing warms the cache the
     // service will read rather than making a second copy of everybody's calendar.
     let mut feeds =

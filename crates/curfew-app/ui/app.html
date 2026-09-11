@@ -400,6 +400,11 @@ function pageHealth() {
   if (s.hosts_error) lines.push(["bad", "Website blocking is not working", s.hosts_error]);
   else lines.push(["ok", `${(s.blocked_domains || []).length} sites in the hosts file`, "Written by the service, checked every tick."]);
   if (s.state_warning) lines.push(["bad", "Saved locks may have been lost", s.state_warning]);
+  // Amber, not red: there is nothing to fix and nothing was lost. A moved clock is refused rather
+  // than obeyed, and time credited across a shutdown is ordinary life. Both are still worth saying,
+  // because a lock that is judged against a clock the user has just changed is exactly the thing
+  // this page exists to make visible.
+  if (s.clock_warning) lines.push(["mut", "The clock", s.clock_warning]);
   const failing = [...(s.failing || [])];
   if (failing.length) lines.push(["bad", `${failing.length} could not be closed`, failing.join(", ")]);
   const unwatched = [...(s.unwatched || [])];

@@ -176,6 +176,14 @@ pub struct Status {
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
     /// may have been lost.
     pub state_warning: Option<String>,
+    /// Set when the machine's clock has been moved, or when time was credited across a shutdown.
+    ///
+    /// The user is owed this for the same reason they are owed `state_warning`: both are cases where
+    /// something a lock depends on is not what it appears to be. It is a sentence rather than a flag
+    /// because the two cases mean different things — one is tampering that was caught, the other is
+    /// ordinary downtime — and a UI cannot tell them apart from a boolean.
+    #[serde(default)]
+    pub clock_warning: Option<String>,
     /// Emergency passes that could be spent right now, and why not when the answer is none. Both
     /// on every status, so a UI never has to ask a second question to know whether to offer the
     /// hatch or to explain its absence.

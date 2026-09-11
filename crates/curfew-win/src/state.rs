@@ -31,6 +31,14 @@ pub struct Persisted {
     pub boots: curfew_core::Boots,
     #[serde(default)]
     pub boot_counter: curfew_core::BootCounter,
+    /// The trusted clock's baseline: the last wall clock and uptime seen together, and the time
+    /// every later reading is measured from.
+    ///
+    /// Persisted for the same reason the boot counter is, and it matters more. The witness is what
+    /// refuses a wall clock that has been moved, and a baseline that a restart reset would make
+    /// "stop the service, set the clock, start the service" a way to end a timer lock early.
+    #[serde(default)]
+    pub clock: Option<curfew_core::ClockWitness>,
     /// Releases this device has given for peer locks. Kept because a release is a promise made to
     /// the other device, and a service restart must not take it back.
     #[serde(default)]

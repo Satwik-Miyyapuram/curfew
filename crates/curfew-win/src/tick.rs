@@ -13,6 +13,7 @@ use crate::blocked::blocked_domains;
 use crate::hosts;
 use crate::ipc::{Request, Response, Status};
 use crate::procs::{enforce, Outcome, Process, Processes};
+use curfew_core::clock::{ClockWitness, Reading, Verdict};
 use curfew_core::engine::charged_keys;
 use curfew_core::stats::{summarize, SessionRecord, Stats};
 use curfew_core::{
@@ -103,6 +104,21 @@ pub struct Enforcer {
     /// that forgot which boot it was in would answer a restart lock by guessing.
     pub boot_id: u64,
     pub boot_counter: curfew_core::BootCounter,
+    /// The clock locks are judged against, the last reading's verdict, and the sentence that
+    /// reading earned.
+    ///
+    /// The witness is persisted, because a baseline a restart reset is exactly what someone moving
+    /// the clock is hoping for. The other two are not: they describe one reading, and replaying a
+    /// stale one after a restart would claim tampering that had not happened since.
+    ///
+    /// `clock_notice` is deliberately sticky rather than recomputed from the latest verdict. A
+    /// verdict is about one reading, and the pass after a tamper reads a clock that has caught up
+    /// with uptime again and is therefore unremarkable — so a notice that tracked the latest verdict
+    /// would be true for one tick and gone, which is a notice no UI polling at any sane rate would
+    /// ever show. It is replaced by a later notable reading, and cleared by restarting the service.
+    pub clock: Option<ClockWitness>,
+    pub clock_verdict: Option<Verdict>,
+    pub clock_notice: Option<String>,
     /// Conditions this device has actually checked recently -- a password Windows accepted, a tag
     /// that matched. Deliberately not persisted: after a restart nothing is proven again.
     pub proofs: curfew_core::Proofs,
@@ -132,6 +148,44 @@ pub struct Enforcer {
     counter: usize,
 }
 
+/// The sentence a reading earns, or `None` when it was unremarkable.
+///
+/// Two different facts, and they deserve different words. Time *refused* is tampering that was
+/// caught and undone. Time *credited* across a reboot is not proof of anything — an honest
+/// overnight shutdown is indistinguishable from an hour stolen in the firmware — so it is reported
+/// as a caveat rather than an accusation, and it says so.
+fn notice_for(verdict: Verdict) -> Option<String> {
+    if verdict.tampered() {
+        let moved = verdict.refused_forward.max(verdict.refused_backward);
+        let direction = if verdict.refused_forward > 0 { "forward" } else { "backward" };
+        return Some(format!(
+            "This machine's clock was moved {direction} by about {}. That time was not credited to \
+             any lock, so nothing ended early — but the clock is not trustworthy until it is \
+             corrected.",
+            rough_duration(moved)
+        ));
+    }
+    if verdict.unverified > 0 {
+        return Some(format!(
+            "{} passed while this machine was switched off. It is counted as real time, because an \
+             honest shutdown cannot be told apart from a clock moved while the machine was off.",
+            rough_duration(verdict.unverified)
+        ));
+    }
+    None
+}
+
+/// "1 h 5 min", "12 min", "40 s" — for a sentence a person reads, not for a log.
+fn rough_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    match seconds {
+        0..=90 => format!("{seconds} s"),
+        s if s < 3600 => format!("{} min", s / 60),
+        s if s % 3600 < 60 => format!("{} h", s / 3600),
+        s => format!("{} h {} min", s / 3600, (s % 3600) / 60),
+    }
+}
+
 impl Enforcer {
     pub fn new(config: Config, hosts_path: PathBuf) -> Self {
         Self {
@@ -149,6 +203,9 @@ impl Enforcer {
             boots: Default::default(),
             boot_id: 0,
             boot_counter: Default::default(),
+            clock: None,
+            clock_verdict: None,
+            clock_notice: None,
             proofs: Default::default(),
             releases: BTreeSet::new(),
             released: BTreeMap::new(),
@@ -170,6 +227,58 @@ impl Enforcer {
         self.boot_id = self.boot_counter.observe(uptime);
     }
 
+    /// Take a reading of both of the machine's clocks and return the instant locks are judged
+    /// against.
+    ///
+    /// This is the *only* place Windows enforcement time comes from. Reading `SystemTime` and using
+    /// it directly was the cheapest bypass there is: the clock is user-settable, so moving it
+    /// forward ended every timer lock, released every host entry, and emptied the domains the
+    /// resolver was holding — and it left no trace, because the ended session was written to history
+    /// as one that had genuinely run out. The core has had the answer to this since
+    /// `curfew_core::clock` was written; the Windows service simply never called it.
+    ///
+    /// Uptime is folded in first, so `boot_id` is current before the witness compares against it.
+    /// That ordering matters: a witness told about a boot after it has already seen a reading from
+    /// it would read the change as a reboot and credit the wall clock's whole delta as unverified.
+    ///
+    /// Called from the edge rather than from inside [`Enforcer::tick`], for the same reason
+    /// [`Enforcer::observe_boot`] is: a test can hand it two numbers instead of waiting for a clock
+    /// to move.
+    pub fn observe_clock(&mut self, wall: Timestamp, uptime: i64) -> Timestamp {
+        self.observe_boot(uptime);
+        let reading = Reading { wall, uptime, boot_id: self.boot_id };
+        let verdict = match self.clock.as_mut() {
+            Some(witness) => witness.observe(reading),
+            None => {
+                // Nothing to check a first reading against, so it is taken on faith and recorded as
+                // the baseline every later reading is measured from.
+                let witness = ClockWitness::new(reading);
+                let now = witness.now();
+                self.clock = Some(witness);
+                Verdict { now, refused_forward: 0, refused_backward: 0, unverified: 0 }
+            }
+        };
+        self.clock_verdict = Some(verdict);
+        if let Some(notice) = notice_for(verdict) {
+            self.clock_notice = Some(notice);
+        }
+        verdict.now
+    }
+
+    /// The trusted instant without taking a new reading, or `None` before the first one.
+    pub fn clock_now(&self) -> Option<Timestamp> {
+        self.clock.as_ref().map(ClockWitness::now)
+    }
+
+    /// What is worth saying out loud about the clock, if anything.
+    ///
+    /// Two different facts, and they deserve different words. Time refused is tampering that was
+    /// caught and undone. Time credited across a reboot is *not* proof of anything — an honest
+    /// overnight shutdown looks exactly like a stolen hour — so it is reported as a caveat rather
+    /// than an accusation.
+    pub fn clock_warning(&self) -> Option<String> {
+        self.clock_notice.clone()
+    }
     /// Everything this device can prove about a session's lock without being told.
     ///
     /// This is what separates a condition that is *checked* from one that is merely claimed. A
@@ -398,6 +507,7 @@ impl Enforcer {
                 freeze: self.freeze.clone(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
+                clock_warning: self.clock_warning(),
                 passes_left: self.passes.remaining(now, &self.config.emergency),
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
