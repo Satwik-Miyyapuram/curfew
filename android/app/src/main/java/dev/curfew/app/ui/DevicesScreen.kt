@@ -66,6 +66,16 @@ fun DevicesScreen(model: CurfewViewModel) {
     var typed by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("") }
 
+    /**
+     * The device whose removal is being confirmed — F-14.
+     *
+     * It was a `Tap` straight to `model.revokeDevice`, which made it the **only destructive action in
+     * the app with no confirmation**. Removing a profile asks (`ProfileEditScreen`), spending a pass
+     * asks, releasing a peer asks, and asking for the 24-hour release asks — all of them with the
+     * consequence named. This one did not, and it is the action that can leave a lock with no way out.
+     */
+    var removing by remember { mutableStateOf<String?>(null) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
         verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -299,7 +309,7 @@ fun DevicesScreen(model: CurfewViewModel) {
                 )
                 if (peer.isActive) {
                     Gap(10.dp)
-                    Tap("Remove this device", Palette.Bad) { model.revokeDevice(peer.id) }
+                    Tap("Remove this device", Palette.Bad) { removing = peer.id }
                     Gap(6.dp)
                     Text(
                         "Removing it does not end any block it started here.",
@@ -311,6 +321,44 @@ fun DevicesScreen(model: CurfewViewModel) {
             }
         }
         item { Gap(Dsn.BottomRoom) }
+    }
+
+    // The confirmation, which this action did not have — F-14.
+    removing?.let { id ->
+        val peer = sync.peers.firstOrNull { it.id == id }
+        val name = peer?.identity?.name ?: id
+        // Named only when true. A lock that awaits this device loses its exit the moment it goes, and
+        // that is the one consequence the old copy did not mention: it said removal "does not end any
+        // block it started here", which is about blocks, not about ways out.
+        val awaiting = locksAwaitingDevice(state.weekly, state.calendarRules, id)
+        DConfirm(
+            title = "Stop listening to $name?",
+            body = buildString {
+                append("It will be ignored from now on, and anything it says will be refused.")
+                if (awaiting > 0) {
+                    append("\n\n")
+                    append(
+                        if (awaiting == 1) {
+                            "One of your schedules waits for this device specifically to let it go. "
+                        } else {
+                            "$awaiting of your schedules wait for this device specifically to let go. "
+                        },
+                    )
+                    append(
+                        "Removing it leaves that lock with no way out at all — not another device, not " +
+                            "a pass. Pair it again first if you still want the way out you built.",
+                    )
+                }
+            },
+            dismiss = "Keep it",
+            confirm = "Remove it",
+            destructive = true,
+            onDismiss = { removing = null },
+            onConfirm = {
+                removing = null
+                model.revokeDevice(id)
+            },
+        )
     }
 }
 

@@ -30,6 +30,7 @@ DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what
 DevicesScreen.kt|${sync.nearby.size} of your devices in earshot.
 DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
 DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
+DevicesScreen.kt|Stop listening to $name?
 MainActivity.kt|${notice.text}. Tap to dismiss.
 NowScreen.kt|$name ends ${relative(endsAt, now)}
 NowScreen.kt|$name ends ${relative(endsAt, now)}

@@ -32,10 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /**
  * The one screen that is about the app rather than about the phone.
  *
- * It leads with the Simple/Power switch, because that switch changes what every other screen looks
- * like and a user who cannot find it is stuck in whichever half of the app suits them less.
- *
- * Under it is the only question this screen really has to answer: **can Curfew actually enforce
+ * It leads with the only question this screen really has to answer: **can Curfew actually enforce
  * anything right now**. That is a list of what it can do with a tick beside it, and a Fix button
  * beside anything it cannot — not a wall of permission names, and not something filed under an
  * advanced heading, because a permission Curfew is missing is a block that is not going to happen.
@@ -114,11 +111,18 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         SectionLabel("Syncing")
         Gap(10.dp)
         DCard(padding = 18.dp) {
-            // Syncing used to be visible only on the Devices screen, which Simple mode never
-            // reached: a user whose blocks were following them between two devices had no way of
-            // seeing that this was happening, or of making it happen now. There is no "last
-            // synced" clock to show — devices talk when they are in earshot of each other, not on
-            // a schedule — so it says what is actually true at this moment.
+            // Syncing used to be visible only on the Devices screen, one tap further in and reachable
+            // only once a device was paired: a user whose blocks were following them between two
+            // devices had no way of seeing that this was happening, or of making it happen now.
+            //
+            // This comment used to say "which Simple mode never reached". **There is no Simple mode.**
+            // It was designed in `docs/PLAN-mobile-polish.md` §4 and never built — the de-cluttering it
+            // was meant to achieve was done by shortening the nav bar for everyone instead. The reason
+            // above is unchanged and still true; only the mechanism named was fiction, which is the
+            // fifth time this codebase has had a comment describing something the code does not do.
+            //
+            // There is no "last synced" clock to show — devices talk when they are in earshot of each
+            // other, not on a schedule — so it says what is actually true at this moment instead.
             Text(
                 when {
                     !state.sync.available -> "Syncing is not set up on this device."

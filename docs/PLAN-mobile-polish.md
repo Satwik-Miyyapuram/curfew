@@ -46,6 +46,17 @@ without it" line, but the action is one tap and it is the system's own UI.
 
 ## 4. Two voices, one app
 
+> **Status, added after the fact (F-11).** **The two modes were never built, and this is deliberate.**
+> There is no Simple/Power switch in the app and no plan to add one. What section 4 was *for* — a nav
+> bar that stops being the most crowded thing on screen — was achieved by **shortening the bar for
+> everyone**: seven tabs became four, and Usage, Health and Devices moved one level in to Settings. That
+> is a better answer than two modes, because it does not make one group of users the crippled build.
+>
+> Of the two bullets below, both landed and neither needed a mode to land: **sync is in Settings** with
+> a plain line saying what is true now, and **Usage is written for a person** — the interaction review
+> called it *"the best-executed flow in the product"*. The section is kept as written because it is the
+> record of what was intended; this note is the record of what happened.
+
 **Simple mode** is the default and is not a crippled build:
 - Sync lives in Settings, not on the home screen — but it is *there*, discoverable, with a plain
   "last synced" line. Today a simple-mode user cannot see syncing at all.
@@ -101,6 +112,10 @@ New or redrawn artboards:
 
 ## Step 1 — build, in this order
 
+> **Status (F-11).** Items 4 and 6 say "for Simple" and "Power mode redefined" — **there is no Simple or
+> Power mode** (§4), so read both as "for everyone": the bar was shortened rather than split. Both landed
+> that way. Item 4's "same five tabs" is also four now.
+
 1. **Immediacy.** Every mutation already calls `refresh()`, and there is a one-second tick, so the
    "only updates when I leave and come back" symptom is not a missing call: it is `refresh()` being
    slow or stalling. It reads the filesystem, the database, the sync node (which waits on the same
@@ -118,6 +133,12 @@ New or redrawn artboards:
 7. **Glass material** applied beyond the nav bar: sheets, dialogs, block screen.
 
 ## Already landed while this plan was being written
+
+> **Status (F-11).** Two of these are wrong as *current* state, though both were true when written. The
+> bar has **four** tabs, not five — the schedule surfaces live under Plan, and Events sits on the bar
+> beside Now. And "in Simple mode" describes a mode that was never built (see §4). The substance of that
+> bullet is right and unchanged: the previous build told a user to "go to the Events tab" and then hid
+> it, and Events is reachable from the bar now.
 
 - Floating etched-glass nav bar, five tabs, identical in both modes. Events is now on the bar in
   Simple mode — the previous build told a Simple user to "go to the Events tab" and then hid it.

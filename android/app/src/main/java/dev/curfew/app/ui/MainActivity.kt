@@ -110,7 +110,7 @@ private enum class Tab(
     Settings("settings", "Settings", "Settings", Icons.Filled.Settings),
 }
 
-/** Routes Settings links to, so a Simple user can still reach every screen that exists. */
+/** Routes Settings links to, so every screen that exists is reachable from the bar of four. */
 object Routes {
     const val CALENDAR = "calendar"
     const val USAGE = "usage"

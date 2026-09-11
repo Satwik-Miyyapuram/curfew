@@ -89,6 +89,7 @@ DevicesScreen.kt|Pair only if your other device is showing these same six digits
 DevicesScreen.kt|Paired
 DevicesScreen.kt|Pairing code for the other device to read
 DevicesScreen.kt|Read this on your other device. It will show you a code back, and 
+DevicesScreen.kt|Remove it
 DevicesScreen.kt|Remove this device
 DevicesScreen.kt|Removed. Nothing it says is listened to.
 DevicesScreen.kt|Removing it does not end any block it started here.

@@ -5,7 +5,9 @@ import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import dev.curfew.policy.PassRefusal
+import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.SessionSource
+import dev.curfew.policy.WeeklySchedule
 import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
@@ -157,6 +159,38 @@ fun describeLock(lock: Lock): String = when (lock) {
     is Lock.PeerRelease -> "another of your devices to let it go"
     is Lock.Token -> "the tag you set aside (${lock.id})"
     is Lock.RestartRequired -> "this device to be restarted"
+}
+
+/**
+ * How many scheduled locks name [deviceId] as the device that can release them.
+ *
+ * This exists for one sentence, on one confirmation: **removing a paired device can take away a lock's
+ * only way out.** `Lock.PeerRelease` requires a *specific* device (`lock.rs`: *"Only a specific paired
+ * device can release"*), so the exit a user configured is that device and nothing else. Removing it
+ * leaves the lock unsatisfiable — the session cannot be ended by any means the user still has.
+ *
+ * F-14 in the interaction review, and the review is right about the substance. It is wrong about one
+ * detail: it says the action's confirmation "Devices never renders", which was true when it was written
+ * and is not now — `MainActivity` renders `state.message` for the whole app (entry 19), so
+ * *"That device will be ignored from now on."* does appear. The unconfirmed tap and the missing
+ * consequence were both still real.
+ *
+ * **Pure, and that is why it lives here rather than in the screen**: it takes the two lists the UI
+ * already holds and returns a number, so it can be tested without an `Application`, a database or a
+ * composition — none of which this host can provide.
+ *
+ * Sessions are deliberately **not** included. A running session's lock set was copied from a schedule
+ * when it started, so counting both would report a lock twice for as long as it runs; the schedule is
+ * the durable answer and the one the user can still edit.
+ */
+fun locksAwaitingDevice(
+    weekly: List<WeeklySchedule>,
+    rules: List<CalendarSchedule>,
+    deviceId: String,
+): Int {
+    fun names(lock: Lock) = lock is Lock.PeerRelease && lock.deviceId == deviceId
+    return weekly.sumOf { window -> window.locks.count(::names) } +
+        rules.sumOf { rule -> rule.locks.count(::names) }
 }
 
 /**
