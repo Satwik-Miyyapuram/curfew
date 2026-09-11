@@ -79,6 +79,34 @@ curfew — distraction blocking that keeps its promises
   curfew uninstall                 remove it (refused while a lock is held)
 ";
 
+/// The sentence refusing a removal, or `None` when there is nothing to refuse.
+///
+/// `None` covers both "no service is running" and "nothing is enforcing that schedule", and they are
+/// deliberately not distinguished: neither is an error, and the caller does the same thing either way.
+///
+/// **Only a *running* session blocks a removal.** A schedule that is not currently enforcing anything can
+/// be deleted freely — that is the ordinary edit, and refusing it would make the plan unmaintainable
+/// without ending a lock first, which is exactly backwards.
+fn removal_refusal(id: &str) -> Option<String> {
+    let Response::Status(status) = curfew_win::ipc::ask(&Request::Status).ok()? else {
+        return None;
+    };
+    let held = curfew_core::session::running_from(&status.running, id);
+    let names: Vec<&str> = held.iter().map(|s| status.name_of(&s.profile)).collect();
+    if names.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Not removed: {} is running under {id} right now, and a running session keeps its own copy of \
+         what it blocks — so deleting the schedule would leave the lock in force and the plan no longer \
+         explaining why.\n\n\
+         End the session first (the lock's conditions decide how), or leave it: it stops on its own at \
+         the end of its window, and the removal will go through then.\n\n\
+         Nothing short of the 24-hour release shortens a lock that is already running.",
+        names.join(", ")
+    ))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("status");
@@ -87,6 +115,23 @@ fn main() {
     // never installed, and on Linux, where there is no service to talk to at all.
     if curfew_cli::handles(command) {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        // **A removal a running lock derives from is refused** — P2-11.
+        //
+        // The session keeps its own copy of what it blocks, so the lock is not weakened and this is not a
+        // bypass: it is that the user is not told, and `README.md` says *"a lock is a promise — nothing
+        // shortens it except the conditions you chose"*. Somebody who reads that and runs
+        // `curfew remove <the window blocking me>` believes they have stopped it. The honest answer is the
+        // one the uninstaller gives: not while it is holding you.
+        //
+        // Asked over the pipe, like the `Reload` below. A service that is not running makes this a no-op,
+        // which is the config-first workflow the module doc describes — preparing a file to copy
+        // elsewhere must not be blocked by a question nobody can answer.
+        if let Some(id) = curfew_cli::removal_target(&refs) {
+            if let Some(refusal) = removal_refusal(id) {
+                eprintln!("{refusal}");
+                std::process::exit(2);
+            }
+        }
         let code = curfew_cli::run(&refs);
         // A write the running service has not been told about is the worst failure this product has:
         // the file says the plan changed, the window reads the same file and shows the change, and

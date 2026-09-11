@@ -3,7 +3,7 @@
 
 use curfew_core::emergency::{EmergencyPolicy, Passes};
 use curfew_core::schedule::{Activation, ActivationSource};
-use curfew_core::session::{reconcile, Refusal, Session, SessionSource, Sessions};
+use curfew_core::session::{reconcile, running_from, Refusal, Session, SessionSource, Sessions};
 use curfew_core::{Lock, LockSet, Timestamp, DELAYED_RELEASE_SECONDS};
 use std::collections::BTreeSet;
 
@@ -632,4 +632,105 @@ fn every_condition_is_accounted_for() {
     assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::RestartRequired)));
     assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::Challenge { .. })));
     assert!(offers.delayed_release);
+}
+
+// --- which running session a schedule is holding (P2-11) -----------------------------------------
+//
+// `curfew remove <id>` deletes a window or calendar rule and nothing in the running service notices. The
+// session keeps its own copy of what it blocks, so the lock is not weakened — but the user is not told,
+// and the README says a lock is a promise that only its own conditions shorten. This is the predicate that
+// lets a caller refuse instead, and refusing is right in exactly one direction: a schedule that is *not*
+// enforcing anything must be deletable, or the plan becomes unmaintainable without ending a lock first.
+
+fn a_session(id: &str, profile: &str, source: SessionSource) -> Session {
+    Session {
+        id: id.into(),
+        profile: profile.into(),
+        source,
+        started_at: NOW,
+        lock: LockSet::new([Lock::Timer], None),
+    }
+}
+
+/// **The case the finding is about**: a weekly window is holding a session, so removing it is refused.
+#[test]
+fn a_running_weekly_window_is_reported_as_holding_a_session() {
+    let running = vec![a_session(
+        "s1",
+        "deep-work",
+        SessionSource::Weekly { schedule: "weekday-mornings".into() },
+    )];
+
+    let held = running_from(&running, "weekday-mornings");
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].id, "s1");
+}
+
+/// A calendar rule the same, because it carries the schedule id too.
+#[test]
+fn a_running_calendar_rule_is_reported_as_holding_a_session() {
+    let running = vec![a_session(
+        "s1",
+        "deep-work",
+        SessionSource::Calendar { schedule: "work-focus".into(), event: "e1".into() },
+    )];
+
+    assert_eq!(running_from(&running, "work-focus").len(), 1);
+}
+
+/// **And the other direction, which is what keeps the plan editable.** A schedule that is not enforcing
+/// anything can be removed freely: that is the ordinary edit, and refusing it would mean ending a lock
+/// before every change to the plan.
+#[test]
+fn a_schedule_that_is_not_running_is_not_reported() {
+    let running = vec![
+        a_session("s1", "deep-work", SessionSource::Weekly { schedule: "weekday-mornings".into() }),
+        // **A calendar session too, asked about a different id.** Both arms need this: without a calendar
+        // case here, replacing the calendar arm's comparison with `true` changes no outcome in any test,
+        // because every other calendar fixture asks about the id it actually carries.
+        a_session(
+            "s2",
+            "deep-work",
+            SessionSource::Calendar { schedule: "work-focus".into(), event: "e1".into() },
+        ),
+    ];
+
+    assert!(running_from(&running, "some-other-window").is_empty());
+    for other in ["weekday-mornings", "work-focus"] {
+        let found = running_from(&running, other);
+        // Neither is "not reported": asking about the id a session carries *does* report it, which is the
+        // other half of this predicate. What matters is that it reports only its own.
+        assert_eq!(found.len(), 1, "{other} reported the wrong number of sessions");
+        assert_eq!(found[0].id, if other == "weekday-mornings" { "s1" } else { "s2" });
+    }
+    assert!(running_from(&[], "weekday-mornings").is_empty());
+}
+
+/// A session started by hand is not derived from any schedule, so no removal is refused on its account.
+#[test]
+fn a_manual_session_holds_no_schedule() {
+    let running = vec![a_session("s1", "deep-work", SessionSource::Manual)];
+
+    assert!(
+        running_from(&running, "weekday-mornings").is_empty(),
+        "a manual session was attributed to a schedule"
+    );
+}
+
+/// Two sessions from the same schedule are both reported, because the refusal names the profiles.
+#[test]
+fn every_session_from_a_schedule_is_reported() {
+    let running = vec![
+        a_session("s1", "deep-work", SessionSource::Weekly { schedule: "w".into() }),
+        a_session(
+            "s2",
+            "evenings",
+            SessionSource::Calendar { schedule: "w".into(), event: "e".into() },
+        ),
+        a_session("s3", "other", SessionSource::Weekly { schedule: "elsewhere".into() }),
+    ];
+
+    let held = running_from(&running, "w");
+    assert_eq!(held.len(), 2, "both sessions from a schedule should be reported");
+    assert!(held.iter().all(|s| s.profile != "other"), "an unrelated session was attributed");
 }

@@ -56,6 +56,21 @@ pub fn handles(command: &str) -> bool {
     )
 }
 
+/// The id a `remove` would delete, when the command is a removal.
+///
+/// **P2-11.** The service refuses a removal that a running lock derives from, and it needs the id to ask.
+/// Deriving it here rather than re-parsing the command line in the caller keeps one copy of the argument
+/// layout — this module owns `CONFIG_ARG` for the same reason.
+///
+/// `None` for anything that is not a removal, so a caller cannot mistake a write for one: adding a
+/// window is not a weakening, and refusing it would be a bug of its own.
+pub fn removal_target<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    match args {
+        ["remove", _config, id, ..] => Some(id),
+        _ => None,
+    }
+}
+
 /// Whether `command` changes the config file rather than only reading it.
 ///
 /// The two reading commands need nothing afterwards. Every other verb writes, and a write the running

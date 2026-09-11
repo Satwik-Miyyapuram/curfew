@@ -95,6 +95,31 @@ pub struct Sessions {
     pub dismissed: BTreeMap<String, Timestamp>,
 }
 
+/// A running session that a given schedule started.
+///
+/// **P2-11.** `curfew remove <id>` deletes a window or calendar rule and nothing in the running
+/// service notices: the session keeps its own copy of what it blocks, so the lock is not weakened —
+/// but the user is told nothing about that, and `README.md` says *"a lock is a promise — nothing
+/// shortens it except the conditions you chose"*, so they reasonably expect the removal to have
+/// stopped it.
+///
+/// This is the predicate that lets a caller refuse instead. It lives here because [`SessionSource`]
+/// already records which schedule started a session, and because the answer is the same on every
+/// platform — what differs is only who can be asked, which is the caller's problem.
+///
+/// A profile is deliberately **not** matched: a session records the schedule that started it, and a
+/// profile is a list of things to block rather than something that starts on its own.
+pub fn running_from<'a>(running: &'a [Session], schedule: &str) -> Vec<&'a Session> {
+    running
+        .iter()
+        .filter(|session| match &session.source {
+            SessionSource::Weekly { schedule: id } => id == schedule,
+            SessionSource::Calendar { schedule: id, .. } => id == schedule,
+            SessionSource::Manual => false,
+        })
+        .collect()
+}
+
 impl Sessions {
     /// Start a session, or strengthen the one already running for that profile.
     ///
