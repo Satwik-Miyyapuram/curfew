@@ -2,12 +2,15 @@ package dev.curfew.app.ui
 
 import android.app.Application
 import android.net.Uri
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.curfew.app.data.AuditRow
 import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.app.data.CalendarReader
 import dev.curfew.app.data.Downtime
+import dev.curfew.app.R
 import dev.curfew.app.curfew
 import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.Action
@@ -104,8 +107,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         if (visible) viewModelScope.launch { refresh() }
     }
 
-    private fun refreshFast() {
-        val now = runtime.clock.now()
+    private suspend fun refreshFast() {
+        // The trusted clock, not the wall clock. `runtime.clock.now()` is `System.currentTimeMillis`
+        // and the user can set it, so reading it here put a settable value in front of the reaper:
+        // move the clock forward two hours, open Curfew, and `endsAt <= now` holds, `reconcileNow`
+        // reaps the session against the same forged instant, and the lock is gone before any screen
+        // has had a chance to show the tamper banner. That is the exact bypass `curfew_core::clock`
+        // exists to refuse.
+        val now = runtime.trustedNowLight()
         // A timer that reaches zero has to end the session itself. It used to sit at zero until
         // the enforcement service's next poll noticed — up to half a minute, and longer if the
         // service was dozing — which read as "I have to press End now or it never ends". The
@@ -138,12 +147,25 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() {
         withContext(Dispatchers.Default) {
             // Sessions come first: a write that has just landed is the reason this was called.
-            val now = runtime.clock.now()
+            //
+            // Trusted: this instant reaches `activations`, `stats` and every screen showing a
+            // countdown, and it is the same instant the enforcement tick uses — so a moved clock
+            // cannot make the UI agree with a session the enforcer has refused to end.
+            val now = runtime.trustedNowLight()
             // The browsing window, not the enforcement one: this list is also what the Events
             // screen shows, and a calendar that stopped at tomorrow looked to the user like a
             // calendar that had lost most of their year.
-            val events = runCatching { runtime.calendarEvents(now, CalendarReader.BROWSE_SECONDS) }
-                .getOrDefault(emptyList())
+            //
+            // The failure is kept, not swallowed into an empty list. `getOrDefault(emptyList())`
+            // made a calendar that could not be *read* indistinguishable from a calendar with
+            // nothing in it: the Events screen drew its ordinary "nothing on today" empty state over
+            // a read that had failed, which is the app asserting something it does not know. It is
+            // the same rule as the downtime banner in §10 — say what actually happened.
+            val calendarRead = runCatching { runtime.calendarEvents(now, CalendarReader.BROWSE_SECONDS) }
+            val events = calendarRead.getOrDefault(emptyList())
+            val calendarError = calendarRead.exceptionOrNull()?.let {
+                it.message ?: "Your calendar could not be read just now."
+            }
             val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
             val activations = runCatching { runtime.policy.activations(now, events) }
                 .getOrDefault(emptyList())
@@ -177,6 +199,20 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 .sortedByDescending { it.second }
             val opens = usage?.launches.orEmpty().mapValues { (_, l) -> l.opens.size }
 
+            // The config is read once and the failure kept, rather than `getOrDefault("")`.
+            //
+            // An empty string is a *valid* config to every reader here, so a failed read made the
+            // raw editor on the Schedule screen open on a blank page — and `saveConfig` validates what
+            // it is given, not that it replaced what was there, so saving that page replaced the
+            // user's whole config with whatever they had just typed. The export button was worse: it
+            // wrote `state.configToml` to a file, so a failed read exported an empty backup over a
+            // good one. Both are guarded on `configError` now.
+            val configRead = runCatching { runtime.policy.configToml() }
+            val configToml = configRead.getOrDefault("")
+            val configError = configRead.exceptionOrNull()?.let {
+                it.message ?: "Your config could not be read."
+            }
+
             _state.update { previous ->
                 previous.copy(
                     now = now,
@@ -187,13 +223,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
                     spentSeconds = spent,
                     launchCounts = opens,
-                    configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
+                    configToml = configToml,
+                    configError = configError,
                     weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
                     calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
                     // Anything that has not finished yet, soonest first. Events already over are
                     // dropped rather than greyed out: the list exists to be pointed at, and a
                     // finished meeting is not something a new rule can usefully be built from.
                     calendarEvents = events.filter { it.end > now }.sortedBy { it.start },
+                    calendarError = calendarError,
                     eventRules = eventRules,
                     calendarGranted = CalendarReader(getApplication()).hasPermission(),
                     profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
@@ -251,13 +289,13 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * two screens.
      */
     fun offerPairing() {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         runCatching { hub.sync.invite(runtime.clock.now()) }
             .onSuccess { json ->
                 pending = null
                 _state.update { it.copy(sync = it.sync.copy(offering = Offer(json, ""))) }
             }
-            .onFailure { say(it.message ?: "That invite could not be made.") }
+            .onFailure { say(it.message ?: str(R.string.invite_failed)) }
     }
 
     /**
@@ -268,19 +306,19 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * phrase exists, so [confirmPairing] is deliberately a separate press.
      */
     fun answerPairing(inviteJson: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         val invite = inviteJson.trim()
         runCatching { Offer(hub.sync.replyTo(invite), hub.sync.phrase(invite), isReply = true) }
             .onSuccess { offer ->
                 pending = invite
                 _state.update { it.copy(sync = it.sync.copy(offering = offer)) }
             }
-            .onFailure { say("That is not a Curfew invite.") }
+            .onFailure { say(str(R.string.not_an_invite)) }
     }
 
     /** Read back the reply from the invited device, so this side can show its phrase too. */
     fun readReply(replyJson: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         val reply = replyJson.trim()
         runCatching { hub.sync.phrase(reply) }
             .onSuccess { phrase ->
@@ -289,13 +327,13 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(sync = it.sync.copy(offering = Offer(reply, phrase, isReply = true)))
                 }
             }
-            .onFailure { say("That is not a Curfew reply.") }
+            .onFailure { say(str(R.string.not_a_reply)) }
     }
 
     /** Pair, now that the person has said the two phrases matched. */
     fun confirmPairing() {
         val hub = runtime.sync ?: return
-        val invite = pending ?: return say("Read the other device code first.")
+        val invite = pending ?: return say(str(R.string.read_other_code_first))
         viewModelScope.launch {
             runCatching { hub.sync.accept(invite, runtime.clock.now()) }
                 .onSuccess {
@@ -303,9 +341,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     hub.refreshPeers()
                     pending = null
                     _state.update { it.copy(sync = it.sync.copy(offering = null)) }
-                    say("Paired.")
+                    note(str(R.string.paired))
                 }
-                .onFailure { say(it.message ?: "That pairing could not be completed.") }
+                .onFailure { say(it.message ?: str(R.string.pairing_failed)) }
             refresh()
         }
     }
@@ -330,9 +368,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess {
                     hub.save()
                     hub.refreshPeers()
-                    say("That device will be ignored from now on.")
+                    note(str(R.string.device_ignored))
                 }
-                .onFailure { say(it.message ?: "That device could not be removed.") }
+                .onFailure { say(it.message ?: str(R.string.device_remove_failed)) }
             refresh()
         }
     }
@@ -342,10 +380,10 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val pass = runtime.syncPass()
             when {
-                pass == null -> say("Sync is not running on this device.")
+                pass == null -> say(str(R.string.sync_not_running))
                 pass.adopted.isNotEmpty() ->
-                    say("Took up ${pass.adopted.size} block(s) from another device.")
-                else -> say("Up to date.")
+                    note(plural(R.plurals.adopted_blocks, pass.adopted.size))
+                else -> note(str(R.string.up_to_date))
             }
             refresh()
         }
@@ -353,15 +391,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Exchange through a folder both devices can see, for devices never on one network. */
     fun folderPass(root: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         viewModelScope.launch {
             runCatching { hub.sync.folderPass(root.trim()) }
                 .onSuccess { pass ->
                     hub.save()
-                    say("Took in ${pass.accepted} update(s), left ${pass.written} behind.")
+                    note(plural(R.plurals.took_in_updates, pass.accepted, pass.written))
                     runtime.syncPass()
                 }
-                .onFailure { say(it.message ?: "That folder could not be used.") }
+                .onFailure { say(it.message ?: str(R.string.folder_failed)) }
             refresh()
         }
     }
@@ -384,7 +422,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.endSession(session.id, satisfied)
-                say("${session.profile} ended.")
+                // **No acknowledgement.** F-8: the receipt is the card disappearing. Principle 4 of
+                // `UX-FLOWS.md` is "dialogs are for decisions, never for acknowledgements", and the
+                // same applies to this banner — the user tapped End, the session ended, and the card
+                // they were looking at is gone. A sentence saying so is one more thing to read and tap
+                // away, for an action whose whole result they just watched happen.
+                //
+                // It was a modal when the review was written; entry 19 made it a banner, which fixed
+                // the mechanism and left the substance.
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -417,7 +462,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.scanToken(session.id, payload)
-                say("${session.profile} ended.")
+                // No acknowledgement here either, for the same reason as `endSession`: the sheet
+                // closes and the card vanishes, which is the receipt.
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -436,7 +482,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun releasePeer(id: String) {
         viewModelScope.launch {
             runtime.releasePeer(id)
-            say("Released. The other device will act on it within a few seconds.")
+            note(str(R.string.released))
             refresh()
         }
     }
@@ -445,8 +491,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun requestRelease(session: Session) {
         viewModelScope.launch {
             runCatching { runtime.requestRelease(session.id) }
-                .onSuccess { say("Release for ${session.profile} lands ${relative(it, runtime.clock.now())}.") }
-                .onFailure { say("That session cannot be released early.") }
+                .onSuccess { note(str(R.string.release_lands, runtime.profileName(session.profile), relative(it, runtime.clock.now()))) }
+                .onFailure { say(str(R.string.cannot_release_early)) }
             refresh()
         }
     }
@@ -462,7 +508,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.spendPass(session.id)
-                say("${session.profile} ended with an emergency pass.")
+                note(str(R.string.ended_with_pass, runtime.profileName(session.profile)))
             } catch (e: NoPass) {
                 say(describePassRefusal(e.refusal, runtime.clock.now()))
             } catch (refused: Refused) {
@@ -501,7 +547,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveConfig(toml: String) {
         viewModelScope.launch {
             runtime.setConfig(toml)
-                .onFailure { say(it.message ?: "That config could not be loaded.") }
+                .onFailure { say(it.message ?: str(R.string.config_load_failed)) }
             refresh()
         }
     }
@@ -532,7 +578,10 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startTimer(profile: String, seconds: Int, locks: List<Lock> = emptyList()) {
         viewModelScope.launch {
-            val now = runtime.clock.now()
+            // Trusted, for the same reason the tick uses it: `endsAt` is minted from here, so a
+            // clock moved *back* before starting would stretch a ninety-minute lock by however long
+            // the lie lasted.
+            val now = runtime.trustedNowLight()
             val session = Session(
                 // Distinct from a reconciled session's id, which is minted from the activation, so
                 // a timer and a schedule for the same profile can never collide.
@@ -543,7 +592,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 lock = LockSet(conditions = locks, endsAt = now + seconds),
             )
             runCatching { runtime.startSession(session) }
-                .onFailure { say(it.message ?: "That could not be started.") }
+                .onFailure { say(it.message ?: str(R.string.start_failed)) }
             refresh()
         }
     }
@@ -551,7 +600,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveProfile(id: String, name: String, description: String = "") {
         viewModelScope.launch {
             runtime.saveProfile(id, name, description)
-                .onFailure { say(it.message ?: "That profile could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.profile_save_failed)) }
             refresh()
         }
     }
@@ -567,18 +616,30 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.saveProfile(id, name)
                 .mapCatching { runtime.saveWeekly(window).getOrThrow() }
-                .onFailure { say(it.message ?: "That window could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
             refresh()
         }
     }
 
-    fun deleteProfile(id: String) {
+    /**
+     * Remove a profile, and say whether it worked.
+     *
+     * `onDone` runs **only on success**, which is the point of it. The one caller used to call
+     * `deleteProfile(id)` and navigate back on the very next line, so the screen left before the core
+     * had answered — and the routine refusal ("a window still points at this profile", named
+     * precisely so the user can fix it) arrived on a screen that no longer existed. Failure now leaves
+     * the user where the problem is, with the banner explaining it.
+     */
+    fun deleteProfile(id: String, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             runtime.deleteProfile(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onSuccess {
+                    note(str(R.string.removed))
+                    onDone()
+                }
                 // The core's message names the schedules still pointing at it, which is exactly
                 // what the user needs in order to fix it.
-                .onFailure { say(it.message ?: "That profile could not be removed.") }
+                .onFailure { say(it.message ?: str(R.string.profile_remove_failed)) }
             refresh()
         }
     }
@@ -586,7 +647,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveWeekly(window: WeeklySchedule) {
         viewModelScope.launch {
             runtime.saveWeekly(window)
-                .onFailure { say(it.message ?: "That window could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
             refresh()
         }
     }
@@ -596,8 +657,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // Said plainly, because it is the part people get wrong: deleting the rule that
             // started a session does not end the session.
             runtime.deleteWeekly(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That window could not be removed.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.window_remove_failed)) }
             refresh()
         }
     }
@@ -605,7 +666,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCalendarRule(rule: CalendarSchedule) {
         viewModelScope.launch {
             runtime.saveCalendarRule(rule)
-                .onFailure { say(it.message ?: "That rule could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.rule_save_failed)) }
             refresh()
         }
     }
@@ -613,8 +674,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCalendarRule(id: String) {
         viewModelScope.launch {
             runtime.deleteCalendarRule(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That rule could not be removed.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.rule_remove_failed)) }
             refresh()
         }
     }
@@ -628,7 +689,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveRule(profile: String, rule: Rule) {
         viewModelScope.launch {
             runtime.saveRule(profile, rule)
-                .onFailure { say(it.message ?: "That could not be blocked.") }
+                .onFailure { say(it.message ?: str(R.string.block_failed)) }
             refresh()
         }
     }
@@ -636,8 +697,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteRule(profile: String, target: Target) {
         viewModelScope.launch {
             runtime.deleteRule(profile, target)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That could not be unblocked.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.unblock_failed)) }
             refresh()
         }
     }
@@ -661,7 +722,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 if (asCsv) runtime.statsCsv() else Json.encodeToString(Stats.serializer(), state.value.stats)
             }.getOrNull()
             if (text == null) {
-                say("Those figures could not be prepared.")
+                say(str(R.string.stats_failed))
                 return@launch
             }
             runCatching {
@@ -669,7 +730,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.write(text.toByteArray())
                 }
             }
-                .onFailure { say("That file could not be written.") }
+                .onFailure { say(str(R.string.file_write_failed)) }
         }
     }
 
@@ -688,9 +749,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), profile, packages)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
                 }
-                .onFailure { say(it.message ?: "That change could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
             refresh()
         }
     }
@@ -709,15 +770,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), target, apps)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
                 }
-                .onFailure { say(it.message ?: "That change could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
             // Everything that is not an app package — domains, urls, keywords — one at a time,
             // because those go through the ordinary rule path rather than the picker's.
             val had = rulesBeyondApps(target).map { it.target }.toSet()
             rulesBeyondApps(source).filterNot { had.contains(it.target) }.forEach { rule ->
                 runtime.saveRule(target, rule)
-                    .onFailure { say(it.message ?: "That could not be blocked.") }
+                    .onFailure { say(it.message ?: str(R.string.block_failed)) }
             }
             refresh()
         }
@@ -736,10 +797,38 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             .firstNotNullOfOrNull { (it.action as? Action.Budget)?.seconds }
 
     /**
+     * A string resource, with arguments, for the messages this class raises.
+     *
+     * The ViewModel is where most of the app's error copy lives — a save that failed, a device that
+     * could not be paired, a config that would not parse — and it has no Composable scope, so
+     * `stringResource` is not available. `AndroidViewModel` does have an application, so this is the
+     * path: `getString` on the application context.
+     *
+     * The `strings.xml` entries these read are the reason a translator can reach the app's most
+     * important sentences. A refused save is precisely the message that has to be understood.
+     */
+    private fun str(@StringRes id: Int, vararg args: Any): String =
+        getApplication<Application>().getString(id, *args)
+
+    /**
+     * Plurals the same way, because "3 apps · 1 site" is not a string a translator can fix.
+     *
+     * English pluralises by appending an `s` and every other language does something else — Russian
+     * has three forms, Arabic six — so `"$n app" + if (n == 1) "" else "s"` is untranslatable in
+     * principle, not merely awkward. `quantityString` is the Android mechanism for it, and this
+     * class is the first place in the app to need one.
+     */
+    private fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
+        getApplication<Application>().resources.getQuantityString(id, count, count, *args)
+
+    /**
      * One line naming what a profile takes away: "2 apps · 1 site · 1h a day".
      *
-     * The Plan page shows a profile once, with its reasons nested under it, so this is the only
-     * place the contents get counted — a card that named neither would be a title and a switch.
+     * The Plan page shows a profile once, with its reasons nested under it, so this is the only place
+     * the contents get counted — a card that named neither would be a title and a switch.
+     *
+     * Every count goes through `plural`, so a language with more than two forms gets them. The
+     * separator is a resource too: a middle dot is punctuation, and punctuation is not universal.
      */
     fun describeBlocks(profile: String): String {
         val apps = blockedApps(profile).size
@@ -747,11 +836,11 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             .count { it.target is Target.Domain || it.target is Target.Url }
         val budget = budgetSeconds(profile)
         val parts = buildList {
-            if (apps > 0) add("$apps app" + if (apps == 1) "" else "s")
-            if (sites > 0) add("$sites site" + if (sites == 1) "" else "s")
-            if (budget != null) add(spellDuration(budget / 60) + " a day")
+            if (apps > 0) add(plural(R.plurals.apps_blocked, apps))
+            if (sites > 0) add(plural(R.plurals.sites_blocked, sites))
+            if (budget != null) add(str(R.string.per_day, spellDuration(budget / 60)))
         }
-        return if (parts.isEmpty()) "Nothing yet" else parts.joinToString(" · ")
+        return if (parts.isEmpty()) str(R.string.nothing_blocked_yet) else parts.joinToString(" · ")
     }
 
     fun blockedApps(profile: String): List<String> =
@@ -769,7 +858,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     /** Bring sessions into line with the schedules right now, rather than at the next alarm. */
     fun reconcileNow() {
         viewModelScope.launch {
-            val now = runtime.clock.now()
+            // This is the path `refreshFast` reaches for the moment a countdown hits zero, and it
+            // ends sessions — so it is the one place in the UI where a wall clock would matter most.
+            val now = runtime.trustedNowLight()
             val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
             runCatching { runtime.reconcile(now, events) }
             refresh()
@@ -777,7 +868,21 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Put one sentence in front of the user. Public so a screen can report a failed file read. */
-    fun say(message: String) = _state.update { it.copy(message = message) }
+    fun say(message: String) = _state.update { it.copy(message = Notice(message, bad = true)) }
+
+    /**
+     * The same surface, for something that went *right*.
+     *
+     * A separate call rather than a flag at every site, because the overwhelming majority of these
+     * sentences are failures and a default of "bad" is the one that fails safe: a new error path that
+     * forgets to say which it is gets shown as a problem, where the reverse would hide a failure
+     * behind a reassuring tick.
+     *
+     * This exists because `message` was one undifferentiated string when the banner was added, and
+     * painting all of it red would have made "Paired." and "Up to date." look like errors — trading
+     * one bug for a louder one.
+     */
+    fun note(message: String) = _state.update { it.copy(message = Notice(message, bad = false)) }
 
     companion object {
         private const val AUDIT_SHOWN = 200
@@ -803,6 +908,15 @@ internal const val PREVIEW_SECONDS = 36L * 3600
 /** One calendar rule catching one event: the rule's id, and the profile it runs. */
 data class EventRule(val schedule: String, val profile: String)
 
+/**
+ * One sentence for the user, and whether it is bad news.
+ *
+ * `bad` chooses the colour and the glyph, and nothing else. A plain flag rather than a third `Tone`
+ * value, because there are only two things to say about a finished action — it worked, or it did not
+ * — and a "warning" tier no call site uses would be a category waiting to be invented wrongly.
+ */
+data class Notice(val text: String, val bad: Boolean)
+
 data class UiState(
     val now: Long = 0,
     val loading: Boolean = true,
@@ -819,6 +933,15 @@ data class UiState(
     val spentSeconds: List<Pair<String, Int>> = emptyList(),
     val launchCounts: Map<String, Int> = emptyMap(),
     val configToml: String = "",
+    /**
+     * Why the config could not be read, if it could not.
+     *
+     * Non-null means [configToml] is empty *because the read failed*, not because the config is
+     * empty — and everything that would act on the empty string (the editor, the export) is disabled
+     * while this is set. Without it, "" meant both "nothing configured" and "we could not look", and
+     * acting on the second destroyed the user's work.
+     */
+    val configError: String? = null,
     /** The weekly windows and calendar rules, as the schedule editor lists them. */
     val weekly: List<WeeklySchedule> = emptyList(),
     val calendarRules: List<CalendarSchedule> = emptyList(),
@@ -830,6 +953,15 @@ data class UiState(
      * that silently never fires, and the user has no way to tell that from a rule that works.
      */
     val calendarEvents: List<CalendarEvent> = emptyList(),
+    /**
+     * Why the calendar could not be read, if it could not.
+     *
+     * Without this, a read that failed produced an empty [calendarEvents] and the Events screen drew
+     * its ordinary "nothing on today" empty state over it — the app asserting something it does not
+     * know. Separate from [calendarGranted], which is about permission: permission can be granted and
+     * the provider still fail, and the two need different sentences.
+     */
+    val calendarError: String? = null,
     /**
      * The calendar rules that catch each event, by event id.
      *
@@ -860,7 +992,7 @@ data class UiState(
     val clockTamper: dev.curfew.app.data.ClockTamper? = null,
     /** Sync as the devices screen shows it. Present even when nothing has been paired. */
     val sync: SyncState = SyncState(),
-    val message: String? = null,
+    val message: Notice? = null,
     /**
      * Sessions whose lock names *this* device as the one that must let them out.
      *

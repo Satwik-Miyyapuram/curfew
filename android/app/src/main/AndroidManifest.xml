@@ -4,9 +4,15 @@
 
     <!--
       Curfew asks for the smallest set of permissions that can enforce a block, and nothing that
-      would let it watch the user. There is no INTERNET permission: the whole point of the design
-      is that nothing leaves the device, and the absence of the permission is what makes that
-      checkable rather than merely promised.
+      would let it watch the user.
+
+      It does hold INTERNET, ACCESS_NETWORK_STATE and CHANGE_WIFI_MULTICAST_STATE, and the reason is
+      worth stating rather than denying: pairing two devices talks to them directly, over the LAN,
+      with no server in between. That is a narrower promise than "no network permission" and a more
+      honest one — the claim a user can check is that nothing goes to a server and no account exists,
+      and the app writes nothing anywhere else. (An earlier version of this comment claimed there
+      was no INTERNET permission at all, which was simply false, and the same sentence had reached
+      three screens. See FIXES.md entry 21.)
     -->
 
     <!-- The foreground service that owns enforcement, and the notification that must accompany it. -->

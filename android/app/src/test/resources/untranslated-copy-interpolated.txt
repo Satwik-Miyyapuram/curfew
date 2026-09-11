@@ -1,0 +1,84 @@
+# Interpolated copy: these need numbered format arguments, not a plain move.
+#
+# One entry per occurrence: File.kt|the literal exactly as it appears.
+# Delete a line when you move that string into strings.xml. The length
+# of this file is the number the project quotes, so a stale line is a lie.
+#
+# Regenerate: ./gradlew :app:testDebugUnitTest -Dcurfew.updateCopyAllowlist=true
+AppPickerScreen.kt|${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites 
+AppPickerScreen.kt|${visible.size - APP_LIMIT} more. Search to narrow the list.
+AppPickerScreen.kt|Changes apply the next time ${nameOf(state, current)} starts — never to a block 
+AppPickerScreen.kt|Copy ${donor.name}'s list?
+AppPickerScreen.kt|No app matches “$query”.
+AppPickerScreen.kt|Stop blocking ${rule.target.label()}
+BlockActivity.kt|$name is blocked
+BlockActivity.kt|$remaining seconds
+BlockActivity.kt|Emergency pass · ${if (passes == 1) 
+BlockActivity.kt|Open $target
+BlockActivity.kt|The wait is over. You can open $target.
+BlockActivity.kt|Waiting $remaining seconds before $target opens.
+CalendarScreen.kt|$kept of $total
+CalendarScreen.kt|Block during ${event.title}
+CalendarScreen.kt|Block during ${event.title}
+CalendarScreen.kt|Blocks $profile
+CalendarScreen.kt|No event matches “$query”.
+ChallengeDialog.kt|${challenge.question} = ?
+ChallengeDialog.kt|What is ${challenge.question.replace(
+ChallengeDialog.kt|What is ${challenge.question.replace(
+DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what it 
+DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what it 
+DevicesScreen.kt|${sync.nearby.size} of your devices in earshot.
+DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
+DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
+DevicesScreen.kt|Stop listening to $name?
+MainActivity.kt|${notice.text}. Tap to dismiss.
+NowScreen.kt|$name ends ${relative(endsAt, now)}
+NowScreen.kt|$name ends ${relative(endsAt, now)}
+NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
+NowScreen.kt|${duration(today)} away from the phone today
+NowScreen.kt|${state.audit.size} logged
+NowScreen.kt|${state.sync.active.size} peers
+NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.
+NowScreen.kt|A release you asked for lands ${relative(at, now)}.
+NowScreen.kt|Ask to end $name in 24 hours
+NowScreen.kt|Ask to end ${named(session.profile)} in 24 hours?
+NowScreen.kt|Emergency pass ($passesLeft)
+NowScreen.kt|End $name now
+NowScreen.kt|End ${named(session.profile)}
+NowScreen.kt|End ${named(session.profile)}?
+NowScreen.kt|Ends ${relative(endsAt, now)} (${clockTime(endsAt)})
+NowScreen.kt|Let $id out
+NowScreen.kt|Let session $id out
+NowScreen.kt|Present a tag for $name
+NowScreen.kt|The tag that ends $profile
+NowScreen.kt|This ends ${named(session.profile)} now. It counts against your ration on 
+NowScreen.kt|Use an emergency pass on $name, $passesLeft left
+NowScreen.kt|left · ends ${clockOf(it)}
+ProfileEditScreen.kt|$emoji $value
+ProfileEditScreen.kt|${apps.size} app${if (apps.size == 1) 
+ProfileEditScreen.kt|${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the 
+ProfileEditScreen.kt|Delete ${existing.name}?
+ScheduleScreen.kt|$note · paused
+ScheduleScreen.kt|Edit ${profile.name}
+ScheduleScreen.kt|Remove ${profile.name}
+ScheduleScreen.kt|Remove ${profile.name}?
+SettingsScreen.kt|${state.sync.active.size} device(s) paired. None in earshot right now.
+SettingsScreen.kt|${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in 
+TimerScreen.kt|${endsAt(minutes)}. Start it?
+TimerScreen.kt|It runs until ${endsAt(minutes)}. A long block is easy to set by 
+TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
+TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
+TimerScreen.kt|That is ${spellDuration(minutes)}
+TimerScreen.kt|Turn it on and this ${spellDuration(minutes)} block starts the moment you 
+TimerScreen.kt|until ${endsAt(minutes)}
+UsageScreen.kt| · opened $opens times
+UsageScreen.kt|${comparison.baselineDays} days before you started.
+UsageScreen.kt|${day.day}: ${duration(day.blockedSeconds)}
+UsageScreen.kt|${describeTarget(key)}: ${duration(seconds)}
+UsageScreen.kt|${duration(comparison.savedSeconds.toInt())} a day back, against the 
+UsageScreen.kt|${stats.currentStreak} days in a row.
+UsageScreen.kt|${stats.totalSessions} session${if (stats.totalSessions == 1) 
+UsageScreen.kt|Android's own figures, averaged over the last ${comparison.recentDays} whole days.
+UsageScreen.kt|Best so far: ${stats.longestStreak}. 
+UsageScreen.kt|In total, ${duration(stats.totalBlockedSeconds.toInt())} across 
+UsageScreen.kt|No lower than before yet, against the ${comparison.baselineDays} days before 

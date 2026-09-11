@@ -141,8 +141,12 @@ fn a_session_over_midnight_touches_two_days() {
     assert_eq!(day(&stats, "2026-05-20").blocked_seconds, 3600);
     assert_eq!(day(&stats, "2026-05-19").sessions, 1);
     assert_eq!(day(&stats, "2026-05-20").sessions, 1);
-    // The session is counted once per day it touched, so the totals are the days' totals.
-    assert_eq!(stats.total_sessions, 2);
+    // **This used to read `assert_eq!(stats.total_sessions, 2)`, under the comment "The session is
+    // counted once per day it touched, so the totals are the days' totals."** — which is P2-20,
+    // enshrined as intent. The per-day figures above are the ones that legitimately count twice,
+    // because both days really did contain blocked time; the total is a count of sessions, and one
+    // session is one block. That number is what the UI prints as "blocks kept".
+    assert_eq!(stats.total_sessions, 1, "one session across midnight is one block");
     assert_eq!(stats.current_streak, 2);
 }
 
@@ -303,4 +307,51 @@ fn the_summary_round_trips_through_json() {
     let json = serde_json::to_string(&stats).expect("stats serialize");
     let back: curfew_core::Stats = serde_json::from_str(&json).expect("stats deserialize");
     assert_eq!(back, stats);
+}
+
+// --- one session is one session, however many days it touches (P2-20) ----------------------------
+//
+// The per-day figures legitimately credit both days a session touches — a window from 23:00 to 01:00
+// blocked time on each of them. `total_sessions` is the number the UI prints as "blocks kept", which
+// is a count of sessions, and it was derived by summing those per-day counts. So one session across
+// midnight was reported as two, and the number that exists to say "this is working" overstated it by
+// exactly the amount a late-night block would.
+
+#[test]
+fn a_session_across_midnight_is_one_block_not_two() {
+    let now = at(UTC, 2026, 5, 20, 9, 0);
+    let records = [record(at(UTC, 2026, 5, 19, 23, 0), Some(at(UTC, 2026, 5, 20, 1, 0)))];
+
+    let stats = summarize(&records, now, UTC, 14);
+
+    assert_eq!(stats.total_sessions, 1, "one session was reported as more than one block");
+    // And both days still show it, because both had time blocked by it.
+    assert_eq!(day(&stats, "2026-05-19").sessions, 1);
+    assert_eq!(day(&stats, "2026-05-20").sessions, 1);
+}
+
+/// The ordinary case must not change: three separate sessions are three blocks.
+#[test]
+fn three_sessions_on_one_day_are_three_blocks() {
+    let now = at(UTC, 2026, 5, 20, 21, 0);
+    let records = [
+        record(at(UTC, 2026, 5, 20, 9, 0), Some(at(UTC, 2026, 5, 20, 10, 0))),
+        record(at(UTC, 2026, 5, 20, 13, 0), Some(at(UTC, 2026, 5, 20, 14, 0))),
+        record(at(UTC, 2026, 5, 20, 19, 0), Some(at(UTC, 2026, 5, 20, 20, 0))),
+    ];
+
+    assert_eq!(summarize(&records, now, UTC, 14).total_sessions, 3);
+}
+
+/// A session spanning three days is one block, and the days it spans still each show one.
+#[test]
+fn a_session_spanning_three_days_is_one_block() {
+    let now = at(UTC, 2026, 5, 22, 12, 0);
+    let records = [record(at(UTC, 2026, 5, 20, 22, 0), Some(at(UTC, 2026, 5, 22, 2, 0)))];
+
+    let stats = summarize(&records, now, UTC, 14);
+    assert_eq!(stats.total_sessions, 1);
+    for d in ["2026-05-20", "2026-05-21", "2026-05-22"] {
+        assert_eq!(day(&stats, d).sessions, 1, "{d} should show the block it contained");
+    }
 }

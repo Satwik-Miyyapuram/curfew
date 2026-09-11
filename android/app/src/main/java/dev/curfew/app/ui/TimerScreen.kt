@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
@@ -64,7 +65,7 @@ private enum class Strength(val label: String, val note: String, val lock: Lock?
     Confirm("Ask me first", "One confirmation, so it is never an accident.", Lock.Confirm),
     Credential("Fingerprint or PIN", "Proves it is you, not a pocket.", Lock.DeviceCredential),
     Typing("Type it out", "A sentence to copy before it opens.", Lock.Challenge(ChallengeKind.TYPING)),
-    Locked("Until it ends", "No way out but an emergency pass.", Lock.Timer),
+    Locked("Until it ends", "Nothing ends this early. The 24-hour release is the way out.", Lock.Timer),
 }
 
 /**
@@ -96,6 +97,42 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     // only one. A missing profile is the one thing this screen cannot invent.
     val chosen = profile ?: state.profiles.firstOrNull()?.id
     val chosenProfile = state.profiles.firstOrNull { it.id == chosen }
+
+    // The one gate every route to "start this timer" goes through.
+    //
+    // There are three of them — the primary button, the return from the accessibility switch, and
+    // "Start without it" — and before this they disagreed: the primary button checked the four-hour
+    // threshold and the other two did not, so "Start without it" would start the strongest lock in
+    // the app from a twelve-hour dial with no confirmation at all. One function means a route added
+    // later cannot quietly skip a check the others make.
+    fun begin(id: String) {
+        if (minutes >= LONG_MINUTES) {
+            confirming = id
+            return
+        }
+        model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+        onDone()
+    }
+
+    // Coming back from the accessibility switch, finish what the user asked for.
+    //
+    // This is the fix for the worst first-run experience in the app. "Turn it on" is the *primary*
+    // button in that dialog, and all it did was open Settings — the timer was never started on the
+    // way back, so a user who did exactly what they were asked ended up with no block, no receipt,
+    // and a Now screen saying nothing was blocked. Declining ("Start without it") worked; complying
+    // did not, which is the wrong way round.
+    //
+    // `strength` and `minutes` are read when resuming rather than captured, so a value the user
+    // changed before leaving is the one that takes effect — and `begin` means the long-timer check
+    // still applies on this route.
+    LifecycleResumeEffect(pending) {
+        val id = pending
+        if (id != null && Grant.Accessibility.isGranted(context)) {
+            pending = null
+            begin(id)
+        }
+        onPauseOrDispose { }
+    }
 
     Screen(spacing = 0.dp) {
         BackRow("Start now", onDone)
@@ -198,8 +235,20 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
         Gap(18.dp)
         SectionLabel("If you change your mind")
         Gap(10.dp)
+        // A strength the device cannot satisfy is not offered at all.
+        //
+        // `Lock.DeviceCredential` on a phone with no screen lock is **a lock with no exit**:
+        // `Auth.prove` reports `false` because there is no keyguard to raise, the core then refuses
+        // the end for an unmet condition, and the session runs to its end with the user unable to do
+        // anything about it. The choice was offered anyway, because the enum is a list of strengths
+        // and nothing connected it to whether the device could keep them. That is F-6 in the
+        // interaction review, and the reason it is worth a comment is that a silent omission here
+        // would be indistinguishable from a bug.
+        val satisfiable = Strength.entries.filter {
+            it != Strength.Credential || Auth.isAvailable(context)
+        }
         DCardFlush {
-            Strength.entries.forEachIndexed { index, option ->
+            satisfiable.forEachIndexed { index, option ->
                 if (index > 0) Rule()
                 Row(
                     modifier = Modifier
@@ -228,6 +277,20 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                     }
                 }
             }
+            // Said out loud, next to where it would have been. A missing option with no explanation
+            // reads as a bug, and the user's next step — set a screen lock — is theirs to take.
+            if (satisfiable.size != Strength.entries.size) {
+                Rule()
+                Text(
+                    "Fingerprint or PIN is not offered, because this phone has no screen lock set. " +
+                        "Curfew cannot ask for one that does not exist, and a lock nothing can open " +
+                        "would hold you until it ran out.",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = Palette.Muted,
+                    modifier = Modifier.padding(14.dp),
+                )
+            }
         }
 
         Gap(12.dp)
@@ -247,12 +310,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 pending = id
                 return@PrimaryButton
             }
-            if (minutes >= LONG_MINUTES) {
-                confirming = id
-                return@PrimaryButton
-            }
-            model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-            onDone()
+            begin(id)
         }
     }
 
@@ -291,17 +349,21 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             text = {
                 Text(
                     "Curfew can only replace a blocked app if it is allowed to see which app is " +
-                        "in front. Without it the timer will run and nothing will be blocked.",
+                        "in front.\n\n" +
+                        "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
+                        "come back. Or start it now, and nothing will be blocked until the switch " +
+                        "is on.",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    pending = null
-                    Grant.Accessibility.settingsIntent(context)?.let { intent ->
-                        runCatching {
-                            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }
-                    }
+                    // `pending` is deliberately NOT cleared here. It is what the resume effect
+                    // watches, and clearing it was the whole bug: the user was sent to Settings and
+                    // the timer they had configured was forgotten in the same breath.
+                    //
+                    // And it goes through the shared path, which falls back to App info — this used to
+                    // swallow the failure, so on a build without the page the tap did nothing at all.
+                    openGrantPage(context, Grant.Accessibility)
                 }) { Text("Turn it on") }
             },
             dismissButton = {
@@ -310,8 +372,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 // it is not enforcing, is one they come back to and fix.
                 TextButton(onClick = {
                     pending = null
-                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-                    onDone()
+                    begin(id)
                 }) { Text("Start without it") }
             },
         )
@@ -354,19 +415,5 @@ fun BackRow(title: String, onBack: () -> Unit) {
             Text("‹", fontSize = 26.sp, color = Palette.Text)
         }
         Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
-    }
-}
-
-@Composable
-private fun Step(glyph: String, description: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(Palette.Raised)
-            .clickable(onClickLabel = description, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(glyph, fontSize = 19.sp, color = Palette.Text)
     }
 }

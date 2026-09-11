@@ -7,6 +7,11 @@
 
 mod feeds;
 mod host;
+// Where diagnostics go. An SCM-started service has null standard handles, so before this every
+// `eprintln!` in this crate was silently discarded (P1-12).
+#[macro_use]
+mod logging;
+mod pairing;
 mod runner;
 // The service control manager is Windows and nothing else, and every caller of `service` is
 // already behind the same gate, so this costs no `cfg` at the call sites; without it a Linux
@@ -75,6 +80,34 @@ curfew — distraction blocking that keeps its promises
   curfew uninstall                 remove it (refused while a lock is held)
 ";
 
+/// The sentence refusing a removal, or `None` when there is nothing to refuse.
+///
+/// `None` covers both "no service is running" and "nothing is enforcing that schedule", and they are
+/// deliberately not distinguished: neither is an error, and the caller does the same thing either way.
+///
+/// **Only a *running* session blocks a removal.** A schedule that is not currently enforcing anything can
+/// be deleted freely — that is the ordinary edit, and refusing it would make the plan unmaintainable
+/// without ending a lock first, which is exactly backwards.
+fn removal_refusal(id: &str) -> Option<String> {
+    let Response::Status(status) = curfew_win::ipc::ask(&Request::Status).ok()? else {
+        return None;
+    };
+    let held = curfew_core::session::running_from(&status.running, id);
+    let names: Vec<&str> = held.iter().map(|s| status.name_of(&s.profile)).collect();
+    if names.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Not removed: {} is running under {id} right now, and a running session keeps its own copy of \
+         what it blocks — so deleting the schedule would leave the lock in force and the plan no longer \
+         explaining why.\n\n\
+         End the session first (the lock's conditions decide how), or leave it: it stops on its own at \
+         the end of its window, and the removal will go through then.\n\n\
+         Nothing short of the 24-hour release shortens a lock that is already running.",
+        names.join(", ")
+    ))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("status");
@@ -83,7 +116,48 @@ fn main() {
     // never installed, and on Linux, where there is no service to talk to at all.
     if curfew_cli::handles(command) {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        std::process::exit(curfew_cli::run(&refs));
+        // **A removal a running lock derives from is refused** — P2-11.
+        //
+        // The session keeps its own copy of what it blocks, so the lock is not weakened and this is not a
+        // bypass: it is that the user is not told, and `README.md` says *"a lock is a promise — nothing
+        // shortens it except the conditions you chose"*. Somebody who reads that and runs
+        // `curfew remove <the window blocking me>` believes they have stopped it. The honest answer is the
+        // one the uninstaller gives: not while it is holding you.
+        //
+        // Asked over the pipe, like the `Reload` below. A service that is not running makes this a no-op,
+        // which is the config-first workflow the module doc describes — preparing a file to copy
+        // elsewhere must not be blocked by a question nobody can answer.
+        if let Some(id) = curfew_cli::removal_target(&refs) {
+            if let Some(refusal) = removal_refusal(id) {
+                eprintln!("{refusal}");
+                std::process::exit(2);
+            }
+        }
+        let code = curfew_cli::run(&refs);
+        // A write the running service has not been told about is the worst failure this product has:
+        // the file says the plan changed, the window reads the same file and shows the change, and
+        // the service is still enforcing the old one. Nothing used to send `Reload` except a user
+        // typing the verb by hand, so `curfew add-window …` printed "Added" and changed nothing that
+        // was actually enforced.
+        //
+        // Best effort, and quiet about it: a machine with no service (a config being prepared to copy
+        // elsewhere, or `curfew check` on a Linux box) is not an error case, and the edit stands
+        // either way. The one case worth a sentence is a write to the file the service reads when
+        // nothing answered — there the user is entitled to think it is already live.
+        if code == 0 && curfew_cli::writes_config(command) {
+            // Resolved before the attempt, because the sentence is only for a write to the file the
+            // service actually reads — and comparing paths is the same work either way.
+            let live = runner::config_path();
+            let is_live =
+                args.get(curfew_cli::CONFIG_ARG).is_some_and(|path| same_file(path, &live));
+            if curfew_win::ipc::ask(&Request::Reload).is_err() && is_live {
+                println!(
+                    "Saved. Curfew is not running, so this applies when it next starts — \
+                     `curfew install` starts it, and `curfew run` enforces it in this terminal."
+                );
+            }
+        }
+        std::process::exit(code);
     }
 
     let code = match command {
@@ -115,7 +189,7 @@ fn main() {
             0
         }
         other => {
-            eprintln!("curfew: no such command: {other}\n\n{USAGE}");
+            crate::note!("no such command: {other}\n\n{USAGE}");
             2
         }
     };
@@ -131,7 +205,7 @@ fn extension(args: &[String]) -> i32 {
     use curfew_win::extension::{manifest, Browser};
 
     let (Some(name), Some(id)) = (args.first(), args.get(1)) else {
-        eprintln!(
+        crate::note!(
             "usage: curfew extension <browser> <extension-id>
 
              The id is shown on the browser's extensions page. Chromium browsers give a long 
@@ -140,22 +214,22 @@ fn extension(args: &[String]) -> i32 {
         return 2;
     };
     let Some(browser) = Browser::parse(name) else {
-        eprintln!("curfew: I do not know how to register with {name}.");
+        crate::note!("I do not know how to register with {name}.");
         return 2;
     };
 
     let Ok(exe) = std::env::current_exe() else {
-        eprintln!("curfew: could not work out where this program lives.");
+        crate::warn!("could not work out where this program lives.");
         return 1;
     };
     let directory = state::default_path().with_file_name("hosts");
     if let Err(e) = std::fs::create_dir_all(&directory) {
-        eprintln!("curfew: could not create {}: {e}", directory.display());
+        crate::warn!("could not create {}: {e}", directory.display());
         return 1;
     }
     let path = directory.join(browser.manifest_file());
     if let Err(e) = std::fs::write(&path, manifest(browser.family(), &exe, id)) {
-        eprintln!("curfew: could not write {}: {e}", path.display());
+        crate::warn!("could not write {}: {e}", path.display());
         return 1;
     }
 
@@ -176,11 +250,11 @@ fn extension(args: &[String]) -> i32 {
             0
         }
         Ok(status) => {
-            eprintln!("curfew: reg add {key} failed ({status}).");
+            crate::warn!("reg add {key} failed ({status}).");
             1
         }
         Err(e) => {
-            eprintln!("curfew: could not run reg ({e}).");
+            crate::warn!("could not run reg ({e}).");
             1
         }
     }
@@ -196,7 +270,7 @@ fn extension(args: &[String]) -> i32 {
 /// this prints the same days the phone shows.
 fn stats(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("usage: curfew stats <config.toml> [--days <n>] [--csv | --json]");
+        crate::note!("usage: curfew stats <config.toml> [--days <n>] [--csv | --json]");
         return 2;
     };
     let mut days: u32 = 14;
@@ -207,14 +281,14 @@ fn stats(args: &[String]) -> i32 {
             "--days" => match rest.next().and_then(|v| v.parse::<u32>().ok()) {
                 Some(n) if (1..=365).contains(&n) => days = n,
                 _ => {
-                    eprintln!("curfew: --days wants a number of days, up to 365.");
+                    crate::note!("--days wants a number of days, up to 365.");
                     return 2;
                 }
             },
             "--csv" => format = "csv",
             "--json" => format = "json",
             other => {
-                eprintln!("curfew: {other} is not a flag this command takes.");
+                crate::note!("{other} is not a flag this command takes.");
                 return 2;
             }
         }
@@ -226,14 +300,14 @@ fn stats(args: &[String]) -> i32 {
     {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
     let zone = match config.tz() {
         Ok(zone) => zone,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
@@ -244,12 +318,12 @@ fn stats(args: &[String]) -> i32 {
     let persisted = match state::load(&state::default_path()) {
         state::Loaded::Ok(state) => state,
         state::Loaded::Recovered { state, detail } => {
-            eprintln!("curfew: {detail}; these figures come from the backup copy.");
+            crate::note!("{detail}; these figures come from the backup copy.");
             state
         }
         state::Loaded::Fresh => Default::default(),
         state::Loaded::Lost { detail } => {
-            eprintln!("curfew: the state file could not be read ({detail}).");
+            crate::warn!("the state file could not be read ({detail}).");
             Default::default()
         }
     };
@@ -261,14 +335,17 @@ fn stats(args: &[String]) -> i32 {
         ended_at: None,
     }));
 
-    let now = runner::now();
+    // A wall clock is right for a statistics report: the user asked what their week looked like,
+    // and the answer is about the days they remember, not about what a lock should be judged
+    // against. Enforcement never uses this.
+    let now = runner::wall_now();
     let summary = curfew_core::stats::summarize(&records, now, zone, days);
     match format {
         "csv" => print!("{}", summary.to_csv()),
         "json" => match serde_json::to_string_pretty(&summary) {
             Ok(text) => println!("{text}"),
             Err(e) => {
-                eprintln!("curfew: {e}");
+                crate::note!("{e}");
                 return 1;
             }
         },
@@ -318,7 +395,7 @@ fn span(seconds: u64) -> String {
 /// answer says so here rather than at the moment it was supposed to block something.
 fn upcoming(args: &[String]) -> i32 {
     let Some(path) = args.first() else {
-        eprintln!("usage: curfew upcoming <config.toml> [--hours <n>]");
+        crate::note!("usage: curfew upcoming <config.toml> [--hours <n>]");
         return 2;
     };
     let mut hours: i64 = 36;
@@ -328,12 +405,12 @@ fn upcoming(args: &[String]) -> i32 {
             "--hours" => match rest.next().and_then(|v| v.parse::<i64>().ok()) {
                 Some(n) if (1..=336).contains(&n) => hours = n,
                 _ => {
-                    eprintln!("curfew: --hours wants a number of hours, up to 336 (two weeks).");
+                    crate::note!("--hours wants a number of hours, up to 336 (two weeks).");
                     return 2;
                 }
             },
             other => {
-                eprintln!("curfew: {other} is not a flag this command takes.");
+                crate::note!("{other} is not a flag this command takes.");
                 return 2;
             }
         }
@@ -345,19 +422,19 @@ fn upcoming(args: &[String]) -> i32 {
     {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
     let zone = match config.tz() {
         Ok(zone) => zone,
         Err(e) => {
-            eprintln!("curfew: {e}");
+            crate::note!("{e}");
             return 1;
         }
     };
 
-    let now = runner::now();
+    let now = runner::wall_now();
     // Fetched into the same cache directory the service uses, so previewing warms the cache the
     // service will read rather than making a second copy of everybody's calendar.
     let mut feeds =
@@ -375,8 +452,8 @@ fn upcoming(args: &[String]) -> i32 {
     );
     for outcome in outcomes {
         if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } = outcome {
-            eprintln!(
-                "curfew: calendar '{id}' could not be read ({detail}){}",
+            crate::warn!(
+                "calendar '{id}' could not be read ({detail}){}",
                 if still_serving { "; showing the last copy that worked" } else { "" }
             );
         }
@@ -437,8 +514,8 @@ fn upcoming(args: &[String]) -> i32 {
 /// Ask the service, and turn "the service is not running" into the sentence that actually helps.
 fn ask(request: Request) -> Result<Response, i32> {
     runner::ask(&request).map_err(|e| {
-        eprintln!(
-            "curfew: could not reach the Curfew service ({e}).\n\
+        crate::warn!(
+            "could not reach the Curfew service ({e}).\n\
              It may not be installed yet — `curfew install` registers it — or it may have been \
              stopped, in which case starting it again is the fix: `sc start Curfew`."
         );
@@ -460,6 +537,34 @@ fn when(ts: curfew_core::Timestamp) -> String {
 fn report(response: Response) -> i32 {
     match response {
         Response::Ok => 0,
+        // Pairing, from the command line. `curfew pair` is not a verb yet — F-18 step 4 is the page —
+        // but the arms are written rather than wildcarded for the reason given below: adding a request
+        // later should get an answer instead of falling into a catch-all.
+        Response::Pairing { json } => {
+            println!("{json}");
+            0
+        }
+        Response::Paired => {
+            println!("Done.");
+            0
+        }
+        // The figures, as the Time page gets them. Nothing on the command line asks for these —
+        // `curfew stats` reads the state file directly so that it works with no service running —
+        // but the arm is written rather than wildcarded so that adding a request later gets an
+        // answer instead of falling into a catch-all.
+        Response::Stats(stats) => {
+            println!(
+                "{} across {} session{} in the last {} days.",
+                span(stats.total_blocked_seconds),
+                stats.total_sessions,
+                if stats.total_sessions == 1 { "" } else { "s" },
+                stats.days.len(),
+            );
+            if stats.current_streak > 0 {
+                println!("Current streak: {} day(s).", stats.current_streak);
+            }
+            0
+        }
         Response::Release { at } => {
             println!("Release starts now and lands at {}. It cannot be brought forward.", when(at));
             0
@@ -491,7 +596,7 @@ fn report(response: Response) -> i32 {
             1
         }
         Response::Error { detail } => {
-            eprintln!("curfew: {detail}");
+            crate::note!("{detail}");
             1
         }
         Response::NoPass { refusal } => {
@@ -565,6 +670,27 @@ fn name_of(lock: &curfew_core::Lock) -> String {
     }
 }
 
+/// Whether two paths name the same file.
+///
+/// `canonicalize` first, because `curfew add-window curfew.toml …` run from `%ProgramData%\Curfew`,
+/// or a path with `..` in it, or a differently-cased spelling on Windows, all name the same file as
+/// the service's own config and none of them compare equal as strings. Falling back to a literal
+/// comparison matters too: the file may not exist yet, and canonicalize fails on a path that is not
+/// there.
+fn same_file(a: &str, b: &std::path::Path) -> bool {
+    let a = std::path::Path::new(a);
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // Neither could be resolved, and they were not literally equal, so there is nothing left to
+        // compare. Saying "not the same" is the safe answer: the only consequence is a missing
+        // sentence, where the other direction prints a warning about a file the service never reads.
+        _ => false,
+    }
+}
+
 fn status() -> i32 {
     let Ok(response) = ask(Request::Status) else { return 1 };
     let Response::Status(status) = response else { return report(response) };
@@ -604,11 +730,11 @@ fn status() -> i32 {
 
 fn start(args: &[String]) -> i32 {
     let (Some(profile), Some(minutes)) = (args.first(), args.get(1)) else {
-        eprintln!("curfew: usage: curfew start <profile> <minutes> [--credential]");
+        crate::note!("usage: curfew start <profile> <minutes> [--credential]");
         return 2;
     };
     let Ok(minutes) = minutes.parse::<u32>() else {
-        eprintln!("curfew: {minutes} is not a number of minutes");
+        crate::note!("{minutes} is not a number of minutes");
         return 2;
     };
     let locks = if args.iter().any(|a| a == "--credential") {
@@ -616,23 +742,65 @@ fn start(args: &[String]) -> i32 {
     } else {
         vec![]
     };
+    // Read before the request, because the request takes the lock list by value and the confirmation
+    // afterwards needs to know whether there was one.
+    let locked = !locks.is_empty();
     // Said out loud before it starts, because after it starts is too late: this is the whole point
     // of a commitment device, and a user surprised by it is a user who was not warned properly.
-    if !locks.is_empty() {
+    if locked {
         println!(
             "Starting a locked session for {minutes} minutes. It will need your Windows password \
              to end early, and if you cannot use it, the 24-hour release is the way out."
         );
     }
     match ask(Request::Start { profile: profile.clone(), seconds: minutes * 60, locks }) {
+        // Confirmed out loud, because this is the one command whose entire purpose is to change
+        // something and it used to print nothing at all.
+        //
+        // `report` is silent on `Ok` on purpose — "end" and "release" are asked for and their effect
+        // is visible elsewhere, so a line saying "done" would be noise. `start` is different: nothing
+        // about the machine looks different afterwards until an app you try to open disappears, which
+        // may be minutes later. A user who is not told it worked concludes it did not, and either runs
+        // it again or gives up on the feature.
+        Ok(Response::Ok) => {
+            print!("{}", started_message(profile, minutes, locked));
+            0
+        }
         Ok(response) => report(response),
         Err(code) => code,
     }
 }
 
+/// What `curfew start` says once a session has actually begun.
+///
+/// Split out from the command so the wording can be read and tested — the same reason the tray keeps
+/// `unreachable_service` out of its Win32 layer. The property worth testing is not the wording but the
+/// *branch*: what a user is told their way out is has to match the lock they chose, and getting it
+/// wrong sends them to a command that will refuse them.
+///
+/// The locked case is the one that matters. `curfew end` claims nothing satisfied — deliberately, so
+/// that a command line cannot assert a password was typed — which means a credential lock is refused
+/// there. Telling somebody to run it would be exactly the failure this log keeps finding: the product
+/// naming an exit that does not exist.
+fn started_message(profile: &str, minutes: u32, locked: bool) -> String {
+    let mut text = format!(
+        "Started. {profile} is running for the next {minutes} minute{}.\n",
+        if minutes == 1 { "" } else { "s" }
+    );
+    if locked {
+        text.push_str(
+            "To stop it early you need your Windows password — the Curfew icon can ask for it — or \
+             you can start the 24-hour release.\n",
+        );
+    } else {
+        text.push_str("To stop it early: `curfew status`, then `curfew end <id>`.\n");
+    }
+    text
+}
+
 fn end(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew end <id>");
+        crate::note!("usage: curfew end <id>");
         return 2;
     };
     // Nothing is claimed as satisfied here. Credential checks belong to the tray, which can show
@@ -650,7 +818,7 @@ fn end(args: &[String]) -> i32 {
 /// paired device. Naming it after what it costs is the honest way to offer it.
 fn emergency(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew emergency <id>");
+        crate::note!("usage: curfew emergency <id>");
         return 2;
     };
     match ask(Request::Emergency { id: id.clone() }) {
@@ -667,7 +835,7 @@ fn emergency(args: &[String]) -> i32 {
 /// token locks at all, and because the honest place to say so is here, in the tool's own help.
 fn scan(args: &[String]) -> i32 {
     let (Some(id), Some(payload)) = (args.first(), args.get(1)) else {
-        eprintln!("curfew: usage: curfew scan <id> <payload>");
+        crate::note!("usage: curfew scan <id> <payload>");
         return 2;
     };
     match ask(Request::Token { id: id.clone(), payload: payload.clone() }) {
@@ -683,7 +851,7 @@ fn scan(args: &[String]) -> i32 {
 /// pretending the second answer could change something.
 fn peer_release(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew peer-release <id>");
+        crate::note!("usage: curfew peer-release <id>");
         return 2;
     };
     match ask(Request::Release { id: id.clone() }) {
@@ -746,7 +914,7 @@ fn mint() -> String {
 
 fn release(args: &[String]) -> i32 {
     let Some(id) = args.first() else {
-        eprintln!("curfew: usage: curfew release <id>");
+        crate::note!("usage: curfew release <id>");
         return 2;
     };
     match ask(Request::RequestRelease { id: id.clone() }) {
@@ -768,13 +936,13 @@ fn run_in_console() -> i32 {
     // A machine with no config yet gets the starter one rather than an error naming a file the
     // user has never heard of.
     if let Err(e) = runner::ensure_config(&runner::config_path()) {
-        eprintln!("curfew: could not write a starting config ({e}).");
+        crate::warn!("could not write a starting config ({e}).");
     }
     let enforcer =
         match runner::build(&runner::config_path(), &state::default_path(), runner::hosts_path()) {
             Ok(enforcer) => enforcer,
             Err(detail) => {
-                eprintln!("curfew: {detail}");
+                crate::note!("{detail}");
                 return 1;
             }
         };
@@ -788,7 +956,7 @@ fn service_entry() -> i32 {
     match service::start_dispatch() {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("curfew: not started by the service control manager: {e}");
+            crate::note!("not started by the service control manager: {e}");
             1
         }
     }
@@ -796,7 +964,7 @@ fn service_entry() -> i32 {
 
 #[cfg(not(windows))]
 fn service_entry() -> i32 {
-    eprintln!("curfew: services are a Windows thing; use `curfew run`");
+    crate::note!("services are a Windows thing; use `curfew run`");
     1
 }
 
@@ -808,8 +976,8 @@ fn install() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!(
-                "curfew: could not install the service ({e}).\n\
+            crate::warn!(
+                "could not install the service ({e}).\n\
                  This needs an administrator prompt: run the same command from a terminal opened \
                  with \"Run as administrator\"."
             );
@@ -823,17 +991,33 @@ fn uninstall() -> i32 {
     // The refusal that makes uninstalling not be a bypass. It is checked against the service's own
     // state rather than a flag on disk, and the delayed release still works while it stands — so
     // this is friction with an exit, not a trap (GAPS D1).
-    match runner::ask(&Request::Status) {
-        Ok(Response::Status(status)) if !status.running.is_empty() => {
-            println!(
-                "Curfew is not going to uninstall itself while a lock is running — that is what \
-                 you asked it for.\n\
-                 The session ends on its own, or `curfew release <id>` starts the 24-hour release, \
-                 after which this will work."
-            );
-            return 1;
-        }
-        _ => {}
+    //
+    // It used to fail open on the one case that matters. The old shape was "refuse if the service
+    // answered *and* listed a running session", and every other outcome fell through to
+    // `service::uninstall()` — including `Err`, which is what asking a *stopped* service returns.
+    // Since the installer stops the service before it runs this, and stopping was itself obeyed,
+    // "stop Curfew, then uninstall" removed a running lock's enforcement entirely. So the answer is
+    // now the other way round: uninstall needs a positive "nothing is running", from two witnesses.
+    let running = match runner::ask(&Request::Status) {
+        Ok(Response::Status(status)) => !status.running.is_empty(),
+        // Unreachable: stopped, crashed, or wedged. Any of those is a reason to refuse, not a
+        // reason to proceed, because the service is the only thing that knows what is running.
+        Ok(_) | Err(_) => true,
+    };
+    // …and the state file directly, which is the witness the watchdog uses and the one thing left
+    // when the service is not answering at all. An unreadable state counts as locked.
+    let state_says_locked = crate::watchdog::locks_running(&curfew_win::state::default_path());
+
+    if refused_uninstall(running, state_says_locked) {
+        println!(
+            "Curfew is not going to uninstall itself while a lock is running — that is what you \
+             asked it for.\n\
+             The session ends on its own, or `curfew release <id>` starts the 24-hour release, \
+             after which this will work.\n\
+             If Curfew has already been removed from your config, `curfew status` will say what it \
+             can still see."
+        );
+        return 1;
     }
     match service::uninstall() {
         Ok(()) => {
@@ -845,20 +1029,159 @@ fn uninstall() -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("curfew: could not remove the service ({e}). Try an administrator prompt.");
+            crate::warn!("could not remove the service ({e}). Try an administrator prompt.");
             1
         }
     }
 }
 
+/// Whether the uninstall guard should refuse, given its two witnesses.
+///
+/// Pulled out of [`uninstall`] so the decision can be tested without a service, a pipe or an
+/// administrator prompt — because the decision is where the bug was, and the bug was a default.
+/// The old code refused only on one specific answer and let *everything else* through, so
+/// "unreachable" and "answered something unexpected" both meant "go ahead and uninstall".
+///
+/// Written as "refuse unless both witnesses positively agree there is nothing running" so that a
+/// future reader adding a third witness cannot accidentally widen the hole again: every argument
+/// added here defaults to refusing.
+#[cfg(windows)]
+fn refused_uninstall(service_says_running: bool, state_says_locked: bool) -> bool {
+    service_says_running || state_says_locked
+}
+
 #[cfg(not(windows))]
 fn install() -> i32 {
-    eprintln!("curfew: services are a Windows thing");
+    crate::note!("services are a Windows thing");
     1
 }
 
 #[cfg(not(windows))]
 fn uninstall() -> i32 {
-    eprintln!("curfew: services are a Windows thing");
+    crate::note!("services are a Windows thing");
     1
+}
+
+#[cfg(all(test, windows))]
+mod uninstall_guard_tests {
+    use super::refused_uninstall;
+
+    /// The regression guard. Before this, an unreachable service meant "nothing is running, go
+    /// ahead" — and since the installer stops the service before it runs `curfew.exe uninstall`,
+    /// that turned "stop Curfew, then uninstall" into a way out of a live lock.
+    #[test]
+    fn an_unreachable_service_refuses_rather_than_permits() {
+        // The call site passes `true` for an unreachable service; this pins the shape so a future
+        // refactor that reintroduces a default-allow arm has to delete a test that says why.
+        assert!(refused_uninstall(true, false), "an unreachable service allowed an uninstall");
+        assert!(refused_uninstall(true, true));
+    }
+
+    #[test]
+    fn a_running_session_refuses() {
+        assert!(refused_uninstall(true, false));
+        assert!(refused_uninstall(false, true), "the state file was ignored");
+        assert!(refused_uninstall(true, true));
+    }
+
+    #[test]
+    fn both_witnesses_agreeing_on_nothing_running_is_the_only_way_through() {
+        assert!(!refused_uninstall(false, false), "an ordinary uninstall was refused");
+    }
+}
+
+#[cfg(test)]
+mod same_file_tests {
+    use super::same_file;
+    use std::path::PathBuf;
+
+    /// The case the check exists for: a config written by the same path the service reads.
+    #[test]
+    fn the_same_path_is_the_same_file() {
+        assert!(same_file("/tmp/curfew.toml", &PathBuf::from("/tmp/curfew.toml")));
+    }
+
+    /// A different path is a different file, and this is the direction that decides whether a
+    /// confusing sentence is printed. Saying "not the same" costs a missing line; saying "the same"
+    /// wrongly would tell someone their edits are live when they are not.
+    #[test]
+    fn a_different_path_is_not() {
+        assert!(!same_file("/tmp/other.toml", &PathBuf::from("/tmp/curfew.toml")));
+    }
+
+    /// A path reached by a different spelling is the same file, and this is the case that matters in
+    /// practice: `curfew add-window curfew.toml …` run from `%ProgramData%\Curfew`, or a path with a
+    /// `..` in it, both name the service's own config and neither compares equal as a string.
+    #[test]
+    fn a_path_reached_by_another_spelling_is_the_same_file() {
+        let dir = std::env::temp_dir().join(format!("curfew-same-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        let real = dir.join("curfew.toml");
+        std::fs::write(&real, "schema_version = 1\n").unwrap();
+
+        let via_parent = dir.join("nested").join("..").join("curfew.toml");
+        assert!(
+            same_file(via_parent.to_str().unwrap(), &real),
+            "a path with `..` in it was treated as a different file"
+        );
+
+        // And a file that does not exist yet still compares by its literal spelling, because
+        // canonicalize fails on a missing path and the fallback is the only thing left.
+        let missing = dir.join("not-written-yet.toml");
+        assert!(same_file(missing.to_str().unwrap(), &missing));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod started_message_tests {
+    use super::started_message;
+
+    /// `curfew start` says something.
+    ///
+    /// It printed nothing on success at all, which is the remaining half of F-22: the one command
+    /// whose entire purpose is to change something gave no sign that it had. Nothing looks different
+    /// until an app you open disappears, which can be minutes later, so a user who is not told
+    /// concludes it failed and either runs it again or gives up on the feature.
+    #[test]
+    fn a_started_session_is_confirmed() {
+        let text = started_message("deep-work", 30, false);
+        assert!(text.contains("Started"), "{text}");
+        assert!(text.contains("deep-work"), "the confirmation does not name the profile: {text}");
+        assert!(text.contains("30 minutes"), "the confirmation does not say how long: {text}");
+    }
+
+    /// One minute is a minute, not "1 minutes".
+    #[test]
+    fn a_single_minute_is_not_pluralised() {
+        let text = started_message("deep-work", 1, false);
+        assert!(text.contains("1 minute."), "{text}");
+        assert!(!text.contains("1 minutes"), "{text}");
+    }
+
+    /// An unlocked session points at `curfew end`, which will actually work.
+    #[test]
+    fn an_unlocked_session_names_the_command_that_ends_it() {
+        let text = started_message("deep-work", 30, false);
+        assert!(text.contains("curfew end"), "{text}");
+        assert!(text.contains("curfew status"), "the id has to come from somewhere: {text}");
+    }
+
+    /// A locked one does **not**, because `curfew end` claims nothing satisfied and would refuse.
+    ///
+    /// This is the assertion that earns its place. Sending somebody to a command that fails is exactly
+    /// the defect this whole log is about — a product naming an exit that does not exist — and it
+    /// would be introduced by a confident-sounding line of copy, not by a logic error.
+    #[test]
+    fn a_locked_session_never_points_at_a_command_that_would_refuse_it() {
+        let text = started_message("deep-work", 30, true);
+        assert!(
+            !text.contains("curfew end"),
+            "a credential-locked session was told to run a command that refuses it: {text}"
+        );
+        // …and it does say what does work.
+        assert!(text.contains("Windows password"), "{text}");
+        assert!(text.contains("24-hour release"), "{text}");
+    }
 }

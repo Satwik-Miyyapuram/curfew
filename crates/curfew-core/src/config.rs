@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub schema_version: u32,
     /// IANA name. Budgets reset and schedules fire in *this* zone, not the device's, so a phone
@@ -48,6 +49,7 @@ pub struct Config {
 /// tool that quietly repoints a user's DNS the first time it runs has helped itself to something it
 /// was not given. The hosts file works without it and stays the floor underneath it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Resolver {
     #[serde(default)]
     pub enabled: bool,
@@ -103,6 +105,27 @@ pub enum ConfigError {
     Invalid(String),
 }
 
+/// What an upsert did, so a caller can say so instead of guessing.
+///
+/// `AlreadyPresent` is the one that earns its keep. The upsert deliberately declines to store a
+/// duplicate, and before this a caller had no way to know: `curfew add-window` printed "Added"
+/// for a window the core had just discarded, based on whether the *id* was new. On a tool whose
+/// whole job is to be trusted about whether a lock exists, that is the wrong kind of wrong.
+///
+/// `#[must_use]`-shaped by convention rather than by attribute: every caller either reports it or
+/// discards it with `.map(|_| ())`, and the ones that report are the ones that print.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Upserted {
+    /// Stored. It was not there before.
+    Added,
+    /// Stored, replacing the row with the same id.
+    Replaced,
+    /// **Nothing was stored**: an equivalent window already exists under another id, and two of
+    /// them cannot behave differently from one. The caller's request is satisfied by what is
+    /// already in the plan, not by a new row.
+    AlreadyPresent,
+}
+
 impl Config {
     /// Parse, migrating older schema versions forward on the way in.
     pub fn from_toml(s: &str) -> Result<Self, ConfigError> {
@@ -125,6 +148,91 @@ impl Config {
 
     pub fn profile(&self, id: &str) -> Option<&Profile> {
         self.profiles.iter().find(|p| p.id == id)
+    }
+
+    /// What `next` would take away from a running session on `profile` — P1-13.
+    ///
+    /// **A session does not hold its own rules.** `Engine::decide` reads them from the live `Config`
+    /// on every pass (`engine.rs:64` takes `config` as an argument), so a rule removed from the config
+    /// stops being enforced immediately while the session — and its lock — carries on. The user sees a
+    /// lock still running and nothing being blocked, which is the worst state this product has: the
+    /// surface says yes and the machine does no.
+    ///
+    /// Two comments in this repository claim otherwise and both were wrong: `Config::remove_profile`
+    /// below says *"the session holds its own copy of what it blocks"* and `GAPS.md` D6 says *"edits
+    /// that would weaken an active session are refused outright until the lock ends"*. Neither was
+    /// true. This function is the second of those claims, made true.
+    ///
+    /// A rule is identified the way [`Config::upsert_rule`] identifies it — the target's key plus the
+    /// platform set — so this catches a rule removed, a rule that no longer covers the platform, and a
+    /// rule whose **action** changed (a budget cut from an hour to a minute keeps its target and is
+    /// still a weakening).
+    ///
+    /// Deliberately conservative in one direction: **changing** an action counts as a loss even when
+    /// the new one is stricter, because telling "stricter" from "weaker" per action kind needs a
+    /// lattice this does not have. Refusing a strengthening edit until the lock ends is an annoyance;
+    /// accepting a weakening one is the bug.
+    ///
+    /// Returns one sentence per loss, so a caller can say exactly what it would not adopt.
+    pub fn rules_weakened_by(&self, next: &Config, profile: &str) -> Vec<String> {
+        let Some(before) = self.profile(profile) else {
+            // The profile is not in the config that is running. Nothing of its was ever enforced, so
+            // there is nothing to lose — a session outliving its profile is the case `remove_profile`
+            // documents, and it is not this function's to judge.
+            return Vec::new();
+        };
+        let after = next.profile(profile);
+
+        let mut lost = Vec::new();
+        for rule in &before.rules {
+            let key = rule.target.key();
+            let found = after.and_then(|p| {
+                p.rules.iter().find(|r| r.target.key() == key && r.platforms == rule.platforms)
+            });
+            match found {
+                None => lost.push(format!("{key} is no longer blocked")),
+                Some(new) if new.action != rule.action => {
+                    lost.push(format!("{key} is enforced differently now"))
+                }
+                Some(_) => {}
+            }
+        }
+        lost
+    }
+
+    /// **Which rules a config change would take away from each running session** — P1-13.
+    ///
+    /// Empty means the change is safe to adopt. Anything else is a list of sentences naming the profile
+    /// and what would stop being enforced, ready to put in front of a user.
+    ///
+    /// **One implementation, two platforms.** The decision is a property of the core — a session carries
+    /// its own copy of what it blocks, so a rule removed underneath it stops being enforced while the lock
+    /// runs on — and both Windows and Android have to make it. Windows grew this loop inline (entry 54)
+    /// and Android had no check at all, which is the state this fixes. A second copy of a security check is
+    /// how the two come to disagree, so the loop lives here and both callers pass what they have.
+    ///
+    /// `profile_names` maps a profile id to the name the user gave it, because the refusal is a sentence
+    /// somebody reads and an id is not a name. A caller with no map passes an empty one and gets the id —
+    /// degraded, never wrong.
+    pub fn weakening_a_running_session(
+        &self,
+        next: &Config,
+        running: &[crate::session::Session],
+        profile_names: &std::collections::BTreeMap<String, String>,
+    ) -> Vec<String> {
+        let mut lost: Vec<String> = Vec::new();
+        for session in running {
+            let named = profile_names
+                .get(&session.profile)
+                .cloned()
+                .unwrap_or_else(|| session.profile.clone());
+            for detail in self.rules_weakened_by(next, &session.profile) {
+                lost.push(format!("{named}: {detail}"));
+            }
+        }
+        lost.sort();
+        lost.dedup();
+        lost
     }
 
     /// Add a rule to a profile, or replace the one already pointing at the same thing.
@@ -296,8 +404,15 @@ impl Config {
     /// rejects, and discovering that at the next launch is discovering it with no blocker running.
     /// The schedules are named in the error so the user knows what to remove first.
     ///
-    /// As everywhere else, a session this profile started keeps running. Its rules are gone from
-    /// the config, but the session holds its own copy of what it blocks.
+    /// As everywhere else, a session this profile started keeps running. Its rules are gone from the
+    /// config — **and the session does not hold a copy of them**, which this comment used to claim and
+    /// which was false. `Engine::decide` reads the rules from the live `Config` on every pass, so a
+    /// session whose profile is removed keeps its lock and blocks nothing.
+    ///
+    /// What stops that being a way out is the *adoption* side rather than this one:
+    /// [`Config::rules_weakened_by`] is consulted before a reload is taken, and the service refuses a
+    /// config that would enforce less than a running session promised. So the order is: the lock ends
+    /// first, then the profile goes.
     pub fn remove_profile(&mut self, id: &str) -> Result<(), ConfigError> {
         let mut used: Vec<&str> = self
             .weekly
@@ -326,10 +441,15 @@ impl Config {
     /// opens for a new window and for an existing one, and which it was is not something the caller
     /// should have to tell us. The whole config is validated afterwards, so a window naming a
     /// profile that does not exist is refused here rather than at the moment it would have fired.
-    pub fn upsert_weekly(&mut self, window: WeeklySchedule) -> Result<(), ConfigError> {
+    ///
+    /// The return value says which of the three happened; see [`Upserted`].
+    pub fn upsert_weekly(&mut self, window: WeeklySchedule) -> Result<Upserted, ConfigError> {
         let before = self.weekly.clone();
-        match self.weekly.iter_mut().find(|w| w.id == window.id) {
-            Some(existing) => *existing = window,
+        let outcome = match self.weekly.iter_mut().find(|w| w.id == window.id) {
+            Some(existing) => {
+                *existing = window;
+                Upserted::Replaced
+            }
             None => {
                 // A new window that runs the same profile on the same days between the same two
                 // minutes is not a second window, it is the first one asked for twice. Two of them
@@ -343,18 +463,25 @@ impl Config {
                         && w.start_minute == window.start_minute
                         && w.end_minute == window.end_minute
                 }) {
-                    return Ok(());
+                    // **Said out loud rather than returned as a bare `Ok`** — P2-10. This branch
+                    // deliberately stores nothing, and a caller that cannot tell it apart from a
+                    // real insert will tell the user the opposite of what happened: `curfew
+                    // add-window` printed "Added" for a window it had just discarded. On a
+                    // self-binding tool the difference matters, because the user is checking
+                    // whether the lock they asked for exists.
+                    return Ok(Upserted::AlreadyPresent);
                 }
-                self.weekly.push(window)
+                self.weekly.push(window);
+                Upserted::Added
             }
-        }
+        };
         // Put the config back exactly as it was if the edit does not stand up. A validate that
         // leaves the invalid value behind turns one bad edit into a config nobody can save.
         if let Err(e) = self.validate() {
             self.weekly = before;
             return Err(e);
         }
-        Ok(())
+        Ok(outcome)
     }
 
     /// Delete a weekly window. Deleting one that is not there is not an error: the caller wanted it
@@ -516,6 +643,40 @@ impl Config {
                 )));
             }
         }
+        // The escape hatch is a safety rail, and an unvalidated rail is not one. Nothing used to
+        // look at `self.emergency` at all, so a zero-length window made the ration unlimited
+        // (`recent` computes `since = now - 0` and therefore never finds a spent pass) and a zero
+        // cooldown removed the minimum gap between two uses. Both are the same class as the
+        // zero-second budget and the zero launch limit above: a config that disables a documented
+        // guard, accepted silently, discovered at 4am inside a lock.
+        if self.emergency.window_seconds == 0 {
+            return Err(ConfigError::Invalid(
+                "[emergency] has a zero-second window, which makes the quota unlimited; \
+                 use a positive number of seconds, or set passes = 0 to switch the hatch off"
+                    .into(),
+            ));
+        }
+        if self.emergency.passes > 0 && self.emergency.cooldown_seconds == 0 {
+            return Err(ConfigError::Invalid(
+                "[emergency] allows passes but sets a zero-second cooldown, which removes the \
+                 minimum gap between two uses; use a positive number of seconds"
+                    .into(),
+            ));
+        }
+        // A rolling window of zero is the same defect one level down: `used_since(Some(now))` would
+        // match only rollups stamped at or after `now`, so the budget could never be exhausted and
+        // the rule would never fire.
+        for p in &self.profiles {
+            for r in &p.rules {
+                if let Action::Budget { refill: Refill::Rolling { seconds: 0 }, .. } = r.action {
+                    return Err(ConfigError::Invalid(format!(
+                        "profile {:?} has a budget with a zero-second rolling window, so it can \
+                         never be spent; use a positive number of seconds",
+                        p.id
+                    )));
+                }
+            }
+        }
         // A minute past the end of the day is not a time. `end == start` is the one that reads as a
         // mistake either way — an empty window or a whole day, depending on who is asked — so it is
         // refused rather than guessed at.
@@ -544,6 +705,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Profile {
     pub id: String,
     pub name: String,
@@ -554,12 +716,30 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub target: Target,
     pub action: Action,
     /// Empty means every platform.
     #[serde(default)]
     pub platforms: Vec<Platform>,
+}
+
+impl Rule {
+    /// **Whether this rule can only be decided by knowing the foreground window** — P2-16.
+    ///
+    /// Two things need it. A [`Target::WindowTitle`] or [`Target::Keyword`] rule matches against the
+    /// title of whatever is in front, and a [`Action::Budget`] or [`Action::LaunchLimit`] is charged to
+    /// whatever is in front. Every other target — an exe, a domain, a path, the whole device — is
+    /// decided from the process list or the resolver, which works without anybody's attention.
+    ///
+    /// This exists so a surface can say *which* rules have stopped being enforced when nothing can
+    /// supply the foreground window, rather than the gap being silent. See
+    /// `curfew_win::Enforcer::foreground_warning`.
+    pub fn needs_foreground(&self) -> bool {
+        matches!(self.target, Target::WindowTitle { .. } | Target::Keyword { .. })
+            || matches!(self.action, Action::Budget { .. } | Action::LaunchLimit { .. })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -572,7 +752,7 @@ pub enum Platform {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum Action {
     Block,
     /// Everything *not* matched by an allow-only rule in the active profile is blocked.

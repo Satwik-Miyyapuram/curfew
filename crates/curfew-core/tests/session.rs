@@ -3,9 +3,9 @@
 
 use curfew_core::emergency::{EmergencyPolicy, Passes};
 use curfew_core::schedule::{Activation, ActivationSource};
-use curfew_core::session::{reconcile, Refusal, Session, SessionSource, Sessions};
+use curfew_core::session::{reconcile, running_from, Refusal, Session, SessionSource, Sessions};
 use curfew_core::{Lock, LockSet, Timestamp, DELAYED_RELEASE_SECONDS};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const NOW: Timestamp = 1_788_609_600;
 
@@ -361,4 +361,625 @@ fn ending_one_occurrence_leaves_the_next_one_alone() {
     let started = reconcile(1_050, &mut s, std::slice::from_ref(&tomorrow), |_| "id2".into());
     assert_eq!(started.len(), 1);
     assert_eq!(s.running.len(), 1);
+}
+
+// --- restoring from storage ----------------------------------------------------------------------
+//
+// The restore path is the one way into session state that does not come from the lattice, and it used
+// to be a whole-structure assignment: `restore_sessions` in `curfew-ffi` deserialized a `Sessions`
+// and wrote it over the running one, with no lock check, no proof and no op-log entry. Anyone who
+// could call it could end every lock by handing over `{"running":[]}`.
+//
+// These tests are the promise that the door is shut, from the side that matters: what a *caller* can
+// achieve by sending arbitrary JSON. Every one of them fails against the old implementation.
+
+#[test]
+fn an_empty_restore_cannot_end_a_running_lock() {
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    // The bypass, in one line: the stored state says nothing is running.
+    s.restore_without_weakening(Sessions::default());
+
+    assert_eq!(s.running.len(), 1, "an empty restore ended a running lock");
+    assert!(s.get("a").is_some());
+    assert!(s.get("a").unwrap().lock.conditions.contains(&Lock::Timer));
+}
+
+#[test]
+fn a_restore_cannot_shorten_a_lock_or_drop_its_conditions() {
+    let mut s = Sessions::default();
+    s.start(session(
+        "a",
+        "deep-work",
+        LockSet::new([Lock::Confirm, Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+
+    // The same session, reported as far weaker than it is: no conditions, ending in a minute.
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([], Some(NOW + 60))));
+    s.restore_without_weakening(incoming);
+
+    let lock = &s.get("a").unwrap().lock;
+    assert!(
+        lock.conditions.contains(&Lock::Confirm)
+            && lock.conditions.contains(&Lock::DeviceCredential),
+        "a restore dropped a lock condition"
+    );
+    assert_eq!(lock.ends_at, Some(NOW + 3600), "a restore shortened the end time");
+}
+
+/// The legitimate use: everything that was running before a restart comes back.
+#[test]
+fn a_restore_starts_sessions_that_are_not_running_yet() {
+    let mut s = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+    incoming.start(session("b", "evening", LockSet::new([Lock::Confirm], Some(NOW + 60))));
+
+    s.restore_without_weakening(incoming);
+
+    assert_eq!(s.running.len(), 2, "a restore dropped a session it should have started");
+    assert!(s.get("a").is_some() && s.get("b").is_some());
+}
+
+/// A restore may strengthen, which is the other half of "necessary and sufficient".
+#[test]
+fn a_restore_can_strengthen_a_running_session() {
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Confirm], Some(NOW + 60))));
+
+    let mut incoming = Sessions::default();
+    incoming.start(session(
+        "a",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+    s.restore_without_weakening(incoming);
+
+    let lock = &s.get("a").unwrap().lock;
+    assert!(
+        lock.conditions.contains(&Lock::Confirm)
+            && lock.conditions.contains(&Lock::DeviceCredential),
+        "the stronger set should hold both conditions"
+    );
+    assert_eq!(lock.ends_at, Some(NOW + 3600));
+}
+
+/// A dismissal is a memory that a schedule occurrence was ended. A restore must not un-remember it,
+/// because forgetting one lets tonight's window start again straight after being ended.
+#[test]
+fn a_restore_cannot_un_dismiss_an_occurrence() {
+    let mut s = Sessions::default();
+    s.dismissed.insert("weekly-night".into(), NOW);
+
+    s.restore_without_weakening(Sessions::default());
+    assert_eq!(s.dismissed.get("weekly-night").copied(), Some(NOW), "a restore forgot a dismissal");
+
+    // **And a later dismissal from the incoming side does NOT win.** This test used to assert that it
+    // did — *"a later dismissal wins, whichever side it came from"* — which was the vulnerability
+    // written down as a feature. `reconcile` only honours a dismissal that falls inside the occurrence
+    // it ended, so pushing the timestamp forward past the window's end un-dismisses it and re-arms a
+    // window the user had explicitly ended. An existing dismissal is now never moved.
+    let mut incoming = Sessions::default();
+    incoming.dismissed.insert("weekly-night".into(), NOW + 10);
+    s.restore_without_weakening(incoming);
+    assert_eq!(
+        s.dismissed.get("weekly-night").copied(),
+        Some(NOW),
+        "a restore moved an existing dismissal, which re-arms the window it was remembering"
+    );
+
+    // A dismissal for a profile that has none is still adopted, which is what a restart needs.
+    let mut fresh = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.dismissed.insert("weekly-morning".into(), NOW + 5);
+    fresh.restore_without_weakening(incoming);
+    assert_eq!(fresh.dismissed.get("weekly-morning").copied(), Some(NOW + 5));
+}
+
+/// Restoring the same thing twice is the ordinary case — a service restart loop, or a retry — and it
+/// must be idempotent rather than accumulating duplicates.
+#[test]
+fn restoring_twice_changes_nothing_the_second_time() {
+    let mut s = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    s.restore_without_weakening(incoming.clone());
+    let after_first = s.running.len();
+    s.restore_without_weakening(incoming);
+
+    assert_eq!(s.running.len(), after_first, "a second restore duplicated a session");
+    assert_eq!(after_first, 1);
+}
+
+// --- what a surface may offer (P1-6) -------------------------------------------------------------
+//
+// Three user interfaces each answered this question their own way. The tray routed `DeviceCredential`
+// and `PeerRelease`; the Windows window routed two variants by comparing display *strings* and
+// rendered no release at all for a credential lock; and neither routed `Challenge`, which exists in
+// this crate and which Android implements. So the decision lives here now and every surface reads it.
+
+/// **The finding.** A credential lock must still offer the exit of last resort, because that is what
+/// the architecture promises and what the window did not do.
+#[test]
+fn a_credential_lock_offers_the_password_and_the_24_hour_release() {
+    let lock = LockSet::new([Lock::DeviceCredential], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert!(offers.credential, "the password route was not offered");
+    assert!(!offers.ends_on_request, "a credential lock is not free to end");
+    assert!(
+        offers.delayed_release,
+        "no 24-hour release: this is the gap that left a user with no way out from the window"
+    );
+    assert!(offers.elsewhere.is_empty(), "a credential is not an elsewhere condition");
+}
+
+/// And a lock whose only condition is a tag in another room. The tray only offered the 24-hour
+/// release when `credential || others`; here `elsewhere` is non-empty, so both agree — but the
+/// predicate is what decides, not the surface.
+#[test]
+fn a_lock_no_local_prompt_can_satisfy_offers_where_it_is_and_the_way_out() {
+    let lock = LockSet::new([Lock::Token { id: "t1".into() }], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert!(!offers.credential && !offers.confirm, "a tag is not a prompt this surface can show");
+    assert_eq!(offers.elsewhere, vec![Lock::Token { id: "t1".into() }]);
+    assert!(offers.delayed_release, "the last-resort exit was withheld");
+}
+
+/// A challenge is a route Android supports and Windows did not route at all. It must be named as
+/// "elsewhere" rather than silently omitted, so a surface can say what is holding the lock.
+#[test]
+fn a_challenge_is_reported_as_an_elsewhere_condition() {
+    use curfew_core::ChallengeKind;
+    let lock = LockSet::new([Lock::Challenge { challenge: ChallengeKind::Math }], Some(NOW + 3600));
+    let offers = lock.offers(false, false);
+
+    assert_eq!(offers.elsewhere.len(), 1, "the challenge was dropped rather than reported");
+    assert!(matches!(offers.elsewhere[0], Lock::Challenge { .. }));
+    assert!(offers.delayed_release);
+}
+
+/// An unlocked session ends on request and needs no exit of last resort — there is nothing to exit.
+#[test]
+fn an_unlocked_session_ends_on_request_and_offers_no_last_resort() {
+    let lock = LockSet::new([], None);
+    let offers = lock.offers(false, false);
+
+    assert!(offers.ends_on_request);
+    assert!(
+        !offers.delayed_release,
+        "a 24-hour delay was offered for a session that can simply be ended"
+    );
+}
+
+/// **The peer release.** A lock naming *this* device is offered here; naming another device it is not.
+/// This is the one input a surface cannot work out for itself, which is why the service computes it.
+#[test]
+fn a_peer_release_is_offered_only_to_the_device_it_names() {
+    let lock = LockSet::new([Lock::PeerRelease { device_id: "PHONE7".into() }], None);
+
+    let ours = lock.offers(true, false);
+    assert!(ours.peer_release, "the named device was not offered the release");
+    assert!(!ours.peer_released);
+    assert!(ours.elsewhere.is_empty(), "a release we can give is not an elsewhere condition");
+
+    let theirs = lock.offers(false, false);
+    assert!(!theirs.peer_release, "a device that was not named was offered the release");
+    assert_eq!(theirs.elsewhere.len(), 1, "the peer lock should be reported as elsewhere");
+}
+
+/// Given already: reported, never offered again. The release cannot be withdrawn, so a button would
+/// suggest it could be redone.
+#[test]
+fn a_peer_release_already_given_is_reported_rather_than_offered() {
+    let lock = LockSet::new([Lock::PeerRelease { device_id: "PHONE7".into() }], None);
+    let offers = lock.offers(true, true);
+
+    assert!(!offers.peer_release, "a release already given was offered again");
+    assert!(offers.peer_released, "a release already given was not reported");
+    assert!(
+        offers.elsewhere.is_empty(),
+        "the device holding the release should not be told the lock is elsewhere"
+    );
+}
+
+/// A release already counting down is never offered again, because asking twice cannot move it.
+#[test]
+fn a_delayed_release_already_running_is_reported_and_never_offered_twice() {
+    let mut lock = LockSet::new([Lock::DeviceCredential], None);
+    lock.delayed_release_at = Some(NOW + curfew_core::DELAYED_RELEASE_SECONDS);
+
+    let offers = lock.offers(false, false);
+    assert!(!offers.delayed_release, "a running release was offered again");
+    assert_eq!(offers.delayed_release_at, Some(NOW + curfew_core::DELAYED_RELEASE_SECONDS));
+}
+
+/// **An expired timer is not "locked elsewhere".** It is a condition in the set but it is satisfied
+/// by the clock, and the tray filters it out for exactly that reason. Leaving it in made an expired
+/// timer render as unreachable from the tray — caught by the tray's own suite, and pinned here so the
+/// shared predicate cannot regress on its own.
+#[test]
+fn a_timer_is_never_an_elsewhere_condition() {
+    let expired = LockSet::new([Lock::Timer], Some(NOW - 1));
+    let offers = expired.offers(false, false);
+
+    assert!(offers.elsewhere.is_empty(), "an expired timer was reported as elsewhere");
+    assert!(offers.delayed_release);
+
+    // And a timer still running is the same: it is a time, not a place.
+    let running = LockSet::new([Lock::Timer], Some(NOW + 3600));
+    assert!(running.offers(false, false).elsewhere.is_empty());
+}
+
+/// A confirmation is friction, not a barrier, and is a route this surface can serve.
+#[test]
+fn a_confirmation_is_offered_rather_than_reported_as_elsewhere() {
+    let offers = LockSet::new([Lock::Confirm], Some(NOW + 3600)).offers(false, false);
+
+    assert!(offers.confirm);
+    assert!(offers.elsewhere.is_empty());
+    assert!(offers.delayed_release);
+}
+
+/// Every condition together, so a surface that renders all of them has something to render.
+#[test]
+fn every_condition_is_accounted_for() {
+    use curfew_core::ChallengeKind;
+    let lock = LockSet::new(
+        [
+            Lock::DeviceCredential,
+            Lock::Confirm,
+            Lock::Challenge { challenge: ChallengeKind::Typing },
+            Lock::RestartRequired,
+            Lock::Timer,
+        ],
+        Some(NOW + 60),
+    );
+    let offers = lock.offers(false, false);
+
+    assert!(offers.credential && offers.confirm);
+    // The challenge and the restart, and *not* the credential, the confirmation or the timer.
+    assert_eq!(offers.elsewhere.len(), 2, "got {:?}", offers.elsewhere);
+    assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::RestartRequired)));
+    assert!(offers.elsewhere.iter().any(|l| matches!(l, Lock::Challenge { .. })));
+    assert!(offers.delayed_release);
+}
+
+// --- which running session a schedule is holding (P2-11) -----------------------------------------
+//
+// `curfew remove <id>` deletes a window or calendar rule and nothing in the running service notices. The
+// session keeps its own copy of what it blocks, so the lock is not weakened — but the user is not told,
+// and the README says a lock is a promise that only its own conditions shorten. This is the predicate that
+// lets a caller refuse instead, and refusing is right in exactly one direction: a schedule that is *not*
+// enforcing anything must be deletable, or the plan becomes unmaintainable without ending a lock first.
+
+fn a_session(id: &str, profile: &str, source: SessionSource) -> Session {
+    Session {
+        id: id.into(),
+        profile: profile.into(),
+        source,
+        started_at: NOW,
+        lock: LockSet::new([Lock::Timer], None),
+    }
+}
+
+/// **The case the finding is about**: a weekly window is holding a session, so removing it is refused.
+#[test]
+fn a_running_weekly_window_is_reported_as_holding_a_session() {
+    let running = vec![a_session(
+        "s1",
+        "deep-work",
+        SessionSource::Weekly { schedule: "weekday-mornings".into() },
+    )];
+
+    let held = running_from(&running, "weekday-mornings");
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].id, "s1");
+}
+
+/// A calendar rule the same, because it carries the schedule id too.
+#[test]
+fn a_running_calendar_rule_is_reported_as_holding_a_session() {
+    let running = vec![a_session(
+        "s1",
+        "deep-work",
+        SessionSource::Calendar { schedule: "work-focus".into(), event: "e1".into() },
+    )];
+
+    assert_eq!(running_from(&running, "work-focus").len(), 1);
+}
+
+/// **And the other direction, which is what keeps the plan editable.** A schedule that is not enforcing
+/// anything can be removed freely: that is the ordinary edit, and refusing it would mean ending a lock
+/// before every change to the plan.
+#[test]
+fn a_schedule_that_is_not_running_is_not_reported() {
+    let running = vec![
+        a_session("s1", "deep-work", SessionSource::Weekly { schedule: "weekday-mornings".into() }),
+        // **A calendar session too, asked about a different id.** Both arms need this: without a calendar
+        // case here, replacing the calendar arm's comparison with `true` changes no outcome in any test,
+        // because every other calendar fixture asks about the id it actually carries.
+        a_session(
+            "s2",
+            "deep-work",
+            SessionSource::Calendar { schedule: "work-focus".into(), event: "e1".into() },
+        ),
+    ];
+
+    assert!(running_from(&running, "some-other-window").is_empty());
+    for other in ["weekday-mornings", "work-focus"] {
+        let found = running_from(&running, other);
+        // Neither is "not reported": asking about the id a session carries *does* report it, which is the
+        // other half of this predicate. What matters is that it reports only its own.
+        assert_eq!(found.len(), 1, "{other} reported the wrong number of sessions");
+        assert_eq!(found[0].id, if other == "weekday-mornings" { "s1" } else { "s2" });
+    }
+    assert!(running_from(&[], "weekday-mornings").is_empty());
+}
+
+/// A session started by hand is not derived from any schedule, so no removal is refused on its account.
+#[test]
+fn a_manual_session_holds_no_schedule() {
+    let running = vec![a_session("s1", "deep-work", SessionSource::Manual)];
+
+    assert!(
+        running_from(&running, "weekday-mornings").is_empty(),
+        "a manual session was attributed to a schedule"
+    );
+}
+
+/// Two sessions from the same schedule are both reported, because the refusal names the profiles.
+#[test]
+fn every_session_from_a_schedule_is_reported() {
+    let running = vec![
+        a_session("s1", "deep-work", SessionSource::Weekly { schedule: "w".into() }),
+        a_session(
+            "s2",
+            "evenings",
+            SessionSource::Calendar { schedule: "w".into(), event: "e".into() },
+        ),
+        a_session("s3", "other", SessionSource::Weekly { schedule: "elsewhere".into() }),
+    ];
+
+    let held = running_from(&running, "w");
+    assert_eq!(held.len(), 2, "both sessions from a schedule should be reported");
+    assert!(held.iter().all(|s| s.profile != "other"), "an unrelated session was attributed");
+}
+
+// --- a restore must not be able to end a running lock (review finding) ---------------------------
+//
+// Both exploits below come from one root cause: `restore_without_weakening` merged incoming state into the
+// running state with `LockSet::merge`, which is a **lattice join over two promises**. A join is right for
+// combining two sessions' locks, where both sides are trusted. Restore is not a join: the incoming side is
+// caller-supplied and the running side is authoritative, so a join lets the untrusted side weaken —
+// exactly the property the function is named for.
+
+/// **Exploit 1.** `LockSet::merge` takes the *earlier* `delayed_release_at`, and `min_opt(None, Some(t))`
+/// is `Some(t)`. So an incoming session whose delayed release is long past hands the running lock a
+/// release that has already happened — `is_expired` turns true and every condition is bypassed.
+#[test]
+fn a_restore_cannot_inject_a_delayed_release_that_has_already_passed() {
+    let mut sessions = Sessions::default();
+    sessions.start(session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 7200)),
+    ));
+
+    // The payload: the same profile, same conditions, but a delayed release in the distant past.
+    let mut forged =
+        session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], Some(NOW + 7200)));
+    forged.lock.delayed_release_at = Some(1);
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("the session is still there");
+    assert_eq!(
+        held.lock.delayed_release_at, None,
+        "a restore injected a delayed release, which ends the lock without any condition"
+    );
+    assert!(
+        !held.lock.is_expired(NOW),
+        "the lock reports itself expired, so every condition has been bypassed"
+    );
+    assert!(
+        !held.lock.can_release(NOW, &BTreeSet::new()),
+        "the lock can be released with no evidence at all"
+    );
+}
+
+/// **Exploit 2.** `dismissed` was merged by taking the *later* timestamp, on the theory that a later
+/// dismissal is the more recent fact. But `reconcile` only honours a dismissal that falls **inside** the
+/// occurrence it ended — so a timestamp pushed past the window's end defeats the dismissal entirely and
+/// the lock starts again.
+#[test]
+fn a_restore_cannot_un_dismiss_an_occurrence_by_pushing_the_time_past_its_window() {
+    let mut sessions = Sessions::default();
+    // The user ended this profile's occurrence by hand, here.
+    sessions.dismissed.insert("deep-work".into(), NOW);
+
+    // The payload moves that dismissal far past any window it could have ended.
+    sessions.restore_without_weakening(Sessions {
+        dismissed: BTreeMap::from([("deep-work".to_string(), NOW + 86_400)]),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        sessions.dismissed.get("deep-work"),
+        Some(&NOW),
+        "a restore moved the dismissal outside the window it ended, so tonight's lock starts again"
+    );
+}
+
+/// **And the property the function is named for holds in the other direction too**: a restore that is
+/// *stronger* is still adopted, or a restart would silently drop a promise. Without this, "never adopt
+/// anything" would satisfy the two tests above while breaking the feature.
+#[test]
+fn a_restore_that_strengthens_is_still_adopted() {
+    let mut sessions = Sessions::default();
+    sessions.start(session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+
+    // A longer timer and an extra condition: strictly more than what is running.
+    let stronger = session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential, Lock::Confirm], Some(NOW + 7200)),
+    );
+    sessions.restore_without_weakening(Sessions { running: vec![stronger], ..Default::default() });
+
+    let held = sessions.running.first().expect("the session is still there");
+    assert!(
+        held.lock.ends_at.is_some_and(|t| t >= NOW + 7200),
+        "a stronger restore was dropped, so a restart would lose a promise: {:?}",
+        held.lock.ends_at
+    );
+    assert!(held.lock.conditions.contains(&Lock::Confirm), "an added condition was dropped");
+}
+
+/// A restore of a profile that is **not** running starts it. That is what the function is for, and it must
+/// keep working — the fix below narrows what a restore may change about an *existing* session, not whether
+/// it may add one.
+#[test]
+fn a_restore_still_starts_a_profile_that_is_not_running() {
+    let mut sessions = Sessions::default();
+    sessions.restore_without_weakening(Sessions {
+        running: vec![session("s9", "reading", LockSet::new([Lock::Timer], Some(NOW + 600)))],
+        ..Default::default()
+    });
+    assert_eq!(sessions.active_profiles(NOW), vec!["reading".to_string()]);
+}
+
+/// **A restore cannot move a concrete release earlier**, when both sides have one.
+///
+/// The mutation run found this gap: `harden` taking `min` instead of `max` for `delayed_release_at` left
+/// every other test passing, because they only ever gave one side a concrete release.
+#[test]
+fn a_restore_cannot_pull_a_delayed_release_forward() {
+    let mut sessions = Sessions::default();
+    let mut mine = LockSet::new([Lock::Timer], Some(NOW + 7200));
+    mine.delayed_release_at = Some(NOW + 3600);
+    sessions.start(session("s1", "deep-work", mine));
+
+    // The payload promises a release an hour earlier than the one already committed to.
+    let mut forged = LockSet::new([Lock::Timer], Some(NOW + 7200));
+    forged.delayed_release_at = Some(NOW + 60);
+    sessions.restore_without_weakening(Sessions {
+        running: vec![session("s1", "deep-work", forged)],
+        ..Default::default()
+    });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.delayed_release_at,
+        Some(NOW + 3600),
+        "a restore pulled the committed release forward"
+    );
+}
+
+/// **A restore cannot give an "until released" lock an end time.**
+///
+/// The second gap the mutation run found. A running lock with `ends_at: None` is the strongest kind there
+/// is — it ends only when every condition is met — so accepting an incoming `Some(t)` would hand it an
+/// automatic expiry it did not have.
+#[test]
+fn a_restore_cannot_give_an_until_released_lock_an_end_time() {
+    let mut sessions = Sessions::default();
+    // `None` end time: ends only when the conditions are satisfied.
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], None)));
+
+    let forged = session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], Some(NOW + 60)));
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.ends_at, None,
+        "a restore gave an 'until released' lock an end time, so it now expires on its own"
+    );
+    assert!(
+        !held.lock.is_expired(NOW + 600),
+        "the lock expires now, though its conditions were never met"
+    );
+}
+
+/// **A restore may push an end time later, which is the strengthening that is safe.**
+///
+/// This replaces a test I wrote earlier in this branch,
+/// `a_restore_may_strengthen_a_timed_lock_into_an_until_released_one`, which asserted that adopting an
+/// incoming `None` over a running timer is desirable because "until released" is stronger. It is stronger
+/// in duration and it is a **trap** in practice: with `conditions = [Timer]` — not claimable since entry 1 —
+/// there is no end time and no satisfiable condition, so nothing can open the lock.
+///
+/// The reasoning behind that test was too simple: if weakening is forbidden, strengthening must be fine.
+/// But **a bound is not only a limit, it is also the exit**, so removing one is not the mirror image of
+/// adding a condition. Pushing a bound later is the strengthening that a restore may safely adopt.
+#[test]
+fn a_restore_may_push_an_end_time_later() {
+    let mut sessions = Sessions::default();
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 60))));
+
+    let stronger = session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 7200)));
+    sessions.restore_without_weakening(Sessions { running: vec![stronger], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.ends_at,
+        Some(NOW + 7200),
+        "a restore that pushed the end time later was dropped"
+    );
+    assert!(!held.lock.is_expired(NOW + 60), "the lock expires earlier than it should");
+}
+
+/// **A restore cannot cancel a delayed release the user has already asked for.**
+///
+/// `harden` treated `None` as the top of the lattice for `delayed_release_at`, so an incoming `None`
+/// overwrote a running `Some(t)`. That is "stronger" in duration — the lock no longer ends on its own — but
+/// it cancels a 24-hour release the user has asked for, and `LockSet::request_release`'s own doc says *"it
+/// cannot be cancelled"*. The delayed release is the guarantee that this tool cannot trap you, so it is the
+/// one commitment a restore must not take away.
+#[test]
+fn a_restore_cannot_cancel_a_delayed_release() {
+    let mut sessions = Sessions::default();
+    let mut mine = LockSet::new([Lock::DeviceCredential], None);
+    let release = mine.request_release(NOW);
+    sessions.start(session("s1", "deep-work", mine));
+
+    // The payload promises no automatic release at all.
+    let forged = session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], None));
+    assert_eq!(forged.lock.delayed_release_at, None, "the fixture must have no release");
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.delayed_release_at,
+        Some(release),
+        "a restore cancelled the release the user asked for, so the lock no longer ends"
+    );
+}
+
+/// **And a restore cannot manufacture an unbounded commitment either.** The same `None`-as-top rule let an
+/// incoming "until released" end time replace a running timer, which with conditions that cannot be
+/// satisfied (`Lock::Timer` is not claimable) is a lock with no way out at all.
+#[test]
+fn a_restore_cannot_remove_a_running_end_time() {
+    let mut sessions = Sessions::default();
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    // "Until released", from the untrusted side.
+    let forged = session("s1", "deep-work", LockSet::new([Lock::Timer], None));
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.ends_at,
+        Some(NOW + 3600),
+        "a restore removed the running lock's end time, and a Timer condition cannot be claimed, so \
+         nothing can open it"
+    );
 }

@@ -32,10 +32,44 @@ Thumbs.db
 scratch/
 *.log
 
-# OneDrive litter
+# Folder metadata written by cloud-sync clients — Google Drive Desktop in this case, which puts one in
+# every folder it manages (the content names `GoogleDriveFS.exe`). `OneDrive litter` was this line's
+# earlier description and named the wrong program.
+#
+# **Ignoring them here is not enough, and that is the trap.** Gradle's resource merger scans the
+# filesystem rather than git, so a `desktop.ini` under `android/**/res/` fails the whole Android build
+# with `Resource and asset merger: The file name must end with .xml or .png` — an error that names the
+# file but not the reason it is there. Fifty-three appeared in one sync pass.
+#
+# There is no AGP-level ignore for this: `androidResources.ignoreAssetsPatterns` is applied by aapt2,
+# which the merge task runs before, and `sourceSets["main"].res.exclude` does not reach the merger
+# either. Both were tried. So `tools/check_workspace.py` reports them, and the fix is to delete them.
 desktop.ini
 .kotlin/
 
-# OneDrive litter
+# Folder metadata written by cloud-sync clients — Google Drive Desktop in this case, which puts one in
+# every folder it manages (the content names `GoogleDriveFS.exe`). `OneDrive litter` was this line's
+# earlier description and named the wrong program.
+#
+# **Ignoring them here is not enough, and that is the trap.** Gradle's resource merger scans the
+# filesystem rather than git, so a `desktop.ini` under `android/**/res/` fails the whole Android build
+# with `Resource and asset merger: The file name must end with .xml or .png` — an error that names the
+# file but not the reason it is there. Fifty-three appeared in one sync pass.
+#
+# There is no AGP-level ignore for this: `androidResources.ignoreAssetsPatterns` is applied by aapt2,
+# which the merge task runs before, and `sourceSets["main"].res.exclude` does not reach the merger
+# either. Both were tried. So `tools/check_workspace.py` reports them, and the fix is to delete them.
 desktop.ini
 .kotlin/
+
+# A checkout of the rchify skill that landed in the working tree during an unrelated probe. It is
+# not a build input, not referenced anywhere in this repository, and not something to commit — but it is
+# 1.3 MB of vendored code, so it is named here rather than left to show up in git status for ever.
+.archify-probe/
+
+# Android signing key material for ssembleRelease. **Never commit these**: a signing key in a public
+# repository is a signing key everyone has, and Android refuses an in-place update signed by a
+# different one. Absent both, the release build is unsigned, which is the published artifact today.
+keystore.properties
+*.jks
+*.keystore

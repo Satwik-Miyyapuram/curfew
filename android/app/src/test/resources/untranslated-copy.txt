@@ -1,0 +1,332 @@
+# Copy a translator cannot reach, found by UntranslatedCopyTest.
+#
+# One entry per occurrence: File.kt|the literal exactly as it appears.
+# Delete a line when you move that string into strings.xml. The length
+# of this file is the number the project quotes, so a stale line is a lie.
+#
+# Regenerate: ./gradlew :app:testDebugUnitTest -Dcurfew.updateCopyAllowlist=true
+AppPickerScreen.kt|* - YouTube*
+AppPickerScreen.kt|*://*/watch*
+AppPickerScreen.kt|Address
+AppPickerScreen.kt|Address
+AppPickerScreen.kt|Address, pattern or word…
+AppPickerScreen.kt|Block
+AppPickerScreen.kt|Block a site or word
+AppPickerScreen.kt|Blocked by this profile
+AppPickerScreen.kt|Blocking belongs to a profile — a named set of apps and sites. Make one on the 
+AppPickerScreen.kt|Blocks anything whose address or title contains the word.
+AppPickerScreen.kt|Blocks the site and everything under it.
+AppPickerScreen.kt|Cancel
+AppPickerScreen.kt|Cancel
+AppPickerScreen.kt|Copy from
+AppPickerScreen.kt|Copy them
+AppPickerScreen.kt|Matches the title of a window, on the PC.
+AppPickerScreen.kt|Matches whole addresses; * stands for any run of characters.
+AppPickerScreen.kt|Nothing has been changed, and this screen will work again once the config 
+AppPickerScreen.kt|Nothing to block yet
+AppPickerScreen.kt|Nothing yet. A site blocks it and everything under it; a word blocks 
+AppPickerScreen.kt|Plan tab and it will appear here.
+AppPickerScreen.kt|Reading your apps…
+AppPickerScreen.kt|Search your apps
+AppPickerScreen.kt|Site
+AppPickerScreen.kt|Site
+AppPickerScreen.kt|Word
+AppPickerScreen.kt|Word
+AppPickerScreen.kt|Your plan could not be read, so Curfew cannot show what this profile blocks. 
+AppPickerScreen.kt|already running.
+AppPickerScreen.kt|anything whose address or title contains it.
+AppPickerScreen.kt|can be read.\n\n
+AppPickerScreen.kt|get added here. Nothing already blocked is removed.
+BlockActivity.kt| else 
+BlockActivity.kt|Back to my home screen
+BlockActivity.kt|No emergency pass right now
+BlockActivity.kt|Not now
+BlockActivity.kt|Wait a moment
+BlockActivity.kt|You can go ahead now.
+BlockActivity.kt|} this month
+CalendarScreen.kt|(untitled)
+CalendarScreen.kt|Add a profile on the Plan tab first — a calendar rule has to say which one 
+CalendarScreen.kt|All day
+CalendarScreen.kt|Allow calendar access
+CalendarScreen.kt|Block this
+CalendarScreen.kt|Change
+CalendarScreen.kt|Curfew cannot see your calendar yet, so no meeting can start a block.
+CalendarScreen.kt|Marked free in your calendar
+CalendarScreen.kt|Nothing blocked
+CalendarScreen.kt|Nothing in the next day and a half. Curfew only reads a narrow window 
+CalendarScreen.kt|Pick from your calendar
+CalendarScreen.kt|Reading your calendar…
+CalendarScreen.kt|Search your calendar events
+CalendarScreen.kt|Search your events
+CalendarScreen.kt|Which meetings should start it?
+CalendarScreen.kt|Your calendar could not be read just now, so this is not a complete list.\n\n
+CalendarScreen.kt|around now, because that is all a rule can act on.
+CalendarScreen.kt|it runs.
+Challenge.kt|Answer this to end the session.
+Challenge.kt|Type this out to end the session.
+ChallengeDialog.kt|End the session
+ChallengeDialog.kt|Keep going
+Design.kt|Cancel
+DevicesScreen.kt|Add a device
+DevicesScreen.kt|Cancel
+DevicesScreen.kt|Compare this with what your other device shows for it.
+DevicesScreen.kt|Copy code
+DevicesScreen.kt|Curfew syncs directly between your own devices. There is no account and no 
+DevicesScreen.kt|Exchange now
+DevicesScreen.kt|For devices that are never on the same network. Point both at one folder a 
+DevicesScreen.kt|Got it
+DevicesScreen.kt|Got it
+DevicesScreen.kt|It answered mine
+DevicesScreen.kt|It is showing a code
+DevicesScreen.kt|It starts with the enforcement service. Turn Curfew on and come back.
+DevicesScreen.kt|It starts with the enforcement service. Turn Curfew on and come back.
+DevicesScreen.kt|Listening on this network. 
+DevicesScreen.kt|No devices paired yet
+DevicesScreen.kt|Not listening on this network right now.
+DevicesScreen.kt|Not seen on this network recently.
+DevicesScreen.kt|On this network now.
+DevicesScreen.kt|Pair only if your other device is showing these same six digits. If 
+DevicesScreen.kt|Paired
+DevicesScreen.kt|Pairing code for the other device to read
+DevicesScreen.kt|Read this on your other device. It will show you a code back, and 
+DevicesScreen.kt|Remove it
+DevicesScreen.kt|Remove this device
+DevicesScreen.kt|Removed. Nothing it says is listened to.
+DevicesScreen.kt|Removing it does not end any block it started here.
+DevicesScreen.kt|Show a code here and read it on the other device, or paste the code the 
+DevicesScreen.kt|Show this device code
+DevicesScreen.kt|Show this device code
+DevicesScreen.kt|Still blocking here
+DevicesScreen.kt|Still blocking here
+DevicesScreen.kt|Sync had trouble
+DevicesScreen.kt|Sync had trouble
+DevicesScreen.kt|Sync is not running
+DevicesScreen.kt|Sync is not running
+DevicesScreen.kt|Sync now
+DevicesScreen.kt|Sync now
+DevicesScreen.kt|Sync storage
+DevicesScreen.kt|Sync storage
+DevicesScreen.kt|The digits match — pair
+DevicesScreen.kt|The digits match — pair
+DevicesScreen.kt|This device
+DevicesScreen.kt|Through a folder
+DevicesScreen.kt|Your devices
+DevicesScreen.kt|\n
+DevicesScreen.kt|already knows whether or not it can reach your other devices.
+DevicesScreen.kt|file-sync app keeps in step; Curfew leaves signed updates there and reads 
+DevicesScreen.kt|it is showing anything else, someone else is trying to pair with 
+DevicesScreen.kt|lock you chose is still live on this device, so it keeps blocking. It 
+DevicesScreen.kt|other device is showing.
+DevicesScreen.kt|server: nothing here leaves the network you are on.
+DevicesScreen.kt|six digits — paste its code below to see the same six digits here.
+DevicesScreen.kt|this device — cancel.
+DevicesScreen.kt|what the other device left.
+DevicesScreen.kt|will end here when the lock is satisfied here.
+HealthScreen.kt| Its database is encrypted with a key held by this 
+HealthScreen.kt|Allow
+HealthScreen.kt|device's keystore.
+NowScreen.kt| days in a row
+NowScreen.kt| this week
+NowScreen.kt|1 peer
+NowScreen.kt|Another of your devices has a session only this one can end.
+NowScreen.kt|Ask for it
+NowScreen.kt|Ask to end in 24 hours
+NowScreen.kt|Blocking now
+NowScreen.kt|Check the schedules now
+NowScreen.kt|Confirm it is you.
+NowScreen.kt|Curfew is watching your schedule. It will start one when its time comes.
+NowScreen.kt|Curfew was not running
+NowScreen.kt|ENFORCING
+NowScreen.kt|End it
+NowScreen.kt|End now
+NowScreen.kt|Got it
+NowScreen.kt|Got it
+NowScreen.kt|Hold the tag against the back of the phone, or type what is on it.
+NowScreen.kt|Let it out
+NowScreen.kt|Let the other device out?
+NowScreen.kt|Locked: needs 
+NowScreen.kt|Missed a stretch
+NowScreen.kt|Next up
+NowScreen.kt|No peers
+NowScreen.kt|Not yet
+NowScreen.kt|Nothing blocked yet today
+NowScreen.kt|Nothing is blocked
+NowScreen.kt|Nothing is set to start on its own. Start a block by hand whenever you want.
+NowScreen.kt|Nothing scheduled in the next day.
+NowScreen.kt|Present
+NowScreen.kt|Present a tag
+NowScreen.kt|Present the tag
+NowScreen.kt|Restart this device, then come back and end it. Force-stopping Curfew or 
+NowScreen.kt|Start a block now
+NowScreen.kt|Tag
+NowScreen.kt|The clock jumped backwards
+NowScreen.kt|The clock jumped forward
+NowScreen.kt|The clock moved backwards
+NowScreen.kt|The hours a block buys are counted here, so you can see what the no was for. 
+NowScreen.kt|This fills in once a block has run.
+NowScreen.kt|This is the way out of a lock nothing here can end. It cannot be taken back, and 
+NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
+NowScreen.kt|Ticks on time
+NowScreen.kt|Upcoming · next 24h
+NowScreen.kt|Use an emergency pass?
+NowScreen.kt|Use one
+NowScreen.kt|Waiting on you
+NowScreen.kt|You chose \"ask me first\" for this one, so this is the asking. Nothing else 
+NowScreen.kt|Your other device is holding a session that only this one can end. Saying yes 
+NowScreen.kt|no end time
+NowScreen.kt|reopening it is not a restart.
+NowScreen.kt|right now.
+ProfileEditScreen.kt| else 
+ProfileEditScreen.kt|A daily budget
+ProfileEditScreen.kt|A daily budget
+ProfileEditScreen.kt|A name you would say out loud. You can change it whenever.
+ProfileEditScreen.kt|A repeating schedule
+ProfileEditScreen.kt|A session it has already started keeps running until its own lock lets it 
+ProfileEditScreen.kt|A timer I start myself
+ProfileEditScreen.kt|Add some apps first and the budget will apply to those.
+ProfileEditScreen.kt|Always on
+ProfileEditScreen.kt|Anything in my calendar
+ProfileEditScreen.kt|Apps and websites, kept apart in two lists.
+ProfileEditScreen.kt|Cancel
+ProfileEditScreen.kt|Delete
+ProfileEditScreen.kt|Delete
+ProfileEditScreen.kt|Delete
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|Give it a name first.
+ProfileEditScreen.kt|How hard is it to get out
+ProfileEditScreen.kt|It stops blocking anything, and its apps, sites and windows go with it. 
+ProfileEditScreen.kt|Keep it
+ProfileEditScreen.kt|Name it
+ProfileEditScreen.kt|Never unblocked, unless you spend a pass.
+ProfileEditScreen.kt|Or start from one of these
+ProfileEditScreen.kt|Pick as many as you like. They stack \u2014 a calendar rule and a nightly schedule 
+ProfileEditScreen.kt|Remove this window
+ProfileEditScreen.kt|Save
+ProfileEditScreen.kt|Save
+ProfileEditScreen.kt|Set it
+ProfileEditScreen.kt|Tap once, block for 90 minutes. Nothing scheduled.
+ProfileEditScreen.kt|This profile does not block any app yet, so there is nothing to ration. 
+ProfileEditScreen.kt|What it blocks
+ProfileEditScreen.kt|What should we call this one?
+ProfileEditScreen.kt|When should it run?
+ProfileEditScreen.kt|\u203A
+ProfileEditScreen.kt|\u2713
+ProfileEditScreen.kt|block ends when the last one is done.
+ProfileEditScreen.kt|can both switch the same profile on.
+ProfileEditScreen.kt|go.\n\nIf you only want it off for a while, turn it off from the schedule 
+ProfileEditScreen.kt|list instead — that is reversible.
+ProfileEditScreen.kt|open until the budget is spent, then close for the rest of the day.
+ProfileEditScreen.kt|} in this profile will 
+ScheduleEditor.kt|*focus*
+ScheduleEditor.kt|Anywhere
+ScheduleEditor.kt|Ignores the ones you are merely invited to.
+ScheduleEditor.kt|Only events marked busy
+ScheduleEditor.kt|Save
+ScheduleEditor.kt|Save
+ScheduleEditor.kt|Work
+ScheduleScreen.kt|+  Add an event
+ScheduleScreen.kt|Add a profile
+ScheduleScreen.kt|Add a window
+ScheduleScreen.kt|Add an event
+ScheduleScreen.kt|Add an event
+ScheduleScreen.kt|Connect it under Settings.
+ScheduleScreen.kt|Discard
+ScheduleScreen.kt|Edit this trigger
+ScheduleScreen.kt|Everything it blocks goes with it. A schedule still pointing at it has to 
+ScheduleScreen.kt|Export
+ScheduleScreen.kt|From calendar
+ScheduleScreen.kt|From your calendar
+ScheduleScreen.kt|Hide the config file
+ScheduleScreen.kt|Import
+ScheduleScreen.kt|Keep it
+ScheduleScreen.kt|Keep it
+ScheduleScreen.kt|Nothing can start a block yet. Make a profile first \u2014 a profile is the 
+ScheduleScreen.kt|Nothing starts it yet
+ScheduleScreen.kt|Pick a meeting, or add a window below
+ScheduleScreen.kt|Plan
+ScheduleScreen.kt|Remove
+ScheduleScreen.kt|Remove
+ScheduleScreen.kt|Remove this schedule?
+ScheduleScreen.kt|Remove this trigger
+ScheduleScreen.kt|Save
+ScheduleScreen.kt|Saving does not end a session that is already running. A lock you asked for is 
+ScheduleScreen.kt|Show the config file
+ScheduleScreen.kt|That file could not be read.
+ScheduleScreen.kt|That file could not be written.
+ScheduleScreen.kt|Your calendar is connected. New events matching a rule block automatically.
+ScheduleScreen.kt|Your calendar is not connected, so calendar rules will not start anything. 
+ScheduleScreen.kt|Your config could not be read, so it cannot be edited here yet.\n\n
+ScheduleScreen.kt|Your config could not be read, so there is nothing to export. Nothing was written.
+ScheduleScreen.kt|\n\nIt will stop starting sessions. A session it has 
+ScheduleScreen.kt|\n\nNothing has been changed. Reopening this screen tries again.
+ScheduleScreen.kt|already started keeps running until its own lock lets it go. If you only 
+ScheduleScreen.kt|be removed first, and a session it already started keeps running.
+ScheduleScreen.kt|not something a settings edit can undo.
+ScheduleScreen.kt|set of things to switch off \u2014 then say when it should run.
+ScheduleScreen.kt|want it off for a while, use the switch instead.
+SettingsScreen.kt|Curfew can enforce
+SettingsScreen.kt|Devices
+SettingsScreen.kt|Devices
+SettingsScreen.kt|Fix
+SettingsScreen.kt|Is Curfew working
+SettingsScreen.kt|No other device paired yet.
+SettingsScreen.kt|Paired, but not listening right now.
+SettingsScreen.kt|Settings
+SettingsScreen.kt|Sync now
+SettingsScreen.kt|Sync now
+SettingsScreen.kt|Syncing
+SettingsScreen.kt|Syncing is not set up on this device.
+SettingsScreen.kt|The rest of Curfew
+SettingsScreen.kt|Time and opens, per app, for as long as Curfew has been watching.
+SettingsScreen.kt|Where your time went
+SettingsScreen.kt|Your calendar
+SettingsScreen.kt|Your other devices
+SettingsScreen.kt|earshot. Blocks follow you between them.
+TimerScreen.kt|Curfew can only replace a blocked app if it is allowed to see which app is 
+TimerScreen.kt|Curfew cannot ask for one that does not exist, and a lock nothing can open 
+TimerScreen.kt|Fingerprint or PIN is not offered, because this phone has no screen lock set. 
+TimerScreen.kt|Go back
+TimerScreen.kt|Go back
+TimerScreen.kt|If you change your mind
+TimerScreen.kt|Nothing ends this early except an emergency pass. It runs until 
+TimerScreen.kt|One switch first
+TimerScreen.kt|Start it
+TimerScreen.kt|Start without it
+TimerScreen.kt|Turn it on
+TimerScreen.kt|You have not set up anything to block yet. Make a profile on the Plan tab 
+TimerScreen.kt|accident on a dial, so this is the check. Start it?
+TimerScreen.kt|come back. Or start it now, and nothing will be blocked until the switch 
+TimerScreen.kt|drag the ring, or pick one
+TimerScreen.kt|first — a timer needs to know what it is switching off.
+TimerScreen.kt|in front.\n\n
+TimerScreen.kt|is on.
+TimerScreen.kt|tap to use another profile
+TimerScreen.kt|would hold you until it ran out.
+TimerScreen.kt|your only profile
+UsageScreen.kt| else 
+UsageScreen.kt|Before Curfew
+UsageScreen.kt|Export CSV
+UsageScreen.kt|Export JSON
+UsageScreen.kt|Kept on this device for 30 days, then deleted.
+UsageScreen.kt|No days in a row yet.
+UsageScreen.kt|Nothing counted yet. Time is only measured for targets a budget or a launch 
+UsageScreen.kt|Now
+UsageScreen.kt|One day in a row.
+UsageScreen.kt|Screen time, a day
+UsageScreen.kt|The before-and-after goes here, and needs a full day of use to be worth 
+UsageScreen.kt|The before-and-after goes here. It needs Usage access, because both halves 
+UsageScreen.kt|Today
+UsageScreen.kt|Today has not finished, so it does not count against you yet.
+UsageScreen.kt|What Curfew did
+UsageScreen.kt|Where your time went
+UsageScreen.kt|are Android's own screen-time figures rather than anything Curfew 
+UsageScreen.kt|counts. Grant it on Health and this fills in.
+UsageScreen.kt|limit actually covers — Curfew does not keep a record of everything you 
+UsageScreen.kt|now, so it cannot say anything on day one.
+UsageScreen.kt|showing — it compares an average day before Curfew with an average day 
+UsageScreen.kt|you started.

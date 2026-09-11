@@ -356,7 +356,7 @@ mod tests {
         /// Spend a pass here and let the mirror carry it, the way the service does.
         fn spend(&mut self, now: Timestamp, policy: &EmergencyPolicy) -> Result<(), PassRefusal> {
             let spent = self.passes.spend(now, policy)?;
-            assert_eq!(spent.at, now);
+            assert_eq!(spent.at(), now);
             self.mirror.publish_passes(&self.shared, now, &self.passes);
             Ok(())
         }

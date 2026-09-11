@@ -14,6 +14,15 @@ pub enum Item {
     /// End a session that has no unmet conditions.
     End {
         id: String,
+        /// Whether the session also asks to be confirmed first.
+        ///
+        /// `Lock::Confirm` is the one condition this menu *can* satisfy, and it could not until now.
+        /// It was classified with the conditions that live elsewhere — a tag, a peer, a restart — so
+        /// a session locked "ask me first" got the sentence "this session is locked elsewhere" and no
+        /// action at all, from the one surface most Windows users ever open. The window could end it
+        /// and the tray could not, which is a worse bug than either being unable to: the product
+        /// disagreed with itself about whether the lock had an exit.
+        confirm: bool,
         label: String,
     },
     /// End one that needs the machine's password, via the operating system's own prompt.
@@ -54,6 +63,13 @@ pub enum Item {
     /// every login and wrong for the only place those two facts are written down: a user who
     /// dismissed it, or who inherited the machine, had no way back to it.
     About,
+    /// Open the Curfew window.
+    ///
+    /// The window is where a block is started by hand, and the tray is the surface almost every
+    /// Windows user actually sees. Until this item existed the two had no route between them: the
+    /// icon could end a session but not begin one, and the window was reachable only from the Start
+    /// menu — which is the wrong way round, because the icon is the thing in front of them.
+    OpenWindow,
     /// Hide the tray icon. It never stops enforcement, and says so.
     Quit,
 }
@@ -88,14 +104,14 @@ pub fn menu(status: &Status) -> Vec<Item> {
             curfew_core::frozen::Due::AwaitingConfirmation => {
                 items.push(Item::Note(format!(
                     "Another device asked to freeze {} — nothing has happened yet",
-                    countdown.profile
+                    status.name_of(&countdown.profile)
                 )));
                 items
                     .push(Item::ConfirmFreeze { label: "Yes, freeze this device too".to_string() });
             }
             _ => items.push(Item::Note(format!(
                 "{} freezes everything in {} s — save your work",
-                countdown.profile,
+                status.name_of(&countdown.profile),
                 curfew_core::frozen::remaining(countdown, status.now)
             ))),
         }
@@ -110,20 +126,29 @@ pub fn menu(status: &Status) -> Vec<Item> {
     for session in &status.running {
         items.push(Item::Note(format!(
             "{} — {}",
-            session.profile,
+            status.name_of(&session.profile),
             remaining(status.now, session.lock.ends_at)
         )));
 
         let conditions: Vec<&Lock> =
             session.lock.conditions.iter().filter(|lock| !matches!(lock, Lock::Timer)).collect();
 
-        // Only the credential can be satisfied from here by pressing something. A tag is scanned,
-        // a challenge is answered in the app, a restart is a restart — an item that opened a prompt
-        // leading nowhere would be worse than no item at all. What *is* actionable here is a peer
-        // release this machine is the named device for, which is a click and nothing more.
-        let credential = conditions.iter().any(|lock| matches!(lock, Lock::DeviceCredential));
-        let others = conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential));
-        let releasable = status.releasable.contains(&session.id);
+        // Which conditions this menu can actually satisfy by being clicked.
+        //
+        // The credential is proved by the operating system's own prompt. A confirmation is proved by
+        // asking — the menu shows a Yes/No before it sends anything, so the item *is* the dialog.
+        // Everything else (a tag scanned, a challenge answered in the app, a restart, a peer) lives
+        // somewhere this menu cannot reach, and an item that opened a prompt leading nowhere would be
+        // worse than no item at all.
+        // **One predicate, shared with the window and the command line** — P1-6. This menu used to
+        // work this out for itself, the Windows window worked it out a different way (comparing lock
+        // display strings), and neither routed `Challenge`. The service now computes `Offers` once
+        // (`LockSet::offers`) and every surface reads it.
+        let offers = status.offers.get(&session.id).cloned().unwrap_or_default();
+        let credential = offers.credential;
+        let confirm = offers.confirm;
+        let others = !offers.elsewhere.is_empty();
+        let releasable = offers.peer_release || offers.peer_released;
 
         // Said before the actions, because it is the answer to "why can I not end this?" and it is
         // the one condition the user satisfies by doing something to the whole machine.
@@ -141,7 +166,10 @@ pub fn menu(status: &Status) -> Vec<Item> {
             } else {
                 items.push(Item::PeerRelease {
                     id: session.id.clone(),
-                    label: format!("Release {} — this device is the one it asks", session.profile),
+                    label: format!(
+                        "Release {} — this device is the one it asks",
+                        status.name_of(&session.profile)
+                    ),
                 });
             }
         }
@@ -151,7 +179,22 @@ pub fn menu(status: &Status) -> Vec<Item> {
         } else if credential {
             items.push(Item::Unlock {
                 id: session.id.clone(),
-                label: format!("End {} with your Windows password", session.profile),
+                label: format!(
+                    "End {} with your Windows password",
+                    status.name_of(&session.profile)
+                ),
+            });
+        } else if confirm {
+            // Offered with a Yes/No in front of it, which is what "ask me first" asked for. The
+            // label says so, because an item that then opens a dialog should not be a surprise, and
+            // it is also the honest description: the menu is asking on the lock's behalf.
+            items.push(Item::End {
+                id: session.id.clone(),
+                confirm: true,
+                label: format!(
+                    "End {} — it asks to be confirmed",
+                    status.name_of(&session.profile)
+                ),
             });
         } else if session.lock.ends_at.is_some_and(|ends| ends > status.now) {
             // A timer that has not run out is a lock; the service will refuse, and it is honest to
@@ -160,7 +203,8 @@ pub fn menu(status: &Status) -> Vec<Item> {
         } else {
             items.push(Item::End {
                 id: session.id.clone(),
-                label: format!("End {}", session.profile),
+                confirm: false,
+                label: format!("End {}", status.name_of(&session.profile)),
             });
         }
 
@@ -172,20 +216,24 @@ pub fn menu(status: &Status) -> Vec<Item> {
                 id: session.id.clone(),
                 label: format!(
                     "Use an emergency pass on {} ({} left)",
-                    session.profile, status.passes_left
+                    status.name_of(&session.profile),
+                    status.passes_left
                 ),
             });
         }
 
-        match session.lock.delayed_release_at {
-            // Already running, and never offered twice: asking again cannot move it, so an item that
-            // looked like it might would be a lie.
-            Some(at) => items.push(Item::Note(format!("    release lands {}", when(at)))),
-            None if credential || others => items.push(Item::Release {
+        // The last-resort exit, offered for **every** lock that is holding somebody rather than only
+        // for the ones this menu cannot otherwise satisfy. `ARCHITECTURE.md` promises it is "visible
+        // from the moment the lock starts", and the predicate is where that promise is kept.
+        if let Some(at) = offers.delayed_release_at {
+            // Never offered twice: asking again cannot move it, so an item that looked like it might
+            // would be a lie.
+            items.push(Item::Note(format!("    release lands {}", when(at))));
+        } else if offers.delayed_release {
+            items.push(Item::Release {
                 id: session.id.clone(),
                 label: "Start the 24-hour release".to_string(),
-            }),
-            None => {}
+            });
         }
     }
 
@@ -218,21 +266,113 @@ pub fn menu(status: &Status) -> Vec<Item> {
     if status.hosts_error.is_some()
         || !status.failing.is_empty()
         || status.state_warning.is_some()
+        || status.foreground_warning.is_some()
+        || status.downtime.is_some()
         || !status.unwatched.is_empty()
     {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
 
-    items.push(Item::Separator);
-    items.push(Item::Details);
-    items.push(Item::About);
-    items.push(Item::Quit);
+    // **The window enforcement was down** — P1-8. Worth a line of its own here rather than only a share
+    // of the "something is not being enforced" note, because it is the one item on this list that is
+    // about the *past*: the others are things to fix, and this one is a hole in the record.
+    if let Some(downtime) = &status.downtime {
+        items.push(Item::Note(format!("    {}", downtime.describe())));
+    }
+
+    // **What the gap actually costs, and how to close it** — P2-16. Said here rather than only on the
+    // window's "Is it working" page, because the person who needs it is the one who just hid the icon
+    // and is now looking at this menu wondering why nothing is being charged.
+    if let Some(warning) = &status.foreground_warning {
+        items.push(Item::Note("    window-title and budget rules have stopped".to_string()));
+        items.push(Item::Note(format!("    {warning}")));
+    }
+
+    items.extend(if status.needs_foreground {
+        tail_with_foreground_warning()
+    } else {
+        static_tail()
+    });
+    items
+}
+
+/// The items that do not depend on the service answering: everything from the separator down.
+///
+/// Split out so [`unreachable`] can build a menu with no status at all and still carry them. The two
+/// lists were the same five lines twice, which is how one of them would eventually have lost an item.
+fn static_tail() -> Vec<Item> {
+    vec![
+        Item::Separator,
+        // Above the two "explain something" items, because it is the only one that *does* something:
+        // starting a block is the product's whole verb, and this icon is the surface most people see.
+        Item::OpenWindow,
+        Item::Details,
+        Item::About,
+        Item::Quit,
+    ]
+}
+
+/// The tail, plus a warning when hiding this icon would cost enforcement — P2-16.
+///
+/// The menu calls this instead of `static_tail` when a running session has a rule that needs the
+/// foreground window. Hiding the icon stops the twice-a-second `Request::Seen` that tells the service
+/// what is in front, and the service is in session 0, so nothing else can take over: window-title and
+/// keyword rules stop matching and budgets stop being charged, while the session keeps running.
+///
+/// **Said before the item, not after.** The action is one click, and a warning delivered on the next
+/// menu opening is a warning nobody needed. The label itself also changes, because that is the line the
+/// user actually reads.
+fn tail_with_foreground_warning() -> Vec<Item> {
+    vec![
+        Item::Separator,
+        // Above the two "explain something" items, because it is the only one that *does* something:
+        // starting a block is the product's whole verb, and this icon is the surface most people see.
+        Item::OpenWindow,
+        Item::Details,
+        Item::About,
+        Item::Note(
+            "Hiding this icon stops window-title and budget rules until it is started again"
+                .to_string(),
+        ),
+        Item::Quit,
+    ]
+}
+
+/// The menu when the service cannot be reached at all.
+///
+/// There is nothing to say about sessions or schedules, because none is known — but the rest of the
+/// menu has nothing to do with the service, and the menu used to *not open at all* in this case:
+/// `show_menu` popped a message box and returned, so "Why Windows warned about this…" and "Hide this
+/// icon" were unreachable exactly when someone was trying to diagnose a problem. The card that
+/// explains the failure is excellent copy; it just could not be read from the menu.
+///
+/// So the explanation becomes the first items and everything static stays. "What is blocked…" is kept
+/// rather than hidden: it re-asks when pressed and shows the same reason, and removing an item the
+/// user can see in every other state would make the failure harder to recognise, not easier.
+pub fn unreachable(detail: &str) -> Vec<Item> {
+    let mut items = vec![
+        Item::Note("The Curfew service is not answering.".to_string()),
+        Item::Note("    blocks may not be enforced right now".to_string()),
+        Item::Note(format!("    {detail}")),
+    ];
+    // `static_tail`, not the warning variant: the service is unreachable so there is no status to ask,
+    // and the two lines above already say the honest thing — blocks may not be enforced at all.
+    items.extend(static_tail());
     items
 }
 
 /// What the tray says when it is closed, so nobody closes it expecting the blocks to lift.
-pub const QUIT_NOTE: &str = "Hiding this icon does not stop Curfew. The service keeps enforcing \
-                             everything you asked for, and `curfew status` still answers.";
+///
+/// **Corrected for P2-16.** This read *"The service keeps enforcing everything you asked for"*, which was
+/// false: window-title and keyword rules and app budgets need to know what is in front, the only process
+/// that can say is this one, and the service is in session 0 where there is no interactive desktop. So
+/// hiding the icon stopped those rules while this sentence said nothing had changed.
+///
+/// The second sentence is kept because it is true and it is the reassurance people actually want: the
+/// locks do not lift, blocks on apps and sites keep working, and `curfew status` still answers.
+pub const QUIT_NOTE: &str = "Hiding this icon does not stop Curfew: your locks stay, and app and site \
+                             blocks keep working. It does stop window-title and budget rules, because \
+                             only this icon can see which window is in front. Start it again to resume.";
 
 /// The details text: everything the service reported that is not an offer to do something.
 pub fn details(status: &Status) -> String {
@@ -244,6 +384,23 @@ pub fn details(status: &Status) -> String {
         for domain in &status.blocked_domains {
             text.push_str(&format!("  {domain}\n"));
         }
+        // What the user will actually see, said here because Curfew cannot say it in the browser.
+        //
+        // A blocked domain is answered `0.0.0.0`, deliberately and for good reasons (`hosts::SINK`,
+        // `dns::refusal`): a local web server is common on a developer's machine, so `127.0.0.1` would
+        // serve that server's pages, and showing a page of Curfew's own for somebody else's domain
+        // means holding a certificate for it, which is not a thing this program will ever do.
+        //
+        // The cost of that decision is that the user gets the browser's own "can't be reached" page
+        // and no other sign that Curfew is involved. From where they are sitting the internet broke.
+        // Serving a page is closed off, so the next best thing is to make the *symptom* legible — and
+        // this list is the only place Curfew has to do it, so it does it here rather than nowhere.
+        text.push_str(
+            "A blocked site shows your browser's own \u{201c}can't be reached\u{201d} page. Curfew \
+             refuses the name rather than serving a page, because it will not hold a certificate for \
+             somebody else's domain. If a site fails that way while a session is running, that is \
+             Curfew and not your connection.\n",
+        );
     }
     for exe in &status.failing {
         text.push_str(&format!(
@@ -298,7 +455,152 @@ mod tests {
     }
 
     fn status(running: Vec<Session>) -> Status {
-        Status { now: NOW, running, ..Default::default() }
+        // **`offers` is filled the way the service fills it** — P1-6. The menu no longer derives which
+        // controls are available; it reads what the service computed, so a fixture leaving this empty
+        // would be testing a menu the service can never produce. Deriving it here from
+        // `LockSet::offers` means every assertion below now pins the *shared* predicate, which is the
+        // point of moving the decision out of this file.
+        let offers = running
+            .iter()
+            .map(|session| {
+                // `PC1` is the device these tests use for "this machine", matching the fixtures that
+                // name a peer.
+                let mine = session.lock.conditions.iter().any(
+                    |lock| matches!(lock, Lock::PeerRelease { device_id } if device_id == "PC1"),
+                );
+                (session.id.clone(), session.lock.offers(mine, false))
+            })
+            .collect();
+        Status { now: NOW, running, offers, ..Default::default() }
+    }
+
+    /// The same, with the profile's id and name deliberately different.
+    ///
+    /// They differ in every test below on purpose: the starter config's id is `distractions`, which
+    /// reads enough like a word that printing the id instead of the name went unnoticed for the whole
+    /// life of this menu. A fixture where the two are the same string cannot catch that.
+    fn named_status(running: Vec<Session>) -> Status {
+        let mut status = status(running);
+        status.profile_names.insert("deep-work".to_string(), "Deep work".to_string());
+        status
+    }
+
+    /// Every label this menu can print, for a profile whose id and name differ.
+    ///
+    /// Returns the strings, so a caller can assert over all of them rather than over the two branches
+    /// its own fixture happens to reach.
+    fn every_label_with_a_name(status: &Status) -> Vec<String> {
+        menu(status)
+            .iter()
+            .filter_map(|i| match i {
+                Item::Note(text) => Some(text.clone()),
+                Item::Unlock { label, .. }
+                | Item::End { label, .. }
+                | Item::Emergency { label, .. }
+                | Item::PeerRelease { label, .. }
+                | Item::Release { label, .. }
+                | Item::CancelFreeze { label }
+                | Item::ConfirmFreeze { label } => Some(label.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every place this menu prints a profile, it prints the *name*.
+    ///
+    /// `Session.profile` is the id from the config, so the menu used to say "End deep-work" while the
+    /// window said "End Deep work" — the same session described two ways, on two surfaces the user can
+    /// see at once.
+    ///
+    /// **Every branch, deliberately.** The first version of this test used one fixture — a credential
+    /// lock, which reaches `Item::Unlock` and nothing else — and a mutation check proved it vacuous:
+    /// reverting the *`End`* label to the raw id still passed, because that fixture never builds an
+    /// `End` item. So the shapes below are chosen to reach each label the menu can produce, and each
+    /// is asserted independently.
+    #[test]
+    fn the_menu_names_the_profile_rather_than_printing_its_id() {
+        // One shape per branch: unlock, confirm-before-ending, plain end, the two notes, the pass,
+        // and a peer release this device is named for.
+        let mut releasable =
+            named_status(vec![session([Lock::PeerRelease { device_id: "PHONE7".into() }], None)]);
+        releasable.releasable = vec!["s1".to_string()];
+
+        // The pass is only offered where it is the only way out *and* there is one to spend, so this
+        // is the one fixture that reaches two labels at once.
+        let mut with_a_pass =
+            named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        with_a_pass.passes_left = 2;
+
+        let shapes: Vec<(&str, Status)> = vec![
+            ("unlock", named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))])),
+            ("with-a-pass", with_a_pass),
+            ("confirm", named_status(vec![session([Lock::Confirm], Some(NOW + 3600))])),
+            ("end", named_status(vec![session([], None)])),
+            ("timer-not-yet", named_status(vec![session([], Some(NOW + 3600))])),
+            ("no-conditions-but-running", named_status(vec![session([], Some(NOW - 1))])),
+            ("peer-release", releasable),
+        ];
+
+        for (shape, status) in shapes {
+            let labels = every_label_with_a_name(&status);
+            assert!(!labels.is_empty(), "the {shape} fixture produced nothing to check");
+            for label in &labels {
+                assert!(
+                    !label.contains("deep-work"),
+                    "the {shape} branch printed the id where the name belongs: {label:?}"
+                );
+            }
+            assert!(
+                labels.iter().any(|l| l.contains("Deep work")),
+                "the {shape} branch never printed the name: {labels:?}"
+            );
+        }
+    }
+
+    /// The same, for a freeze, whose label is built from the countdown rather than a session.
+    #[test]
+    fn a_freeze_also_names_the_profile() {
+        let mut status = named_status(vec![]);
+        status.freeze = Some(curfew_core::Countdown {
+            profile: "deep-work".into(),
+            seconds: 3600,
+            origin: curfew_core::Origin::Peer,
+            announced_at: NOW,
+            fires_at: NOW + 30,
+            confirmed: false,
+        });
+
+        let labels = every_label_with_a_name(&status);
+        assert!(!labels.is_empty(), "the freeze produced no menu items at all");
+        for label in &labels {
+            assert!(!label.contains("deep-work"), "the freeze printed the id: {label:?}");
+        }
+        assert!(labels.iter().any(|l| l.contains("Deep work")), "{labels:?}");
+    }
+
+    /// And a profile with no name to look up falls back to its id rather than to nothing.
+    ///
+    /// This is the real case, not a hypothetical: a session started from a profile that was then
+    /// deleted keeps running until its own lock lets it go, and by then there is no name to find.
+    /// Printing the id is worse than printing the name and much better than printing an empty string
+    /// or panicking in a UI thread.
+    #[test]
+    fn a_profile_with_no_name_falls_back_to_its_id() {
+        let status = status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        assert_eq!(status.name_of("deep-work"), "deep-work");
+        assert_eq!(status.name_of("anything-at-all"), "anything-at-all");
+
+        let labels: Vec<String> = menu(&status)
+            .iter()
+            .filter_map(|i| match i {
+                Item::Unlock { label, .. } => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.iter().any(|l| l.contains("deep-work")),
+            "the id did not survive as the fallback: {labels:?}"
+        );
     }
 
     #[test]
@@ -358,6 +660,59 @@ mod tests {
         assert!(items.iter().any(|i| matches!(i, Item::Release { .. })));
     }
 
+    /// The regression guard for a gap in this menu, not in the service.
+    ///
+    /// `Lock::Confirm` used to be classified with the conditions that live elsewhere, so a session
+    /// locked "ask me first" was described as *"this session is locked elsewhere"* and given no
+    /// action — from the one surface most Windows users ever open. The window could end it and the
+    /// tray could not, which is worse than either failing: the product disagreed with itself about
+    /// whether the lock had an exit.
+    #[test]
+    fn a_confirmation_lock_offers_a_way_to_end_it() {
+        let items = menu(&status(vec![session([Lock::Confirm], Some(NOW + 3600))]));
+
+        assert!(
+            items.iter().any(|i| matches!(i, Item::End { confirm: true, .. })),
+            "a lock that only asks to be confirmed offered no way to confirm it: {items:?}"
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|i| matches!(i, Item::Note(text) if text.contains("locked elsewhere"))),
+            "a confirmation is satisfiable here and was described as unreachable: {items:?}"
+        );
+    }
+
+    /// …and the claim travels with the item rather than being assumed by the sender, because the
+    /// Yes/No the shell shows is what makes the claim true.
+    ///
+    /// A session with no conditions and no end time can simply be ended, so it must not ask to be
+    /// confirmed — otherwise every ordinary block would open a dialog nobody requested.
+    #[test]
+    fn a_lock_with_nothing_to_confirm_does_not_ask_to_be_confirmed() {
+        let items = menu(&status(vec![session([], None)]));
+        assert!(
+            items.iter().any(|i| matches!(i, Item::End { confirm: false, .. })),
+            "an unlocked session was not offered as endable: {items:?}"
+        );
+        assert!(
+            !items.iter().any(|i| matches!(i, Item::End { confirm: true, .. })),
+            "a session with nothing to confirm offered a confirmation: {items:?}"
+        );
+    }
+
+    /// A timer that has not run out is a lock, so there is nothing to click — `ends_at` in the future
+    /// is the condition, and offering an End item would offer something the service refuses.
+    #[test]
+    fn a_running_timer_is_reported_rather_than_offered() {
+        let items = menu(&status(vec![session([], Some(NOW + 3600))]));
+        assert!(
+            !items.iter().any(|i| matches!(i, Item::End { .. })),
+            "a timer with time left was offered as endable: {items:?}"
+        );
+        assert!(items.iter().any(|i| matches!(i, Item::Note(text) if text.contains("runs out"))));
+    }
+
     #[test]
     fn a_release_already_running_is_never_offered_again() {
         let mut session = session([Lock::DeviceCredential], Some(NOW + 3600));
@@ -410,6 +765,41 @@ mod tests {
         let text = details(&status);
         assert!(text.contains("reddit.com"));
         assert!(text.contains("steam.exe"));
+    }
+
+    /// The symptom is named, because Curfew cannot show a page of its own.
+    ///
+    /// A blocked domain is answered `0.0.0.0`, so the user gets the browser's error page and no other
+    /// sign that Curfew was involved — the largest population of users meets this product as "the
+    /// internet broke". Serving a page is closed off for good reasons (see `hosts::SINK`), so the
+    /// detail text is the only surface that can connect the two, and this pins that it does.
+    #[test]
+    fn the_details_say_what_a_blocked_site_looks_like() {
+        let mut status = status(vec![]);
+        status.blocked_domains.insert("reddit.com".into());
+
+        let text = details(&status);
+
+        assert!(
+            text.contains("can't be reached"),
+            "the browser's own symptom was not named: {text}"
+        );
+        assert!(
+            text.contains("Curfew") && text.contains("not your connection"),
+            "the sentence does not say this is Curfew and not a fault: {text}"
+        );
+    }
+
+    /// …and is not said when nothing is blocked, because then the symptom means something else — a
+    /// dead connection, or a broken hosts file — and blaming Curfew for it would be a lie.
+    #[test]
+    fn an_idle_tray_does_not_explain_a_page_it_did_not_block() {
+        let text = details(&status(vec![]));
+        assert!(text.contains("No websites are blocked"));
+        assert!(
+            !text.contains("can't be reached"),
+            "a machine blocking nothing explained a blocked-page symptom: {text}"
+        );
     }
 
     #[test]
@@ -554,6 +944,145 @@ mod tests {
         assert!(
             !items.iter().any(|i| matches!(i, Item::PeerRelease { .. } | Item::End { .. })),
             "a lock for another device offered a way out here: {items:?}"
+        );
+    }
+
+    /// The menu still opens when the service is down.
+    ///
+    /// It used to pop a message box and return, so every item that needs nothing from the service —
+    /// opening the window, the welcome, and above all "Hide this icon" — was unreachable exactly when
+    /// the user was trying to diagnose a problem. The explanation is now *in* the menu rather than
+    /// instead of it.
+    #[test]
+    fn a_service_that_does_not_answer_still_gets_a_menu() {
+        let items = unreachable("the pipe has been ended");
+
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(t) if t.contains("not answering"))),
+            "the menu does not say the service is down: {items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(t) if t.contains("the pipe has been ended"))),
+            "the service's own reason was dropped: {items:?}"
+        );
+
+        // And everything that never needed the service is still reachable.
+        for (what, found) in [
+            ("the window", items.iter().any(|i| matches!(i, Item::OpenWindow))),
+            ("the welcome", items.iter().any(|i| matches!(i, Item::About))),
+            ("hide-the-icon", items.iter().any(|i| matches!(i, Item::Quit))),
+        ] {
+            assert!(found, "{what} is unreachable when the service is down: {items:?}");
+        }
+    }
+
+    /// The static tail is one list, not two copies.
+    ///
+    /// `menu` and `unreachable` end with the same five items. They were written twice before this and
+    /// would eventually have drifted apart; this pins that both finish the same way.
+    #[test]
+    fn both_menus_end_with_the_same_static_items() {
+        let live = menu(&status(vec![]));
+        let dead = unreachable("no service");
+
+        /// A name for the five items that need no service, or `None` for anything else.
+        fn tail_name(item: &Item) -> Option<&'static str> {
+            match item {
+                Item::Separator => Some("separator"),
+                Item::OpenWindow => Some("window"),
+                Item::Details => Some("details"),
+                Item::About => Some("about"),
+                Item::Quit => Some("quit"),
+                _ => None,
+            }
+        }
+        let tail = |items: &[Item]| -> Vec<&'static str> {
+            items.iter().rev().take(5).filter_map(tail_name).collect()
+        };
+
+        let live_tail = tail(&live);
+        // Asserted outright as well as against each other: two menus could agree on being wrong.
+        assert_eq!(live_tail, vec!["quit", "about", "details", "window", "separator"]);
+        assert_eq!(live_tail, tail(&dead), "the two menus no longer end alike");
+    }
+    /// **The tray has to say what hiding it costs, before the user hides it** — P2-16.
+    ///
+    /// The item is labelled "Hide this icon", which reads as harmless, and the quit note used to claim the
+    /// service "keeps enforcing everything you asked for" — which was false for exactly the rules this
+    /// finding is about.
+    #[test]
+    fn hiding_the_icon_warns_when_it_would_stop_enforcement() {
+        // A credential lock with a budget rule in the profile: the session needs the foreground report.
+        let mut exposed = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        exposed.needs_foreground = true;
+        let items = menu(&exposed);
+
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("window-title and budget rules"))),
+            "hiding the icon would stop enforcement and the menu said nothing: {items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("until it is started again"))),
+            "the menu did not say the cost is reversible: {items:?}"
+        );
+        // And the item is still there to press — this is a warning, not a refusal.
+        assert!(items.iter().any(|i| matches!(i, Item::Quit)));
+    }
+
+    /// And says nothing when it would cost nothing.
+    #[test]
+    fn hiding_the_icon_is_quiet_when_nothing_depends_on_it() {
+        let mut quiet = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        quiet.needs_foreground = false;
+        let items = menu(&quiet);
+
+        assert!(
+            !items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("window-title and budget rules"))),
+            "a warning was raised about enforcement that would have kept working: {items:?}"
+        );
+    }
+
+    /// The quit note itself, which is the sentence the user reads after pressing the item.
+    #[test]
+    fn the_quit_note_does_not_claim_more_than_is_true() {
+        // The reassurance that is true is kept.
+        assert!(QUIT_NOTE.contains("your locks stay"), "{QUIT_NOTE}");
+        assert!(QUIT_NOTE.contains("app and site"), "{QUIT_NOTE}");
+        // And the false part is gone: this read "keeps enforcing everything you asked for".
+        assert!(
+            !QUIT_NOTE.contains("everything you asked for"),
+            "the quit note is claiming more than the service does: {QUIT_NOTE}"
+        );
+        assert!(
+            QUIT_NOTE.contains("window-title"),
+            "the quit note does not say what it costs: {QUIT_NOTE}"
+        );
+    }
+
+    /// The gap, once it has opened, is reported on the menu rather than only on the window's page.
+    #[test]
+    fn an_open_gap_is_reported_in_the_menu() {
+        let mut broken = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        broken.needs_foreground = true;
+        broken.foreground_warning =
+            Some("Nothing is telling Curfew which window is in front.".into());
+        let items = menu(&broken);
+
+        assert!(
+        items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("Something is not being enforced"))),
+        "the menu did not count the foreground gap among the things not being enforced: {items:?}"
+    );
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("have stopped"))),
+            "the menu did not say which rules stopped: {items:?}"
         );
     }
 }

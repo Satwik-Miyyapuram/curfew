@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import dev.curfew.app.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -30,10 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /**
  * The one screen that is about the app rather than about the phone.
  *
- * It leads with the Simple/Power switch, because that switch changes what every other screen looks
- * like and a user who cannot find it is stuck in whichever half of the app suits them less.
- *
- * Under it is the only question this screen really has to answer: **can Curfew actually enforce
+ * It leads with the only question this screen really has to answer: **can Curfew actually enforce
  * anything right now**. That is a list of what it can do with a tick beside it, and a Fix button
  * beside anything it cannot — not a wall of permission names, and not something filed under an
  * advanced heading, because a permission Curfew is missing is a block that is not going to happen.
@@ -63,26 +62,30 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
+                // Resolved outside the semantics block, which is not a composable scope, and
+                // composed from resources with numbered arguments rather than concatenated — the
+                // same reason as on the health screen: a sentence built with `+` is English only.
+                val name = stringResource(entry.grant.title)
+                val cost = stringResource(entry.grant.cost)
+                val described = if (entry.granted) {
+                    context.getString(R.string.settings_grant_allowed, name)
+                } else {
+                    context.getString(R.string.settings_grant_refused, name, cost)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 17.dp, vertical = 15.dp)
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = if (entry.granted) {
-                                "${entry.grant.title}, allowed"
-                            } else {
-                                "${entry.grant.title}, not allowed. ${entry.grant.cost}"
-                            }
-                        },
+                        .semantics(mergeDescendants = true) { contentDescription = described },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Mark(entry.granted)
                     Column(Modifier.weight(1f)) {
-                        Text(entry.grant.title, fontSize = 15.sp, color = Palette.Text)
+                        Text(name, fontSize = 15.sp, color = Palette.Text)
                         if (!entry.granted) {
                             Text(
-                                entry.grant.cost,
+                                cost,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp,
                                 color = Palette.Muted,
@@ -95,14 +98,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         // Sending the user to a Health screen to press a second button was the
                         // longest way round to the only thing they came here to do.
                         Fix {
-                            val permission = entry.grant.runtimePermission()
-                            val settings = entry.grant.settingsIntent(context)
-                            when {
-                                permission != null -> requestRuntimePermission(context, permission)
-                                settings != null -> context.startActivity(
-                                    settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }
+                            // Was a bare `startActivity`, which throws on a device whose OEM build
+                            // lacks the page — see `openGrantPage`. F-33.
+                            openGrantPage(context, entry.grant)
                         }
                     }
                 }
@@ -113,11 +111,18 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         SectionLabel("Syncing")
         Gap(10.dp)
         DCard(padding = 18.dp) {
-            // Syncing used to be visible only on the Devices screen, which Simple mode never
-            // reached: a user whose blocks were following them between two devices had no way of
-            // seeing that this was happening, or of making it happen now. There is no "last
-            // synced" clock to show — devices talk when they are in earshot of each other, not on
-            // a schedule — so it says what is actually true at this moment.
+            // Syncing used to be visible only on the Devices screen, one tap further in and reachable
+            // only once a device was paired: a user whose blocks were following them between two
+            // devices had no way of seeing that this was happening, or of making it happen now.
+            //
+            // This comment used to say "which Simple mode never reached". **There is no Simple mode.**
+            // It was designed in `docs/PLAN-mobile-polish.md` §4 and never built — the de-cluttering it
+            // was meant to achieve was done by shortening the nav bar for everyone instead. The reason
+            // above is unchanged and still true; only the mechanism named was fiction, which is the
+            // fifth time this codebase has had a comment describing something the code does not do.
+            //
+            // There is no "last synced" clock to show — devices talk when they are in earshot of each
+            // other, not on a schedule — so it says what is actually true at this moment instead.
             Text(
                 when {
                     !state.sync.available -> "Syncing is not set up on this device."
@@ -131,7 +136,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 },
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
-                color = if (state.sync.running) Palette.Muted else Palette.Live,
+                // The same correction as DevicesScreen: amber for *not* listening was backwards, and
+                // the neutral sentence read as "a block is running". See the note there.
+                color = if (state.sync.running) Palette.Ok else Palette.Muted,
             )
             state.sync.error?.let { problem ->
                 Gap(6.dp)
@@ -204,8 +211,12 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
                 Text("⛨", fontSize = 17.sp, color = Palette.Muted)
                 Text(
-                    "Curfew has no internet permission at all. Your devices sync directly to " +
-                        "each other — no account, no server.",
+                    // The true claim, and the same one Health shows: this sentence existed twice and
+                    // one copy was false. Saying "no internet permission at all" was the earlier
+                    // version of the same mistake — the manifest declares INTERNET for LAN sync —
+                    // and it is load-bearing, because this is the card a user reads to decide
+                    // whether to trust a screen-watching app. See [Privacy].
+                    Privacy.NO_SERVER,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                     color = Palette.Muted,

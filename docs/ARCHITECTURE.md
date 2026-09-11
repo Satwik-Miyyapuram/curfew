@@ -45,7 +45,7 @@ No accounts, no servers, no telemetry.
                                                                     | native messaging
                                                      +--------------v---------------+
                                                      |  Browser extension (MV3)     |
-                                                     |  - URL/path/in-page rules    |
+                                                     |  - URL/path rules            |
                                                      +------------------------------+
 ```
 
@@ -150,7 +150,17 @@ setup, nothing that can make a device unrecoverable.
 | Service + process watcher | admin install | exes, window titles, files/folders |
 | Hosts file | admin | domains (coarse) |
 | WFP filters (phase 2) | admin + driver-free WFP API | domains, per-app network, DoH |
-| Browser extension | user install | URL paths, in-page elements, search keywords |
+| Browser extension | user install | URL and path rules, rechecked on navigation, SPA history changes, and tab activation |
+
+> **Corrected (P2-12).** This row used to read *"URL paths, in-page elements, search keywords"* — three
+> capabilities, of which **one and a half exist**. `extension/manifest.json` declares `nativeMessaging`,
+> `webNavigation`, `tabs` and `alarms`: there is no `content_scripts`, no `scripting` and no
+> `declarativeNetRequest`, so **in-page element blocking is not implementable with the code present**.
+> Search keywords are reachable only because they appear in the URL, which is what `tabs` gives.
+>
+> The extension blocks by redirecting the tab after `onBeforeNavigate`, i.e. once the load has begun —
+> the same limitation `GAPS.md` uses to dismiss a competitor's extension. The honest claim is the one
+> now in the row. Implement DNR plus a content script if the original three are wanted.
 | Lock screen / Frozen mode | none | whole device |
 | Watchdog pair + ACLs | admin | tamper resistance |
 
@@ -191,8 +201,28 @@ always know which layers are live and say so.
 - **Persistence**: locked sessions live in storage, not memory. `BOOT_COMPLETED` and
   `LOCKED_BOOT_COMPLETED` on Android, service auto-start on Windows, both re-entering the lock
   rather than resetting it.
-- **Adaptive cost**: pollers run at 1s while a session is active, 15s idle, and stop entirely when
-  no rule can fire. The VPN filter runs only while a session with domain rules is active.
+- **Adaptive cost**: enforcement pollers run at **1s while a session is active** and **15s idle**, on both
+  platforms. The VPN filter runs only while a session with domain rules is active. On Android the meter and
+  the foreground sample are gated on an active profile, and the incidental work — the heartbeat, the
+  schedule alarm, the notification — runs on its own 15s cadence rather than at the poll rate, because a
+  database write, an `AlarmManager` call and an IPC once a second would cost more than the faster poll
+  saves.
+
+  **The pollers do not stop, and the limit is worth stating rather than discovering.** This loop writes the
+  heartbeat that the downtime report above measures against, and on Android it arms the alarm for the next
+  scheduled window. A loop that stopped when no rule could fire would make the first feature lie — reporting
+  downtime that never happened — and leave the second window with no alarm. That is the silent failure the
+  previous bullet forbids, so the loop keeps running and the cadence does the work instead.
+
+  Two thresholds bound the idle figure and neither is a preference: downtime is detected at gaps over
+  **five minutes** (`DOWNTIME_SECONDS`), and the heartbeat is what is measured, so any idle interval
+  approaching that would report downtime on a machine that was never down. 15s is twenty times under it.
+
+  On Windows the *reconcile tick* stays at 2s and is deliberately not adaptive: the sync pass runs inside
+  that loop, and `curfew-sync`'s own comment names the promise it keeps — *"the phone blocks within five
+  seconds of the PC starting a session"* — with the reacting machine being the one that may be idle. What
+  backs off there is the **state write**, which clones ten collections and rewrites `state.json` every two
+  seconds when a session runs and every 15s when none does.
 
 ## 11. Safety and recovery
 
@@ -226,6 +256,12 @@ do to them.
 
 - **Android**: GitHub Releases (APK) and F-Droid as reference channels; Play Store only if the
   AccessibilityService declaration survives review. The sideloaded build is the reference build.
+  **The published APK is unsigned, for downstream signing** — a deliberate limit rather than an
+  oversight. `assembleRelease` **does** sign when given a key: `keystore.properties` beside
+  `android/app/`, or the `CURFEW_KEYSTORE_*` environment variables. With neither, it emits an unsigned
+  artifact, which is what CI publishes today. A key is never generated in CI: Android requires the same
+  key for an in-place update, so a per-build key would mean no release could ever be upgraded, and a
+  signature that changes every time teaches the opposite of what a signature is for.
 - **Windows**: GitHub Releases with checksums, plus winget and scoop manifests. Binaries are
   unsigned (no recurring cost, D6), so SmartScreen friction and antivirus heuristics are expected
   and documented; vendor allowlisting is requested after first release.

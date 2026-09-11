@@ -1,7 +1,9 @@
 package dev.curfew.app.ui
 
 import android.Manifest
+import androidx.annotation.StringRes
 import androidx.core.app.ActivityCompat
+import dev.curfew.app.R
 import android.content.ContextWrapper
 import android.app.Activity
 import android.app.AlarmManager
@@ -29,59 +31,68 @@ import dev.curfew.app.enforce.UsageStatsPoller
  * what is lost while it is missing.
  */
 enum class Grant(
-    val title: String,
+    /**
+     * A string resource rather than the text.
+     *
+     * This is the table a translator most needs — it is the one that explains what Curfew is asking
+     * for and what is lost without it — and its copy is long enough that a retyped duplicate would
+     * eventually differ from the original by a word. That would be a permission table quietly
+     * misinforming somebody about their own device, which is why the text moved by machine and the
+     * call sites resolve it here rather than carrying a copy.
+     */
+    @StringRes val title: Int,
     /** Why Curfew wants it, in the user's terms. */
-    val because: String,
+    @StringRes val because: Int,
     /** What still works without it, so the user can make a real choice. */
-    val cost: String,
+    @StringRes val cost: Int,
     val required: Boolean,
 ) {
     Accessibility(
-        title = "Accessibility service",
-        because = "Curfew needs to see which app is in front to replace it when it is blocked.",
-        cost = "Nothing is blocked at all: this is the only way to act on an app the moment it opens.",
+        title = R.string.perm_accessibility_title,
+        because = R.string.perm_accessibility_because,
+        cost = R.string.perm_accessibility_cost,
         required = true,
     ),
     UsageAccess(
-        title = "Usage access",
-        because = "Time budgets are counted from the system's own usage figures, which survive Curfew being killed.",
-        cost = "Budgets and launch limits stop counting; blocks and schedules still work.",
+        title = R.string.perm_usage_access_title,
+        because = R.string.perm_usage_access_because,
+        cost = R.string.perm_usage_access_cost,
         required = false,
     ),
     Overlay(
-        title = "Display over other apps",
-        because = "Some launchers refuse to show the block screen from the background without it.",
-        cost = "A blocked app may flash into view for a moment before it is replaced.",
+        title = R.string.perm_overlay_title,
+        because = R.string.perm_overlay_because,
+        cost = R.string.perm_overlay_cost,
         required = false,
     ),
     Notifications(
-        title = "Notifications",
-        because = "The ongoing notification is how you can always tell that enforcement is running.",
-        cost = "Enforcement still runs, but Android may show its own generic notice instead.",
+        title = R.string.perm_notifications_title,
+        because = R.string.perm_notifications_because,
+        cost = R.string.perm_notifications_cost,
         required = false,
     ),
     ExactAlarms(
-        title = "Exact alarms",
-        because = "A session that should start at 09:00 has to start at 09:00, not whenever the system next wakes.",
-        cost = "Sessions can start up to a few minutes late.",
+        title = R.string.perm_exact_alarms_title,
+        because = R.string.perm_exact_alarms_because,
+        cost = R.string.perm_exact_alarms_cost,
         required = false,
     ),
     Calendar(
-        title = "Calendar",
-        because = "Calendar rules read event titles to decide when a profile should run.",
-        cost = "Calendar rules never match; weekly schedules are unaffected.",
+        title = R.string.perm_calendar_title,
+        because = R.string.perm_calendar_because,
+        cost = R.string.perm_calendar_cost,
         required = false,
     ),
     NotificationAccess(
-        title = "Notification access",
-        because = "Silencing an app's notifications is the one thing Android will not let Curfew do without it.",
-        cost = "Rules that mute notifications do nothing; everything else is unaffected. Granting it lets Curfew see every notification on the device, so leave it off unless you use a mute rule.",
+        title = R.string.perm_notification_access_title,
+        because = R.string.perm_notification_access_because,
+        cost = R.string.perm_notification_access_cost,
         required = false,
     ),
     BatteryUnrestricted(
-        title = "Unrestricted battery use",
-        because = "Aggressive battery savers kill background services, and a blocker that is killed blocks nothing.",
-        cost = "Curfew may be stopped by the system and stop enforcing without warning.",
+        title = R.string.perm_battery_unrestricted_title,
+        because = R.string.perm_battery_unrestricted_because,
+        cost = R.string.perm_battery_unrestricted_cost,
         required = false,
     ),
 
@@ -95,9 +106,9 @@ enum class Grant(
      * rather than the recommended one.
      */
     UninstallProtection(
-        title = "Uninstall protection (device admin)",
-        because = "Android will not uninstall an app that is an active device admin, which closes the last easy way out of a running lock. Curfew already holds its own settings and uninstall pages shut through the accessibility service; this is the stricter version of the same idea.",
-        cost = "Nothing inside Curfew changes: every block, schedule and lock works the same either way. The cost is outside it — many banking and payment apps refuse to run while any device admin is active, so leave this off if you use one. Curfew asks for no admin powers beyond being active: it cannot erase, lock or unlock the device, or touch any password, and you can turn it off whenever no lock is running.",
+        title = R.string.perm_uninstall_protection_title,
+        because = R.string.perm_uninstall_protection_because,
+        cost = R.string.perm_uninstall_protection_cost,
         required = false,
     ),
     ;
@@ -289,6 +300,49 @@ object RestrictedSettings {
 fun requestRuntimePermission(context: Context, permission: String) {
     val activity = context.findActivity() ?: return
     ActivityCompat.requestPermissions(activity, arrayOf(permission), PERMISSION_REQUEST_CODE)
+}
+
+/**
+ * Take the user to the page where a permission is granted — runtime dialog, or the system settings page.
+ *
+ * **One function because there were three, and all three behaved differently.** The "Fix" button on
+ * Health, the same button on Settings, and "Turn it on" on the Timer each resolved a grant to a page and
+ * launched it, and each had drifted into its own failure handling:
+ *
+ * | Site | On a device whose OEM build lacks the page |
+ * | :--- | :--- |
+ * | Health | `runCatching` with an App-info fallback — **correct** |
+ * | Timer | `runCatching`, failing silently — the tap does nothing and says nothing |
+ * | Settings | **no `runCatching` at all** — `ActivityNotFoundException` kills the screen |
+ *
+ * That third one is `UX_INTERACTION_REVIEW.md` **F-33** (P1), and it is the worst place in the app for
+ * it: the Settings screen is where a user goes *because* something is not working, and the failure mode
+ * was for the app to close. The comment on Health's copy already said this — *"an
+ * ActivityNotFoundException here would kill the one screen whose job is to fix permissions"* — and the
+ * fix was applied to the copy in front of it rather than to the behaviour.
+ *
+ * `App info` is the fallback because it resolves on every build: every app has an app-info page, and from
+ * there the permission is two taps away. Landing the user somewhere useful beats a crash and beats
+ * silence.
+ */
+fun openGrantPage(context: Context, grant: Grant) {
+    val permission = grant.runtimePermission()
+    if (permission != null) {
+        requestRuntimePermission(context, permission)
+        return
+    }
+    val settings = grant.settingsIntent(context)
+    val opened = settings != null && runCatching {
+        context.startActivity(settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+    // Nothing to open, or the page this OEM calls it by does not exist. App info always does.
+    if (!opened) {
+        runCatching {
+            context.startActivity(
+                RestrictedSettings.appInfoIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
 }
 
 /** Android's accessibility page for one service, and the extra naming that service. API 31+. */

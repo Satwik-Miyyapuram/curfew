@@ -9,6 +9,80 @@ android {
     namespace = "dev.curfew.app"
     compileSdk = 35
 
+    /**
+     * Sign the release build when a key is available, and leave it unsigned when one is not.
+     *
+     * **P1-7 was that the published APK cannot be installed by anyone.** `ARCHITECTURE.md` §12 lists
+     * GitHub Releases as a reference channel and calls the sideloaded build "the reference build",
+     * and there was no way to produce one: no `signingConfig`, so `assembleRelease` emitted an
+     * unaligned unsigned artifact that Android refuses unless the user signs it themselves.
+     *
+     * **The review's suggested fix is wrong, and it is worth saying why.** It offers "generate a
+     * debug-style self-signed release key in CI and sign". Android requires the *same* key for an
+     * in-place update, so a key minted fresh on every run gives every release a different
+     * certificate — users could never upgrade without uninstalling first, and the only lesson the
+     * signature teaches them is that it changes, which is the opposite of what a signature is for.
+     * An unsigned artifact is more honest than a signature that means nothing.
+     *
+     * So the key comes from outside: `keystore.properties` beside this file, or the four
+     * `CURFEW_KEYSTORE_*` environment variables, whichever is present. Neither is in the repository
+     * and both are gitignored, because a signing key in a public repo is a signing key everyone has.
+     * With no key the build behaves exactly as it did — unsigned, for downstream signing — so CI
+     * keeps working and nothing here is a new requirement for a contributor.
+     */
+    /**
+     * `keystore.properties`, parsed as **plain text rather than with `Properties`**.
+     *
+     * **`\` is an escape character in the `.properties` format**, so `Properties.load` turns
+     * `storeFile=C:\keys\curfew.jks` into `C:keyscurfew.jks` — `\k` and `\c` are silently swallowed.
+     * That is not a theoretical trap: the first version of this block used `Properties`, configured
+     * without error, and produced an *unsigned* release, because `file(storePath).isFile` was false
+     * for a path that had been quietly mangled on the way in. Nothing warned; the artifact was just
+     * unsigned for no stated reason.
+     *
+     * Four lines of `key=value` do not need Java's escaping rules, and the rules actively break the
+     * one value a Windows user will write. So this reads the text and splits on the first `=`, which
+     * is what somebody editing this file expects to happen.
+     */
+    val keyStoreFile: Map<String, String> =
+        rootProject.file("keystore.properties").takeIf { it.isFile }?.let { props ->
+            props.readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
+                .associate { it.substringBefore('=').trim() to it.substringAfter('=').trim() }
+        } ?: emptyMap()
+
+    fun key(name: String, env: String): String? =
+        keyStoreFile[name]?.takeIf { it.isNotBlank() }
+            ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+
+    val storePath = key("storeFile", "CURFEW_KEYSTORE_FILE")
+    val signable = storePath != null && file(storePath).isFile &&
+        key("storePassword", "CURFEW_KEYSTORE_PASSWORD") != null &&
+        key("keyAlias", "CURFEW_KEY_ALIAS") != null &&
+        key("keyPassword", "CURFEW_KEY_PASSWORD") != null
+
+    if (storePath != null && !signable) {
+        // Said out loud rather than skipped in silence. A `keystore.properties` that is present but
+        // incomplete is a mistake somebody will otherwise spend an afternoon on: the build succeeds,
+        // and the artifact is unsigned for no stated reason.
+        logger.lifecycle(
+            "Curfew: keystore.properties is present but the release build will NOT be signed. " +
+                "It needs storeFile (an existing file), storePassword, keyAlias and keyPassword.",
+        )
+    }
+
+    signingConfigs {
+        if (signable) {
+            create("release") {
+                storeFile = file(storePath!!)
+                storePassword = key("storePassword", "CURFEW_KEYSTORE_PASSWORD")
+                this.keyAlias = key("keyAlias", "CURFEW_KEY_ALIAS")
+                keyPassword = key("keyPassword", "CURFEW_KEY_PASSWORD")
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "dev.curfew.app"
         // 26 is where foreground services, notification channels and `UsageStatsManager` all
@@ -34,6 +108,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // `null` when no key is configured, and then this variant is unsigned exactly as it was
+            // before. See the `signingConfigs` block above for why the key is supplied, not generated.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

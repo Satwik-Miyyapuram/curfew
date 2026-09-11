@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +15,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,10 +32,10 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -109,7 +110,7 @@ private enum class Tab(
     Settings("settings", "Settings", "Settings", Icons.Filled.Settings),
 }
 
-/** Routes Settings links to, so a Simple user can still reach every screen that exists. */
+/** Routes Settings links to, so every screen that exists is reachable from the bar of four. */
 object Routes {
     const val CALENDAR = "calendar"
     const val USAGE = "usage"
@@ -131,6 +132,9 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
     }
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
+    // Read once here rather than inside each branch, so the banner below reacts to a message raised
+    // on any screen without the nav graph having to re-read the whole state flow for it.
+    val state by model.state.collectAsStateWithLifecycle()
 
     fun go(route: String) {
         navController.navigate(route) {
@@ -194,6 +198,71 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+
+        // One place for the app to say something, whatever screen raised it.
+        //
+        // This is here because it was nowhere. `UiState.message` was set from eight places — a failed
+        // app toggle, an import that would not parse, a device that could not be revoked, a profile
+        // that could not be deleted — and rendered on two: Now and the profile editor. So a user
+        // tapped a switch on the app picker, watched nothing happen, and was told why on a screen
+        // they were not looking at, sometimes several minutes later when the modal finally surfaced
+        // on Now. The message surface belonged to whoever raised it, which is the bug.
+        state.message?.let { notice ->
+            MessageBanner(
+                notice = notice,
+                onDismiss = model::dismissMessage,
+                // Above the nav bar rather than under it: the bar floats over the content, so a
+                // banner at the very bottom would be behind glass.
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = Dsn.Gutter, vertical = if (onATab) 128.dp else 16.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One sentence about something that just happened, where the user already is.
+ *
+ * Deliberately *not* a dialog. Principle 4 of `UX-FLOWS.md` is that the receipt is the changed thing
+ * and dialogs are for decisions — and an acknowledgement is not a decision. A modal here was also
+ * actively harmful: it was rendered by two screens, so a failure raised anywhere else either vanished
+ * or interrupted whatever the user did next, minutes later.
+ *
+ * Colour follows [Notice.bad] rather than one alarming red, because this surface carries both "That
+ * could not be saved" and "Paired." — showing a success as an error is its own kind of lie.
+ *
+ * Tap to dismiss, and it does not time out on its own. A sentence that disappears before it is read
+ * is worse than one that stays slightly too long, and nothing here is a decision the user can miss by
+ * being slow.
+ */
+@Composable
+private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val tone = if (notice.bad) Palette.Bad else Palette.Ok
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(tone.copy(alpha = 0.16f))
+            .border(1.dp, tone.copy(alpha = 0.45f), RoundedCornerShape(Dsn.CtlRadius))
+            .clickable(onClick = onDismiss)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .semantics(mergeDescendants = true) {
+                // One sentence, and how to get rid of it. Without this a screen reader reads the text
+                // and gives no clue that the banner is tappable.
+                contentDescription = "${notice.text}. Tap to dismiss."
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            if (notice.bad) "!" else "✓",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = tone,
+        )
+        Text(notice.text, fontSize = 13.sp, lineHeight = 19.sp, color = Palette.Text)
     }
 }
 
@@ -224,17 +293,11 @@ private fun GlassBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(22.dp, RoundedCornerShape(26.dp), clip = false)
-                .clip(RoundedCornerShape(26.dp))
-                // Two layers: a translucent ground so the page shows through, then a top-down
-                // sheen so the slab has a lit edge rather than one flat tone.
-                .background(Palette.Surface.copy(alpha = 0.86f))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.06f), Color.Transparent),
-                    ),
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(26.dp))
+                // The app's one elevated surface, defined in `Design.kt` with the block screen and the
+                // sheets. The two layers — a translucent ground so the page shows through, a top-down
+                // sheen so the slab has a lit edge rather than one flat tone — were written out here
+                // and again on the block screen, and had already drifted apart.
+                .glass(RoundedCornerShape(26.dp), elevation = 22.dp)
                 .padding(horizontal = 6.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
@@ -244,7 +307,27 @@ private fun GlassBar(
     }
 }
 
-/** One tab. The icon lights up rather than a pill sliding in behind it. */
+/**
+ * One tab. The icon lights up rather than a pill sliding in behind it.
+ *
+ * The hit area is pinned to [MIN_TOUCH] and the press feedback is back. Both were wrong, in opposite
+ * directions from what the review assumed:
+ *
+ * * It was **not** too small. The clickable spans the icon box plus padding plus the label, so it
+ *   measured roughly 50×55dp — comfortably over Material's 48dp, and the review's "roughly 38dp",
+ *   which counted the icon and the padding but not the label or the gap, was a miscount. What was
+ *   wrong is that the size was an *accident* of the label's line height: at 10sp it clears 48dp, and
+ *   a smaller label style or a shorter one would quietly take the most-touched control in the app
+ *   below the floor. It is now a stated minimum rather than a coincidence.
+ * * It had **no press feedback at all**. `indication = null` was the only such suppression in the
+ *   app, and it was there to stop Material's sliding pill, which is not what a ripple is. Every other
+ *   clickable on this screen — `Switch`, `GhostButton`, the row bodies — shows a ripple. The nav, the
+ *   control every user touches every session, showed nothing, so a tap that registered and a tap that
+ *   missed felt identical.
+ *
+ * `minimumInteractiveComponentSize` is the enforcement rather than a comment: it is Material's own
+ * guarantee that the *touch* target is at least 48dp while the visual size stays whatever was drawn.
+ */
 @Composable
 private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val lit by animateFloatAsState(if (selected) 1f else 0f, label = "tab")
@@ -254,11 +337,10 @@ private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            )
+            .clickable(onClick = onClick)
+            .minimumInteractiveComponentSize()
+            .heightIn(min = Dsn.MinTouch)
+            .widthIn(min = Dsn.MinTouch)
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .semantics(mergeDescendants = true) {
                 contentDescription = if (selected) tab.label + ", selected" else tab.label

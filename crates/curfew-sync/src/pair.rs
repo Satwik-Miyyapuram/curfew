@@ -117,6 +117,34 @@ impl Peer {
     }
 }
 
+/// How many signature verifications this thread has performed. See [`Peers::verify`].
+///
+/// **Thread-local on purpose.** `cargo test` runs tests in parallel, so a global counter would be bumped
+/// by whichever test was verifying at the same moment and the assertion would be flaky — reading as a bug
+/// in `receive` rather than in the counter. Each test runs on its own thread and `receive` is synchronous,
+/// so a per-thread count is exact.
+#[cfg(test)]
+pub(crate) mod verify_count {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn bump() {
+        COUNT.with(|count| count.set(count.get() + 1));
+    }
+
+    /// The count since the last [`reset`], on this thread.
+    pub fn taken() -> usize {
+        COUNT.with(|count| count.get())
+    }
+
+    pub fn reset() {
+        COUNT.with(|count| count.set(0));
+    }
+}
+
 /// Every device this one is paired with.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Peers {
@@ -174,6 +202,11 @@ impl Peers {
 
     /// Check a signature, and that the signer is still someone this device listens to.
     pub fn verify(&self, id: &DeviceId, message: &[u8], signature: &[u8; 64]) -> Result<(), Error> {
+        // Counted under `cfg(test)` only. P2-18 is a claim about *how many* of these a batch costs, and
+        // that number is the only observable difference between a linear `receive` and a quadratic one —
+        // so a test that does not count cannot tell the fix from the bug.
+        #[cfg(test)]
+        crate::pair::verify_count::bump();
         Ok(self.active(id)?.identity.verify(message, signature)?)
     }
 

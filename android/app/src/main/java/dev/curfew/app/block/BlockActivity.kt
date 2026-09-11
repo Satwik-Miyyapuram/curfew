@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.curfew
 import dev.curfew.app.ui.CurfewTheme
+import dev.curfew.app.ui.glass
 import dev.curfew.app.ui.Palette
 import kotlinx.coroutines.delay
 
@@ -195,6 +196,11 @@ private fun BlockScreen(
     }
     val name = remember(target) { appLabel(context, target) }
     val passes = remember(lock) { runCatching { context.curfew.passesRemaining() }.getOrDefault(0) }
+    // Why there are none, when there are none. Without this the screen said "No emergency pass left
+    // this month" to a user who had never been given one — a default install configures no passes at
+    // all — which reads as "you spent them". The refusal already carries the honest sentence, and
+    // `Format.describePassRefusal` is the one place that copy lives.
+    val passRefusal = remember(lock) { runCatching { context.curfew.passRefusal() }.getOrNull() }
 
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(endsAt) {
@@ -267,15 +273,11 @@ private fun BlockScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .clip(RoundedCornerShape(16.dp))
-                // The same pane of glass as the nav bar: translucent ground, lit top edge.
-                .background(Palette.Raised.copy(alpha = 0.88f))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.07f), Color.Transparent),
-                    ),
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+                // The app's one pane of glass, from `Design.kt`. This said "the same pane of glass as
+                // the nav bar" and was not: Raised at 0.88 with a 0.07 sheen and a 0.10 edge, against
+                // the nav bar's Surface at 0.86/0.06/0.09. The comment asserted a consistency the code
+                // did not have, which is the failure mode this codebase keeps producing.
+                .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
                 .clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
@@ -291,11 +293,16 @@ private fun BlockScreen(
         Text(
             if (passes > 0) {
                 "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
+            } else if (passRefusal != null) {
+                // The sentence names what is missing and, where there is one, when it comes back.
+                // A blocked screen is the worst place in the app to be vague.
+                dev.curfew.app.ui.describePassRefusal(passRefusal, now)
             } else {
-                "No emergency pass left this month"
+                "No emergency pass right now"
             },
             fontSize = 13.sp,
             color = Palette.Dim,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -322,22 +329,21 @@ private fun reasonLine(profile: String, explanation: String, endsAt: Long?): Str
     return "$profile is running$until. $explanation"
 }
 
-private fun clockAt(epochSeconds: Long): String {
-    val time = java.time.Instant.ofEpochSecond(epochSeconds)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime()
-    return "%02d:%02d".format(time.hour, time.minute)
-}
+/** An epoch second as a wall clock, in the device's own format. See [clockTime]. */
+private fun clockAt(epochSeconds: Long): String = dev.curfew.app.ui.clockTime(epochSeconds)
 
-/** "1:12" for an hour and twelve minutes; "4:09" for four minutes and nine seconds under an hour. */
-private fun countdown(secondsLeft: Long): String {
-    val left = secondsLeft.coerceAtLeast(0)
-    return if (left >= 3600) {
-        "%d:%02d".format(left / 3600, (left % 3600) / 60)
-    } else {
-        "%d:%02d".format(left / 60, left % 60)
-    }
-}
+/**
+ * "1:12" for an hour and twelve minutes; "14m 09s" below that; "48s" under a minute.
+ *
+ * The seconds are kept for this screen and not for the Now dial, and that is the whole of the
+ * difference between them: this is the screen somebody is sitting in front of, waiting, and a number
+ * that visibly moves is the point. What is *not* kept is the old format — this used to render
+ * fourteen minutes as "14:00", which reads as two in the afternoon rather than as a countdown, and
+ * which disagreed with the Now screen's "14m" for the very same session. Both now come from
+ * [dev.curfew.app.ui.countdown], so they cannot drift again.
+ */
+private fun countdown(secondsLeft: Long): String =
+    dev.curfew.app.ui.countdown(secondsLeft, withSeconds = true)
 
 /**
  * The pause before a delayed app opens.

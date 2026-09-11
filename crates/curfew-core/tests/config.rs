@@ -1,7 +1,7 @@
 //! The config document: parsing, validation, round-tripping and forward migration.
 
 use curfew_core::budget::Refill;
-use curfew_core::{Action, Config, ConfigError, Rule, Target, CONFIG_SCHEMA_VERSION};
+use curfew_core::{Action, Config, ConfigError, Rule, Target, Upserted, CONFIG_SCHEMA_VERSION};
 
 const GOLDEN: &str = include_str!("golden/example.toml");
 const GOLDEN_V0: &str = include_str!("golden/v0_example.toml");
@@ -111,6 +111,70 @@ fn a_zero_budget_is_refused_because_it_is_a_block_in_disguise() {
     "#;
     let err = Config::from_toml(toml).unwrap_err();
     assert!(err.to_string().contains("zero-second budget"), "got {err}");
+}
+
+/// A zero-length rolling window is the same defect as a zero budget, one level down: the rule is
+/// present and looks enforced, and can never fire.
+#[test]
+fn a_zero_length_rolling_window_is_refused() {
+    let toml = r#"
+        schema_version = 1
+        [[profiles]]
+        id = "x"
+        name = "X"
+        [[profiles.rules]]
+        target = { kind = "app_package", package = "com.a" }
+        action = { kind = "budget", seconds = 1200, refill = { kind = "rolling", seconds = 0 } }
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second rolling window"), "got {err}");
+}
+
+/// The escape hatch is a safety rail, and an unvalidated rail is not one. `validate` never looked at
+/// `[emergency]` at all, so a zero-length window made the ration unlimited: `recent` computes
+/// `since = now - 0`, finds no spent pass, and reports the full quota for ever.
+#[test]
+fn a_zero_length_emergency_window_is_refused() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 3
+        window_seconds = 0
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second window"), "got {err}");
+}
+
+/// The cooldown is what stops one bad evening consuming a month's allowance, so a zero one is a
+/// rail removed — but only when there is a ration for it to protect.
+#[test]
+fn a_zero_cooldown_is_refused_when_there_are_passes_to_protect() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 3
+        window_seconds = 604800
+        cooldown_seconds = 0
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second cooldown"), "got {err}");
+}
+
+/// …and accepted when the hatch is switched off, because then there is nothing to ration and the
+/// number means nothing. Turning the hatch on later is when it starts to matter.
+#[test]
+fn a_zero_cooldown_is_fine_while_the_hatch_is_off() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 0
+        window_seconds = 604800
+        cooldown_seconds = 0
+    "#;
+    assert!(
+        Config::from_toml(toml).is_ok(),
+        "a disabled hatch was refused for an irrelevant number"
+    );
 }
 
 #[test]
@@ -683,4 +747,481 @@ fn a_rule_for_a_profile_that_does_not_exist_is_refused() {
         .is_err());
     assert_eq!(before, cfg.profiles);
     assert_eq!(0, cfg.remove_rule("nope", &Target::Domain { domain: "x.com".into() }));
+}
+
+// --- what an upsert actually did (P2-10) ---------------------------------------------------------
+//
+// `upsert_weekly` deliberately declines to store a duplicate, and before this a caller could not tell
+// that apart from a real insert — so `curfew add-window` printed "Added" for a window the core had
+// just discarded, inferring the outcome from whether the *id* was new. These pin the three cases so
+// the CLI's message has something true to report.
+
+#[test]
+fn an_upsert_says_when_it_added_something() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    assert_eq!(cfg.upsert_weekly(window("evenings", "deep-work")).unwrap(), Upserted::Added);
+}
+
+#[test]
+fn an_upsert_says_when_it_replaced_a_row() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+
+    let mut edited = window("evenings", "deep-work");
+    edited.end_minute = 22 * 60;
+    assert_eq!(cfg.upsert_weekly(edited).unwrap(), Upserted::Replaced);
+}
+
+/// The case the CLI got wrong: a different id, the same minutes, and nothing stored.
+#[test]
+fn an_upsert_says_when_the_plan_already_covers_it() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    let before = cfg.weekly.len();
+
+    let mut twin = window("evenings", "deep-work");
+    twin.id = "evenings-by-another-name".into();
+    assert_eq!(cfg.upsert_weekly(twin).unwrap(), Upserted::AlreadyPresent);
+    assert_eq!(cfg.weekly.len(), before, "an identical window was stored after all");
+}
+
+/// A rejected window reports the error rather than an outcome, so nothing can print a success for it.
+#[test]
+fn a_refused_upsert_reports_no_outcome() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let mut broken = window("evenings", "no-such-profile");
+    broken.profile = "no-such-profile".into();
+    assert!(cfg.upsert_weekly(broken).is_err());
+}
+
+// --- a typo is not a silent no-op (P2-7) ---------------------------------------------------------
+//
+// Serde ignores keys it does not know, which is the wrong default for a file whose entire job is to
+// state what is forbidden. `[[weekly]] lockss = [...]` — one transposition — loaded successfully with
+// **no locks at all**, so the window ran a session the user believed was locked and could end it with
+// one tap. `curfew-ffi` promised the opposite in a doc comment: *"a config we cannot fully understand
+// is refused so it can never be written back with the user's rules missing."*
+
+/// The review's own example, and the one with teeth: a mistyped field inside a schedule.
+#[test]
+fn a_mistyped_lock_list_in_a_window_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[weekly]]
+id = "evenings"
+profile = "deep-work"
+days = [0, 1]
+start_minute = 1200
+end_minute = 1320
+lockss = [{ kind = "timer" }]
+"#;
+
+    let error = Config::from_toml(config).expect_err("a typo was accepted");
+    let text = error.to_string();
+    assert!(
+        text.contains("lockss"),
+        "the error must name the key the user mistyped, or they cannot find it: {text}"
+    );
+}
+
+/// An unknown key at the top level: a whole section named wrongly used to simply not exist.
+#[test]
+fn an_unknown_top_level_key_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+profiless = []
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown top-level key was accepted");
+    assert!(error.to_string().contains("profiless"), "{error}");
+}
+
+/// Inside a profile.
+#[test]
+fn an_unknown_key_in_a_profile_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+enableed = true
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown profile key was accepted");
+    assert!(error.to_string().contains("enableed"), "{error}");
+}
+
+/// Inside a rule — where a typo is worse than elsewhere, because the rule is the block.
+#[test]
+fn an_unknown_key_in_a_rule_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+enableed = true
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown rule key was accepted");
+    assert!(error.to_string().contains("enableed"), "{error}");
+}
+
+/// A misspelled enum tag is refused too. These are internally tagged, so the tag is a field name and
+/// serde would otherwise accept the variant while ignoring everything beside it.
+#[test]
+fn a_mistyped_action_kind_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "blok" }
+"#;
+
+    assert!(Config::from_toml(config).is_err(), "a misspelled action kind was accepted");
+}
+
+/// And the file this project actually ships must still parse, or the guard protects nothing.
+#[test]
+fn the_shipped_example_still_parses_with_unknown_fields_denied() {
+    Config::from_toml(GOLDEN).expect("the golden config must survive deny_unknown_fields");
+    // And the v0 fixture, which is what a forward migration reads — an older file has *fewer* fields,
+    // never unknown ones, so migration is unaffected. Asserted rather than assumed.
+    Config::from_toml(GOLDEN_V0).expect("a v0 config must still migrate");
+}
+
+/// The resolver section: a typo here means the machine silently uses the wrong upstream.
+#[test]
+fn an_unknown_key_in_the_resolver_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[resolver]
+enabled = true
+upstreem = "9.9.9.9:53"
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown resolver key was accepted");
+    assert!(error.to_string().contains("upstreem"), "{error}");
+}
+
+/// A subscription: `refresh_second` instead of `refresh_seconds` used to mean the default interval,
+/// so a user tuning how often their calendar is fetched had no effect and no message.
+#[test]
+fn an_unknown_key_in_a_calendar_source_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[calendar_sources]]
+id = "work"
+location = "https://example.test/work.ics"
+refresh_second = 900
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown source key was accepted");
+    assert!(error.to_string().contains("refresh_second"), "{error}");
+}
+
+/// A calendar schedule. The matcher is the part that decides *which* meetings lock, so a typo in it is
+/// a rule that quietly matches nothing.
+#[test]
+fn an_unknown_key_in_a_calendar_schedule_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[calendars]]
+id = "work-focus"
+profile = "deep-work"
+pad_before_second = 300
+matcher = { title = "*focus*" }
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown calendar key was accepted");
+    assert!(error.to_string().contains("pad_before_second"), "{error}");
+}
+
+/// And the emergency policy, where a typo would leave the release route either missing or wider than
+/// the user asked for.
+#[test]
+fn an_unknown_key_in_the_emergency_policy_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[emergency]
+enabled = true
+cooldown_second = 3600
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown emergency key was accepted");
+    assert!(error.to_string().contains("cooldown_second"), "{error}");
+}
+
+/// **Inside an action variant**, which the outer `Rule` guard does not reach.
+///
+/// `action = { kind = "budget", seconds = 600, refil = "daily" }` was accepted and the refill silently
+/// took its default, so somebody who meant "refill daily at 04:00" got the default instead and no
+/// message at all. `Action` and `Refill` are internally tagged enums, so their variant fields sit
+/// inline in the same table and need `deny_unknown_fields` on the enums themselves — the outer `Rule`
+/// guard cannot see them.
+#[test]
+fn a_mistyped_field_inside_an_action_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 600, refil = "daily" }
+"#;
+
+    let error = Config::from_toml(config).expect_err("a mistyped action field was accepted");
+    assert!(error.to_string().contains("refil"), "{error}");
+}
+
+/// And a mistyped field inside a `Refill` variant, one level further in.
+#[test]
+fn a_mistyped_field_inside_a_refill_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minutes = 240 } }
+"#;
+
+    let error = Config::from_toml(config).expect_err("a mistyped refill field was accepted");
+    assert!(error.to_string().contains("at_minutes"), "{error}");
+}
+
+// --- which rules need the foreground window (P2-16) ----------------------------------------------
+//
+// The predicate behind the Windows answer to "what stopped being enforced when the tray went". It has
+// to be right in both directions: too narrow and a rule that really did stop goes unreported, too wide
+// and the warning fires on machines where nothing is wrong, which teaches people to ignore it.
+
+/// A rule decided by what is in front: a window title.
+#[test]
+fn a_window_title_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "window_title", pattern = "*Steam*" }
+action = { kind = "block" }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A keyword, which is matched against a window title as well as a URL.
+#[test]
+fn a_keyword_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "keyword", text = "shorts" }
+action = { kind = "block" }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A budget, because it is charged to whatever is in front and to nothing else.
+#[test]
+fn a_budget_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "news.exe" }
+action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minute = 240 } }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A launch limit too: it is counted when the foreground changes, so it needs the same report.
+#[test]
+fn a_launch_limit_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "news.exe" }
+action = { kind = "launch_limit", count = 3, refill = { kind = "daily", at_minute = 240 } }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// **And the other direction**, which is what stops the warning crying wolf. An exe block is decided
+/// from the process list, a domain from the resolver, a path from the filesystem — none of them needs
+/// anybody's attention.
+#[test]
+fn a_rule_decided_without_a_window_does_not_need_the_foreground() {
+    // The path glob is deliberately backslash-free. A Windows pattern needs `\\` in TOML, and the
+    // first version of this fixture wrote `\G` — which TOML rejects, so the test failed on *parsing*
+    // rather than on the predicate. This case is about which rules need the foreground, and the
+    // predicate does not look at the pattern, so a simple glob tests exactly as much.
+    for (target, action) in [
+        (r#"{ kind = "windows_exe", exe = "steam.exe" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "domain", domain = "reddit.com" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "file_path", pattern = "*Games*" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "windows_exe", exe = "steam.exe" }"#, r#"{ kind = "delay", seconds = 30 }"#),
+    ] {
+        let config = format!(
+            "schema_version = 1\ntimezone = \"Europe/London\"\n\n[[profiles]]\nid = \"deep-work\"\n\
+             name = \"Deep work\"\n\n[[profiles.rules]]\ntarget = {target}\naction = {action}\n"
+        );
+        let cfg = Config::from_toml(&config).unwrap();
+        assert!(
+            !cfg.profile("deep-work").unwrap().rules[0].needs_foreground(),
+            "{target} with {action} was said to need the foreground window"
+        );
+    }
+}
+
+// --- a config edit that takes a rule from a running session (P1-13) ------------------------------
+//
+// Windows refused this since entry 54 and Android did not, so the decision moved into the core and both
+// platforms consult it. These pin the shared version, which is what stops the two from drifting.
+
+/// The sentence a caller shows, naming the profile a user recognises.
+#[test]
+fn weakening_a_running_session_names_the_profile() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.retain(|r| r.target.key() != "domain:reddit.com");
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    let names =
+        std::collections::BTreeMap::from([("deep-work".to_string(), "Deep work".to_string())]);
+
+    let lost = current.weakening_a_running_session(&next, &running, &names);
+    assert!(!lost.is_empty(), "removing a rule from a running profile was not reported");
+    assert!(
+        lost[0].starts_with("Deep work:"),
+        "the refusal should name the profile the user recognises, not the id: {lost:?}"
+    );
+}
+
+/// **Nothing running means nothing to lose**, which is what keeps the plan editable. A profile with no
+/// session can be changed freely, and refusing that would make the editor unusable.
+#[test]
+fn a_change_that_weakens_nothing_running_is_allowed() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.retain(|r| r.target.key() != "domain:reddit.com");
+
+    assert!(current.weakening_a_running_session(&next, &[], &Default::default()).is_empty());
+}
+
+/// An edit that only *adds* is never refused, however much is running.
+#[test]
+fn a_change_that_only_strengthens_is_allowed() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.push(curfew_core::Rule {
+        target: curfew_core::Target::Domain { domain: "example.test".into() },
+        action: curfew_core::Action::Block,
+        platforms: Vec::new(),
+    });
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    assert!(
+        current.weakening_a_running_session(&next, &running, &Default::default()).is_empty(),
+        "adding a rule was refused"
+    );
+}
+
+/// With no name map the id is used, which is degraded rather than wrong.
+#[test]
+fn a_missing_name_falls_back_to_the_id() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    next.profiles.retain(|p| p.id != "deep-work");
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    let lost = current.weakening_a_running_session(&next, &running, &Default::default());
+    assert!(!lost.is_empty(), "removing a whole profile was not reported");
+    assert!(lost[0].starts_with("deep-work:"), "{lost:?}");
 }

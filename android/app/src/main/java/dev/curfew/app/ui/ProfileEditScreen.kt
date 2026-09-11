@@ -73,6 +73,10 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     // Which of the triggers has opened its own picker, so choosing what a profile blocks never
     // means leaving the profile.
     var picking by remember { mutableStateOf<String?>(null) }
+    // Deleting a profile is the one action on this screen that cannot be undone, and it used to run
+    // on a single tap with no question at all — while *removing a window*, which is far easier to
+    // put back, has asked for confirmation all along. The order was the wrong way round.
+    var confirmingDelete by remember { mutableStateOf(false) }
     val existing = state.profiles.firstOrNull { it.id == (id ?: slug(name)) }
 
     LaunchedEffect(existing?.id) {
@@ -165,7 +169,10 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             ),
             Trigger(
                 glyph = "\u23F1",
-                tint = Palette.Live,
+                // Accent, not Live. This row describes a way to start a profile — nothing is running
+                // while the user is reading it — and the row is tappable, which is exactly what
+                // Accent means. Amber is reserved for a block that is running right now.
+                tint = Palette.Accent,
                 title = "A timer I start myself",
                 example = "Tap once, block for 90 minutes. Nothing scheduled.",
                 // Always true: a timer needs no setting up, it is the Now tab's button.
@@ -260,10 +267,40 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 picking = "budget"
                             }
                         }
-                        else ->
-                            model.say(
-                                "Add a window covering the whole week to leave it always on.",
-                            )
+                        // F-34: this branch used to be a `say` telling the user to go to Plan, add a
+                        // window covering the whole week, and pick this profile out of a pill row to
+                        // come back. **The comment four branches above is the argument against that**:
+                        // "Being told to go somewhere else, find the same list, and remember which
+                        // profile you were half way through building is how a profile gets abandoned."
+                        // The file stated the principle and then broke it in its own last branch, so
+                        // the row now does what it says, the way the four above it do.
+                        "Always on" -> {
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else if (windows.isNotEmpty()) {
+                                // Same as the repeating-schedule branch: already set, and the window's
+                                // own card below is where it gets edited or removed.
+                                Unit
+                            } else {
+                                model.saveProfileWithWindow(
+                                    profileId,
+                                    name.trim(),
+                                    WeeklySchedule(
+                                        id = "w-${state.now}",
+                                        profile = profileId,
+                                        // All seven days, midnight to midnight. `end_minute ==
+                                        // start_minute` is how the core spells "runs into the following
+                                        // day" (`schedule.rs`: "A window whose end is at or before its
+                                        // start runs into the following day"), so 0 to 0 is a full day
+                                        // rather than a window of no length.
+                                        days = listOf(0, 1, 2, 3, 4, 5, 6),
+                                        startMinute = 0,
+                                        endMinute = 0,
+                                        locks = listOf(Lock.Confirm),
+                                    ),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -320,10 +357,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     text = "Delete",
                     modifier = Modifier.weight(1f),
                     colour = Palette.Bad,
-                ) {
-                    model.deleteProfile(existing.id)
-                    onDone()
-                }
+                ) { confirmingDelete = true }
             }
             PrimaryButton(
                 text = "Save",
@@ -362,12 +396,41 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     }
 
     // Whatever the core said. This screen used to swallow it, which is how "Add a window" could
-    // fail silently and leave a profile with no schedule and no explanation.
-    state.message?.let { message ->
+    // fail silently and leave a profile with no schedule and no explanation. It is a banner in
+    // `CurfewApp` now rather than a dialog here, so the sentence is shown wherever the user is —
+    // including the screens that used to render nothing at all.
+
+    // Asked before it happens, and the screen only leaves once it has.
+    //
+    // `deleteProfile` used to be followed immediately by `onDone()`, so the screen navigated away
+    // before the core had answered. A refusal — and there is a routine one, "a window still points at
+    // this profile", which the core names precisely so it can be fixed — arrived after the user was
+    // already somewhere else, describing something they could no longer see. The callback runs only
+    // on success now: on failure the user stays exactly where the problem is.
+    if (confirmingDelete && existing != null) {
         AlertDialog(
-            onDismissRequest = model::dismissMessage,
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete ${existing.name}?") },
+            text = {
+                Text(
+                    "It stops blocking anything, and its apps, sites and windows go with it. " +
+                        "A session it has already started keeps running until its own lock lets it " +
+                        "go.\n\nIf you only want it off for a while, turn it off from the schedule " +
+                        "list instead — that is reversible.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = existing.id
+                    confirmingDelete = false
+                    model.deleteProfile(target) { onDone() }
+                }) {
+                    Text("Delete", color = Palette.Bad)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) { Text("Keep it") }
+            },
         )
     }
 }
@@ -552,15 +615,14 @@ private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {
 /**
  * Minutes past midnight as a clock face.
  *
- * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far
- * end of an evening window rather than the start of one, and a window that ends at or before it
- * starts is the core's own way of saying "and on into tomorrow".
+ * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far end
+ * of an evening window rather than the start of one, and a window that ends at or before it starts is
+ * the core's own way of saying "and on into tomorrow".
+ *
+ * The formatting itself lives in [clockMinute] with the rest of the app's time words, and the reason
+ * it is not the localised clock is written down there: this text is typed back into a config.
  */
-private fun clock(minute: Int): String {
-    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
-    if (m == 0) return "midnight"
-    return "%02d:%02d".format(m / 60, m % 60)
-}
+private fun clock(minute: Int): String = clockMinute(minute)
 
 private fun slug(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "profile" }

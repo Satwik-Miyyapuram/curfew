@@ -5,7 +5,9 @@ import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import dev.curfew.policy.PassRefusal
+import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.SessionSource
+import dev.curfew.policy.WeeklySchedule
 import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
@@ -40,6 +42,51 @@ fun relative(at: Long, now: Long): String {
 /** A wall-clock time in the device's own format, for anything more than a few hours away. */
 fun clockTime(epochSeconds: Long): String =
     DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(epochSeconds * 1000))
+
+/**
+ * How much time is left, said as an amount of time rather than as a clock face.
+ *
+ * "1:12" for an hour and over, "14m" under it, "14s" under a minute. [withSeconds] adds the seconds
+ * to the middle case, for the one screen where the number visibly ticks.
+ *
+ * **One rule, one place.** There were two of these, one on the Now screen and one on the block screen,
+ * and they disagreed below an hour: the same fourteen minutes remaining read "14m" on Now and
+ * "14:00" while an app was blocked. That is not a difference of precision — "14:00" reads as a
+ * wall-clock time, so the block screen appeared to say the session ends at two in the afternoon. Two
+ * implementations of one idea will always drift; the fix is that there is now one.
+ *
+ * Above an hour both already agreed on "1:12", and that is kept: with "left" beside it, an H:MM
+ * reading is a duration everywhere a person meets one, and it is shorter than "1 hr 12 min" on a
+ * screen with a large ticking number on it.
+ */
+fun countdown(secondsLeft: Long, withSeconds: Boolean = false): String {
+    val left = secondsLeft.coerceAtLeast(0)
+    val hours = left / 3600
+    val minutes = (left % 3600) / 60
+    return when {
+        hours > 0 -> "$hours:%02d".format(minutes)
+        minutes > 0 -> if (withSeconds) "${minutes}m ${"%02d".format(left % 60)}s" else "${minutes}m"
+        else -> "${left}s"
+    }
+}
+
+/**
+ * A time of day the user typed and will type again, so it is not localised on purpose.
+ *
+ * This is the one clock in the app that deliberately ignores the device's format. The strings on the
+ * schedule editor are also what gets written into the config and read back by the core, and a window
+ * saved as "9:00 PM" somewhere a 12-hour clock is set would come back as an error rather than as a
+ * window. Round-tripping beats prettiness where the same text is both a label and an input.
+ *
+ * It takes **minutes past midnight** rather than an epoch second, which is the other reason it is not
+ * [clockTime]: a weekly window has no date, and a screen that formatted one would eventually show a
+ * date it invented.
+ */
+fun clockMinute(minute: Int): String {
+    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
+    if (m == 0) return "midnight"
+    return "%02d:%02d".format(m / 60, m % 60)
+}
 
 fun dateTime(epochSeconds: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
@@ -112,6 +159,85 @@ fun describeLock(lock: Lock): String = when (lock) {
     is Lock.PeerRelease -> "another of your devices to let it go"
     is Lock.Token -> "the tag you set aside (${lock.id})"
     is Lock.RestartRequired -> "this device to be restarted"
+}
+
+/**
+ * How many scheduled locks name [deviceId] as the device that can release them.
+ *
+ * This exists for one sentence, on one confirmation: **removing a paired device can take away a lock's
+ * only way out.** `Lock.PeerRelease` requires a *specific* device (`lock.rs`: *"Only a specific paired
+ * device can release"*), so the exit a user configured is that device and nothing else. Removing it
+ * leaves the lock unsatisfiable — the session cannot be ended by any means the user still has.
+ *
+ * F-14 in the interaction review, and the review is right about the substance. It is wrong about one
+ * detail: it says the action's confirmation "Devices never renders", which was true when it was written
+ * and is not now — `MainActivity` renders `state.message` for the whole app (entry 19), so
+ * *"That device will be ignored from now on."* does appear. The unconfirmed tap and the missing
+ * consequence were both still real.
+ *
+ * **Pure, and that is why it lives here rather than in the screen**: it takes the two lists the UI
+ * already holds and returns a number, so it can be tested without an `Application`, a database or a
+ * composition — none of which this host can provide.
+ *
+ * Sessions are deliberately **not** included. A running session's lock set was copied from a schedule
+ * when it started, so counting both would report a lock twice for as long as it runs; the schedule is
+ * the durable answer and the one the user can still edit.
+ */
+/**
+ * What to say about the profile Curfew wrote on a fresh install - F-2.
+ *
+ * A self-binding tool that has **already written a policy** owes the user a sentence about it. The
+ * seeding is deliberate and documented (`CurfewRuntime.seedStarterProfile`: *"a blocker earns its
+ * place by blocking something within a minute of being opened, not by handing over a form"*), but it
+ * was silent, and the only way to find out what had been set up was to open Plan and look.
+ *
+ * The sentence names **two apps and counts the rest**, because a list long enough to be complete is a
+ * list nobody reads, and two names are enough to recognise the shape of the choice.
+ *
+ * Pure, so every shape can be tested on this host: nothing blocked, one app, two, and more than two
+ * - plus the singular, which is the one that reads badly if it is wrong ("and 1 others").
+ */
+/**
+ * The one true sentence about where a user's data goes.
+ *
+ * **Written once because it was written twice and one of the two was false.** Settings said *"nothing
+ * you record leaves the devices you paired"*; Health said *"Nothing Curfew records leaves this device"*
+ * and then, in the next clause, *"the only network traffic is to devices you paired"* — which
+ * contradicts it. Both cards carry a comment correctly identifying the honest claim, and only one of
+ * them made the sentence match. This is F-48's *"central sentence is false"*, and it is the eighth
+ * time on this branch that a claim was right in one copy and wrong in another.
+ *
+ * The claim is worth getting exactly right because it is **the** sentence a person reads to decide
+ * whether to trust a tool that watches which app is in front. "Nothing leaves this device" is
+ * checkable, and false the moment sync is on, and a claim a user can falsify costs every other claim
+ * on the same screen its credibility. *"Nothing goes to a server"* is narrower, true, and just as
+ * strong: it is the part that matters, because a server is the thing that would make this somebody
+ * else's data.
+ */
+object Privacy {
+    const val NO_SERVER =
+        "Nothing goes to a server: your devices talk to each other directly, and nothing you record " +
+            "leaves the devices you paired."
+}
+fun describeSeed(profileName: String, blockedLabels: List<String>): String {
+    val named = blockedLabels.take(2)
+    val others = blockedLabels.size - named.size
+    val what = when {
+        blockedLabels.isEmpty() -> "with nothing in it yet"
+        others == 0 -> "blocking ${named.joinToString(" and ")}"
+        others == 1 -> "blocking ${named.joinToString(", ")} and 1 other"
+        else -> "blocking ${named.joinToString(", ")} and $others others"
+    }
+    return "Curfew set up a profile called $profileName, $what. Change it on Plan."
+}
+fun locksAwaitingDevice(
+    weekly: List<WeeklySchedule>,
+    rules: List<CalendarSchedule>,
+    deviceId: String,
+): Int {
+    fun names(lock: Lock) = lock is Lock.PeerRelease && lock.deviceId == deviceId
+    return weekly.sumOf { window -> window.locks.count(::names) } +
+        rules.sumOf { rule -> rule.locks.count(::names) }
 }
 
 /**

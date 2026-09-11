@@ -127,7 +127,7 @@ pub fn run(name: &str, state_path: &Path) {
                 if let Err(e) = sys::start(name) {
                     // Worth saying and not worth stopping for: the next pass tries again, and the
                     // usual cause is the manager being busy stopping the service we are starting.
-                    eprintln!("curfew: watchdog could not start the service: {e}");
+                    crate::warn!("watchdog could not start the service: {e}");
                 }
             }
             Action::Retire => return,
@@ -158,36 +158,57 @@ pub fn image_path() -> PathBuf {
 /// asked to; it is just easier to interrupt, and refusing to run at all would be a worse trade.
 pub fn spawn() -> std::io::Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    // Refreshed whenever the service's own binary is newer, so an upgraded Curfew is not watched
-    // by the version it replaced. A copy that cannot be written — most often because the previous
-    // watchdog is still running from it — is not fatal: the one already there is this program too.
+    // The image lives beside the state file so the installer has one file to replace instead of
+    // two. `refresh` decides whether it is genuinely this build; a `false` is not a failure to
+    // report but a reason to run from `exe`, which is the only path whose contents are not in
+    // question — so an image that cannot be trusted is never the thing that gets spawned.
     let image = image_path();
-    if let Err(e) = refresh(&exe, &image) {
-        eprintln!("curfew: watchdog image not refreshed: {e}");
-    }
-    let from = if image.exists() { image } else { exe };
+    let from = if refresh(&exe, &image) { image } else { exe };
     std::process::Command::new(from).arg("watchdog").spawn()
 }
 
-/// Copy [`from`] over [`to`] unless what is already there was written by the same build.
-fn refresh(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Make sure [`to`] holds a copy of this build, and say whether it is safe to run from.
+///
+/// **This decides whether a SYSTEM process executes a file, so it compares contents, not metadata.**
+/// It used to compare length and modification time, which is an attacker-controlled pair: the
+/// directory inherits `BUILTIN\Users: Write` from `C:\ProgramData`, `curfew-watchdog.exe` does not
+/// exist until the service first runs, and a user who creates it first — padded to the length of
+/// `curfew.exe` with a newer timestamp — makes the old check succeed, so the copy was skipped and
+/// the service spawned their binary as SYSTEM. Reading both files and comparing bytes removes the
+/// guesswork: a difference is a difference, whatever the metadata says.
+///
+/// `false` means "do not run from here". The caller falls back to this process's own executable,
+/// which is the one file we know the contents of by definition. That is a deliberate trade: running
+/// the watchdog from `curfew.exe` can make the installer want a reboot (the reason this image
+/// exists at all), and a reboot request is a far better outcome than executing an unverified binary
+/// as SYSTEM.
+fn refresh(from: &Path, to: &Path) -> bool {
     if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let current = std::fs::metadata(from)?;
-    if let Ok(existing) = std::fs::metadata(to) {
-        // Length first: it is the cheap half of the comparison and the half that never lies about
-        // a different build. Times are only consulted when the sizes agree.
-        let same = existing.len() == current.len()
-            && match (existing.modified(), current.modified()) {
-                (Ok(there), Ok(here)) => there >= here,
-                _ => false,
-            };
-        if same {
-            return Ok(());
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            crate::note!("watchdog image directory unavailable: {e}");
+            return false;
         }
     }
-    std::fs::copy(from, to).map(|_| ())
+    let current = match std::fs::read(from) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            crate::warn!("could not read this build to check the watchdog image: {e}");
+            return false;
+        }
+    };
+    // Identical bytes are the same file, so a running watchdog holding it open costs nothing.
+    if std::fs::read(to).is_ok_and(|existing| existing == current) {
+        return true;
+    }
+    match std::fs::write(to, &current) {
+        Ok(()) => true,
+        Err(e) => {
+            // Most often a previous watchdog still running from this path. Reported rather than
+            // fatal, but it does mean the image is not this build and must not be spawned.
+            crate::warn!("watchdog image could not be replaced ({e})");
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -235,5 +256,122 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("curfew-wd-fresh-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!locks_running(&dir.join("nothing.json")));
+    }
+
+    /// **A deletion is not a first run** (P1-9), and this is the consequence that mattered.
+    ///
+    /// `Loaded::Fresh` retires the watchdog — that is what `false` here means. `load` reports `Fresh`
+    /// when both state files are missing, which a deliberate deletion produces and a crash does not
+    /// (a crash leaves the backup). So before the out-of-band witness, deleting two files released
+    /// every lock *and* switched off the process whose whole job is to notice that enforcement
+    /// stopped. The witness is what tells `load` the difference, and this asserts the watchdog acts
+    /// on it.
+    #[test]
+    fn a_deleted_state_directory_does_not_retire_the_watchdog() {
+        let dir = scratch("deleted");
+
+        // A locked machine, saved twice so a `.bak` exists to delete.
+        let mut sessions = curfew_core::Sessions::default();
+        sessions.start(curfew_core::Session {
+            id: "s1".into(),
+            profile: "deep-work".into(),
+            source: curfew_core::session::SessionSource::Manual,
+            started_at: 1_788_510_600,
+            lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(1_788_513_600)),
+        });
+        let state = state::Persisted { sessions, ..Default::default() };
+        let path = dir.join("state.json");
+        state::save(&path, &state).unwrap();
+        state::save(&path, &state).unwrap();
+        assert!(locks_running(&path), "a locked machine should be watched");
+
+        // The deletion: both copies, leaving the witness.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(path.with_extension("bak")).unwrap();
+
+        assert!(
+            locks_running(&path),
+            "deleting the state files retired the watchdog, so nothing would restart enforcement"
+        );
+    }
+
+    /// And a machine that has genuinely never run is still left alone.
+    #[test]
+    fn a_machine_that_has_never_run_is_not_watched() {
+        let dir = scratch("never-run");
+        assert!(!locks_running(&dir.join("state.json")));
+    }
+
+    /// A scratch directory per test, so parallel tests do not fight over one path.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("curfew-wd-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_planted_image_is_replaced_even_when_its_size_and_time_agree() {
+        // The exploit this replaced a metadata check for. `%ProgramData%\Curfew` inherits
+        // `BUILTIN\Users: Write`, and `curfew-watchdog.exe` does not exist until the service first
+        // runs — so a user can create it first, padded to the same length as `curfew.exe` with a
+        // newer timestamp. The old check compared exactly those two things, decided the copy was
+        // unnecessary, and the service spawned the attacker's binary as SYSTEM.
+        let dir = scratch("planted");
+        let from = dir.join("curfew.exe");
+        let to = dir.join("curfew-watchdog.exe");
+
+        // Same length by construction, different content, and the name says which is which.
+        std::fs::write(&from, b"REAL-BUILD-16byt").unwrap();
+        std::fs::write(&to, b"EVIL-IMAGE-16byt").unwrap();
+        assert_eq!(std::fs::metadata(&from).unwrap().len(), std::fs::metadata(&to).unwrap().len());
+
+        // …and newer than the real build, which is the other half of the old check.
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(&to).unwrap().set_modified(future).unwrap();
+
+        assert!(refresh(&from, &to), "a replaceable image was reported as unusable");
+        assert_eq!(
+            std::fs::read(&to).unwrap(),
+            std::fs::read(&from).unwrap(),
+            "the planted image survived: a SYSTEM process would have run it"
+        );
+    }
+
+    #[test]
+    fn an_identical_image_is_left_alone() {
+        // The common case, and the reason content comparison is affordable: the bytes are read
+        // either way, but nothing is written, so a watchdog currently running from this path does
+        // not block the service from starting.
+        let dir = scratch("identical");
+        let from = dir.join("curfew.exe");
+        let to = dir.join("curfew-watchdog.exe");
+        std::fs::write(&from, b"same bytes").unwrap();
+        std::fs::write(&to, b"same bytes").unwrap();
+
+        assert!(refresh(&from, &to));
+        assert_eq!(std::fs::read(&to).unwrap(), b"same bytes");
+    }
+
+    #[test]
+    fn a_missing_image_is_created_from_this_build() {
+        let dir = scratch("missing");
+        let from = dir.join("curfew.exe");
+        let to = dir.join("nested").join("curfew-watchdog.exe");
+        std::fs::write(&from, b"the real build").unwrap();
+
+        assert!(refresh(&from, &to), "a first run could not stage the watchdog");
+        assert_eq!(std::fs::read(&to).unwrap(), b"the real build");
+    }
+
+    #[test]
+    fn an_image_that_cannot_be_verified_is_not_vouched_for() {
+        // What the caller does with `false` is fall back to its own executable. The point here is
+        // that a build we cannot read is never reported as safe to run.
+        let dir = scratch("unreadable");
+        let from = dir.join("curfew.exe");
+        let to = dir.join("curfew-watchdog.exe");
+
+        assert!(!refresh(&from, &to), "an unreadable build was reported as safe to run");
     }
 }

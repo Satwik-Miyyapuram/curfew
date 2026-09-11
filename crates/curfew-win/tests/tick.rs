@@ -5,7 +5,7 @@
 //! or leaving the hosts file blocking a machine whose lock ended hours ago.
 
 use curfew_core::{CalendarEvent, Config, Lock, Session, SessionSource};
-use curfew_win::ipc::Request;
+use curfew_win::ipc::{Request, Response};
 use curfew_win::procs::{Process, Processes};
 use curfew_win::Enforcer;
 use std::cell::RefCell;
@@ -91,11 +91,17 @@ fn proc(pid: u32, exe: &str) -> Process {
 /// An `Enforcer` writing to a hosts file of its own, named after the test so parallel tests do not
 /// fight over one path.
 fn enforcer(name: &str) -> (Enforcer, PathBuf) {
+    enforcer_with(name, CONFIG)
+}
+
+/// The same, for a test that needs the schedule to carry a different lock.
+fn enforcer_with(name: &str, toml: &str) -> (Enforcer, PathBuf) {
     let dir = std::env::temp_dir().join(format!("curfew-tick-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("hosts");
     std::fs::write(&path, "127.0.0.1 localhost\r\n").unwrap();
-    (Enforcer::new(config(), path.clone()), path)
+    let config = Config::from_toml(toml).expect("the test config must parse");
+    (Enforcer::new(config, path.clone()), path)
 }
 
 fn hosts(path: &PathBuf) -> String {
@@ -352,21 +358,69 @@ fn a_session_that_ends_is_kept_for_the_statistics() {
 /// A session can end by being reaped, by a satisfied lock, by an emergency pass or by a peer. The
 /// history is written by noticing what is no longer running, so every one of those is covered
 /// without each having to remember to say so.
+///
+/// This uses a `confirm` lock rather than the schedule's `timer`, because a timer is not a condition
+/// a caller may claim — see [`claiming_a_timer_does_not_release_a_timer_lock`].
 #[test]
 fn a_session_ended_by_hand_is_kept_too() {
-    let (mut enforcer, _) = enforcer("history-by-hand");
+    let (mut enforcer, _) = enforcer_with(
+        "history-by-hand",
+        &CONFIG.replace("locks = [{ kind = \"timer\" }]", "locks = [{ kind = \"confirm\" }]"),
+    );
     let table = Fake::new(vec![]);
 
     enforcer.tick(NOW, 0, &[], &table);
     let id = enforcer.sessions.running[0].id.clone();
-    enforcer
-        .sessions
-        .end(&id, NOW + 600, &BTreeSet::from([Lock::Timer]))
-        .expect("the timer had run out");
+
+    let answer =
+        enforcer.handle(NOW + 600, Request::End { id, satisfied: BTreeSet::from([Lock::Confirm]) });
+    assert_eq!(
+        answer,
+        Response::Ok,
+        "a confirmation the caller showed did not release the session"
+    );
+
     enforcer.tick(NOW + 900, 0, &[], &table);
 
     assert_eq!(enforcer.history.len(), 1);
     assert_eq!(enforcer.history[0].ended_at, Some(NOW + 900));
+}
+
+/// The regression guard for the worst bug this review found.
+///
+/// `Lock::Timer` used to be in `claimable`, which meant a caller could assert that the timer had run
+/// out and be believed. One line on the named pipe — no administrator, no UI, no tray — ended any
+/// timer-locked session, and the flagship configuration in `tests/golden/example.toml` is a weekly
+/// window locked exactly that way. A timer's condition is the machine fact `ends_at`; expiry already
+/// grants it, and nothing legitimate was ever gained by letting a caller claim it.
+#[test]
+fn claiming_a_timer_does_not_release_a_timer_lock() {
+    let (mut enforcer, _) = enforcer("timer-not-claimable");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    let id = enforcer.sessions.running[0].id.clone();
+
+    // The window runs 09:00–12:00 and NOW is 09:30, so the timer has two and a half hours left.
+    let answer = enforcer.handle(
+        NOW + 600,
+        Request::End { id: id.clone(), satisfied: BTreeSet::from([Lock::Timer]) },
+    );
+
+    match answer {
+        Response::Refused { refusal } => {
+            assert!(
+                matches!(refusal, curfew_core::Refusal::Locked { .. }),
+                "a claimed timer was refused for the wrong reason: {refusal:?}"
+            );
+        }
+        other => panic!("a timer was released by claiming it: {other:?}"),
+    }
+    assert_eq!(enforcer.sessions.running.len(), 1, "the session ended on a claimed timer");
+
+    // …and the honest path still works: once the clock reaches `ends_at`, the pass reaps it.
+    enforcer.tick(AFTER, 0, &[], &table);
+    assert!(enforcer.sessions.running.is_empty(), "expiry no longer releases a timer lock");
 }
 
 #[test]
@@ -398,4 +452,401 @@ fn history_older_than_thirty_days_is_dropped() {
     assert_eq!(enforcer.history.len(), 1);
     enforcer.tick(AFTER + 60 * 24 * 3600, 0, &[], &table);
     assert!(enforcer.history.is_empty());
+}
+
+// --- the figures the Time page shows ------------------------------------------------------------
+
+/// The request the window's "Where time went" page sends, answered over the real handler.
+///
+/// Before this existed the page could not exist: the design has carried a "Where time went" nav entry
+/// all along, the build had four pages, and on Windows the only route to your own usage data was
+/// `curfew stats` in a terminal. This pins the whole path — request in, typed figures out — rather
+/// than the arithmetic, which `curfew-core` already tests.
+#[test]
+fn the_time_page_gets_its_figures_over_the_wire() {
+    let (mut enforcer, _) = enforcer("stats-wire");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    enforcer.tick(AFTER, 0, &[], &table);
+    assert_eq!(enforcer.history.len(), 1, "the fixture did not record a session");
+
+    // Exactly the JSON the page builds, parsed by the real enum — the same contract test the Start
+    // button has, so a rename on either side is a failing test rather than a blank page.
+    let request: Request =
+        serde_json::from_str(r#"{"request":"stats","days":14}"#).expect("the page's own request");
+    match enforcer.handle(NOW, request) {
+        Response::Stats(stats) => {
+            assert_eq!(stats.days.len(), 14, "a fortnight was asked for");
+            assert_eq!(stats.total_sessions, 1);
+            assert!(
+                stats.total_blocked_seconds > 0,
+                "a session that ran was counted as no time at all"
+            );
+        }
+        other => panic!("the figures came back as {other:?}"),
+    }
+}
+
+/// And a machine that has never blocked anything answers with an empty fortnight rather than an
+/// error: a fresh install opening the page is not a fault.
+#[test]
+fn a_machine_with_no_history_still_answers() {
+    let (mut enforcer, _) = enforcer("stats-empty");
+
+    match enforcer.handle(NOW, Request::Stats { days: 14 }) {
+        Response::Stats(stats) => {
+            assert_eq!(stats.days.len(), 14);
+            assert_eq!(stats.total_sessions, 0);
+            assert_eq!(stats.total_blocked_seconds, 0);
+        }
+        other => panic!("an empty history was answered with {other:?}"),
+    }
+}
+
+/// The window omits `days` when it wants the default, so the field has to have one — and it must be
+/// the same fortnight the page's own chart labels, or the bars and the count would disagree.
+#[test]
+fn omitting_the_window_gives_the_same_fortnight_as_asking_for_it() {
+    let (mut enforcer, _) = enforcer("stats-default");
+
+    let request: Request =
+        serde_json::from_str(r#"{"request":"stats"}"#).expect("a request with no days");
+    match (enforcer.handle(NOW, request), enforcer.handle(NOW, Request::Stats { days: 14 })) {
+        (Response::Stats(omitted), Response::Stats(explicit)) => {
+            assert_eq!(omitted.days.len(), explicit.days.len());
+            assert_eq!(omitted.days.len(), 14);
+        }
+        other => panic!("the two answers differed in shape: {other:?}"),
+    }
+}
+
+// --- what stops being enforced when the tray goes (P2-16) -----------------------------------------
+//
+// Hiding or quitting the tray takes the foreground report with it. The service is in session 0, where
+// there is no interactive desktop, so nothing else can take over: window-title and keyword rules stop
+// matching and budgets stop being charged, while the session keeps running.
+//
+// **The review's fix — "move the watch into the service" — cannot be done**, and the comment on
+// `Enforcer::foreground_warning` says why. What can be fixed is the silence, which is what these pin.
+
+/// The gap, reported.
+#[test]
+fn a_stale_foreground_report_is_reported_when_a_rule_needs_it() {
+    let (mut enforcer, _) = enforcer("fw-warn");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+
+    // Start the window, so a session is running. `deep-work` has a budget rule on `news.exe`, which is
+    // a rule that can only be decided from the foreground.
+    enforcer.tick(NOW, 0, &[], &table);
+    assert!(
+        enforcer.needs_foreground(),
+        "the fixture no longer has a foreground-dependent rule, so this test proves nothing"
+    );
+    assert!(
+        enforcer.foreground_warning.is_none(),
+        "nothing is wrong yet, and the service should not be complaining"
+    );
+
+    // A tray that has quit: nothing reported for twenty minutes.
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    let warning =
+        enforcer.foreground_warning.as_ref().expect("the gap was not reported, so it is silent");
+    assert!(
+        warning.contains("Deep work"),
+        "the sentence should name the profile whose rules stopped: {warning}"
+    );
+    assert!(
+        warning.contains("tray"),
+        "the sentence should say what the user can do about it: {warning}"
+    );
+}
+
+/// And the second half of the promise: it does **not** cry wolf.
+///
+/// A machine running only exe and domain rules loses nothing when the tray goes, and a warning about
+/// enforcement that is still working would train people to ignore the one that matters.
+#[test]
+fn a_stale_foreground_report_is_not_reported_when_no_rule_needs_it() {
+    // A config whose rules are all decided from the process list.
+    let (mut enforcer, _) = enforcer_with(
+        "fw-quiet",
+        r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "steam.exe" }
+action = { kind = "block" }
+
+[[weekly]]
+id = "mornings"
+profile = "deep-work"
+days = [0, 1, 2, 3, 4]
+start_minute = 540
+end_minute = 720
+locks = [{ kind = "timer" }]
+"#,
+    );
+    let table = Fake::new(vec![proc(1, "steam.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    assert!(!enforcer.needs_foreground(), "an exe-only rule should not need the foreground window");
+    assert!(
+        enforcer.foreground_warning.is_none(),
+        "a warning was raised about enforcement that is still working: {:?}",
+        enforcer.foreground_warning
+    );
+}
+
+/// A tray that is reporting raises nothing, which is the ordinary case and must stay silent.
+///
+/// **The first version of this test could not fail.** It reported a window and asserted no warning —
+/// but a fresh report always supplies a window, so the guard short-circuited on `foreground.is_some()`
+/// and the clause the test claimed to exercise was never reached. Deleting that clause left the test
+/// passing, which is how it was found: it was written to check a distinction that does not exist here,
+/// because in session 0 a missing foreground always means the report is missing.
+///
+/// So this asserts what is true and load-bearing instead: while the tray is alive, no warning, however
+/// quiet the machine is.
+#[test]
+fn a_live_tray_never_raises_the_warning() {
+    let (mut enforcer, _) = enforcer("fw-live");
+    // Nothing at all is running in the process table and the service can see no desktop — a quiet
+    // machine with a tray beating against it.
+    let table = Fake::new(vec![]);
+    enforcer.tick(NOW, 0, &[], &table);
+
+    for i in 1..=5 {
+        let at = NOW + i * 60;
+        enforcer.handle(at, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+        enforcer.tick(at, 60, &[], &table);
+        assert!(
+            enforcer.foreground_warning.is_none(),
+            "a live tray report was treated as a gap at {at}"
+        );
+    }
+
+    // And the moment it stops, the warning appears — the same test, one report's difference.
+    for i in 6..=25 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+    assert!(
+        enforcer.foreground_warning.is_some(),
+        "the tray stopped reporting and the gap was not raised"
+    );
+}
+
+/// The property that made the old `reported` flag dead, stated so nobody reintroduces it.
+///
+/// A fresh report always carries a window, so "the tray reported, but we have no window" is not a state
+/// this program can be in. If that ever changes, this fails and the distinction becomes worth making
+/// again.
+#[test]
+fn a_fresh_report_always_supplies_a_window() {
+    let (mut enforcer, _) = enforcer("fw-always");
+    let table = Fake::new(vec![]);
+    enforcer.handle(NOW, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+
+    assert!(
+        enforcer.foreground_now(NOW, &table).is_some(),
+        "a fresh report did not supply a window, so the warning needs a distinction it does not have"
+    );
+}
+
+/// The gap is also carried on `Status`, because that is how a surface learns about it.
+#[test]
+fn the_status_carries_the_gap() {
+    let (mut enforcer, _) = enforcer("fw-status");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    let Response::Status(status) = enforcer.handle(NOW + 21 * 60, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    assert!(status.foreground_warning.is_some(), "the gap did not reach the surface");
+    assert!(
+        status.needs_foreground,
+        "the status must say the exposure exists, so a surface can warn before it is caused"
+    );
+}
+
+/// **The exposure is reported while the tray is still running**, which is the half that lets a surface
+/// warn somebody *before* they hide the icon. `foreground_warning` is None here on purpose.
+#[test]
+fn the_status_says_the_exposure_exists_before_the_gap_opens() {
+    let (mut enforcer, _) = enforcer("fw-exposure");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+    enforcer.handle(NOW, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+
+    let Response::Status(status) = enforcer.handle(NOW, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    assert!(
+        status.needs_foreground,
+        "hiding the tray would cost enforcement and the status did not say so"
+    );
+    assert!(status.foreground_warning.is_none(), "nothing has broken yet");
+}
+
+// --- the window enforcement was down (P1-8) ------------------------------------------------------
+//
+// `ARCHITECTURE.md` §10 promises that a service which was killed, crashed or never started reports the
+// exact window it was down. Android has done this since `Downtime.kt`; Windows had nothing, so a service
+// that was killed during a timer lock stopped enforcing everything behind it and left no record.
+//
+// The case nothing caught is the one with **no reboot in it**: uptime never goes backwards, so the clock
+// layer sees nothing wrong, and `Persisted::last_tick` was only used to charge elapsed time — clamped to
+// one tick, so the two unenforced hours were silently discarded.
+
+/// A two-hour absence with the machine up throughout is the interesting case, and it is reported as
+/// such rather than as a restart.
+#[test]
+fn a_service_absent_within_one_boot_is_reported_as_a_gap() {
+    let (mut enforcer, _) = enforcer("gap");
+    // A previous run happened, so the boot counter knows this machine's boot already. Without this the
+    // fixture describes a machine that has never run while also claiming a persisted gap — a state the
+    // service cannot be in, and one that made `rebooted` true for the wrong reason.
+    let previous_uptime = 100_000;
+    enforcer.observe_boot(previous_uptime);
+    // The previous run stopped two hours before `NOW`, with a session running.
+    enforcer.sessions.start(curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: NOW - 10_000,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(NOW + 3600)),
+    });
+
+    // Same boot: the uptime keeps climbing, so `BootCounter` does not renumber.
+    let reported = enforcer.note_start(Some(NOW - 7200), NOW, previous_uptime + 120);
+
+    let gap = reported.expect("a two-hour absence was not reported");
+    assert!(!gap.rebooted, "a service stop was reported as a machine restart");
+    assert_eq!(gap.seconds(), 7200);
+    assert_eq!(gap.sessions, 1, "the notice must say a lock was running");
+    assert!(
+        enforcer.downtime.is_some(),
+        "the notice must also be kept, so a surface that was not looking can still see it"
+    );
+}
+
+/// A machine that restarted is the other case, and `BootCounter` is what tells them apart: uptime
+/// going backwards is the one thing that cannot happen within a boot.
+#[test]
+fn a_restart_is_reported_as_a_restart() {
+    let (mut enforcer, _) = enforcer("gap-reboot");
+    // Put a high uptime into the counter first, as a previous run would have.
+    enforcer.observe_boot(500_000);
+
+    // Now the machine has restarted: uptime is small again.
+    let gap = enforcer
+        .note_start(Some(NOW - 7200), NOW, 30)
+        .expect("a two-hour absence across a restart was not reported");
+    assert!(gap.rebooted, "a restart was not recognised as one");
+    assert!(gap.describe().contains("restarted"), "{}", gap.describe());
+}
+
+/// A short restart is not news, and reporting every upgrade would train people to dismiss the one that
+/// matters.
+#[test]
+fn a_quick_restart_is_not_reported() {
+    let (mut enforcer, _) = enforcer("gap-quick");
+    assert_eq!(enforcer.note_start(Some(NOW - 30), NOW, 100_000), None);
+}
+
+/// A first run has nothing to compare against.
+#[test]
+fn a_first_run_is_not_a_gap() {
+    let (mut enforcer, _) = enforcer("gap-fresh");
+    assert_eq!(enforcer.note_start(None, NOW, 100_000), None);
+}
+
+/// It is recorded once and then left alone, so a long-running service does not re-report the same gap
+/// every tick.
+#[test]
+fn the_gap_is_recorded_once() {
+    let (mut enforcer, _) = enforcer("gap-once");
+    assert!(enforcer.note_start(Some(NOW - 7200), NOW, 100_000).is_some());
+    assert!(
+        enforcer.note_start(Some(NOW - 7200), NOW + 2, 100_002).is_none(),
+        "the same gap was reported twice"
+    );
+    assert!(enforcer.downtime.is_some(), "the second call should keep the notice, not clear it");
+}
+
+/// Dismissing clears it, which is the only thing that does — a notice that vanishes on its own is one
+/// the person it is for can miss.
+#[test]
+fn dismissing_clears_the_notice() {
+    let (mut enforcer, _) = enforcer("gap-dismiss");
+    enforcer.note_start(Some(NOW - 7200), NOW, 100_000);
+    assert!(enforcer.downtime.is_some());
+
+    let answer = enforcer.handle(NOW, Request::DismissDowntime);
+    assert_eq!(answer, Response::Ok);
+    assert!(enforcer.downtime.is_none(), "the notice survived being dismissed");
+
+    // And it does not come back: `note_start` has already run.
+    assert!(enforcer.note_start(Some(NOW - 7200), NOW + 2, 100_002).is_none());
+    assert!(enforcer.downtime.is_none());
+}
+
+/// And it reaches a surface.
+#[test]
+fn the_status_carries_the_downtime_notice() {
+    let (mut enforcer, _) = enforcer("gap-status");
+    enforcer.note_start(Some(NOW - 7200), NOW, 100_000);
+
+    let Response::Status(status) = enforcer.handle(NOW, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    let gap = status.downtime.expect("the gap did not reach the surface");
+    assert_eq!(gap.seconds(), 7200);
+}
+
+/// **A previous run we have no boot record for is not a restart.** The upgrade case.
+///
+/// `boot_counter` deserializes to zero when a state file written by an older build does not carry one,
+/// while `last_tick` — which older builds did persist — is present. So this is a state the service
+/// really can start in, and `BootCounter::observe` numbers the first reading it ever takes as boot 1.
+/// Treating `0 -> 1` as a reboot would announce *"This machine was restarted"* on the strength of a
+/// missing field.
+///
+/// The honest answer is the less specific one: Curfew was not running, which is true either way. A
+/// notice that overstates what it knows is worth less than the line it replaces.
+#[test]
+fn a_missing_boot_record_is_not_a_restart() {
+    let (mut enforcer, _) = enforcer("gap-no-boot-record");
+    // No `observe_boot` first: this is a boot counter that has never been used, as an upgraded state
+    // file yields.
+    assert_eq!(enforcer.boot_id, 0, "the fixture is supposed to start with no boot record");
+
+    let gap = enforcer
+        .note_start(Some(NOW - 7200), NOW, 100_000)
+        .expect("the gap itself is real and should be reported");
+
+    assert!(
+        !gap.rebooted,
+        "a missing boot record was reported as a machine restart: {}",
+        gap.describe()
+    );
+    let text = gap.describe();
+    assert!(text.contains("Curfew was not running"), "{text}");
+    assert!(!text.contains("restarted"), "the notice claimed a restart on no evidence: {text}");
 }

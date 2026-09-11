@@ -6,6 +6,7 @@ import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.ScreenTime
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
+import dev.curfew.policy.ClockVerdict
 import dev.curfew.policy.Consumption
 import dev.curfew.policy.Decision
 import dev.curfew.policy.Launches
@@ -367,6 +368,19 @@ class CurfewRuntime internal constructor(
      * request: if the window covers this minute, the session is running before the form closes.
      */
     private suspend fun commitConfig(kind: String, detail: String) {
+        // **Checked, then written** — P1-13. `policy.commitConfig` refuses an edit that would take a
+        // rule away from a session that is running, and throws with a sentence naming the profile and
+        // what would stop being enforced. The file is not touched in that case, so the user's edit is
+        // theirs to fix rather than half-applied.
+        //
+        // Before this, Android wrote the config and reconciled with no check at all: a user could
+        // delete the rule that was holding them and the lock would carry on enforcing nothing behind
+        // it. Windows has refused that since entry 54.
+        //
+        // No getOrThrow: UniFFI maps a Result<(), E> to a function that throws, so the failure
+        // arrives as an exception rather than a value. A .getOrThrow() here would not compile, which
+        // is how this was found.
+        policy.commitConfig(policy.configToml())
         config.write(policy.configToml()).getOrThrow()
         val now = clock.now()
         audit(now, kind, detail)
@@ -609,13 +623,33 @@ class CurfewRuntime internal constructor(
      * is a code path like any other, and invariant 2 says no code path may shorten a lock.
      */
     suspend fun trustedNow(): Long {
+        val verdict = observeClocks()
+        // Written down here rather than in `observeClocks`, because this is the cadence that
+        // matters: the enforcement service calls this on every tick and after every boot broadcast,
+        // and a witness that was never persisted would reset its baseline on the next launch — which
+        // is exactly what someone moving the clock is hoping for.
+        policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
+        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
+        return verdict.now
+    }
+
+    /**
+     * The same decision, without writing it down.
+     *
+     * For the UI's one-second beat, which needs the trusted instant constantly and must not put two
+     * rows through the database every second to get it. The tamper flag is still raised, because a
+     * screen is the one place a person can be told the clock moved; only the two state writes are
+     * skipped, and the service's own tick persists them within a couple of seconds either way.
+     */
+    suspend fun trustedNowLight(): Long = observeClocks().now
+
+    /** Read both device clocks and decide what the reading is worth. */
+    private suspend fun observeClocks(): ClockVerdict {
         val verdict = policy.observeClock(clock.now(), clock.uptime(), clock.bootId())
         // Taken from the same reading, and from uptime rather than the wall clock: uptime can only
         // go backwards by rebooting, so a clock moved forward in Settings cannot be dressed up as
         // the restart a lock asked for.
         policy.observeBoot(clock.uptime())
-        policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
-        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
         if (verdict.tampered) {
             _clockTamper.value = ClockTamper(
                 at = verdict.now,
@@ -627,7 +661,7 @@ class CurfewRuntime internal constructor(
                 else "back ${verdict.refusedBackward}s"
             audit(verdict.now, "enforcement.clock", "refused $direction")
         }
-        return verdict.now
+        return verdict
     }
 
     // --- downtime ----------------------------------------------------------------------------------
