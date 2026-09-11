@@ -127,10 +127,23 @@ STATUS = {
              "the log. **Android's half of the finding is untouched**: it already implements this. The "
              "review's second claim — that Android's polling is not adaptive — is **not done**: the "
              "Windows tick is 2 s regardless of whether a session is running"),
-    "P2-8": ("open",
-              "**verified open.** The ICS parser is the weakest component here and the finding lists distinct gaps: a bare `YYYYMMDD` `DTSTART` is not treated as all-day, so an all-day entry with no `DTEND` fails the overlap test and is dropped entirely; a negative `BYMONTHDAY` is discarded by `filter_map`, after which an empty list means *unconstrained*, which is fail-open; and recurrence is partial generally. **Not done**: each is a separate parser change with its own RFC cases, and doing one badly is worse than leaving all of them named"),
-    "P2-11": ("open",
-              "**verified open.** `curfew remove` deletes a window or calendar rule with no session-state query, while `README.md` and `INSTALL.txt` tell the user nothing short of the 24-hour release shortens a lock. The blast radius is bounded — a running session keeps its own copy — but the expectation the docs set is not met. **Not done**: `curfew-cli` depends only on `curfew-core`, so mirroring the uninstall refusal means giving the CLI an IPC path and a behaviour for *no service installed*, which is a first-class case rather than an error"),
+    "P2-8": ("fixed",
+             "**fixed** (entry 75) for the three defects the review lists in the code. A bare `YYYYMMDD` "
+             "`DTSTART` is now recognised as all-day, so an entry with no `DTEND` is no longer a "
+             "zero-length event that the overlap test drops. `BYMONTHDAY` is parsed as `i32` and negatives "
+             "resolve against the month they are in. And an unparseable `BYDAY`/`BYMONTHDAY` token now "
+             "**refuses the recurrence** rather than being dropped — dropping left the constraint list "
+             "empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's "
+             "fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in "
+             "two other crates; and `UNTIL` with a DATE value, which the review calls \"parsed oddly\" "
+             "without saying what the right answer is"),
+    "P2-11": ("fixed",
+              "**fixed** (entry 76). `curfew remove` now refuses when a running session derives from the "
+              "id, mirroring the uninstall refusal: `running_from` in the core is the decision, "
+              "`curfew_cli::removal_target` names the id, and the service's dispatcher asks over the pipe "
+              "it already uses for `Reload`. A service that is not running makes it a no-op, so the "
+              "config-first workflow is untouched, and only a *running* session blocks a removal — "
+              "otherwise the plan could not be edited without ending a lock first"),
     "P2-14": ("fixed",
               "**fixed** (entry 71). Each window owns its text through `GWLP_USERDATA`, handed over with "
               "`Box::into_raw` and reclaimed on `WM_NCDESTROY`, instead of one `thread_local` that every "

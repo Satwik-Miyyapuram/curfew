@@ -102,6 +102,8 @@ must run.
 | 84 | The overlay appeared on the primary monitor, outside the work area (P2-15) | **P2** | **Fixed** — cursor monitor + work area; DPI still undeclared (entry 72) |
 | 85 | A batch delivered in reverse order cost O(n²) Ed25519 verifications (P2-18) | **P2** | **Fixed** — 300 checks for 24 entries measured before, 24 after (entry 73) |
 | 86 | The FFI's restore payloads were unbounded, and the comments implied a guarantee they lacked (P1-3) | **P1** | **Partly fixed** — the cap and the bypasses are closed; forging the clock baseline remains possible (entry 74) |
+| 87 | An unexpandable ICS rule widened its match instead of refusing (P2-8) | **P2** | **Fixed** — all-day value form, negative `BYMONTHDAY`, and refusal rather than a dropped token (entry 75) |
+| 88 | `curfew remove` deleted a schedule a running lock derived from, silently (P2-11) | **P2** | **Fixed** — refused when the service is reachable and a session derives from it (entry 76) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -181,10 +183,10 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
 | P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
 | P2-7 | P2 | **fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, `Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so `refil = "daily"` was silently defaulting. Only the config: the state file and op-log are read by other versions, where refusing an unknown field would break forward compatibility |
-| P2-8 | P2 | **verified open.** The ICS parser is the weakest component here and the finding lists distinct gaps: a bare `YYYYMMDD` `DTSTART` is not treated as all-day, so an all-day entry with no `DTEND` fails the overlap test and is dropped entirely; a negative `BYMONTHDAY` is discarded by `filter_map`, after which an empty list means *unconstrained*, which is fail-open; and recurrence is partial generally. **Not done**: each is a separate parser change with its own RFC cases, and doing one badly is worse than leaving all of them named |
+| P2-8 | P2 | **fixed** (entry 75) for the three defects the review lists in the code. A bare `YYYYMMDD` `DTSTART` is now recognised as all-day, so an entry with no `DTEND` is no longer a zero-length event that the overlap test drops. `BYMONTHDAY` is parsed as `i32` and negatives resolve against the month they are in. And an unparseable `BYDAY`/`BYMONTHDAY` token now **refuses the recurrence** rather than being dropped — dropping left the constraint list empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in two other crates; and `UNTIL` with a DATE value, which the review calls "parsed oddly" without saying what the right answer is |
 | P2-9 | P2 | **fixed** (entry 65). Parse success only ever meant the text carried `BEGIN:VCALENDAR`, so a provider's auth-expiry placeholder or a truncated export replaced the last good copy and released every block it was driving. `curfew_ics::event_count` now tells the two apart, and a document with no events keeps the cache serving. **The false positive is deliberate and tested**: a genuinely emptied subscription keeps serving the old copy once one exists |
 | P2-10 | P2 | **fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing `Added` for a window it had discarded. **Android not covered**: the FFI still discards the outcome |
-| P2-11 | P2 | **verified open.** `curfew remove` deletes a window or calendar rule with no session-state query, while `README.md` and `INSTALL.txt` tell the user nothing short of the 24-hour release shortens a lock. The blast radius is bounded — a running session keeps its own copy — but the expectation the docs set is not met. **Not done**: `curfew-cli` depends only on `curfew-core`, so mirroring the uninstall refusal means giving the CLI an IPC path and a behaviour for *no service installed*, which is a first-class case rather than an error |
+| P2-11 | P2 | **fixed** (entry 76). `curfew remove` now refuses when a running session derives from the id, mirroring the uninstall refusal: `running_from` in the core is the decision, `curfew_cli::removal_target` names the id, and the service's dispatcher asks over the pipe it already uses for `Reload`. A service that is not running makes it a no-op, so the config-first workflow is untouched, and only a *running* session blocks a removal — otherwise the plan could not be edited without ending a lock first |
 | P2-12 | P2 | **fixed** (entry 56). `ARCHITECTURE.md` advertised in-page element blocking the manifest cannot implement (no `content_scripts`, `scripting` or `declarativeNetRequest`); corrected in both places it appeared. And the functional half: a rule starting while a matching page was already open never took effect, which `tabs.onActivated` and `windows.onFocusChanged` now fix |
 | P2-13 | P2 | **fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front |
 | P2-14 | P2 | **fixed** (entry 71). Each window owns its text through `GWLP_USERDATA`, handed over with `Box::into_raw` and reclaimed on `WM_NCDESTROY`, instead of one `thread_local` that every `show()` wrote and every paint read — a second notice overwrote the first before it had painted. **The executable tests cannot catch a mutation of the fix**: `overlay_proc` is a Win32 callback, so the wiring is guarded at the source level and the tests pin only the ownership rule's shape |
@@ -288,6 +290,8 @@ this table is a reading aid.
 | `742abcb` | Place the overlay on the user's monitor, inside its work area (entry 72) |
 | `262ea59` | Verify each entry once, and walk each chain once (entry 73) |
 | `c3c7266` | Bound the restore payloads, and stop implying a guarantee the code lacks (entry 74) |
+| `99f47d0` | Refuse an unexpandable ICS rule rather than widening it (entry 75) |
+| `cf1b2a7` | Refuse to remove a schedule a running lock derives from (entry 76) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4225,3 +4229,145 @@ cap checked *after* the parse, and the cap applied to `sessions` only.
 **My first attempt at the ordering mutation was equivalent rather than uncaught** — it read
 `let _ = restoration(&json)?;`, and the `?` still propagates, so nothing changed. Worth recording because a
 mutation that changes nothing reads exactly like a gap in the tests, and I nearly recorded it as one.
+
+---
+
+## 75. P2-8: an unexpandable ICS rule widened its match instead of refusing
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-8**. **Fixed** — the three defects it lists in the code.
+
+### What was wrong
+
+The module's own doc says unsupported recurrence should make an event *non-recurring*. The code's actual
+behaviour after a dropped token was to **widen** the match — and this parser feeds a lock, so a rule that
+fires on the wrong days is worse than one that never fires.
+
+Three separate defects, each verified in the source before changing anything.
+
+**The all-day value form was not recognised.** `is_all_day` tested only the `VALUE=DATE` parameter, never
+the bare `YYYYMMDD` form RFC 5545 also permits. `span` then produced a zero-length interval, the overlap
+test rejected it, and an ordinary all-day "Holiday" or "Leave" entry was dropped entirely — a calendar rule
+silently stopping on exactly the days it was set up to cover. `parse_time` already accepted both spellings;
+this was the other half of the same decision.
+
+**`BYMONTHDAY=-1` was discarded, and an empty list means "no constraint".** `u32::parse` failed on the
+minus, `filter_map` dropped the token, and a rule written for month-end fired every day. Now parsed as
+`i32` and resolved against the month the cursor is in — which is what the negative means, and why it cannot
+be a precomputed `contains` or "31 minus the ordinal": February has 28 days and March has 31.
+
+**`BYDAY=2FR` widened the same way.** `weekday` returned `None`, the token was dropped, `by_day` was left
+empty, and the `WEEKLY` branch reads an empty day list as "no day filter" — so a rule for the second Friday
+fired every week.
+
+### The fix
+
+The review's rule, now the module's: **refuse to expand at all rather than expand wrongly.**
+`collect`/`collect_ints` return `Option<Vec<_>>` rather than an empty `Vec`, because an empty *constraint*
+list and a *refusal* are different things — and collapsing them is precisely what caused this. An
+unexpandable rule still reports its own `DTSTART` once, which is the module doc's instruction and keeps the
+event in the schedule.
+
+### A fourteenth false guarantee
+
+`weekday`'s comment claimed the refusal already happened — *"the rule is refused above by the day never
+matching rather than by silently becoming 'every Friday'"*. That was false: the day list was empty, so
+nothing was matched *against*. The fix is the same as the previous thirteen: make the code true.
+
+### Two of my own fixtures were wrong, and the mutation run found both
+
+**My test fixtures were corrupted by Python's line continuation.** `"...\r\n\` followed by an indented
+`RRULE:` inside a Python string removes the backslash but **keeps the leading whitespace**, so the Rust
+literal got `RRULE` preceded by nine spaces and the parser did not recognise the property. Four tests
+failed for a reason that had nothing to do with the code.
+
+**And my two "refused" tests expected `is_empty()`**, which was my expectation being wrong: `starts()`
+inserts the first occurrence unconditionally, so refusal means *non-recurring*, exactly as the doc says.
+They assert against the widened count now, so a regression has to explain the difference rather than a bare
+emptiness.
+
+**And my "eight characters but not a date" cases were ten and nine characters.** So relaxing `is_date_form`
+to `len() == 8` survived the mutation run — the fixture did not have the property it claimed to have. Same
+mistake as the `days = ["mon"]` fixture and the shadowed `PAD` earlier on this branch; this time the
+mutations caught it rather than a reader.
+
+### One mutation is genuinely unreachable, and that is stated rather than hidden
+
+The digit check in `is_date_form` cannot be exercised through the public API, because eight non-digit
+characters fail `parse_time` first and no event is produced either way. It is **not** dead code — it guards
+against the two functions drifting apart, which is exactly the bug — so the test asserts *that agreement*
+directly (`the_two_date_parsers_agree`) rather than pretending a behaviour test covers it.
+
+### Verification
+
+1001 Rust tests (was 991). Six mutations caught, one per defect and one per negative-resolution direction.
+
+### What was deliberately not done
+
+The review's fourth point — that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently — is in
+two other crates, and it is a separate change with its own tests. `UNTIL` with a DATE value is also
+untouched: the review calls it "parsed oddly" without saying what the right answer is, and inventing one
+would be guessing at a spec question rather than fixing a known defect. **Both are named on the coverage
+row so neither is read as closed.**
+
+---
+
+## 76. P2-11: `curfew remove` deleted a schedule a running lock derived from, silently
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-11**. **Fixed.**
+
+### What was wrong
+
+`curfew remove <id>` deleted a window or calendar rule and nothing in the running service noticed. The
+session keeps its own copy of what it blocks, so the lock was **not** weakened — this was never a bypass.
+The problem is that the user is not told, and `README.md` says *"a lock is a promise — nothing shortens it
+except the conditions you chose"*, so somebody who reads that and runs
+`curfew remove <the window blocking me>` believes they have stopped it.
+
+### The fix
+
+The uninstall refusal's shape, in three layers, each doing only what it can:
+
+- **`curfew-core::session::running_from`** is the decision. `SessionSource` already records which schedule
+  started a session, and the answer is the same on every platform, so it belongs in the core. It takes
+  `&[Session]` rather than `&Sessions` because that is what a caller holding a service status actually has,
+  and because nothing in the check reads the `dismissed` map.
+- **`curfew_cli::removal_target`** says which id a removal names, so the caller does not re-parse the
+  command line. It is `None` for everything that is not a removal — `add-window` is not a weakening, and
+  refusing it would be a bug in the direction that makes the plan unmaintainable.
+- **`curfew-svc`'s dispatcher refuses**, because it is the only thing that can ask the running service what
+  is enforcing. It already asks over the pipe for `Request::Reload` two lines below, so the shape is
+  established rather than invented.
+
+### Two deliberate limits
+
+**A service that is not running makes this a no-op.** `curfew remove` on a machine where Curfew has never
+run — or on Linux, where there is no service at all — edits a file and nothing else. Refusing because a
+*service* cannot be reached would break the config-first workflow the module doc describes: preparing a
+file to copy elsewhere must not be blocked by a question nobody can answer. `None` covers both "no
+service" and "nothing is enforcing that schedule", and they are not distinguished because the caller does
+the same thing either way.
+
+**Only a *running* session blocks a removal.** A schedule that is not currently enforcing anything can be
+deleted freely, or the plan could not be edited without ending a lock first — which is exactly backwards.
+
+The refusal names the profiles, says why the deletion would not do what it looks like, and ends with the
+sentence the docs already promise: *"Nothing short of the 24-hour release shortens a lock that is already
+running."*
+
+### Verification
+
+1009 Rust tests (was 1001). Six mutations caught: matching nothing, ignoring the weekly id, ignoring the
+calendar id, attributing a manual session to a schedule, treating any three-argument command as a removal,
+and prefix-matching the verb.
+
+**One of those six was uncovered until the mutation run found it.** Every calendar fixture asked about the
+id it actually carried, so replacing the calendar arm's comparison with `true` changed no outcome in any
+test. A fixture has to hold the *negative* case — a calendar session asked about somebody else's id — or the
+comparison is untested. Same lesson as the `is_date_form` digit check two entries up, in the opposite
+direction: there the check was unreachable, here the case was missing.
+
+### What was deliberately not done
+
+The docs are unchanged. The refusal makes the behaviour match what `README.md` and `INSTALL.txt` already
+say, so rewording them would be a second change where one will do — and the sentence the user needs is now
+printed at the moment they need it.
