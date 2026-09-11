@@ -169,7 +169,10 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             ),
             Trigger(
                 glyph = "\u23F1",
-                tint = Palette.Live,
+                // Accent, not Live. This row describes a way to start a profile — nothing is running
+                // while the user is reading it — and the row is tappable, which is exactly what
+                // Accent means. Amber is reserved for a block that is running right now.
+                tint = Palette.Accent,
                 title = "A timer I start myself",
                 example = "Tap once, block for 90 minutes. Nothing scheduled.",
                 // Always true: a timer needs no setting up, it is the Now tab's button.
@@ -582,15 +585,14 @@ private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {
 /**
  * Minutes past midnight as a clock face.
  *
- * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far
- * end of an evening window rather than the start of one, and a window that ends at or before it
- * starts is the core's own way of saying "and on into tomorrow".
+ * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far end
+ * of an evening window rather than the start of one, and a window that ends at or before it starts is
+ * the core's own way of saying "and on into tomorrow".
+ *
+ * The formatting itself lives in [clockMinute] with the rest of the app's time words, and the reason
+ * it is not the localised clock is written down there: this text is typed back into a config.
  */
-private fun clock(minute: Int): String {
-    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
-    if (m == 0) return "midnight"
-    return "%02d:%02d".format(m / 60, m % 60)
-}
+private fun clock(minute: Int): String = clockMinute(minute)
 
 private fun slug(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "profile" }

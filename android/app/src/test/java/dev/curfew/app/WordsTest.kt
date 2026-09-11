@@ -1,6 +1,8 @@
 package dev.curfew.app
 
 import dev.curfew.app.block.BlockActivity
+import dev.curfew.app.ui.clockMinute
+import dev.curfew.app.ui.countdown
 import dev.curfew.app.ui.dayLabel
 import dev.curfew.app.ui.describePassRefusal
 import dev.curfew.policy.PassRefusal
@@ -70,6 +72,73 @@ class WordsTest {
         assertEquals("now", relative(100, 100))
         assertEquals("in 20 min", relative(1300, 100))
         assertEquals("20 min ago", relative(100, 1300))
+    }
+
+    /**
+     * A countdown is an amount of time, never a clock face.
+     *
+     * The bug this pins: the Now screen and the block screen each had their own countdown, and below
+     * an hour they disagreed. Fourteen minutes remaining read "14m" on Now and "14:00" on the block
+     * screen — and "14:00" reads as two in the afternoon, so the screen somebody is staring at while
+     * an app is blocked appeared to say their session ends at 2pm.
+     */
+    @Test
+    fun `a countdown is an amount of time and not a time of day`() {
+        assertEquals("1:12", countdown(4320))
+        assertEquals("14m", countdown(840))
+        assertEquals("48s", countdown(48))
+        // A negative slice is a bug elsewhere; it must not become "-14m" on someone's screen.
+        assertEquals("0s", countdown(-60))
+    }
+
+    /** …and the one screen that wants the seconds gets them without changing the rule. */
+    @Test
+    fun `the block screen shows seconds without inventing a clock face`() {
+        assertEquals("14m 09s", countdown(849, withSeconds = true))
+        // Above an hour it is the same as everywhere else: seconds on a two-hour wait are noise.
+        assertEquals("1:12", countdown(4320, withSeconds = true))
+        assertEquals("48s", countdown(48, withSeconds = true))
+    }
+
+    /**
+     * A window's own times are 24-hour and say "midnight", because the user types them back in.
+     *
+     * This is the one clock in the app that deliberately ignores the device's 12/24-hour setting, and
+     * the wraparound is the part worth pinning: a window ending at or before midnight is the core's
+     * way of spelling "and on into tomorrow", so a value past 24 hours or below zero has to land on a
+     * real time rather than on "25:00".
+     */
+    @Test
+    fun `a window's times are clock faces a person can type back in`() {
+        assertEquals("midnight", clockMinute(0))
+        assertEquals("09:00", clockMinute(540))
+        assertEquals("23:59", clockMinute(1439))
+        assertEquals("01:00", clockMinute(25 * 60))
+        assertEquals("23:00", clockMinute(-60))
+    }
+
+    /**
+     * The two screens agree wherever agreement is expected, which is the property that was broken.
+     *
+     * They are allowed to differ in exactly one band — under an hour but over a minute, where the
+     * block screen adds the ticking seconds — and nowhere else. Stated as a rule over every band
+     * rather than as two literals, because two literals can both be right while the functions still
+     * drift apart the next time somebody edits one of them.
+     */
+    @Test
+    fun `both screens say the same thing about the same session`() {
+        for (left in listOf(30L, 59L, 60L, 840L, 3599L, 3600L, 4320L, 25 * 3600L)) {
+            val plain = countdown(left)
+            val ticking = countdown(left, withSeconds = true)
+            if (left in 60 until 3600) {
+                assertTrue(
+                    "the block screen lost its seconds at $left: $ticking",
+                    ticking.startsWith(plain) && ticking.length > plain.length,
+                )
+            } else {
+                assertEquals("the two screens disagree about $left seconds", plain, ticking)
+            }
+        }
     }
 
     @Test

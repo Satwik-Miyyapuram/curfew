@@ -237,7 +237,12 @@ fun ScheduleScreen(
                     TriggerRow(
                         title = describeDays(window.days),
                         note = describeWindow(window).substringAfter(" \u00B7 "),
-                        tint = Palette.Live,
+                        // Accent, matching the calendar rule below it. This was amber, so a weekly
+                        // window wore the "a block is running now" colour while it was merely a row
+                        // on a list — and amber was the only thing distinguishing it from the
+                        // calendar row, a difference the title already carries ("Mon\u2013Fri"
+                        // against "From your calendar").
+                        tint = Palette.Accent,
                         enabled = window.enabled,
                         onToggle = { model.saveWeekly(window.copy(enabled = it)) },
                         onOpen = { weeklyForm = Editing(window) },

@@ -386,6 +386,11 @@ fun Switch(on: Boolean, onChange: (Boolean) -> Unit) {
  *
  * [fraction] is how much of the arc to draw, 0 for a bare track. Drawing starts at twelve o'clock
  * and runs clockwise, which is the only direction anyone reads a remaining-time ring.
+ *
+ * [colour] defaults to [Palette.Live] and *that* is right here, unlike [DragDial]'s — worth saying
+ * because the two look like the same decision. The arc is only drawn when `fraction > 0f`, so this
+ * colour appears exactly when there is time left to show, which is exactly when a block is running.
+ * An idle dial is a bare grey track and is never amber.
  */
 @Composable
 fun Dial(
@@ -441,6 +446,12 @@ fun Dial(
  * The handle is drawn where the value is, so there is something to aim at, and every whole minute
  * crossed ticks the phone — the feedback that makes a dial feel like a physical control rather than
  * like a slider with a round hitbox.
+ *
+ * [colour] defaults to [Palette.Accent], not to [Palette.Live], and that is the point rather than a
+ * detail. Its only caller is the setup screen, where the whole question is "how long do you want?" and
+ * nothing is running yet — so an amber dial there made the *planning* screen wear the colour that
+ * means *a block is running now*, which is the one thing amber is reserved for (`Theme.kt`). A caller
+ * that wants the live dial passes it explicitly.
  */
 @Composable
 fun DragDial(
@@ -450,7 +461,7 @@ fun DragDial(
     diameter: androidx.compose.ui.unit.Dp,
     stroke: androidx.compose.ui.unit.Dp = 12.dp,
     perTurn: Int = 60,
-    colour: Color = Palette.Live,
+    colour: Color = Palette.Accent,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current

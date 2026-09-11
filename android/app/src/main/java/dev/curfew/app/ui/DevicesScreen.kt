@@ -149,7 +149,13 @@ fun DevicesScreen(model: CurfewViewModel) {
                     },
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
-                    color = if (sync.running) Palette.Muted else Palette.Live,
+                    // Ok when listening, Muted when not — and this used to be amber for *not*
+                    // listening, which is almost exactly backwards. Amber means "a block is running
+                    // right now", so the neutral sentence "Not listening on this network right now"
+                    // read as "something is live", on the screen a user opens to check their devices.
+                    // Listening is a state that holds, which is what Ok is for; not listening is
+                    // ordinary information and gets the quiet tone.
+                    color = if (sync.running) Palette.Ok else Palette.Muted,
                 )
                 Gap(12.dp)
                 GhostButton(text = "Sync now", onClick = model::syncNow)
@@ -204,8 +210,12 @@ fun DevicesScreen(model: CurfewViewModel) {
                                 "this device — cancel.",
                             fontSize = 13.sp,
                             lineHeight = 20.sp,
-                            // The one warning on the screen that a wrong answer makes permanent.
-                            color = Palette.Live,
+                            // The one warning on the screen that a wrong answer makes permanent —
+                            // and Bad rather than amber, because amber means "a block is running
+                            // right now" and nothing is running while somebody reads this. A caution
+                            // about an outcome that cannot be undone is a bad thing that has not
+                            // happened yet, which is the nearest the palette has to it.
+                            color = Palette.Bad,
                         )
                         Gap(12.dp)
                         PrimaryButton(

@@ -332,22 +332,21 @@ private fun reasonLine(profile: String, explanation: String, endsAt: Long?): Str
     return "$profile is running$until. $explanation"
 }
 
-private fun clockAt(epochSeconds: Long): String {
-    val time = java.time.Instant.ofEpochSecond(epochSeconds)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime()
-    return "%02d:%02d".format(time.hour, time.minute)
-}
+/** An epoch second as a wall clock, in the device's own format. See [clockTime]. */
+private fun clockAt(epochSeconds: Long): String = dev.curfew.app.ui.clockTime(epochSeconds)
 
-/** "1:12" for an hour and twelve minutes; "4:09" for four minutes and nine seconds under an hour. */
-private fun countdown(secondsLeft: Long): String {
-    val left = secondsLeft.coerceAtLeast(0)
-    return if (left >= 3600) {
-        "%d:%02d".format(left / 3600, (left % 3600) / 60)
-    } else {
-        "%d:%02d".format(left / 60, left % 60)
-    }
-}
+/**
+ * "1:12" for an hour and twelve minutes; "14m 09s" below that; "48s" under a minute.
+ *
+ * The seconds are kept for this screen and not for the Now dial, and that is the whole of the
+ * difference between them: this is the screen somebody is sitting in front of, waiting, and a number
+ * that visibly moves is the point. What is *not* kept is the old format — this used to render
+ * fourteen minutes as "14:00", which reads as two in the afternoon rather than as a countdown, and
+ * which disagreed with the Now screen's "14m" for the very same session. Both now come from
+ * [dev.curfew.app.ui.countdown], so they cannot drift again.
+ */
+private fun countdown(secondsLeft: Long): String =
+    dev.curfew.app.ui.countdown(secondsLeft, withSeconds = true)
 
 /**
  * The pause before a delayed app opens.

@@ -41,6 +41,51 @@ fun relative(at: Long, now: Long): String {
 fun clockTime(epochSeconds: Long): String =
     DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(epochSeconds * 1000))
 
+/**
+ * How much time is left, said as an amount of time rather than as a clock face.
+ *
+ * "1:12" for an hour and over, "14m" under it, "14s" under a minute. [withSeconds] adds the seconds
+ * to the middle case, for the one screen where the number visibly ticks.
+ *
+ * **One rule, one place.** There were two of these, one on the Now screen and one on the block screen,
+ * and they disagreed below an hour: the same fourteen minutes remaining read "14m" on Now and
+ * "14:00" while an app was blocked. That is not a difference of precision — "14:00" reads as a
+ * wall-clock time, so the block screen appeared to say the session ends at two in the afternoon. Two
+ * implementations of one idea will always drift; the fix is that there is now one.
+ *
+ * Above an hour both already agreed on "1:12", and that is kept: with "left" beside it, an H:MM
+ * reading is a duration everywhere a person meets one, and it is shorter than "1 hr 12 min" on a
+ * screen with a large ticking number on it.
+ */
+fun countdown(secondsLeft: Long, withSeconds: Boolean = false): String {
+    val left = secondsLeft.coerceAtLeast(0)
+    val hours = left / 3600
+    val minutes = (left % 3600) / 60
+    return when {
+        hours > 0 -> "$hours:%02d".format(minutes)
+        minutes > 0 -> if (withSeconds) "${minutes}m ${"%02d".format(left % 60)}s" else "${minutes}m"
+        else -> "${left}s"
+    }
+}
+
+/**
+ * A time of day the user typed and will type again, so it is not localised on purpose.
+ *
+ * This is the one clock in the app that deliberately ignores the device's format. The strings on the
+ * schedule editor are also what gets written into the config and read back by the core, and a window
+ * saved as "9:00 PM" somewhere a 12-hour clock is set would come back as an error rather than as a
+ * window. Round-tripping beats prettiness where the same text is both a label and an input.
+ *
+ * It takes **minutes past midnight** rather than an epoch second, which is the other reason it is not
+ * [clockTime]: a weekly window has no date, and a screen that formatted one would eventually show a
+ * date it invented.
+ */
+fun clockMinute(minute: Int): String {
+    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
+    if (m == 0) return "midnight"
+    return "%02d:%02d".format(m / 60, m % 60)
+}
+
 fun dateTime(epochSeconds: Long): String =
     DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         .format(Date(epochSeconds * 1000))

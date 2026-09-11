@@ -295,7 +295,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill(
                     if (state.downtime == null) "Ticks on time" else "Missed a stretch",
-                    tint = if (state.downtime == null) Palette.Ok else Palette.Live,
+                    // Bad, not amber. A stretch Curfew missed is a bad thing that already happened —
+                    // which is what Bad is for — where amber would say a block is running, the
+                    // opposite of what this pill reports.
+                    tint = if (state.downtime == null) Palette.Ok else Palette.Bad,
                 )
                 Pill(
                     when (state.sync.active.size) {
@@ -853,28 +856,26 @@ private fun remaining(session: Session, now: Long): Float {
 /**
  * "1:12", the way a clock left-of-the-colon counts down. Seconds only under a minute.
  *
+ * Kept as a thin name for this screen's own shape — every countdown in the app comes from
+ * [dev.curfew.app.ui.countdown] now, because two copies of this rule had already drifted apart: the
+ * block screen rendered fourteen minutes as "14:00". The epoch-second comment below is why this took
+ * a while to get right and is worth keeping.
+ *
  * Every instant in this app is an epoch SECOND — the core writes them, `state.now` is one, and
  * `Format.clockTime` reads them that way. Dividing by a thousand here turned twenty-five minutes
  * into "1s" while the session card two inches below said "Ends in 24 min".
  */
-private fun countdown(endsAt: Long, now: Long): String {
-    val left = (endsAt - now).coerceAtLeast(0)
-    val hours = left / 3600
-    val minutes = (left % 3600) / 60
-    return when {
-        hours > 0 -> "$hours:%02d".format(minutes)
-        minutes > 0 -> "${minutes}m"
-        else -> "${left}s"
-    }
-}
+private fun countdown(endsAt: Long, now: Long): String =
+    dev.curfew.app.ui.countdown(endsAt - now)
 
-/** An epoch second as a wall clock, in whatever zone the phone is in. */
-private fun clockOf(epochSeconds: Long): String {
-    val time = java.time.Instant.ofEpochSecond(epochSeconds)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime()
-    return "%02d:%02d".format(time.hour, time.minute)
-}
+/**
+ * An epoch second as a wall clock, in the device's own format.
+ *
+ * Was a hardcoded `%02d:%02d`, which ignores the device's 12/24-hour setting: on a phone set to a
+ * 12-hour clock the Now dial read "13:30" while the stats card beside it read "1 hr 30 min", and the
+ * calendar on the next tab read "1:30 PM". [clockTime] is the app's one localised clock.
+ */
+private fun clockOf(epochSeconds: Long): String = clockTime(epochSeconds)
 
 /** The earliest start among the weekly windows, as a clock face, or null when there are none. */
 /**

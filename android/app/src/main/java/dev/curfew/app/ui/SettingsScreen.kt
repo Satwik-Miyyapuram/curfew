@@ -131,7 +131,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 },
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
-                color = if (state.sync.running) Palette.Muted else Palette.Live,
+                // The same correction as DevicesScreen: amber for *not* listening was backwards, and
+                // the neutral sentence read as "a block is running". See the note there.
+                color = if (state.sync.running) Palette.Ok else Palette.Muted,
             )
             state.sync.error?.let { problem ->
                 Gap(6.dp)
