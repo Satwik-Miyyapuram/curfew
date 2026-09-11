@@ -735,7 +735,8 @@ that page a user cannot act on, because `<config>` is precisely what they do not
 service's config when omitted is the durable fix — it would let the README say
 `curfew add-profile --id deep-work` and remove the class of error entirely — but it changes argument
 parsing across `curfew-cli/src/schedule.rs` and is a bigger change than this pass should make
-unverified. **Recorded as entry 23.**
+unverified. **Recorded in "Still open" at the end of this document as the `curfew-cli` path default** —
+it is the one follow-up this entry deliberately did not attempt.
 
 **Verification.** `cargo build -p curfew-app` clean; full workspace suite green; the HTML is compiled
 into the binary by `include_str!`, so a syntax error would be a compile error.
@@ -747,7 +748,8 @@ into the binary by `include_str!`, so a syntax error would be a compile error.
 Recorded here so the remaining work is a list rather than a memory. Rewritten after every round, and
 the entries it named as open in the previous revision — F-16, F-38, the control channel, the
 `%ProgramData%` ACL, the wrong-password swallow, the config-reload gap, the single message surface, and
-the two read-failure findings — are all fixed above. What follows is what is actually left.
+the read-failure findings — all three of them: the config, the calendar, and the app picker — are all
+fixed above. What follows is what is actually left.
 
 **P0 — none.** All four are fixed: the claimable `Timer`, the untrusted Windows clock, the obeyed
 `Stop`, and the Android UI's wall clock, plus the three P0s from the interaction review (F-1, F-16,
