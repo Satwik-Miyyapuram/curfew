@@ -72,6 +72,9 @@ must run.
 | 51 | Simple mode was cited by a comment that contradicted itself and a plan that promises it (F-11) | **P1** | **Fixed** as documentation (entry 48) |
 | 52 | Two absences with no explanation: day one on Now, the comparison on Usage (F-12, F-13) | **P2** | **Fixed** (entry 48) |
 | 53 | The README advertised a pairing step the Windows build cannot do (F-18) | **P0** | **Partly fixed** — the advertisement is honest; the front door is scoped, not built (entry 49) |
+| 57 | Windows could not state its sync state on any surface (F-18 step 5) | **P0** | **Fixed** — `SyncState` on every status, five phases in the window (entry 51) |
+| 58 | Ending a block raised an acknowledgement against the app's own principle 4 (F-8) | **P2** | **Fixed** (entry 52) |
+| 59 | **F-8 was missing from this log for five rounds**, and two edits truncated it | **P2** | **Fixed** — a structural checker now runs against the log (entry 52) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -98,13 +101,14 @@ problem rather than a number in it.
 | F-3 | P2 | **Not a defect — the review is wrong.** It says "the design says 30"; `design/Timer.dc.html:71` shows the accented (selected) pill as **`1h 30m`**, against `PRESETS = listOf(25, 50, 90, 180)`. The code matches the design authority. **Deliberately not changed** — see entry 46 |
 | F-6 | P1 | **Fixed** (entry 47). `Auth.isAvailable` was only consulted *at prove time* (`Auth.kt:55`); the choice is now gated at choice time too |
 | F-7 | P1 | **Fixed** (entry 47). `NowScreen.kt:669` called `onRelease` straight from the button; it goes through `DConfirm` now |
+| F-8 | P2 | **Fixed** (entry 52). Ending a block raised an acknowledgement; the receipt is the card disappearing. **Found by `tools/check_log.py`, not by reading** |
 | F-9 | P1 | **Fixed** — in an earlier round, and only recorded here. `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
 | F-11 | P1 | **Fixed** (entry 48). There is no Simple mode; three status notes in the plan, and a Settings comment that contradicted itself eight lines later |
 | F-12 | P2 | **Fixed** (entry 48). `NowScreen.kt:461` returned early when all three numbers were zero — which is day one, the moment the decision gets made |
 | F-13 | P2 | **Fixed** (entry 48). `UsageScreen.kt:64` rendered the comparison only when non-null; the two reasons it can be null now have a placeholder that names them |
 | F-14 | P1 | **Fixed** (entry 48). `DevicesScreen.kt:302` revoked on a single tap; now confirmed, naming the locks that would lose their exit |
 | F-15 | P3 | **Fixed** (entry 46) |
-| F-18 | **P0** | **Partly fixed** (entry 49). The README no longer advertises a step the PC cannot do; the front door itself is still unbuilt, with its scope recorded |
+| F-18 | **P0** | **Partly fixed** (entries 49, 51). The README no longer advertises a step the PC cannot do, and the window can now state its sync state — but the PC still cannot *begin* a pairing, which is steps 1–4 of the recorded scope |
 | F-33 | P1 | **Fixed** (entry 46) |
 | F-34 | P2 | **Fixed** (entry 50). "Pick a meeting, or set a schedule" opened only the picker; "Always on" sent the user to Plan — against the file's own stated principle |
 | F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
@@ -180,6 +184,8 @@ this table is a reading aid.
 | `3be9a24` | The README advertised a pairing step Windows cannot do (entry 49) |
 | `ab0b7b1` | The remaining unassessed findings, assessed and fixed (entries 50) |
 | `e88a9ed` | The privacy claim was false on one of the two screens that made it (entries 50) |
+| `e9c86e3` | The window can say what sync is doing (entry 51) |
+| `b0888e8` | Stop acknowledging a block the user just watched end, and a checker for this log (entry 52) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -2538,6 +2544,7 @@ be committed unrecorded, which is precisely what it is for. Counts: 319 untransl
 Material. Rust untouched at **861 passed**; fmt and clippy clean.
 
 **Limits:** the Compose changes are compile-verified only.
+
 ---
 
 ## 48. The remaining verified-open P1s and P2s
@@ -2810,3 +2817,152 @@ valid, one line changed, and `build.py`'s output is identical with and without t
 **One limit is now retired.** Every finding in the coverage table has a verified status; there are **no
 "not re-assessed" rows left**. The four that were there are recorded above, and F-49 — the largest — turned
 out to be four-fifths done and one-fifth a decision with a stated reason.
+
+---
+
+## 51. F-18, step 5: the window can say what sync is doing
+
+**Finding:** `UX_INTERACTION_REVIEW.md` **F-18 (P0)**, one step of the scope recorded in entry 49. Entry 49
+flagged this one as *"worth doing on its own, and is the smallest"*; this does it. **F-18 remains open.**
+
+### What was wrong
+
+**Windows said nothing about sync on any page.** `Status` — the one struct every Windows surface reads —
+carried no sync field at all. So even once pairing worked, a user could not tell paired from unpaired, or
+*paired and waiting* from *paired and broken*. The interaction review praises Android for stating sync truth
+in a five-way `when` and calls it better than any competitor reviewed; **Windows stated it in zero ways**,
+and the only Windows surface that mentioned sync was one that could not be reached.
+
+### What changed
+
+`SyncState` travels on every status, and the window's **Is it working** page states which of five things is
+true. Five, because they have five different next steps:
+
+| Phase | What the user should do |
+| :--- | :--- |
+| `broken` | fix it — the reason is carried as a sentence, not a code |
+| `unpaired` | pair, if they want to. **Not an error**, and must not read as one |
+| `idle` | wait; the node comes up on the pass after a pairing lands, by design |
+| `waiting` | wait; these devices talk when they are in earshot |
+| `working` | nothing; N of M are reachable |
+
+**`Option` could not express this, and that is the substantive part.** `start_sync` returned `None` both for
+*"nothing is paired, which is normal"* and for *"the sync directory is not writable, which is not"* — the
+opposite thing to a user, one of which needs no action and one of which belongs on a screen. It now returns
+a `SyncStart` carrying the reason. In the failure case it reports `paired: 0` rather than a guess, because
+`store::open` failing means the peers on disk are exactly what could not be read.
+
+### The five-way rule lives in one place
+
+The window switches on `phase`, computed by the service — **not** on the four raw facts. Five lines of
+branching could have been re-derived in JavaScript, and that is the duplication this branch has spent ten
+rounds removing: two copies of one rule, free to drift, the Rust side covered by tests and the JS side by
+nothing.
+
+So `SyncState`'s `Serialize` is hand-written and emits `phase` as **derived output**, computed at the moment
+of writing from the same values it is about to write. A stored `phase` field could disagree with the facts
+printed beside it — "working" while `nearby` is zero — and deriving it makes that unrepresentable.
+
+### Verified executably
+
+JS is the one language in this repo with **no test infrastructure**, so the check is a recorded run rather
+than a committed test. `node --check` passes on the page's script, and the branch block was extracted from
+`app.html` **verbatim** and executed with all five phases plus three degraded cases:
+
+```
+broken    bad  | Sync is off | sync directory is not writable — this de...
+unpaired  mut  | No devices paired | Sessions stay on this machine. Pairing i...
+idle      mut  | Sync starting — 2 devices paired | The listener comes up on the next pass. ...
+waiting   mut  | 2 devices paired, none in earshot | These devices talk when they are on the ...
+working   ok   | Syncing with 1 of 2 | On this network right now. Blocks and th...
+missing   mut  | No devices paired | ...          <- no `sync` object at all
+future    mut  | No devices paired | ...          <- a phase this window does not know
+ALL FIVE PHASES DISTINCT AND NON-EMPTY
+```
+
+Two Rust tests cover the same seam from the other side: that `phase` reaches the wire and agrees with the
+facts, and that a `sync` object with no fields still parses.
+
+**That second one was found by a test, not by reasoning.** I had put `#[serde(default)]` on `Status::sync`
+only, so a payload carrying `"sync": {}` failed with `missing field 'running'`. The window and the service are
+separate binaries that can be updated at different times, so the attribute belongs on the struct.
+
+**And one error was mine, not the code's.** The first execution harness passed the sync object *as* the whole
+status; every case then fell through to "No devices paired". The page was correct and the test was wrong, and
+it is recorded here because a less careful reading of that output would have "fixed" working code — which is
+the failure mode this log has documented in the other direction several times.
+
+### What this is not
+
+**Not the front door.** The PC still cannot *begin* a pairing. That is steps 1–4 of entry 49's scope: a
+Devices page, three new `Request` variants and their handlers — including the design question about making an
+identity available before any peer exists without binding a listener, which `runner.rs:225-231` refuses to do
+so that Windows Defender never prompts an unpaired user about a firewall rule for a feature they have not
+switched on.
+
+What changed is that the window can now tell the truth about a machine that **is** paired, which it could not
+do even when pairing works. That is a real gap closed and a real gap left.
+
+### Verification
+
+**872 Rust tests** (was 863) across the workspace; fmt and clippy clean; all 8 crates build standalone. The
+window's script passes `node --check`. No Android change this round.
+---
+
+## 52. F-8, found by a checker rather than by reading — and the checker itself
+
+**Findings:** **F-8** (P2) fixed. Both halves of this entry are about the same defect: a claim of
+completeness that nothing was checking.
+
+### F-8 was never in this log
+
+Ending a block raised an acknowledgement: `say("${session.profile} ended.")`. `UX-FLOWS.md`
+principle 4 is *"dialogs are for decisions, never for acknowledgements"*, and the review's fix is that
+the receipt should be the dial going grey and the card disappearing. The user tapped End, the session
+ended, the card they were looking at is gone — a sentence saying so is one more thing to read and tap
+away, for an action whose whole result they just watched happen.
+
+**The mechanism was fixed and the substance was not, which is exactly why it went unlogged.** Entry 19
+made `UiState.message` a banner instead of a modal, closing F-29. F-8 points at the same code and asks a
+different question — not *where* the acknowledgement appears, but whether an acknowledgement should
+exist at all — and fixing F-29 made F-8 look done. Both call sites (`endSession`, `scanToken`) are
+reached only from NowScreen's own end flows, so the card vanishing is always the receipt.
+
+`session_ended` is now unused and the string is deleted. That is the same class as `block_open_curfew`
+from F-37: dead copy left behind by a fix, and it would have sat there indefinitely.
+
+### The checker
+
+**I had broken this log twice by editing it**, both times by splicing on a phrase that appears more than
+once. The first took entries 47 and 49; the second took 48, 49 and 50. Both were caught by reading the
+headings afterwards, and both were recoverable from git — which is luck, not process. The lesson is not
+"be careful": it is that **an anchor which is not unique is not an anchor**, and that a document whose
+structure lives only in the head of whoever last edited it will be broken by the next edit.
+
+`tools/check_log.py` now checks what a reader would ask:
+
+| Check | Why |
+| :--- | :--- |
+| every finding the review defines appears in the log | this is the coverage guarantee from entry 46 |
+| no entry heading in `HEAD` is missing now | the truncation check, and the failure that actually happened |
+| the status table is contiguous and duplicate-free | a gap means a row was lost |
+| the coverage table exists, and how many rows are unassessed | the count that kept being wrong |
+| code fences are balanced | an unbalanced block mis-renders everything after it |
+| every cited commit hash exists | a citation nobody can follow is not a citation |
+
+**Its first version was wrong, in an instructive way.** It flagged **seven** "entry headings run
+backwards" failures on a correct file. Entries here are written in the order the work happened and
+numbered by finding, so entry 19 legitimately sits between entry 3 and entry 4 throughout the document.
+Seven false failures is a check that teaches people to ignore it, so that rule was replaced with the
+comparison against `HEAD` — the failure that actually occurred.
+
+**And it found F-8 on its first successful run.** That is not a coincidence: the rule that caught it is
+*"does every finding the review defines appear in the log"*, which is the one question I had been
+answering from memory, and answering wrong. Every other count in this document has been corrected at
+least once; this is the first time a correction came from a machine rather than from noticing.
+
+### Verification
+
+72 Android tests across 12 classes; **872 Rust**; fmt and clippy clean. `python tools/check_log.py`
+reports the log structurally sound: no headings lost against `HEAD`, 59 status rows, 19 coverage rows,
+fences balanced, all 46 cited commits exist.
