@@ -190,29 +190,83 @@ pub fn should_show(newly: &[String], last_shown: Option<Timestamp>, now: Timesta
     }
 }
 
+/// The card's width, in pixels. Wide enough for a wrapped sentence and narrow enough not to be a window.
+pub(crate) const WIDTH: i32 = 460;
+
+/// The shortest a card is ever drawn. A one-line notice in a tall card looks like something failed to
+/// load.
+pub(crate) const MIN_HEIGHT: i32 = 196;
+
+/// The breathing room between the card's content and the edge of the card — and, from
+/// [`bottom_right_of`], between the card and the edge of the work area.
+///
+/// **Module-level, not inside `#[cfg(windows)] mod sys`.** These are numbers about a card rather than
+/// facts about Win32, and keeping them in the platform module is what made the placement arithmetic
+/// untestable: a test could not reach them, so the first version of the placement tests declared copies
+/// — asserting against numbers the overlay does not draw with.
+pub(crate) const PAD: i32 = 22;
+
+/// Where the bottom-right of a card goes, inside a work area.
+///
+/// **Portable on purpose.** The Win32 half of the placement cannot run under `cargo test`, but this
+/// arithmetic is where the finding lived: the old code subtracted a hardcoded 72 pixels as a stand-in for
+/// the taskbar, and took its screen size from the *primary* monitor. Taking the work area as a value
+/// makes both testable, and leaves `work_area()` as plumbing that a reader can check by eye.
+///
+/// `PAD` from the working area's own edges: the work area already excludes the taskbar, so the number
+/// that used to stand in for it is gone rather than adjusted.
+///
+/// Returns `(left, top)` for `CreateWindowExW`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn bottom_right_of(
+    work_area: (i32, i32, i32, i32),
+    width: i32,
+    height: i32,
+    pad: i32,
+) -> (i32, i32) {
+    let (left, top, right, bottom) = work_area;
+    // `min` with the left/top edge, so a work area smaller than the card — a tiny virtual display, or a
+    // card clamped to three quarters of a screen that is itself shorter — puts the card at the corner
+    // rather than off the top-left of it. Negative would mean drawing over the edge of the display.
+    ((right - width - pad).max(left), (bottom - height - pad).max(top))
+}
+
+/// The height of a work area, for the clamp in [`sys::measure`].
+///
+/// `fallback` is passed in rather than assumed, because only the Windows half can ask for the primary
+/// screen's height — and the first version of this returned 0 when there was no monitor, which made the
+/// caller's `clamp(MIN_HEIGHT, 0)` panic on its own argument order. A notice that takes the tray down is
+/// a worse outcome than one in the wrong corner.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn work_area_height(work_area: Option<(i32, i32, i32, i32)>, fallback: i32) -> i32 {
+    work_area.map(|(_, top, _, bottom)| bottom - top).unwrap_or(fallback)
+}
+
 #[cfg(windows)]
 mod sys {
     use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+    // The card's geometry now lives at the module level, beside `bottom_right_of` that consumes it —
+    // it is a fact about a card, not about Win32. See the constants above.
+    use super::{MIN_HEIGHT, PAD, WIDTH};
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreatePen, CreateRoundRectRgn, CreateSolidBrush, DeleteObject,
-        DrawTextW, EndPaint, FillRect, GetDC, ReleaseDC, RoundRect, SelectObject, SetBkMode,
-        SetTextColor, SetWindowRgn, DT_CALCRECT, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_TOP,
-        DT_WORDBREAK, HDC, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
+        DrawTextW, EndPaint, FillRect, GetDC, GetMonitorInfoW, MonitorFromPoint, ReleaseDC,
+        RoundRect, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, DT_CALCRECT, DT_LEFT,
+        DT_NOPREFIX, DT_SINGLELINE, DT_TOP, DT_WORDBREAK, HDC, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetSystemMetrics,
-        GetWindowLongPtrW, KillTimer, RegisterClassW, SetTimer, SetWindowLongPtrW, ShowWindow,
-        GWLP_USERDATA, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA, WM_DESTROY, WM_LBUTTONUP, WM_NCDESTROY,
-        WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos,
+        GetSystemMetrics, GetWindowLongPtrW, KillTimer, RegisterClassW, SetTimer,
+        SetWindowLongPtrW, ShowWindow, GWLP_USERDATA, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA,
+        WM_DESTROY, WM_LBUTTONUP, WM_NCDESTROY, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
     const CLOSE_TIMER: usize = 7;
-    const WIDTH: i32 = 460;
-    /// The shortest a card is ever drawn. A one-line notice in a tall card looks like something
-    /// failed to load.
-    const MIN_HEIGHT: i32 = 196;
 
     // The phone's palette, as GDI wants it: 0x00BBGGRR, not the 0xRRGGBB the rest of the project
     // writes. One app should not look like two, and this notice is the only Curfew surface most
@@ -232,8 +286,6 @@ mod sys {
 
     /// The amber stripe down the left edge, in pixels.
     const STRIPE: i32 = 4;
-    /// The breathing room between the text and the edge of the card.
-    const PAD: i32 = 22;
     /// The gap between the line that states the fact and the paragraphs under it.
     const GAP: i32 = 14;
     /// The two type sizes of the card, matching `design/win/Answer.dc.html`.
@@ -513,6 +565,53 @@ mod sys {
         }
     }
 
+    /// **The work area of the monitor the user is on** — P2-15.
+    ///
+    /// `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)` answers for the **primary** monitor only, so on a
+    /// laptop with an external display the notice appeared on the laptop's screen while the user was
+    /// working on the external one. It also returns the whole screen rather than the work area, which is
+    /// why the placement subtracted a hardcoded 72 pixels: a taskbar taller than that, docked to the
+    /// side, or absent altogether all put the card in the wrong place.
+    ///
+    /// The monitor under the **cursor**, for the same reason the tray menu opens there: it is where the
+    /// user is looking. `MONITOR_DEFAULTTONEAREST` means a cursor that is somehow off every display —
+    /// possible with a display that has just been unplugged — still yields a usable rectangle rather
+    /// than a null monitor.
+    ///
+    /// Returns `(left, top, right, bottom)` of the work area, or `None` when Windows will not answer,
+    /// in which case the caller falls back to the old behaviour rather than refusing to draw.
+    ///
+    /// **What this deliberately does not do: DPI.** No awareness is declared for this process, so
+    /// Windows virtualizes every coordinate it returns and every coordinate `CreateWindowExW` takes —
+    /// they are consistent with each other, which is why the placement below is correct without scaling.
+    /// Declaring awareness is the half-fix that would break it: the font sizes are fixed points, so a
+    /// notice on a 200% display would render at a third of its intended size. Doing that properly means
+    /// scaling every dimension in this file from the monitor's DPI, which is a change to the whole
+    /// drawing path rather than to this function.
+    fn work_area() -> Option<(i32, i32, i32, i32)> {
+        // SAFETY: `point` is a plain out-parameter; both calls handle failure by returning what is
+        // documented, and a null monitor is rejected below before it is used.
+        unsafe {
+            let mut point = POINT { x: 0, y: 0 };
+            if GetCursorPos(&mut point) == 0 {
+                return None;
+            }
+            let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+            if monitor.is_null() {
+                return None;
+            }
+            let mut info: MONITORINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(monitor, &mut info) == 0 {
+                return None;
+            }
+            // `rcWork`, not `rcMonitor`: the work area excludes the taskbar and any docked appbar, which
+            // is what "bottom right, where Windows puts everything else" actually means.
+            let r = info.rcWork;
+            Some((r.left, r.top, r.right, r.bottom))
+        }
+    }
+
     /// How tall the card has to be to hold `text` without cutting a word off.
     ///
     /// The height used to be a constant, which was right while the only thing this window said was
@@ -545,7 +644,14 @@ mod sys {
             let wanted = PAD * 2 + title_height + body_height;
             // Never taller than most of the screen: a card that runs off the bottom edge hides the
             // end of its own sentence and there is nothing to scroll.
-            wanted.clamp(MIN_HEIGHT, (GetSystemMetrics(SM_CYSCREEN) * 3) / 4)
+            // Three quarters of the monitor the notice will actually appear on, not of the primary one:
+            // the two differ whenever a second display is attached, and a card clamped to the wrong
+            // screen's height runs off the bottom of the right one.
+            // Three quarters of the monitor the notice will actually appear on, not of the primary one:
+            // the two differ whenever a second display is attached, and a card clamped to the wrong
+            // screen's height runs off the bottom of the right one.
+            let available = super::work_area_height(work_area(), GetSystemMetrics(SM_CYSCREEN));
+            wanted.clamp(MIN_HEIGHT, (available * 3) / 4)
         }
     }
 
@@ -567,8 +673,15 @@ mod sys {
             // outlives this call: `WM_NCDESTROY` is what takes it back.
             let owned = Box::into_raw(Box::new(wide(text)));
 
-            let screen_w = GetSystemMetrics(SM_CXSCREEN);
-            let screen_h = GetSystemMetrics(SM_CYSCREEN);
+            // Bottom right of the monitor the user is on, inside its work area — see `work_area`. The
+            // fallback is the primary screen, which is what this used to be unconditionally: a notice in
+            // roughly the right place beats no notice at all. `SM_CXSCREEN` is 0 and `SM_CYSCREEN` is 1,
+            // spelled as the constants rather than as numbers, because a wrong number here still compiles
+            // and still looks deliberate — an earlier version of this change wrote 76 and 77.
+            let area = work_area().unwrap_or_else(|| {
+                (0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+            });
+            let (corner_x, corner_y) = super::bottom_right_of(area, WIDTH, height, PAD);
             let window = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class_name.as_ptr(),
@@ -576,8 +689,11 @@ mod sys {
                 WS_POPUP,
                 // Bottom right, where Windows puts everything else that speaks without being asked.
                 // Centred, it landed on top of the window the user was about to go back to.
-                screen_w - WIDTH - 24,
-                screen_h - height - 72,
+                //
+                // `PAD` from the work area's own edges rather than a bare 24 and a guessed 72: the guess
+                // was standing in for the taskbar, and the work area already excludes it.
+                corner_x,
+                corner_y,
                 WIDTH,
                 height,
                 std::ptr::null_mut(),
@@ -967,6 +1083,95 @@ mod shared_slot_tests {
         assert!(
             after.contains("Box::from_raw"),
             "the last message no longer frees the window's text, so each notice leaks its buffer"
+        );
+    }
+}
+
+// --- where the card goes (P2-15) -----------------------------------------------------------------
+//
+// The Win32 calls cannot run under `cargo test`, but the arithmetic can, and the arithmetic is where the
+// finding lived: the old code subtracted a hardcoded 72 pixels as a stand-in for the taskbar and took its
+// screen size from the **primary** monitor, so on a laptop with an external display the notice appeared
+// on the wrong screen.
+#[cfg(test)]
+mod placement_tests {
+    use super::{bottom_right_of, work_area_height};
+
+    /// The overlay's own numbers, not copies. A test with its own `PAD` asserts against a constant the
+    /// production code does not use, and would keep passing if the real one changed.
+    const PAD: i32 = super::PAD;
+    const CARD_W: i32 = super::WIDTH;
+
+    /// Taller than the shortest card, so it never collides with `MIN_HEIGHT`.
+    const CARD_H: i32 = 260;
+
+    /// Bottom right, inside the work area — and on the monitor it was given, not on the primary one.
+    #[test]
+    fn the_card_sits_at_the_bottom_right_of_the_work_area_it_was_given() {
+        // A second monitor to the right of the primary, as Windows reports it: x from 1920 to 3840.
+        let second = (1920, 0, 3840, 1080);
+        let (x, y) = bottom_right_of(second, CARD_W, CARD_H, PAD);
+
+        assert_eq!(x, 3840 - CARD_W - PAD, "the card ignored the monitor it was given");
+        assert!(x >= 1920, "the card was placed on the primary monitor, which is the bug: x = {x}");
+        assert_eq!(y, 1080 - CARD_H - PAD);
+    }
+
+    /// A work area excludes the taskbar, so no separate allowance for it is needed — and none is made.
+    ///
+    /// The old code used the full screen height minus a guessed 72, which is wrong for a taskbar of any
+    /// other size, wrong for one docked to the side, and wrong when there is no taskbar at all.
+    #[test]
+    fn the_work_area_is_used_whole_with_no_taskbar_guess() {
+        let with_taskbar = (0, 0, 1920, 1040);
+        let (_, y) = bottom_right_of(with_taskbar, CARD_W, CARD_H, PAD);
+        assert_eq!(y, 1040 - CARD_H - PAD);
+
+        // And a taskbar on the *left* is a work area with a positive left edge, which the placement
+        // respects through the `max` below rather than through a second guess.
+        let left_dock = (80, 0, 1920, 1080);
+        let (x, _) = bottom_right_of(left_dock, CARD_W, CARD_H, PAD);
+        assert_eq!(x, 1920 - CARD_W - PAD);
+    }
+
+    /// **A work area smaller than the card must not put it off the top-left.** A tiny virtual display, or
+    /// a card clamped to three quarters of a screen that is itself shorter, can produce one — and a
+    /// negative coordinate draws over the edge of the display, where none of the notice is readable.
+    #[test]
+    fn a_work_area_smaller_than_the_card_still_contains_it() {
+        let tiny = (0, 0, 300, 150);
+        let (x, y) = bottom_right_of(tiny, CARD_W, CARD_H, PAD);
+        assert!(x >= 0 && y >= 0, "the card was placed off the top-left: ({x}, {y})");
+        assert_eq!((x, y), (0, 0));
+
+        // And with an offset work area, the corner is that area's corner rather than the screen's.
+        let offset = (200, 100, 400, 200);
+        assert_eq!(bottom_right_of(offset, CARD_W, CARD_H, PAD), (200, 100));
+    }
+
+    /// A monitor above or to the left of the primary has **negative** coordinates, which is ordinary on a
+    /// multi-monitor desk and is the case a naive implementation gets wrong twice over.
+    #[test]
+    fn a_monitor_to_the_left_of_the_primary_is_placed_on() {
+        let left_of_primary = (-1920, -200, 0, 880);
+        let (x, y) = bottom_right_of(left_of_primary, CARD_W, CARD_H, PAD);
+
+        assert_eq!(x, 0 - CARD_W - PAD);
+        assert!(x < -CARD_W, "the card was placed on the primary instead: {x}");
+        assert_eq!(y, 880 - CARD_H - PAD);
+    }
+
+    /// The clamp's input: a work area's height, or the caller's fallback when Windows will not name one.
+    #[test]
+    fn the_clamp_input_never_produces_a_degenerate_range() {
+        assert_eq!(work_area_height(Some((0, 0, 1920, 1040)), 1080), 1040);
+        // `None` gives the fallback, **not zero**: `clamp(MIN_HEIGHT, 0)` panics, and a notice that takes
+        // the tray process down is worse than one in the wrong corner. The first version returned zero and
+        // would have done exactly that.
+        assert_eq!(work_area_height(None, 1080), 1080);
+        assert!(
+            work_area_height(None, 1080) >= super::MIN_HEIGHT,
+            "the clamp range would be inverted"
         );
     }
 }
