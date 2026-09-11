@@ -4,6 +4,14 @@
 //! itself after a failure, so `taskkill` buys a few seconds rather than an evening. And it refuses
 //! to stop while a lock is held — the control manager is told the stop failed, which is true, and
 //! the enforcement loop carries on.
+//!
+//! That second one used to be a comment describing behaviour the code did not have: the handler set
+//! the loop's stop flag and returned `NoError` for *both* `Stop` and `Shutdown`, whatever was
+//! running. `NoError` is acceptance, so the service went down on any stop request — and because the
+//! installer stops the service before replacing its files, that also made the install-time stop
+//! succeed, which in turn let the deferred `curfew.exe uninstall` run against a stopped service and
+//! fail open. Stopping the service was therefore a complete way out of a lock, and it needed no
+//! administrator: Task Manager's "End task" and the Services console both reach it.
 
 use curfew_win::state;
 use std::ffi::OsString;
@@ -18,6 +26,13 @@ use windows_service::service::{
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 pub const NAME: &str = "Curfew";
+
+/// `ERROR_SERVICE_CANNOT_ACCEPT_CTRL` (winerror.h, 1061).
+///
+/// What a control handler returns to *deny* a control rather than acknowledge it. Spelled out
+/// because the `windows-sys` feature set this crate enables does not export it, and a wrong number
+/// here would be reported by the SCM as some unrelated failure.
+const ERROR_SERVICE_CANNOT_ACCEPT_CTRL: u32 = 1061;
 
 windows_service::define_windows_service!(ffi_service_main, service_main);
 
@@ -34,20 +49,40 @@ fn service_main(_arguments: Vec<OsString>) {
 fn run() -> windows_service::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let asked_to_stop = Arc::clone(&stop);
+    // The control handler runs on a thread the SCM owns, so it cannot lock the enforcer or ask the
+    // service anything through the pipe. It reads the same witness the watchdog reads — the state
+    // file — which is the only channel available to it and the same one `curfew uninstall` uses.
+    let state_path = state::default_path();
 
     let status_handle = windows_service::service_control_handler::register(NAME, move |control| {
+        use windows_service::service_control_handler::ServiceControlHandlerResult;
         match control {
-            ServiceControl::Interrogate => {
-                windows_service::service_control_handler::ServiceControlHandlerResult::NoError
-            }
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                // A shutdown is the machine going away and is always obeyed; the state file is what
-                // carries the lock across the reboot. A stop is a request, and while a lock is held
-                // it is refused.
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            // A shutdown is the machine going away. It is always obeyed whatever is running: the
+            // lock is carried across the reboot by the state file, and refusing would only mean the
+            // machine hung on its way down. `Lock::RestartRequired` is satisfied by the reboot, and
+            // every timer simply resumes against a clock that kept moving.
+            ServiceControl::Shutdown => {
                 asked_to_stop.store(true, Ordering::SeqCst);
-                windows_service::service_control_handler::ServiceControlHandlerResult::NoError
+                ServiceControlHandlerResult::NoError
             }
-            _ => windows_service::service_control_handler::ServiceControlHandlerResult::NotImplemented,
+            // A stop is a request, and while a lock is held it is refused. `ERROR_SERVICE_CANNOT_
+            // ACCEPT_CTRL` is what tells the SCM and the caller the request was denied, which is
+            // what makes an installer's `StopServices` fail and roll the uninstall back rather than
+            // replacing the binaries of a service that was holding a lock.
+            //
+            // An unreadable state file counts as locked — `locks_running` answers `true` for
+            // `Loaded::Lost` — because "the state is gone" is exactly what someone deleting their
+            // way out of a lock would arrange, and a refusal here costs an honest user one reboot.
+            ServiceControl::Stop => {
+                if crate::watchdog::locks_running(&state_path) {
+                    ServiceControlHandlerResult::Other(ERROR_SERVICE_CANNOT_ACCEPT_CTRL)
+                } else {
+                    asked_to_stop.store(true, Ordering::SeqCst);
+                    ServiceControlHandlerResult::NoError
+                }
+            }
+            _ => ServiceControlHandlerResult::NotImplemented,
         }
     })?;
 

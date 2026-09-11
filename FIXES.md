@@ -119,7 +119,56 @@ Clippy clean.
 
 **Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P0-2.
 
-*(Entry written with the change; see the commit for the diff.)*
+**What was wrong.** The service read `SystemTime` and used it as the instant locks are judged
+against. That clock is user-settable, so this was the cheapest bypass in the product — and it worked
+through **two** doors, which the review named as one:
+
+1. **The tick loop** (`runner.rs`), where `Sessions::reap` drops any session whose `ends_at` has
+   passed.
+2. **The control channel** (`serve`), where a request reaches `LockSet::can_release`, which grants a
+   release the moment `is_expired(now)` holds. So `Request::End` with **no conditions claimed at
+   all** ended a timer lock, once the caller had wound the clock forward. The second door is not in
+   the original finding and would have survived fixing only the first.
+
+Either way it left nothing behind: the session was written to history as one that had genuinely run
+out, the hosts file was given back, and the resolver emptied.
+
+`docs/ARCHITECTURE.md` lists "change the clock" as in scope and `GAPS C6` specifies the mechanism.
+`curfew_core::clock` has implemented it since it was written and Android has called it all along.
+**The Windows half was simply never wired to it** — `git grep -l ClockWitness -- crates/` returned
+only core, its tests, and `curfew-ffi`.
+
+**What was changed.**
+
+- `Enforcer` gains `clock: Option<ClockWitness>`, `clock_verdict: Option<Verdict>` and
+  `clock_notice: Option<String>`.
+- `Enforcer::observe_clock(wall, uptime) -> Timestamp` — folds in a reading and returns the instant
+  to judge against. It calls `observe_boot` **first**, because the witness compares against the boot
+  id and a witness told about a boot after it has already seen a reading from that boot reads the
+  change as a reboot and credits the wall clock's whole delta.
+- `runner::now()` → `runner::wall_now()`, documented as untrusted and naming its two honest uses
+  (reporting to a human, stamping a log line). Nothing on an enforcement path reads it any more.
+- Both `serve` and the tick loop take their instant from the witness.
+- `Persisted.clock` carries the baseline across restarts. This is the part that is easy to miss:
+  without it, *stopping the service, moving the clock, starting it again* is the same bypass, because
+  a fresh witness takes its first reading on faith.
+- `Status.clock_warning` carries a sentence, shown on the window's "Is it working" page in **amber**,
+  not red — a refused clock change is not a fault and nothing was lost.
+
+**One design decision worth recording.** The notice is **sticky**, not recomputed from the latest
+verdict. My first version recomputed it, and a test caught that the notice disappeared on the very
+next tick: the pass after a tamper reads a clock that has caught up with uptime and is therefore
+unremarkable, so the message was true for ~2 seconds and gone — which no UI polling at a sane rate
+would ever show. It is now replaced by a later notable reading and cleared by restarting the service.
+`tests/clock.rs` asserts it survives a following quiet reading.
+
+**Not changed.** The residual the design already accepts and documents: a wall-clock jump **across a
+reboot** is credited, because an honest overnight shutdown is indistinguishable from an hour stolen
+in the firmware. That is `clock.rs`'s stated position and `tests/clock.rs` pins it — including that
+the credited time is labelled as a caveat rather than an accusation.
+
+**Verification.** New `crates/curfew-win/tests/clock.rs`, six tests, all of which fail against the
+old code. Full suite: **806 green**. Clippy and fmt clean.
 
 ---
 
@@ -127,4 +176,48 @@ Clippy clean.
 
 **Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P0-3.
 
-*(Entry written with the change; see the commit for the diff.)*
+**What was wrong.** Two halves of one hole.
+
+The control handler's comment said *"A stop is a request, and while a lock is held it is refused"* —
+and the code set the loop's stop flag and returned `NoError` for **both** `Stop` and `Shutdown`,
+whatever was running. `NoError` *is* acceptance. So the service went down on any stop request, from
+Task Manager's "End task", the Services console, or `sc stop Curfew`, with no administrator.
+
+That mattered more than it looks, because the installer stops the service before replacing its files
+(`<ServiceControl Stop="both" Wait="yes" />`), and the deferred `curfew.exe uninstall` then ran
+against a **stopped** service. The uninstall guard was shaped as "refuse if the service answered
+*and* listed a running session" with a `_ => {}` catch-all — so `Err` (what asking a stopped service
+returns) fell straight through to `service::uninstall()`, which has no lock check of its own.
+
+`Settings → Apps → Curfew → Uninstall` during a locked session therefore succeeded, and
+`INSTALL.txt` and the `.wxs` both described protection that was not there.
+
+**What was changed.**
+
+1. **`service.rs`** — `Stop` and `Shutdown` are now separate arms. `Shutdown` is always obeyed: the
+   machine is going away, the lock is carried across the reboot by the state file, and refusing would
+   only hang the machine on its way down. `Stop` returns
+   `ServiceControlHandlerResult::Other(ERROR_SERVICE_CANNOT_ACCEPT_CTRL)` (1061, spelled out because
+   the enabled `windows-sys` features do not export it) while `watchdog::locks_running` says a lock
+   is held.
+2. **`main.rs`** — the uninstall guard is inverted to **fail closed**. It now needs a *positive*
+   "nothing is running" from two witnesses: the service's answer, and the state file directly (the
+   same witness the watchdog uses, and the only one left when nothing is answering). `Err`,
+   `Ok(something unexpected)`, and an unreadable state file all refuse.
+3. The decision is extracted into `refused_uninstall(service_says_running, state_says_locked)` and
+   unit-tested, because **the bug was a default** and a default is invisible in a `match`. It is
+   written as "refuse unless both agree there is nothing running" so a future reader adding a third
+   witness cannot widen the hole by accident.
+
+**A consequence worth stating.** The installer's `Stop="both"` will now *fail* when a lock is
+running, which aborts and rolls back the uninstall — exactly what the `.wxs` comment already
+promised. An upgrade over a locked service will therefore also refuse until the lock ends. That is
+the intended trade: the alternative is replacing the binaries of a service that is holding a lock.
+
+**Verification.** 3 new tests in `curfew-svc`, including the specific regression — "an unreachable
+service refuses rather than permits". `cargo test -p curfew-svc`: 15 passed. Clippy and fmt clean.
+
+**One residual, recorded rather than fixed.** The handler reads the state file on the SCM's control
+thread, which is file I/O inside a service callback. It is a single bounded read and `windows-service`
+only requires the handler not to block indefinitely, so this is acceptable — but it is the reason the
+handler cannot ask the service directly, and worth knowing if the state file ever grows.
