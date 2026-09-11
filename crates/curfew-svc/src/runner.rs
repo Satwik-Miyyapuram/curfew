@@ -229,28 +229,68 @@ pub fn sync_root() -> PathBuf {
 /// can is being asked to allow a listener for a feature they have not switched on. So an unpaired
 /// device binds nothing at all, and [`resume_sync`] brings the node up on the pass after the first
 /// pairing lands.
-fn start_sync() -> Option<(curfew_sync::node::Node, PathBuf)> {
+/// The outcome of trying to bring sync up: a node, or the reason there is none.
+///
+/// **An `Option` could not tell two opposite things apart.** `start_sync` returned `None` both for
+/// "nothing is paired, which is normal" and for "the sync directory is not writable, which is not",
+/// and those want opposite things from the user: the first needs no action, the second does, and only
+/// one of them belongs on a screen. Carrying the reason is what lets [`curfew_win::ipc::Status`] say
+/// which — and until this existed the Windows window said nothing about sync at all.
+enum SyncStart {
+    /// Listening, with this many peers on disk and this root to save against.
+    Up(curfew_sync::node::Node, PathBuf, usize),
+    /// Nothing paired. Ordinary: not an error, not worth a warning, nothing to do.
+    Unpaired,
+    /// It did not start, and this is why — a sentence fit to show a user.
+    Failed(String),
+}
+
+impl SyncStart {
+    /// What to publish on every status.
+    ///
+    /// `nearby` is passed in because only the caller can ask the node, and asking it every pass is the
+    /// only way the answer stays true: devices come and go from a LAN without telling anyone.
+    fn state(&self, nearby: usize) -> curfew_win::ipc::SyncState {
+        use curfew_win::ipc::SyncState;
+        match self {
+            SyncStart::Up(_, _, paired) => {
+                SyncState { running: true, paired: *paired, nearby, why_off: None }
+            }
+            SyncStart::Unpaired => {
+                SyncState { running: false, paired: 0, nearby: 0, why_off: None }
+            }
+            // `paired: 0` rather than a guess: `store::open` failed, so the peers on disk are exactly
+            // what could not be read. Reporting a count here would be inventing one.
+            SyncStart::Failed(why) => {
+                SyncState { running: false, paired: 0, nearby: 0, why_off: Some(why.clone()) }
+            }
+        }
+    }
+}
+
+fn start_sync() -> SyncStart {
     let root = sync_root();
     let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into());
     let (shared, complaints) = match curfew_sync::store::open(&root, &name) {
         Ok(opened) => opened,
         Err(e) => {
             eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
-            return None;
+            return SyncStart::Failed(e.to_string());
         }
     };
     for complaint in complaints {
         eprintln!("curfew: {complaint}");
     }
-    if shared.peers.lock().is_ok_and(|peers| peers.is_empty()) {
+    let paired = shared.peers.lock().map(|peers| peers.active_ids().count()).unwrap_or(0);
+    if paired == 0 {
         // Not an error and not worth a warning: this is simply a device that has not been paired.
-        return None;
+        return SyncStart::Unpaired;
     }
     match curfew_sync::node::Node::start(shared) {
-        Ok(node) => Some((node, root)),
+        Ok(node) => SyncStart::Up(node, root, paired),
         Err(e) => {
             eprintln!("curfew: sync is off ({e}). This device still enforces its own locks.");
-            None
+            SyncStart::Failed(e.to_string())
         }
     }
 }
@@ -553,7 +593,7 @@ pub fn run(
             // Sync runs after the pass, not before it: what the other device is told is what this
             // one has just decided, and what it hears back is enforced on the very next pass two
             // seconds later, which is what keeps the five-second promise.
-            if let Some((node, root)) = &sync {
+            if let SyncStart::Up(node, root, _) = &sync {
                 let calendars = guard.config.calendars.clone();
                 // Passes go out before the merge comes back, so a pass spent on this device in
                 // the last two seconds is in the log the other device reads, and the ration this
@@ -588,9 +628,17 @@ pub fn run(
                     }
                 }
             }
+            // Publish what sync is doing, whether or not it is up. `nearby` is asked of the node
+            // rather than remembered, because devices leave a network without ever saying so.
+            let nearby = match &sync {
+                SyncStart::Up(node, _, _) => node.nearby(now).len(),
+                _ => 0,
+            };
+            guard.sync = sync.state(nearby);
             persist(&guard, &state_path, now);
         }
-        if sync.is_none() {
+
+        if !matches!(sync, SyncStart::Up(..)) {
             sync_retry += 1;
             if sync_retry >= SYNC_RETRY_TICKS {
                 sync_retry = 0;

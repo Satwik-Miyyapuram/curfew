@@ -130,6 +130,16 @@ pub struct Enforcer {
     /// This device's own id in the op-log, once sync knows it. `None` on a machine that has never
     /// paired, where no peer lock can name it anyway.
     pub device_id: Option<String>,
+    /// What sync is doing, for [`crate::ipc::Status`].
+    ///
+    /// **Set by the caller, not computed here.** The sync node lives in the service's run loop and
+    /// `curfew-win` deliberately does not depend on `curfew-sync`, so this crate cannot ask the node
+    /// anything; it can only carry the answer. The alternative — threading the node into the
+    /// `Enforcer` — would put a TCP listener inside the struct that enforcement is judged against,
+    /// which is the wrong place for it.
+    ///
+    /// Defaults to `Unpaired`, which is what a test or a machine with no sync directory should report.
+    pub sync: crate::ipc::SyncState,
     /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
     /// two countdowns racing each other would leave nobody able to say what is about to occur.
     pub freeze: Option<curfew_core::Countdown>,
@@ -210,6 +220,7 @@ impl Enforcer {
             releases: BTreeSet::new(),
             released: BTreeMap::new(),
             device_id: None,
+            sync: crate::ipc::SyncState::default(),
             freeze: None,
             gates: Default::default(),
             watch: Default::default(),
@@ -521,6 +532,7 @@ impl Enforcer {
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
                 released: self.releases.iter().cloned().collect(),
+                sync: self.sync.clone(),
             })),
 
             Request::Start { profile, seconds, locks } => {

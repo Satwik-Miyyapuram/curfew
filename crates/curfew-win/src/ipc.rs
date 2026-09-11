@@ -233,8 +233,107 @@ pub struct Status {
     /// release is given once and there is nothing further to press.
     #[serde(default)]
     pub released: Vec<String>,
+    /// What this machine's sync is doing, as a fact rather than a promise.
+    ///
+    /// **Windows had no way to say this at all.** `Status` carried nothing about sync, so a user
+    /// could not tell paired from unpaired even once pairing worked, and no page of the window
+    /// mentioned it. The interaction review praises Android for stating sync truth in a five-way
+    /// `when`, and the only Windows surface that mentioned sync was one that could not be reached.
+    #[serde(default)]
+    pub sync: SyncState,
 }
 
+/// Which of the five sync situations a machine is in.
+///
+/// A name rather than a sentence, so the window, the tray and the CLI can each write their own copy
+/// and a test can assert the *distinction* rather than the wording. The five are separated because
+/// they have five different next steps, not because the enum looked thin.
+///
+/// Serialized, and that is why it exists separately from [`SyncState`]'s four facts: the window
+/// switches on this rather than re-deriving it from them, so the rule lives in **one** place. A second
+/// copy in JavaScript would be free to drift from this one, and removing pairs of copies that drift is
+/// what this branch has spent ten rounds doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPhase {
+    /// Sync could not start and something is wrong: an unwritable sync directory, a log that will not
+    /// parse. The next step is to fix it.
+    Broken,
+    /// Nothing is paired, which is not an error. The next step is to pair, if the user wants to.
+    Unpaired,
+    /// Devices are paired and the node is not up yet — the ordinary state for one pass after a pairing
+    /// lands, because the service starts the node on the following pass rather than binding a listener
+    /// the instant a peer appears. The next step is to wait.
+    Idle,
+    /// Listening, and no paired device is on this network. The next step is to wait: these devices talk
+    /// when they are in earshot, not on a schedule.
+    Waiting,
+    /// Listening, with at least one paired device reachable. Working.
+    Working,
+}
+
+/// What this machine's sync is doing right now.
+///
+/// Carried on every status rather than asked for separately, for the same reason the pass count is: a
+/// UI that had to make a second request to know whether to mention sync would mention it late or not
+/// at all.
+///
+/// `#[serde(default)]` is on the **struct**, not only on [`Status::sync`], and the difference was
+/// found by the test below rather than by reasoning: with the attribute only on the field, a payload
+/// carrying `"sync": {}` failed with `missing field 'running'`. The window and the service are separate
+/// binaries and can be updated at different times, so every field here has to be optional on the wire.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct SyncState {
+    /// Whether a node is listening. False is normal on an unpaired machine — see [`Self::why_off`].
+    pub running: bool,
+    /// Paired devices that have not been revoked.
+    pub paired: usize,
+    /// Paired devices reachable on this network right now.
+    pub nearby: usize,
+    /// Why there is no node, when there is none **and something is wrong**.
+    ///
+    /// `None` covers both "sync is up" and "nothing is paired yet", which are the two cases where
+    /// there is nothing to report and nothing to do. [`Self::phase`] separates them, so a caller never
+    /// has to infer a failure from a missing sentence.
+    pub why_off: Option<String>,
+}
+
+impl SyncState {
+    /// The phase, which is the whole public meaning of this struct.
+    ///
+    /// The order of the checks is the order of the exceptions: a failure outranks everything, because a
+    /// machine that cannot sync must say so rather than report the ordinary idle state and leave the
+    /// user waiting for something that will not happen.
+    pub fn phase(&self) -> SyncPhase {
+        match (self.why_off.is_some(), self.paired, self.running, self.nearby) {
+            (true, ..) => SyncPhase::Broken,
+            (false, 0, ..) => SyncPhase::Unpaired,
+            (false, _, false, _) => SyncPhase::Idle,
+            (false, _, true, 0) => SyncPhase::Waiting,
+            (false, _, true, _) => SyncPhase::Working,
+        }
+    }
+}
+
+/// Hand-written so `phase` is **derived output rather than a stored field**.
+///
+/// A `phase` field on the struct could disagree with the four facts printed beside it — a status saying
+/// "working" while `nearby` is zero. Deriving it at the moment of writing makes that unrepresentable:
+/// there is one constructor of the JSON and it always computes the phase from the same values it is
+/// about to write.
+impl Serialize for SyncState {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("SyncState", 5)?;
+        st.serialize_field("running", &self.running)?;
+        st.serialize_field("paired", &self.paired)?;
+        st.serialize_field("nearby", &self.nearby)?;
+        st.serialize_field("why_off", &self.why_off)?;
+        st.serialize_field("phase", &self.phase())?;
+        st.end()
+    }
+}
 impl Status {
     /// What to call a profile in a sentence a person reads.
     ///
@@ -295,4 +394,100 @@ pub fn encode(response: &Response) -> String {
     let body = serde_json::to_string(response)
         .unwrap_or_else(|e| format!(r#"{{"response":"error","detail":"{e}"}}"#));
     format!("{body}\n")
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+    use super::{SyncPhase, SyncState};
+
+    /// The five phases, each pinned by the fact that distinguishes it.
+    ///
+    /// Windows had no sync state on the wire at all before this, so there was nothing to test and
+    /// nothing to get wrong. Now there is one thing to get wrong, and it is the ordering: a machine
+    /// that **cannot** sync must report `Broken` rather than the ordinary `Unpaired`, because
+    /// `Unpaired` reads as "nothing to do here" and would leave a user waiting for a pairing that
+    /// cannot happen. Each case below is the one its phase exists for.
+    #[test]
+    fn a_failure_outranks_every_other_state() {
+        // Broken even while a node is up and a peer is in earshot: the reason outranks the rest.
+        let s = SyncState {
+            running: true,
+            paired: 3,
+            nearby: 2,
+            why_off: Some("sync directory is not writable".into()),
+        };
+        assert_eq!(s.phase(), SyncPhase::Broken);
+    }
+
+    #[test]
+    fn nothing_paired_is_not_an_error() {
+        let s = SyncState::default();
+        assert_eq!(s.phase(), SyncPhase::Unpaired);
+        assert!(s.why_off.is_none(), "an unpaired machine has nothing to report");
+    }
+
+    /// One pass after a pairing lands: peers on disk, node not started yet. Ordinary, and it must
+    /// not read as broken — the service brings the node up on the next pass by design.
+    #[test]
+    fn paired_but_not_listening_yet_is_idle_rather_than_broken() {
+        let s = SyncState { running: false, paired: 1, nearby: 0, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Idle);
+    }
+
+    #[test]
+    fn listening_with_nobody_in_earshot_is_waiting() {
+        let s = SyncState { running: true, paired: 2, nearby: 0, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Waiting);
+    }
+
+    #[test]
+    fn one_reachable_peer_is_working() {
+        let s = SyncState { running: true, paired: 2, nearby: 1, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Working);
+    }
+
+    /// `nearby` without `running` cannot happen, and the phase says the safe thing if it ever does:
+    /// a count of reachable peers is not evidence that we are listening to them.
+    #[test]
+    fn a_reachable_count_does_not_imply_a_listener() {
+        let s = SyncState { running: false, paired: 1, nearby: 3, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Idle);
+    }
+
+    /// The state survives the wire, including the `Option`, because it is read by a separate process.
+    #[test]
+    fn it_round_trips_through_json() {
+        let s = SyncState { running: true, paired: 2, nearby: 1, why_off: Some("a reason".into()) };
+        let line = serde_json::to_string(&s).expect("serializes");
+        assert_eq!(serde_json::from_str::<SyncState>(&line).expect("parses"), s);
+    }
+
+    /// And an older service that does not send the field at all still parses, as `Unpaired`.
+    ///
+    /// `#[serde(default)]` is why, and this is the test that keeps somebody from removing it: the
+    /// window and the service are separate binaries and can be updated at different times, so a new
+    /// window must not fail to read an old service's status.
+    #[test]
+    fn a_status_without_the_field_still_parses() {
+        let s: SyncState = serde_json::from_str("{}").expect("absent field defaults");
+        assert_eq!(s, SyncState::default());
+        assert_eq!(s.phase(), SyncPhase::Unpaired);
+    }
+    /// The phase travels on the wire, and that is the assertion worth making about the hand-written
+    /// `Serialize`: if it stopped emitting `phase`, the window would silently fall back to its default
+    /// branch and every machine would report "no devices paired" while the Rust side said otherwise.
+    #[test]
+    fn the_phase_is_on_the_wire_and_agrees_with_the_facts() {
+        let s = SyncState { running: true, paired: 3, nearby: 2, why_off: None };
+        let v: serde_json::Value = serde_json::to_value(&s).expect("serializes");
+        assert_eq!(v["phase"], "working");
+        assert_eq!(v["paired"], 3);
+        assert_eq!(v["nearby"], 2);
+
+        // And a failure outranks the rest on the wire too, not only in `phase()`.
+        let broken =
+            SyncState { running: true, paired: 3, nearby: 2, why_off: Some("not writable".into()) };
+        let v: serde_json::Value = serde_json::to_value(&broken).expect("serializes");
+        assert_eq!(v["phase"], "broken");
+    }
 }

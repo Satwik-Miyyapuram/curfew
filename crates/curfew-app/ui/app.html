@@ -592,7 +592,47 @@ function pageHealth() {
     lines.push(["bad", `${unwatched.length} browser${unwatched.length === 1 ? "" : "s"} without the extension`,
       unwatched.join(", ") + " — page-level rules cannot be enforced there, so the browser is closed instead."]);
   }
-  if (s.pass_refusal) lines.push(["mut", "No emergency pass right now", JSON.stringify(s.pass_refusal)]);
+  // Sync, in five statements rather than one flag.
+  //
+  // Windows said nothing about sync on any page until this, so a user could not tell paired from
+  // unpaired, or "paired and waiting" from "paired and broken". They are separated because they have
+  // five different next steps: nothing, wait, wait, nothing, or fix it. Android states this in a
+  // five-way `when`, and the review calls that better than any competitor's.
+  //
+  // **The branch is on `phase`, which the service computes.** It would have been five lines to derive
+  // the same five cases here from `paired`/`running`/`nearby`, and that is exactly the duplication this
+  // branch has spent ten rounds removing — two copies of one rule, free to drift, with the Rust side
+  // covered by tests and the JavaScript side covered by nothing. `phase` is derived at serialization
+  // time (`SyncState`'s hand-written `Serialize`), so it cannot disagree with the facts beside it.
+  {
+    const y = s.sync || {};
+    const paired = y.paired || 0;
+    const nearby = y.nearby || 0;
+    const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    switch (y.phase) {
+      case "broken":
+        lines.push(["bad", "Sync is off",
+          `${y.why_off} — this device still enforces its own locks, and nothing you record has left it.`]);
+        break;
+      case "idle":
+        lines.push(["mut", `Sync starting — ${plural(paired, "device")} paired`,
+          "The listener comes up on the next pass. It is deliberately not started before a device is paired, so Windows never asks for a firewall rule nothing would use."]);
+        break;
+      case "waiting":
+        lines.push(["mut", `${plural(paired, "device")} paired, none in earshot`,
+          "These devices talk when they are on the same network, not on a schedule."]);
+        break;
+      case "working":
+        lines.push(["ok", `Syncing with ${nearby} of ${paired}`,
+          "On this network right now. Blocks and the emergency ration are shared with them."]);
+        break;
+      default:
+        // `unpaired`, and also anything a future service sends that this window does not know. Saying
+        // nothing is paired is true in both cases and is the one that needs no action.
+        lines.push(["mut", "No devices paired",
+          "Sessions stay on this machine. Pairing is Android-only today — see the README."]);
+    }
+  }  if (s.pass_refusal) lines.push(["mut", "No emergency pass right now", JSON.stringify(s.pass_refusal)]);
   else lines.push(["mut", `${s.passes_left || 0} emergency passes`, "Spent from the Now page, on one session."]);
   return `<h1>Is it working</h1>
     <div class="sub">Everything that could be quietly broken, said out loud.</div>
