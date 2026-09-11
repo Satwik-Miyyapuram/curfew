@@ -5,7 +5,7 @@ use curfew_core::emergency::{EmergencyPolicy, Passes};
 use curfew_core::schedule::{Activation, ActivationSource};
 use curfew_core::session::{reconcile, running_from, Refusal, Session, SessionSource, Sessions};
 use curfew_core::{Lock, LockSet, Timestamp, DELAYED_RELEASE_SECONDS};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 const NOW: Timestamp = 1_788_609_600;
 
@@ -456,11 +456,26 @@ fn a_restore_cannot_un_dismiss_an_occurrence() {
     s.restore_without_weakening(Sessions::default());
     assert_eq!(s.dismissed.get("weekly-night").copied(), Some(NOW), "a restore forgot a dismissal");
 
-    // And a later dismissal wins, whichever side it came from.
+    // **And a later dismissal from the incoming side does NOT win.** This test used to assert that it
+    // did — *"a later dismissal wins, whichever side it came from"* — which was the vulnerability
+    // written down as a feature. `reconcile` only honours a dismissal that falls inside the occurrence
+    // it ended, so pushing the timestamp forward past the window's end un-dismisses it and re-arms a
+    // window the user had explicitly ended. An existing dismissal is now never moved.
     let mut incoming = Sessions::default();
     incoming.dismissed.insert("weekly-night".into(), NOW + 10);
     s.restore_without_weakening(incoming);
-    assert_eq!(s.dismissed.get("weekly-night").copied(), Some(NOW + 10));
+    assert_eq!(
+        s.dismissed.get("weekly-night").copied(),
+        Some(NOW),
+        "a restore moved an existing dismissal, which re-arms the window it was remembering"
+    );
+
+    // A dismissal for a profile that has none is still adopted, which is what a restart needs.
+    let mut fresh = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.dismissed.insert("weekly-morning".into(), NOW + 5);
+    fresh.restore_without_weakening(incoming);
+    assert_eq!(fresh.dismissed.get("weekly-morning").copied(), Some(NOW + 5));
 }
 
 /// Restoring the same thing twice is the ordinary case — a service restart loop, or a retry — and it
@@ -733,4 +748,177 @@ fn every_session_from_a_schedule_is_reported() {
     let held = running_from(&running, "w");
     assert_eq!(held.len(), 2, "both sessions from a schedule should be reported");
     assert!(held.iter().all(|s| s.profile != "other"), "an unrelated session was attributed");
+}
+
+// --- a restore must not be able to end a running lock (review finding) ---------------------------
+//
+// Both exploits below come from one root cause: `restore_without_weakening` merged incoming state into the
+// running state with `LockSet::merge`, which is a **lattice join over two promises**. A join is right for
+// combining two sessions' locks, where both sides are trusted. Restore is not a join: the incoming side is
+// caller-supplied and the running side is authoritative, so a join lets the untrusted side weaken —
+// exactly the property the function is named for.
+
+/// **Exploit 1.** `LockSet::merge` takes the *earlier* `delayed_release_at`, and `min_opt(None, Some(t))`
+/// is `Some(t)`. So an incoming session whose delayed release is long past hands the running lock a
+/// release that has already happened — `is_expired` turns true and every condition is bypassed.
+#[test]
+fn a_restore_cannot_inject_a_delayed_release_that_has_already_passed() {
+    let mut sessions = Sessions::default();
+    sessions.start(session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 7200)),
+    ));
+
+    // The payload: the same profile, same conditions, but a delayed release in the distant past.
+    let mut forged =
+        session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], Some(NOW + 7200)));
+    forged.lock.delayed_release_at = Some(1);
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("the session is still there");
+    assert_eq!(
+        held.lock.delayed_release_at, None,
+        "a restore injected a delayed release, which ends the lock without any condition"
+    );
+    assert!(
+        !held.lock.is_expired(NOW),
+        "the lock reports itself expired, so every condition has been bypassed"
+    );
+    assert!(
+        !held.lock.can_release(NOW, &BTreeSet::new()),
+        "the lock can be released with no evidence at all"
+    );
+}
+
+/// **Exploit 2.** `dismissed` was merged by taking the *later* timestamp, on the theory that a later
+/// dismissal is the more recent fact. But `reconcile` only honours a dismissal that falls **inside** the
+/// occurrence it ended — so a timestamp pushed past the window's end defeats the dismissal entirely and
+/// the lock starts again.
+#[test]
+fn a_restore_cannot_un_dismiss_an_occurrence_by_pushing_the_time_past_its_window() {
+    let mut sessions = Sessions::default();
+    // The user ended this profile's occurrence by hand, here.
+    sessions.dismissed.insert("deep-work".into(), NOW);
+
+    // The payload moves that dismissal far past any window it could have ended.
+    sessions.restore_without_weakening(Sessions {
+        dismissed: BTreeMap::from([("deep-work".to_string(), NOW + 86_400)]),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        sessions.dismissed.get("deep-work"),
+        Some(&NOW),
+        "a restore moved the dismissal outside the window it ended, so tonight's lock starts again"
+    );
+}
+
+/// **And the property the function is named for holds in the other direction too**: a restore that is
+/// *stronger* is still adopted, or a restart would silently drop a promise. Without this, "never adopt
+/// anything" would satisfy the two tests above while breaking the feature.
+#[test]
+fn a_restore_that_strengthens_is_still_adopted() {
+    let mut sessions = Sessions::default();
+    sessions.start(session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+
+    // A longer timer and an extra condition: strictly more than what is running.
+    let stronger = session(
+        "s1",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential, Lock::Confirm], Some(NOW + 7200)),
+    );
+    sessions.restore_without_weakening(Sessions { running: vec![stronger], ..Default::default() });
+
+    let held = sessions.running.first().expect("the session is still there");
+    assert!(
+        held.lock.ends_at.is_some_and(|t| t >= NOW + 7200),
+        "a stronger restore was dropped, so a restart would lose a promise: {:?}",
+        held.lock.ends_at
+    );
+    assert!(held.lock.conditions.contains(&Lock::Confirm), "an added condition was dropped");
+}
+
+/// A restore of a profile that is **not** running starts it. That is what the function is for, and it must
+/// keep working — the fix below narrows what a restore may change about an *existing* session, not whether
+/// it may add one.
+#[test]
+fn a_restore_still_starts_a_profile_that_is_not_running() {
+    let mut sessions = Sessions::default();
+    sessions.restore_without_weakening(Sessions {
+        running: vec![session("s9", "reading", LockSet::new([Lock::Timer], Some(NOW + 600)))],
+        ..Default::default()
+    });
+    assert_eq!(sessions.active_profiles(NOW), vec!["reading".to_string()]);
+}
+
+/// **A restore cannot move a concrete release earlier**, when both sides have one.
+///
+/// The mutation run found this gap: `harden` taking `min` instead of `max` for `delayed_release_at` left
+/// every other test passing, because they only ever gave one side a concrete release.
+#[test]
+fn a_restore_cannot_pull_a_delayed_release_forward() {
+    let mut sessions = Sessions::default();
+    let mut mine = LockSet::new([Lock::Timer], Some(NOW + 7200));
+    mine.delayed_release_at = Some(NOW + 3600);
+    sessions.start(session("s1", "deep-work", mine));
+
+    // The payload promises a release an hour earlier than the one already committed to.
+    let mut forged = LockSet::new([Lock::Timer], Some(NOW + 7200));
+    forged.delayed_release_at = Some(NOW + 60);
+    sessions.restore_without_weakening(Sessions {
+        running: vec![session("s1", "deep-work", forged)],
+        ..Default::default()
+    });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.delayed_release_at,
+        Some(NOW + 3600),
+        "a restore pulled the committed release forward"
+    );
+}
+
+/// **A restore cannot give an "until released" lock an end time.**
+///
+/// The second gap the mutation run found. A running lock with `ends_at: None` is the strongest kind there
+/// is — it ends only when every condition is met — so accepting an incoming `Some(t)` would hand it an
+/// automatic expiry it did not have.
+#[test]
+fn a_restore_cannot_give_an_until_released_lock_an_end_time() {
+    let mut sessions = Sessions::default();
+    // `None` end time: ends only when the conditions are satisfied.
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], None)));
+
+    let forged = session("s1", "deep-work", LockSet::new([Lock::DeviceCredential], Some(NOW + 60)));
+    sessions.restore_without_weakening(Sessions { running: vec![forged], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(
+        held.lock.ends_at, None,
+        "a restore gave an 'until released' lock an end time, so it now expires on its own"
+    );
+    assert!(
+        !held.lock.is_expired(NOW + 600),
+        "the lock expires now, though its conditions were never met"
+    );
+}
+
+/// And the converse holds: a restore **may** turn a timed lock into an "until released" one, because that
+/// is strictly stronger. Without this, "ignore `ends_at` entirely" would satisfy the test above.
+#[test]
+fn a_restore_may_strengthen_a_timed_lock_into_an_until_released_one() {
+    let mut sessions = Sessions::default();
+    sessions.start(session("s1", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 60))));
+
+    let stronger = session("s1", "deep-work", LockSet::new([Lock::Timer], None));
+    sessions.restore_without_weakening(Sessions { running: vec![stronger], ..Default::default() });
+
+    let held = sessions.running.first().expect("still running");
+    assert_eq!(held.lock.ends_at, None, "a strengthening restore was dropped");
+    assert!(!held.lock.is_expired(NOW + 86_400), "the lock still expires on a timer");
 }

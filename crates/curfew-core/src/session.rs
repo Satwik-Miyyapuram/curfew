@@ -149,26 +149,44 @@ impl Sessions {
     /// claimable `Lock::Timer` that was P0-1, through a different door, and on the platform where the
     /// FFI is the whole interface.
     ///
-    /// The rule is the same one `start` follows, applied to a set:
+    /// The rule is:
     ///
-    /// * A session already running is **merged** into, never replaced. `LockSet::merge` can only add
-    ///   conditions and push the end time later, so a restore may strengthen a lock and cannot weaken
-    ///   one.
+    /// * A session already running is **hardened**, never merged. [`LockSet::harden`] is the join where
+    ///   `None` is top, so a restore may add a condition, push the end time later or push the release
+    ///   later, and can do nothing else.
     /// * A session in the incoming set that is not running is **started**, which is what a legitimate
     ///   restore after a restart needs.
     /// * A session running here and **absent** from the incoming set is **kept**. Deleting the stored
     ///   state is therefore not a way to end a lock — which is the case that matters, because the
     ///   stored state is a file a user can delete.
     ///
-    /// `dismissed` is merged by taking the later dismissal per occurrence, so a restore cannot
-    /// un-dismiss a schedule that was ended and let tonight's window start again.
+    /// **Not [`LockSet::merge`], and that distinction is the whole point of this function.** `merge`
+    /// combines two trusted promises and takes the *earlier* `delayed_release_at`, so a forged payload
+    /// could hand a running lock a release that had already passed — `is_expired` then returned true and
+    /// every condition was bypassed. The comment here used to claim `merge` "can only add conditions and
+    /// push the end time later", which was false: it also moved the release *earlier*, and a security
+    /// comment asserting something the code does not do is worse than no comment.
+    ///
+    /// `dismissed` is **first-write-wins**: an existing dismissal is never moved. The earlier version took
+    /// the later timestamp on the theory that a later dismissal is the more recent fact, but `reconcile`
+    /// only honours a dismissal that falls *inside* the occurrence it ended — so a timestamp pushed past
+    /// the window's end defeated the dismissal entirely and re-armed a window the user had ended. A
+    /// restore may still **add** a dismissal for a profile that has none, which is what adopting
+    /// persisted state needs.
     pub fn restore_without_weakening(&mut self, incoming: Sessions) {
         for session in incoming.running {
+            let profile = session.profile.clone();
+            // The running session is authoritative, so the incoming lock is adopted only where it is
+            // strictly stronger. `started_at` is deliberately left alone: it is not a promise a lock
+            // makes, and letting an untrusted payload move it earlier would distort usage.
+            if let Some(existing) = self.running.iter_mut().find(|s| s.profile == profile) {
+                existing.lock = existing.lock.harden(&session.lock);
+                continue;
+            }
             self.start(session);
         }
         for (occurrence, at) in incoming.dismissed {
-            let entry = self.dismissed.entry(occurrence).or_insert(at);
-            *entry = (*entry).max(at);
+            self.dismissed.entry(occurrence).or_insert(at);
         }
     }
 

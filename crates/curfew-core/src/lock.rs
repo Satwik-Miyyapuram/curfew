@@ -208,6 +208,38 @@ impl LockSet {
         }
     }
 
+    /// **The stronger of the two locks, in every component** — never weaker than `self`.
+    ///
+    /// This is the lattice join, with `None` as the top element for both optional times: no end time
+    /// ("until released") outlasts any concrete one, and no delayed release outlasts any concrete time.
+    ///
+    /// **Why this exists next to [`merge`], which looks similar.** `merge` combines two genuinely
+    /// concurrent sessions' locks, where both sides are trusted; for `delayed_release_at` it deliberately
+    /// takes the *earlier* one, because a release already shown to the user is a commitment we made and
+    /// combining must not push it back. That is right for two promises and **wrong for a restore**, where
+    /// the incoming side is caller-supplied and the running side is authoritative: `merge`'s
+    /// `min_opt(None, Some(t)) == Some(t)` let a forged payload hand a running lock a release that had
+    /// already passed, and `is_expired` then returned true with every condition bypassed.
+    ///
+    /// So the rule is: **use `merge` to combine promises, use `harden` to adopt untrusted state.**
+    pub fn harden(&self, other: &LockSet) -> LockSet {
+        let ends_at = match (self.ends_at, other.ends_at) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            // "Until released" outlasts any concrete end time.
+            _ => None,
+        };
+        let delayed_release_at = match (self.delayed_release_at, other.delayed_release_at) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            // No automatic release outlasts any concrete release time.
+            _ => None,
+        };
+        Self {
+            conditions: self.conditions.union(&other.conditions).cloned().collect(),
+            ends_at,
+            delayed_release_at,
+        }
+    }
+
     /// Start the 24-hour delayed release. Idempotent: calling it again never moves the time later,
     /// so spamming it cannot be used to reset anything, and it cannot be cancelled.
     pub fn request_release(&mut self, now: Timestamp) -> Timestamp {
