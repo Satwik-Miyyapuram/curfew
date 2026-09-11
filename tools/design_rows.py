@@ -140,7 +140,7 @@ STATUS = {
              "empty, and empty means *unconstrained*, so the rule widened. **Not done**: the review's "
              "fourth point, that `schedule.rs` and `budget.rs` resolve `minute == 1440` differently, is in "
              "two other crates; and `UNTIL` with a DATE value, which the review calls \"parsed oddly\" "
-             "without saying what the right answer is"),
+             "without saying what the right answer is. **And the fourth point is now done too**: the two `local_instant` helpers disagreed about `1440` — `schedule.rs` rolled to the next day at 00:00 and `budget.rs` clamped to 23:59 — so `budget.rs` delegates to the schedule's, which is one rule rather than two that agree today"),
     "P2-11": ("fixed",
               "**fixed** (entry 76). `curfew remove` now refuses when a running session derives from the "
               "id, mirroring the uninstall refusal: `running_from` in the core is the decision, "

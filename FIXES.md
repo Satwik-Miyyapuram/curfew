@@ -108,6 +108,7 @@ must run.
 | 90 | Pairing had no Windows request surface at all (F-18 step 2) | **P0** | **Fixed** — six requests, a `Pairing` trait, and six mutations caught (entry 77) |
 | 91 | Pairing had no Windows front door, though it is the advertised headline (F-18 step 4) | **P0** | **Fixed** — the Devices page, with its own nav item and four mutations caught (entry 78) |
 | 92 | Android took a config edit that stopped enforcing part of a running lock (P1-13) | **P1** | **Fixed** — the check moved into the core and Android now consults it (entry 79) |
+| 93 | `schedule.rs` and `budget.rs` disagreed about what minute 1440 means (P2-8's fourth point) | **P2** | **Fixed** — `budget` delegates, so there is one rule (entry 80) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -299,6 +300,7 @@ this table is a reading aid.
 | `ab4e0fd` | A Windows front door for pairing, steps 1-2 (entry 77) |
 | `2215ff8` | The Devices page, so pairing has a front door (entry 78) |
 | `47d5c2c` | One weakening check, and Android actually uses it (entry 79) |
+| `a55e172` | One rule for minute 1440, not two (entry 80) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4556,3 +4558,49 @@ makes the fixture the real path rather than an approximation — the same lesson
 check from `remove_rule`, from `upsert_rule` and from `set_config`, making the refusal never fire, and
 making the shared check report nothing — the last of which proves both platforms depend on the one
 implementation.
+
+---
+
+## 80. P2-8's fourth point: two helpers, one minute, two answers
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-8**, the fourth point — *"share one `local_instant`
+helper with `budget.rs`, which resolves `minute == 1440` differently (`schedule.rs` → next-day 00:00,
+`budget.rs:116` → 23:59)."* **Fixed.**
+
+### What was wrong
+
+Both are reachable from a user config: `at_minute` and a window's `end_minute` are plain `u32`s with no
+validation, so `1440` is accepted and means one thing in a schedule and another in a refill. A budget
+refilling at "24:00" happened at 23:59 while a window ending at "24:00" ended at midnight — two names for
+one minute, which is how a bug report nobody can reproduce gets filed.
+
+### The fix
+
+`budget::local_instant` delegates to `schedule::local_instant`. The direction matters: the schedule's
+version already handles the DST fold, returns `Option` so a nonexistent minute is the caller's to place,
+and handles the roll to the next day.
+
+The budget keeps its **own** fallback for a minute that exists nowhere, rather than pushing that into the
+shared function: a refill that cannot be placed has to land somewhere or the allowance never resets, and
+the schedule's `None` is a caller's answer rather than this one's.
+
+### Why both tests are unit tests
+
+`local_instant` is private on both sides. Widening its visibility to assert one arithmetic rule would be
+the wrong trade, so each half is tested beside its own function — and that is also the honest statement of
+what is covered: from outside, the two are indistinguishable in shape, and the property being pinned is
+that **they agree**. A mutation restoring the 23:59 clamp is caught by exactly the test written for it.
+
+### Verification
+
+1033 Rust tests (was 1028). Two tests on the schedule's rule and two on the budget's, including that
+anything past 1440 clamps rather than rolling into the following day — so a config nobody validated cannot
+move a window by days.
+
+### And the workspace checker caught my own scaffolding
+
+The first attempt at this left `tools/add_1440_tests.py` behind, and `tools/check_workspace.py` reported it
+on the next run as *"throwaway scaffolding in `tools/`"*. That guard was added in entry 70 after `git add
+-A` swept a helper into a commit twice; this is the third time scaffolding has been left behind and the
+first time a tool said so before a human did. One more line of evidence that the fix for a recurring
+mistake is a check rather than resolve.
