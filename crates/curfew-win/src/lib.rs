@@ -12,6 +12,7 @@ pub mod capacity;
 pub mod credential;
 pub mod delay;
 pub mod dns;
+pub mod downtime;
 pub mod extension;
 pub mod hosts;
 pub mod ipc;

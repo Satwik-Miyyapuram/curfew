@@ -304,6 +304,23 @@ function pageNow() {
   }
   const s = state.status;
   const running = s.running || [];
+  // **The window enforcement was down** — P1-8. `ARCHITECTURE.md` §10 promises that a service which was
+  // killed, crashed or never started reports the exact window it was down, and Android has done this
+  // since `Downtime.kt` while Windows had nothing. It goes at the top because it is a statement about
+  // the trustworthiness of everything below it: a stretch where nothing was enforced means the record
+  // has a hole in it, and the user is the one who has to know that.
+  //
+  // Dismissed by a request rather than by a timer, because the notice exists to be *read*.
+  const downtime = s.downtime
+    ? `<div class="card" style="border-color:rgba(242,114,114,.5);margin-bottom:14px">
+        <div style="display:flex;align-items:flex-start;gap:16px">
+          <div class="grow">
+            <div class="lbl" style="color:var(--bad)">${s.downtime.rebooted ? "This machine was restarted" : "Curfew was not running"}</div>
+            <div style="margin-top:6px;line-height:1.6">${esc(describeDowntime(s.downtime))}</div>
+          </div>
+          <button class="btn ghost" data-act="dismiss-downtime">I have read it</button>
+        </div></div>`
+    : "";
   // The one action the whole product exists for, and this window did not have it.
   //
   // Every other route to a block on Windows is a schedule or a calendar; starting one by hand meant
@@ -318,7 +335,7 @@ function pageNow() {
   const start = `<button class="btn" data-act="start-open">Start a block</button>`;
   if (running.length === 0) {
     const next = nextWindows(1)[0];
-    return `<h1>Nothing is running</h1>
+    return downtime + `<h1>Nothing is running</h1>
       <div class="sub">${next
         ? `Next is ${esc(next.name)}, at ${esc(hhmm(next.start_minute))}.`
         : "No window is scheduled. The Plan page is where windows are made."}</div>
@@ -326,7 +343,7 @@ function pageNow() {
       <div class="strip">${start}</div>
       <div style="height:18px"></div>${blockedSummary()}`;
   }
-  return running.map(sessionCard).join('<div style="height:14px"></div>') +
+  return downtime + running.map(sessionCard).join('<div style="height:14px"></div>') +
     '<div style="height:14px"></div>' +
     `<div class="strip">${start}</div>` +
     '<div style="height:14px"></div>' + blockedSummary() +
@@ -336,6 +353,28 @@ function pageNow() {
 function profileName(id) {
   const found = (state.config?.profiles || []).find((p) => p.id === id);
   return found ? found.name : id;
+}
+
+/**
+ * The window enforcement was down, in a sentence — P1-8.
+ *
+ * Composed here rather than sent as prose, because the two halves are facts the service stores and the
+ * page knows how it wants to read them: how long, and what it cost. The service's own `describe()` is
+ * what goes to the log, where a reader has no clock in front of them and needs the absolute instants.
+ */
+function describeDowntime(d) {
+  const seconds = Math.max(0, (d.to || 0) - (d.from || 0));
+  let length;
+  if (seconds < 3600) length = Math.max(1, Math.floor(seconds / 60)) + " minutes";
+  else if (seconds < 86400) length = Math.floor(seconds / 3600) + " hours " + Math.floor((seconds % 3600) / 60) + " minutes";
+  else length = Math.floor(seconds / 86400) + " days " + Math.floor((seconds % 86400) / 3600) + " hours";
+  const cost = d.sessions === 0
+    ? "Nothing was locked at the time."
+    : d.sessions === 1
+      ? "One lock was running and was not enforced during it."
+      : d.sessions + " locks were running and were not enforced during it.";
+  return "It was not enforcing for " + length + ", from " + atTime(d.from) + " to " + atTime(d.to) +
+    ". " + cost + " Treat that stretch as time this machine was not held to.";
 }
 
 function sessionCard(session) {
@@ -1092,6 +1131,12 @@ async function activate(target) {
     // to `Request::Release`, which the protocol documents as *"it cannot be withdrawn: a release a peer
     // could take back would let one device shut a lock the user has already been told they are out
     // of."* The tray put a Yes/No in front of the identical action; this page did not.
+    case "dismiss-downtime": {
+      // Best-effort: if the service is not answering, the notice stays, which is the right way round —
+      // claiming it was read when the service never heard would lose it silently.
+      await askService({ request: "dismiss_downtime" });
+      return refresh();
+    }
     case "release-ask": return confirmRelease(id);
     case "delayed-ask": return confirmDelayedRelease(id);
     case "release": {

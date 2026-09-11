@@ -66,6 +66,11 @@ pub enum Request {
     Release { id: String },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
+    /// "I have read the notice about the window enforcement was down." Clears it.
+    ///
+    /// A request rather than a timer, because the notice exists to be *read* and a timer cannot know
+    /// that happened. Android dismisses its banner the same way, from the screen that shows it.
+    DismissDowntime,
     /// Spend an emergency pass on one session, ending it whatever its lock says.
     ///
     /// The rationing is the service's to enforce, not the caller's: a tray that decided for itself
@@ -236,6 +241,14 @@ pub struct Status {
     /// action that causes it, and a warning delivered afterwards is no use to the person deciding.
     #[serde(default)]
     pub needs_foreground: bool,
+    /// **The window enforcement was down before this run** — P1-8.
+    ///
+    /// `ARCHITECTURE.md` promises that a service which was killed, crashed or never started reports the
+    /// exact window it was down. Android has done this since `Downtime.kt`; Windows had nothing. Carried
+    /// until somebody dismisses it, because a notice that vanishes on its own is one the person it is
+    /// for can miss.
+    #[serde(default)]
+    pub downtime: Option<crate::downtime::Downtime>,
     /// Emergency passes that could be spent right now, and why not when the answer is none. Both
     /// on every status, so a UI never has to ask a second question to know whether to offer the
     /// hatch or to explain its absence.

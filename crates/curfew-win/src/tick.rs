@@ -158,6 +158,11 @@ pub struct Enforcer {
     /// Recomputed every pass, and carried on [`crate::ipc::Status`] so a surface can say it.
     /// See [`Enforcer::foreground_warning`] for why the gap exists and cannot be closed here.
     pub foreground_warning: Option<String>,
+    /// **The window enforcement was down before this run** — P1-8. Set once by `note_start`, cleared by
+    /// `dismiss_downtime`, and reported on `Status` until somebody has read it.
+    pub downtime: Option<crate::downtime::Downtime>,
+    /// Whether `note_start` has run, so the first pass records the gap and later passes cannot.
+    started: bool,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -231,6 +236,8 @@ impl Enforcer {
             watch: Default::default(),
             seen: None,
             foreground_warning: None,
+            downtime: None,
+            started: false,
             counter: 0,
         }
     }
@@ -242,6 +249,54 @@ impl Enforcer {
     /// reboot is two lines rather than a reboot.
     pub fn observe_boot(&mut self, uptime: i64) {
         self.boot_id = self.boot_counter.observe(uptime);
+    }
+
+    /// **Record the window enforcement was down, once, on the first pass after a restart** — P1-8.
+    ///
+    /// Called before the first [`Enforcer::observe_clock`], with the `last_tick` the previous run
+    /// persisted. Two things make this the right place:
+    ///
+    /// - **`previous` is a trusted instant.** `Persisted::last_tick` is written from the clock witness,
+    ///   so the gap is measured against the same clock the locks are judged by — not against a wall
+    ///   clock somebody may have moved, which would make the reported window fiction.
+    /// - **The boot counter is restored but not yet observed.** `self.boot_counter` still holds the
+    ///   previous run's numbering, so observing the current uptime and seeing the number *change* is
+    ///   what distinguishes a machine that restarted from a service that was killed while the machine
+    ///   stayed up. That second case is the one nothing caught: uptime never goes backwards, so the
+    ///   clock layer sees nothing wrong, and `last_tick` was only used to charge elapsed time, clamped
+    ///   to one tick — so two unenforced hours were silently discarded.
+    ///
+    /// `previous` is now only read here as well as by the loop, which is why `run` still takes it: the
+    /// charging clamp is a different question from the accountability one, and this does not change it.
+    pub fn note_start(
+        &mut self,
+        previous: Option<Timestamp>,
+        now: Timestamp,
+        uptime: i64,
+    ) -> Option<crate::downtime::Downtime> {
+        if self.started {
+            return None;
+        }
+        self.started = true;
+        let before = self.boot_counter.boot_id();
+        self.observe_boot(uptime);
+        // **`before > 0` is required, and the direction of the guess matters.** A counter of zero means
+        // *no record of a previous boot*, not that the machine restarted. `BootCounter::observe` numbers
+        // the very first reading as boot 1, so treating `0 -> 1` as a restart would have every first-ever
+        // run claim the machine had been restarted — a statement about the world with no evidence behind
+        // it. Left false, the sentence says only that Curfew was not running, which is true either way,
+        // so the honest choice is the less specific one.
+        let rebooted = before > 0 && self.boot_counter.boot_id() > before;
+        self.downtime =
+            crate::downtime::Downtime::detect(previous, now, rebooted, self.sessions.running.len());
+        // Returned as well as stored, so the caller can write it to the log **once**. The stored copy
+        // stays until somebody dismisses it; this one is gone after the first pass.
+        self.downtime
+    }
+
+    /// Forget the notice, because somebody has read it. Android dismisses the same banner.
+    pub fn dismiss_downtime(&mut self) {
+        self.downtime = None;
     }
 
     /// Take a reading of both of the machine's clocks and return the instant locks are judged
@@ -641,6 +696,7 @@ impl Enforcer {
                 clock_warning: self.clock_warning(),
                 foreground_warning: self.foreground_warning.clone(),
                 needs_foreground: self.needs_foreground(),
+                downtime: self.downtime,
                 passes_left: self.passes.remaining(now, &self.config.emergency),
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
@@ -827,6 +883,13 @@ impl Enforcer {
                 Ok(at) => Response::Release { at },
                 Err(refusal) => Response::Refused { refusal },
             },
+
+            // Somebody has read the notice, so it goes. Nothing else happens: this is a display
+            // acknowledgement, which is why it touches no lock and writes no history.
+            Request::DismissDowntime => {
+                self.dismiss_downtime();
+                Response::Ok
+            }
 
             // Recorded and nothing else. A heartbeat is not a request to change anything, which is
             // why it is safe for it to be unauthenticated on a local pipe.

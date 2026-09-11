@@ -703,3 +703,150 @@ fn the_status_says_the_exposure_exists_before_the_gap_opens() {
     );
     assert!(status.foreground_warning.is_none(), "nothing has broken yet");
 }
+
+// --- the window enforcement was down (P1-8) ------------------------------------------------------
+//
+// `ARCHITECTURE.md` §10 promises that a service which was killed, crashed or never started reports the
+// exact window it was down. Android has done this since `Downtime.kt`; Windows had nothing, so a service
+// that was killed during a timer lock stopped enforcing everything behind it and left no record.
+//
+// The case nothing caught is the one with **no reboot in it**: uptime never goes backwards, so the clock
+// layer sees nothing wrong, and `Persisted::last_tick` was only used to charge elapsed time — clamped to
+// one tick, so the two unenforced hours were silently discarded.
+
+/// A two-hour absence with the machine up throughout is the interesting case, and it is reported as
+/// such rather than as a restart.
+#[test]
+fn a_service_absent_within_one_boot_is_reported_as_a_gap() {
+    let (mut enforcer, _) = enforcer("gap");
+    // A previous run happened, so the boot counter knows this machine's boot already. Without this the
+    // fixture describes a machine that has never run while also claiming a persisted gap — a state the
+    // service cannot be in, and one that made `rebooted` true for the wrong reason.
+    let previous_uptime = 100_000;
+    enforcer.observe_boot(previous_uptime);
+    // The previous run stopped two hours before `NOW`, with a session running.
+    enforcer.sessions.start(curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: NOW - 10_000,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(NOW + 3600)),
+    });
+
+    // Same boot: the uptime keeps climbing, so `BootCounter` does not renumber.
+    let reported = enforcer.note_start(Some(NOW - 7200), NOW, previous_uptime + 120);
+
+    let gap = reported.expect("a two-hour absence was not reported");
+    assert!(!gap.rebooted, "a service stop was reported as a machine restart");
+    assert_eq!(gap.seconds(), 7200);
+    assert_eq!(gap.sessions, 1, "the notice must say a lock was running");
+    assert!(
+        enforcer.downtime.is_some(),
+        "the notice must also be kept, so a surface that was not looking can still see it"
+    );
+}
+
+/// A machine that restarted is the other case, and `BootCounter` is what tells them apart: uptime
+/// going backwards is the one thing that cannot happen within a boot.
+#[test]
+fn a_restart_is_reported_as_a_restart() {
+    let (mut enforcer, _) = enforcer("gap-reboot");
+    // Put a high uptime into the counter first, as a previous run would have.
+    enforcer.observe_boot(500_000);
+
+    // Now the machine has restarted: uptime is small again.
+    let gap = enforcer
+        .note_start(Some(NOW - 7200), NOW, 30)
+        .expect("a two-hour absence across a restart was not reported");
+    assert!(gap.rebooted, "a restart was not recognised as one");
+    assert!(gap.describe().contains("restarted"), "{}", gap.describe());
+}
+
+/// A short restart is not news, and reporting every upgrade would train people to dismiss the one that
+/// matters.
+#[test]
+fn a_quick_restart_is_not_reported() {
+    let (mut enforcer, _) = enforcer("gap-quick");
+    assert_eq!(enforcer.note_start(Some(NOW - 30), NOW, 100_000), None);
+}
+
+/// A first run has nothing to compare against.
+#[test]
+fn a_first_run_is_not_a_gap() {
+    let (mut enforcer, _) = enforcer("gap-fresh");
+    assert_eq!(enforcer.note_start(None, NOW, 100_000), None);
+}
+
+/// It is recorded once and then left alone, so a long-running service does not re-report the same gap
+/// every tick.
+#[test]
+fn the_gap_is_recorded_once() {
+    let (mut enforcer, _) = enforcer("gap-once");
+    assert!(enforcer.note_start(Some(NOW - 7200), NOW, 100_000).is_some());
+    assert!(
+        enforcer.note_start(Some(NOW - 7200), NOW + 2, 100_002).is_none(),
+        "the same gap was reported twice"
+    );
+    assert!(enforcer.downtime.is_some(), "the second call should keep the notice, not clear it");
+}
+
+/// Dismissing clears it, which is the only thing that does — a notice that vanishes on its own is one
+/// the person it is for can miss.
+#[test]
+fn dismissing_clears_the_notice() {
+    let (mut enforcer, _) = enforcer("gap-dismiss");
+    enforcer.note_start(Some(NOW - 7200), NOW, 100_000);
+    assert!(enforcer.downtime.is_some());
+
+    let answer = enforcer.handle(NOW, Request::DismissDowntime);
+    assert_eq!(answer, Response::Ok);
+    assert!(enforcer.downtime.is_none(), "the notice survived being dismissed");
+
+    // And it does not come back: `note_start` has already run.
+    assert!(enforcer.note_start(Some(NOW - 7200), NOW + 2, 100_002).is_none());
+    assert!(enforcer.downtime.is_none());
+}
+
+/// And it reaches a surface.
+#[test]
+fn the_status_carries_the_downtime_notice() {
+    let (mut enforcer, _) = enforcer("gap-status");
+    enforcer.note_start(Some(NOW - 7200), NOW, 100_000);
+
+    let Response::Status(status) = enforcer.handle(NOW, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    let gap = status.downtime.expect("the gap did not reach the surface");
+    assert_eq!(gap.seconds(), 7200);
+}
+
+/// **A previous run we have no boot record for is not a restart.** The upgrade case.
+///
+/// `boot_counter` deserializes to zero when a state file written by an older build does not carry one,
+/// while `last_tick` — which older builds did persist — is present. So this is a state the service
+/// really can start in, and `BootCounter::observe` numbers the first reading it ever takes as boot 1.
+/// Treating `0 -> 1` as a reboot would announce *"This machine was restarted"* on the strength of a
+/// missing field.
+///
+/// The honest answer is the less specific one: Curfew was not running, which is true either way. A
+/// notice that overstates what it knows is worth less than the line it replaces.
+#[test]
+fn a_missing_boot_record_is_not_a_restart() {
+    let (mut enforcer, _) = enforcer("gap-no-boot-record");
+    // No `observe_boot` first: this is a boot counter that has never been used, as an upgraded state
+    // file yields.
+    assert_eq!(enforcer.boot_id, 0, "the fixture is supposed to start with no boot record");
+
+    let gap = enforcer
+        .note_start(Some(NOW - 7200), NOW, 100_000)
+        .expect("the gap itself is real and should be reported");
+
+    assert!(
+        !gap.rebooted,
+        "a missing boot record was reported as a machine restart: {}",
+        gap.describe()
+    );
+    let text = gap.describe();
+    assert!(text.contains("Curfew was not running"), "{text}");
+    assert!(!text.contains("restarted"), "the notice claimed a restart on no evidence: {text}");
+}

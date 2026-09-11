@@ -267,9 +267,17 @@ pub fn menu(status: &Status) -> Vec<Item> {
         || !status.failing.is_empty()
         || status.state_warning.is_some()
         || status.foreground_warning.is_some()
+        || status.downtime.is_some()
         || !status.unwatched.is_empty()
     {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
+    }
+
+    // **The window enforcement was down** — P1-8. Worth a line of its own here rather than only a share
+    // of the "something is not being enforced" note, because it is the one item on this list that is
+    // about the *past*: the others are things to fix, and this one is a hole in the record.
+    if let Some(downtime) = &status.downtime {
+        items.push(Item::Note(format!("    {}", downtime.describe())));
     }
 
     // **What the gap actually costs, and how to close it** — P2-16. Said here rather than only on the

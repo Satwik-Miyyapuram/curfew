@@ -592,7 +592,20 @@ pub fn run(
         // the pass is unchanged by it.
         let now = {
             let mut guard = enforcer.lock().expect("enforcer");
-            guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds())
+            let now = guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds());
+            // **The window enforcement was down, recorded on the first pass** — P1-8. Here rather than
+            // at startup because `now` has to be the *trusted* instant: measuring the gap against a
+            // wall clock somebody may have moved would make the reported window fiction. `note_start`
+            // is a no-op after the first call, so the loop costs one branch per pass.
+            let gap = guard.note_start(previous, now, curfew_win::windows::uptime_seconds());
+            // And said out loud, once, into the log the service now keeps (P1-12). The notice on
+            // `Status` is for whoever is looking at the app; this is for whoever is looking at the
+            // machine a week later, and the architecture's promise is about the record as much as the
+            // banner.
+            if let Some(downtime) = gap {
+                crate::warn!("{}", downtime.describe());
+            }
+            now
         };
         // Elapsed is clamped to the tick interval. A gap larger than that is the machine having
         // been asleep or off, and time the machine was off is not time the user spent on anything:

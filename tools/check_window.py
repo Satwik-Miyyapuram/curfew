@@ -72,6 +72,8 @@ let running = [];
 // What the service computes per session (`LockSet::offers`). Empty by default, which is what a status
 // for an unlocked session looks like.
 let offers = {};
+// The window enforcement was down before this run (P1-8). Null for an ordinary start.
+let downtime = null;
 
 function buildReply(message) {
   if (message.kind === "config") {
@@ -82,7 +84,7 @@ function buildReply(message) {
   if (request === "status") {
     replies.statusCalls++;
     const now = ++replies.statusSeq;
-    const reply = { ok: true, value: { response: "status", now, running: running.slice(), offers } };
+    const reply = { ok: true, value: { response: "status", now, running: running.slice(), offers, downtime } };
     if (holdNextStatus) {
       // Held rather than answered, so a test can let a later call overtake this one.
       holdNextStatus = false;
@@ -284,6 +286,66 @@ async function testOffersDriveTheCard() {
 }
 
 
+
+// --- P1-8: the window enforcement was down -----------------------------------------------------
+//
+// `ARCHITECTURE.md` §10 promises that a service which was killed, crashed or never started reports the
+// exact window it was down. Android has done this since `Downtime.kt`; Windows had nothing, so a service
+// killed during a timer lock stopped enforcing everything behind it and left no record the user could
+// see. The notice goes at the top of the Now page, because it is a statement about the trustworthiness
+// of everything below it.
+
+async function testDowntimeNotice() {
+  // Nothing to report: no banner, which is the ordinary case and must not regress.
+  reset();
+  running = [];
+  downtime = null;
+  await refresh();
+  check("an ordinary start shows no downtime notice",
+             !body.innerHTML.includes("was not running") && !body.innerHTML.includes("was restarted"),
+             "a notice appeared with nothing to report");
+
+  // A gap with no reboot: the case nothing caught before.
+  reset();
+  running = [];
+  downtime = { from: 1000, to: 1000 + 7200, rebooted: false, sessions: 1 };
+  await refresh();
+  const shown = body.innerHTML;
+  check("a gap is reported on the Now page", shown.includes("Curfew was not running"),
+             "the service was unenforced for two hours and the window said nothing");
+  check("and the length is in the sentence", shown.includes("2 hours"),
+             "the window did not say how long");
+  check("and what it cost", shown.includes("One lock was running"),
+             "the notice did not say a lock went unenforced");
+  check("and it offers a way to clear it", shown.includes('data-act="dismiss-downtime"'),
+             "there is no way to acknowledge it");
+
+  // A reboot is described as one, because the two lead a user to different conclusions.
+  reset();
+  running = [];
+  downtime = { from: 1000, to: 1000 + 7200, rebooted: true, sessions: 0 };
+  await refresh();
+  const rebooted = body.innerHTML;
+  check("a restart is described as a restart", rebooted.includes("was restarted"),
+             "a machine restart and a service stop read the same");
+  check("and says nothing was locked", rebooted.includes("Nothing was locked"),
+             "the notice did not distinguish the harmless case");
+
+  // It sits above the sessions, because it is about the record rather than about one block.
+  reset();
+  running = [{ id: "s1", profile: "deep-work", lock: { ends_at: null, conditions: [] } }];
+  offers = { s1: { ends_on_request: true, credential: false, confirm: false, elsewhere: [],
+                   peer_release: false, peer_released: false, delayed_release: false,
+                   delayed_release_at: null } };
+  downtime = { from: 1000, to: 1000 + 7200, rebooted: false, sessions: 1 };
+  await refresh();
+  const both = body.innerHTML;
+  check("the notice is above the session it is about",
+             both.indexOf("Curfew was not running") < both.indexOf("is running"),
+             "the notice was placed after the thing it qualifies");
+}
+
+
 // --- P2-1: the config is not re-read on every tick ---------------------------------------------
 async function testConfigCadence() {
   reset();
@@ -314,6 +376,7 @@ async function testConfigCadence() {
   await testRefreshOrdering();
   await testConfigCadence();
   await testOffersDriveTheCard();
+  await testDowntimeNotice();
   console.log();
   console.log(failures === 0 ? "window polling: OK" : `window polling: ${failures} problem(s)`);
   process.exit(failures === 0 ? 0 : 1);
@@ -412,6 +475,21 @@ MUTATIONS = [
         "P1-6: offer the delayed release again while one is counting down",
         "  if (offers.delayed_release) {",
         "  if (true) {",
+    ),
+    (
+        "P1-8: drop the downtime notice from the Now page",
+        "  const downtime = s.downtime",
+        "  const downtime = null && s.downtime",
+    ),
+    (
+        "P1-8: describe a restart as an ordinary stop",
+        '${s.downtime.rebooted ? "This machine was restarted" : "Curfew was not running"}',
+        '"Curfew was not running"',
+    ),
+    (
+        "P1-8: forget to say what the gap cost",
+        '". " + cost + " Treat that stretch as time this machine was not held to.";',
+        '". Treat that stretch as time this machine was not held to.";',
     ),
 ]
 
