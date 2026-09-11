@@ -33,9 +33,11 @@ STATUS = {
              "**verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` "
              "has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented "
              "last-resort exit and the primary Windows surface cannot reach it"),
-    "P1-7": ("open",
-             "**verified open.** No `signingConfig` in `android/app/build.gradle.kts`, so a release APK "
-             "built here cannot be installed. Either sign it or correct `ARCHITECTURE.md` §12"),
+    "P1-7": ("fixed",
+             "**fixed** (entry 58). `assembleRelease` now signs when given a key via "
+             "`keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is "
+             "unchanged. A key is never generated in CI: Android needs the same key for an in-place "
+             "update, so a per-build key would mean no release could ever be upgraded"),
     "P1-9": ("open",
              "**verified open.** `state.rs:102` reports `Loaded::Fresh` when the main file *and* the backup "
              "are both missing, which is exactly the deliberate-deletion case — a crash leaves a backup, a "

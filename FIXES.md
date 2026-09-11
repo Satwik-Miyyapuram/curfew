@@ -85,6 +85,7 @@ must run.
 | 67 | A session across midnight was counted as two blocks, and a test enshrined it (P2-20) | **P2** | **Fixed** (entry 56) |
 | 68 | `ARCHITECTURE.md` advertised in-page blocking the manifest cannot do; live rules never took effect (P2-12) | **P2** | **Fixed** — docs corrected, `tabs.onActivated` re-checks (entry 56) |
 | 69 | The shared-folder reader had no size cap, unlike the LAN path (P2-19) | **P2** | **Fixed** — `read_capped` shares `lan::MAX_FRAME` (entry 57) |
+| 70 | The published Android APK could not be installed by anyone (P1-7) | **P1** | **Fixed** — `assembleRelease` signs when given a key, unsigned without one (entry 58) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -150,7 +151,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-4 | P1 | entry 11 — the ration is enforced by the type |
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
 | P1-6 | P1 | **verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented last-resort exit and the primary Windows surface cannot reach it |
-| P1-7 | P1 | **verified open.** No `signingConfig` in `android/app/build.gradle.kts`, so a release APK built here cannot be installed. Either sign it or correct `ARCHITECTURE.md` §12 |
+| P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
 | P1-8 | P1 | **Not re-assessed** — nobody has read this one against the code |
 | P1-9 | P1 | **verified open.** `state.rs:102` reports `Loaded::Fresh` when the main file *and* the backup are both missing, which is exactly the deliberate-deletion case — a crash leaves a backup, a deletion does not. The comment asserting the two are 'answered the same way' is wrong |
 | P1-10 | P1 | **verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while sessions are running — fail open. Locks survive, but every rule behind them stops |
@@ -254,6 +255,7 @@ this table is a reading aid.
 | `6f57b04` | The browser is identified by its process, and the CLI stops claiming "Added" (entry 56) |
 | `a033870` | One session is one block, and the extension's claims match what it can do (entries 56, 57) |
 | `49c946a` | The shared-folder reader refuses a file larger than a frame (entry 57) |
+| `8839b90` | The release build signs when given a key (entry 58) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3262,3 +3264,67 @@ somebody hitting this will look.
 
 Android is green again: `:app:compileDebugKotlin` clean and **72 tests across 12 classes**. 882 Rust tests;
 all three tools pass; `git fsck` reports zero errors.
+
+
+---
+
+## 58. P1-7: the published APK could not be installed
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-7**. **Fixed.**
+
+### What was wrong
+
+`ARCHITECTURE.md` §12 lists GitHub Releases as a reference channel and calls the sideloaded build *"the
+reference build"*. There was no way to produce one: no `signingConfig` in
+`android/app/build.gradle.kts`, so `assembleRelease` emitted an unaligned unsigned artifact that Android
+refuses. The published `curfew-android-unsigned.apk` was honest about being unsigned and useless to
+anybody who did not sign it themselves.
+
+### The review's suggested fix is wrong
+
+It offers *"generate a debug-style self-signed release key in CI and sign"*. **Android requires the same
+key for an in-place update**, so a key minted fresh on every run gives each release a different
+certificate: users could never upgrade without uninstalling first, and the only lesson the signature
+teaches them is that it changes — the opposite of what a signature is for. **An unsigned artifact is more
+honest than a signature that means nothing.**
+
+So the key is **supplied, never generated**: `keystore.properties` beside `android/app/`, or the four
+`CURFEW_KEYSTORE_*` environment variables. Neither is in the repository and both are gitignored — a
+signing key in a public repo is a signing key everyone has. With no key the build behaves exactly as
+before, so CI is unchanged and a contributor needs nothing new.
+
+### Verified with `signingReport`, because that is what shows the wiring
+
+| Situation | Result |
+| :--- | :--- |
+| a key is configured | `Variant: release` → `Config: release`, the test keystore, alias `curfew-test` |
+| no `keystore.properties` | `Variant: release` → `Config: null` — **unsigned, exactly as before** |
+| present but incomplete | warns: *"keystore.properties is present but the release build will NOT be signed"* |
+
+### And the first implementation was silently broken
+
+It used `java.util.Properties`, and **`\` is an escape character in that format**:
+`storeFile=C:\keys\curfew.jks` loads as `C:keyscurfew.jks`, because `\k` and `\c` are swallowed. The
+build configured without error, produced an unsigned release, and said nothing — every natural Windows
+spelling was mangled on the way in, and the code looked correct while it happened.
+
+The fix is to parse the file as **plain text**. Four lines of `key=value` do not need Java's escaping
+rules, and those rules break the one value a Windows user will write. Found by running `signingReport`
+and noticing the report did not mention the key at all, which is the third time on this branch that
+running the thing beat reading the diff.
+
+A `lifecycle` warning now covers the incomplete-file case: a present-but-unusable key is an afternoon
+somebody would otherwise lose to a build that succeeds and an artifact that is unsigned for no stated
+reason.
+
+### One limit, stated rather than implied
+
+**The full `assembleRelease` could not be run end to end on this host.** The installed NDK is a stub —
+`android/sdk/ndk/30.0.16248370` contains only `.installer` — so Gradle fails at NDK detection before it
+reaches packaging. The signing configuration is verified through `signingReport`, which resolves the same
+wiring `assembleRelease` consumes, and Android's compile and 72 tests pass. **The APK-producing step
+itself is not verified here**, and this entry says so rather than implying a green build.
+
+### Verification
+
+72 Android tests across 12 classes; Rust untouched at **895**; fmt and clippy clean.
