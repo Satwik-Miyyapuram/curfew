@@ -85,12 +85,16 @@ pub struct Curfew {
 
 /// Whether a condition is one the caller is the only witness to.
 ///
-/// A timer, a confirmation and a challenge are satisfied inside the UI and nowhere else, so the UI
-/// is allowed to say it did them. Everything else is checked here against something the caller
+/// A confirmation and a challenge are satisfied inside the UI and nowhere else, so the UI is
+/// allowed to say it did them. Everything else is checked here against something the caller
 /// cannot fake, because `end_session` is reachable from any code in the app process -- and on a
 /// rooted device, from outside it.
+///
+/// `Lock::Timer` is deliberately absent. Its condition is the machine fact `ends_at`, which
+/// `LockSet::can_release` already grants through `is_expired`; accepting a caller's word for it
+/// only ever meant accepting a claim that the clock had reached a point it had not.
 fn claimable(lock: &Lock) -> bool {
-    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+    matches!(lock, Lock::Confirm | Lock::Challenge { .. })
 }
 
 impl Curfew {

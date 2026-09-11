@@ -5,7 +5,7 @@
 //! or leaving the hosts file blocking a machine whose lock ended hours ago.
 
 use curfew_core::{CalendarEvent, Config, Lock, Session, SessionSource};
-use curfew_win::ipc::Request;
+use curfew_win::ipc::{Request, Response};
 use curfew_win::procs::{Process, Processes};
 use curfew_win::Enforcer;
 use std::cell::RefCell;
@@ -91,11 +91,17 @@ fn proc(pid: u32, exe: &str) -> Process {
 /// An `Enforcer` writing to a hosts file of its own, named after the test so parallel tests do not
 /// fight over one path.
 fn enforcer(name: &str) -> (Enforcer, PathBuf) {
+    enforcer_with(name, CONFIG)
+}
+
+/// The same, for a test that needs the schedule to carry a different lock.
+fn enforcer_with(name: &str, toml: &str) -> (Enforcer, PathBuf) {
     let dir = std::env::temp_dir().join(format!("curfew-tick-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("hosts");
     std::fs::write(&path, "127.0.0.1 localhost\r\n").unwrap();
-    (Enforcer::new(config(), path.clone()), path)
+    let config = Config::from_toml(toml).expect("the test config must parse");
+    (Enforcer::new(config, path.clone()), path)
 }
 
 fn hosts(path: &PathBuf) -> String {
@@ -352,21 +358,69 @@ fn a_session_that_ends_is_kept_for_the_statistics() {
 /// A session can end by being reaped, by a satisfied lock, by an emergency pass or by a peer. The
 /// history is written by noticing what is no longer running, so every one of those is covered
 /// without each having to remember to say so.
+///
+/// This uses a `confirm` lock rather than the schedule's `timer`, because a timer is not a condition
+/// a caller may claim — see [`claiming_a_timer_does_not_release_a_timer_lock`].
 #[test]
 fn a_session_ended_by_hand_is_kept_too() {
-    let (mut enforcer, _) = enforcer("history-by-hand");
+    let (mut enforcer, _) = enforcer_with(
+        "history-by-hand",
+        &CONFIG.replace("locks = [{ kind = \"timer\" }]", "locks = [{ kind = \"confirm\" }]"),
+    );
     let table = Fake::new(vec![]);
 
     enforcer.tick(NOW, 0, &[], &table);
     let id = enforcer.sessions.running[0].id.clone();
-    enforcer
-        .sessions
-        .end(&id, NOW + 600, &BTreeSet::from([Lock::Timer]))
-        .expect("the timer had run out");
+
+    let answer =
+        enforcer.handle(NOW + 600, Request::End { id, satisfied: BTreeSet::from([Lock::Confirm]) });
+    assert_eq!(
+        answer,
+        Response::Ok,
+        "a confirmation the caller showed did not release the session"
+    );
+
     enforcer.tick(NOW + 900, 0, &[], &table);
 
     assert_eq!(enforcer.history.len(), 1);
     assert_eq!(enforcer.history[0].ended_at, Some(NOW + 900));
+}
+
+/// The regression guard for the worst bug this review found.
+///
+/// `Lock::Timer` used to be in `claimable`, which meant a caller could assert that the timer had run
+/// out and be believed. One line on the named pipe — no administrator, no UI, no tray — ended any
+/// timer-locked session, and the flagship configuration in `tests/golden/example.toml` is a weekly
+/// window locked exactly that way. A timer's condition is the machine fact `ends_at`; expiry already
+/// grants it, and nothing legitimate was ever gained by letting a caller claim it.
+#[test]
+fn claiming_a_timer_does_not_release_a_timer_lock() {
+    let (mut enforcer, _) = enforcer("timer-not-claimable");
+    let table = Fake::new(vec![]);
+
+    enforcer.tick(NOW, 0, &[], &table);
+    let id = enforcer.sessions.running[0].id.clone();
+
+    // The window runs 09:00–12:00 and NOW is 09:30, so the timer has two and a half hours left.
+    let answer = enforcer.handle(
+        NOW + 600,
+        Request::End { id: id.clone(), satisfied: BTreeSet::from([Lock::Timer]) },
+    );
+
+    match answer {
+        Response::Refused { refusal } => {
+            assert!(
+                matches!(refusal, curfew_core::Refusal::Locked { .. }),
+                "a claimed timer was refused for the wrong reason: {refusal:?}"
+            );
+        }
+        other => panic!("a timer was released by claiming it: {other:?}"),
+    }
+    assert_eq!(enforcer.sessions.running.len(), 1, "the session ended on a claimed timer");
+
+    // …and the honest path still works: once the clock reaches `ends_at`, the pass reaps it.
+    enforcer.tick(AFTER, 0, &[], &table);
+    assert!(enforcer.sessions.running.is_empty(), "expiry no longer releases a timer lock");
 }
 
 #[test]

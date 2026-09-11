@@ -56,9 +56,16 @@ pub struct Tick {
 /// underneath them, so the process that showed them is the only possible witness and refusing its
 /// word would make those locks unusable rather than stronger. Everything else -- a password, a tag,
 /// a reboot, a peer -- is checked by the service, and is therefore never taken on a caller's say-so.
+///
+/// `Lock::Timer` is deliberately **not** in this list, and its absence is load-bearing. A timer
+/// lock's whole meaning is the machine fact `ends_at`, which `LockSet::can_release` already honours
+/// by way of `is_expired`. Letting a caller *claim* it added nothing that expiry did not already
+/// grant, and it let anyone with access to the pipe assert that a timer had run out when it had not:
+/// one line, no administrator, no UI. That was a real bypass of every timer-locked session, and the
+/// test that covered this path asserted the bypass was correct behaviour.
 fn claimable(lock: &curfew_core::Lock) -> bool {
     use curfew_core::Lock;
-    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+    matches!(lock, Lock::Confirm | Lock::Challenge { .. })
 }
 
 /// The service's state between passes.
