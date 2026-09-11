@@ -197,6 +197,28 @@ fun describeLock(lock: Lock): String = when (lock) {
  * Pure, so every shape can be tested on this host: nothing blocked, one app, two, and more than two
  * - plus the singular, which is the one that reads badly if it is wrong ("and 1 others").
  */
+/**
+ * The one true sentence about where a user's data goes.
+ *
+ * **Written once because it was written twice and one of the two was false.** Settings said *"nothing
+ * you record leaves the devices you paired"*; Health said *"Nothing Curfew records leaves this device"*
+ * and then, in the next clause, *"the only network traffic is to devices you paired"* — which
+ * contradicts it. Both cards carry a comment correctly identifying the honest claim, and only one of
+ * them made the sentence match. This is F-48's *"central sentence is false"*, and it is the eighth
+ * time on this branch that a claim was right in one copy and wrong in another.
+ *
+ * The claim is worth getting exactly right because it is **the** sentence a person reads to decide
+ * whether to trust a tool that watches which app is in front. "Nothing leaves this device" is
+ * checkable, and false the moment sync is on, and a claim a user can falsify costs every other claim
+ * on the same screen its credibility. *"Nothing goes to a server"* is narrower, true, and just as
+ * strong: it is the part that matters, because a server is the thing that would make this somebody
+ * else's data.
+ */
+object Privacy {
+    const val NO_SERVER =
+        "Nothing goes to a server: your devices talk to each other directly, and nothing you record " +
+            "leaves the devices you paired."
+}
 fun describeSeed(profileName: String, blockedLabels: List<String>): String {
     val named = blockedLabels.take(2)
     val others = blockedLabels.size - named.size

@@ -122,10 +122,9 @@ DevicesScreen.kt|six digits — paste its code below to see the same six digits 
 DevicesScreen.kt|this device — cancel.
 DevicesScreen.kt|what the other device left.
 DevicesScreen.kt|will end here when the lock is satisfied here.
+HealthScreen.kt| Its database is encrypted with a key held by this 
 HealthScreen.kt|Allow
-HealthScreen.kt|Its database is encrypted with a key held by this device's keystore.
-HealthScreen.kt|Nothing Curfew records leaves this device. There is no account and no server: 
-HealthScreen.kt|the only network traffic is to devices you paired, on your own network. 
+HealthScreen.kt|device's keystore.
 NowScreen.kt| days in a row
 NowScreen.kt| this week
 NowScreen.kt|1 peer
@@ -276,7 +275,6 @@ SettingsScreen.kt|Devices
 SettingsScreen.kt|Fix
 SettingsScreen.kt|Is Curfew working
 SettingsScreen.kt|No other device paired yet.
-SettingsScreen.kt|Nothing goes to a server. Your devices sync directly to each other — no 
 SettingsScreen.kt|Paired, but not listening right now.
 SettingsScreen.kt|Settings
 SettingsScreen.kt|Sync now
@@ -288,7 +286,6 @@ SettingsScreen.kt|Time and opens, per app, for as long as Curfew has been watchi
 SettingsScreen.kt|Where your time went
 SettingsScreen.kt|Your calendar
 SettingsScreen.kt|Your other devices
-SettingsScreen.kt|account, no cloud, and nothing you record leaves the devices you paired.
 SettingsScreen.kt|earshot. Blocks follow you between them.
 TimerScreen.kt|Curfew can only replace a blocked app if it is allowed to see which app is 
 TimerScreen.kt|Curfew cannot ask for one that does not exist, and a lock nothing can open 

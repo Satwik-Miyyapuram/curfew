@@ -245,12 +245,32 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 // Labels resolved here rather than in the pure function: this needs a Context, and
                 // the sentence is the part worth testing without one.
                 val labels = model.blockedApps(starter.id).map { appLabel(context, it) }
-                Text(
-                    describeSeed(starter.name, labels),
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
-                )
+                DCard(padding = 16.dp) {
+                    Text(
+                        describeSeed(starter.name, labels),
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp,
+                        color = Palette.Text,
+                    )
+                    // F-48's other half: the privacy claim, at the moment the question arises.
+                    //
+                    // The review calls this "the single strongest thing the app can say to someone
+                    // deciding whether to trust a screen-watching tool", and it lived on Settings and
+                    // Health - two taps in, on screens a first-day user has no reason to open.
+                    //
+                    // It belongs *here* rather than on a screen of its own, because this is the card
+                    // that has just said "we blocked the usual time sinks for you": the next thought
+                    // of anyone reasonable is what that thing sends, and answering it one screen
+                    // later is answering it too late. The card retires with the notice, so Now does
+                    // not carry a permanent privacy banner.
+                    Gap(8.dp)
+                    Text(
+                        Privacy.NO_SERVER,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = Palette.Muted,
+                    )
+                }
             }
         }
 

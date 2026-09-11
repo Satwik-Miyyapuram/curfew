@@ -191,11 +191,11 @@ fun HealthScreen(model: CurfewViewModel) {
                 Text(
                     // Not "no internet permission at all": the manifest declares INTERNET, because
                     // LAN sync needs it, and a user can falsify that sentence in ten seconds in
-                    // Android Settings. The honest claim is narrower and just as strong — nothing
-                    // goes to a server, and the only traffic is to devices this user paired.
-                    "Nothing Curfew records leaves this device. There is no account and no server: " +
-                        "the only network traffic is to devices you paired, on your own network. " +
-                        "Its database is encrypted with a key held by this device's keystore.",
+                    // Android Settings. And not "nothing leaves this device" either, which is what
+                    // this card said — false whenever sync is on, and contradicted by its own next
+                    // clause. The shared sentence is the honest one. See [Privacy].
+                    Privacy.NO_SERVER + " Its database is encrypted with a key held by this " +
+                        "device's keystore.",
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                     color = Palette.Muted,

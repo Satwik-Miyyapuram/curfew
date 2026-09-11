@@ -211,12 +211,12 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
                 Text("⛨", fontSize = 17.sp, color = Palette.Muted)
                 Text(
-                    // The true claim. Saying "no internet permission at all" was false — the
-                    // manifest declares INTERNET for LAN sync — and it was load-bearing: this is
-                    // the card a user reads to decide whether to trust a screen-watching app, and a
-                    // claim they can check and find false costs the rest their credibility.
-                    "Nothing goes to a server. Your devices sync directly to each other — no " +
-                        "account, no cloud, and nothing you record leaves the devices you paired.",
+                    // The true claim, and the same one Health shows: this sentence existed twice and
+                    // one copy was false. Saying "no internet permission at all" was the earlier
+                    // version of the same mistake — the manifest declares INTERNET for LAN sync —
+                    // and it is load-bearing, because this is the card a user reads to decide
+                    // whether to trust a screen-watching app. See [Privacy].
+                    Privacy.NO_SERVER,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                     color = Palette.Muted,
