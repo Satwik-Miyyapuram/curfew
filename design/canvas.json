@@ -140,7 +140,7 @@
    "x": 0,
    "y": -180,
    "w": 300,
-   "text": "Simple mode: 4 tabs, plain words. Power mode: 7 tabs, exact numbers, rule syntax. One toggle in Settings."
+   "text": "One bar, 4 tabs, plain words - for everyone. There is no Simple/Power toggle: two modes were designed and deliberately not built, because shortening the bar for everyone de-clutters it without making anyone the crippled build. See docs/PLAN-mobile-polish.md section 4."
   },
   {
    "id": "profiles",

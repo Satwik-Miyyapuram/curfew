@@ -72,6 +72,9 @@ must run.
 | 51 | Simple mode was cited by a comment that contradicted itself and a plan that promises it (F-11) | **P1** | **Fixed** as documentation (entry 48) |
 | 52 | Two absences with no explanation: day one on Now, the comparison on Usage (F-12, F-13) | **P2** | **Fixed** (entry 48) |
 | 53 | The README advertised a pairing step the Windows build cannot do (F-18) | **P0** | **Partly fixed** — the advertisement is honest; the front door is scoped, not built (entry 49) |
+| 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
+| 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
+| 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -91,7 +94,7 @@ problem rather than a number in it.
 
 | Finding | Sev | Status, as verified in entry 46 |
 | :--- | :--- | :--- |
-| F-2 | P2 | **Not re-assessed.** First run seeds a starter profile; whether it says so was not checked |
+| F-2 | P2 | **Fixed** (entry 50). The seed was silent; Now says what was written, once, and the one-time-ness is derived from the audit log |
 | F-3 | P2 | **Not a defect — the review is wrong.** It says "the design says 30"; `design/Timer.dc.html:71` shows the accented (selected) pill as **`1h 30m`**, against `PRESETS = listOf(25, 50, 90, 180)`. The code matches the design authority. **Deliberately not changed** — see entry 46 |
 | F-6 | P1 | **Fixed** (entry 47). `Auth.isAvailable` was only consulted *at prove time* (`Auth.kt:55`); the choice is now gated at choice time too |
 | F-7 | P1 | **Fixed** (entry 47). `NowScreen.kt:669` called `onRelease` straight from the button; it goes through `DConfirm` now |
@@ -103,12 +106,12 @@ problem rather than a number in it.
 | F-15 | P3 | **Fixed** (entry 46) |
 | F-18 | **P0** | **Partly fixed** (entry 49). The README no longer advertises a step the PC cannot do; the front door itself is still unbuilt, with its scope recorded |
 | F-33 | P1 | **Fixed** (entry 46) |
-| F-34 | P2 | **Not re-assessed.** Two rows that promise a path they do not implement |
+| F-34 | P2 | **Fixed** (entry 50). "Pick a meeting, or set a schedule" opened only the picker; "Always on" sent the user to Plan — against the file's own stated principle |
 | F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
 | F-36 | P2 | **Fixed** (entry 46) |
 | F-37 | P3 | **Fixed** (entry 46) |
-| F-48 | P1 | **Not re-assessed** |
-| F-49 | P1 | **Not re-assessed.** Windows and Android are still disjoint in interaction model; this is a product decision rather than a defect to patch |
+| F-48 | P1 | **Fixed** (entry 50). Health said "leaves this device", which its own next clause contradicted; one shared sentence now, and it also appears at first run |
+| F-49 | P1 | **Assessed** (entry 50). Four of its nine table cells are stale; the remainder is a protocol-and-UAC decision, and the build already says so honestly. Two concrete canvas findings came out of it |
 
 ### One finding was rejected rather than fixed
 
@@ -175,6 +178,8 @@ this table is a reading aid.
 | `b171ed4` | An absence with no explanation, in the two places it matters most (entries 48) |
 | `6a53653` | Entry 48, and four coverage rows corrected (entries 48) |
 | `3be9a24` | The README advertised a pairing step Windows cannot do (entry 49) |
+| `ab0b7b1` | The remaining unassessed findings, assessed and fixed (entries 50) |
+| `e88a9ed` | The privacy claim was false on one of the two screens that made it (entries 50) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -2477,93 +2482,6 @@ clean.
 **Limits:** the Compose changes are compile-verified only.
 ---
 
-## 48. The remaining verified-open P1s and P2s
-
-**Findings:** F-14, F-11, F-12, F-13. All four were verified open in entry 46 and are now fixed.
-
-### F-14 (P1): the only destructive action with no confirmation, and the worst consequence
-
-"Remove this device" was a `Tap` straight to `model.revokeDevice`. Removing a profile asks, spending an
-emergency pass asks, releasing a peer asks, asking for the 24-hour release asks — all with the consequence
-named. This one did not, **and it is the action that can take away a lock's only way out.**
-
-`Lock.PeerRelease` requires a *specific* device — `lock.rs`: *"Only a specific paired device can release"* —
-so removing that device leaves the lock unsatisfiable: no other device, no pass, nothing the user still has.
-The confirmation now says exactly that, with the count, and only when it is true.
-
-The count comes from `locksAwaitingDevice`, a **pure function** in `Format.kt` so it can be tested on this
-host without an `Application`, a database or a composition. Eight tests, built around the shapes that would
-get the number wrong rather than happy paths — because the two failure directions are both real: too low and
-the warning is missing from the removal that needed it; **too high and every removal carries a scare that is
-not true, which teaches people to dismiss the dialog, and then the real one gets dismissed too.**
-Mutation-tested three ways: the wrong device matched, calendar rules ignored, every lock kind counted.
-
-**One detail in the review is stale, and it is recorded rather than silently not fixed.** It says the
-action's confirmation *"Devices never renders"*. That was true when written; entry 19 made `MainActivity`
-render `state.message` app-wide, so *"That device will be ignored from now on."* does appear. The
-unconfirmed tap and the missing consequence were both still real.
-
-**And `PeerRelease` is unreachable from the UI** — no screen offers it. So this scenario needs a
-hand-edited config, which is a supported interface, and the warning is worth having for exactly that.
-
-### F-11 (P1): a comment that contradicted itself, and a plan citing a feature that does not exist
-
-`SettingsScreen`'s doc comment began *"It leads with the Simple/Power switch"* and ended, eight lines later,
-*"There is no beginner/expert switch: an app that hides half of itself behind a mode makes the reader wonder
-what else it is hiding."* **The first half described a mode that was never built; the second half is the
-argument for not building it.** The file argued with itself, and both halves had been true of different
-versions of the plan.
-
-There is no Simple mode. It is designed in `docs/PLAN-mobile-polish.md` §4 and was never implemented — the
-de-cluttering it existed to achieve was done by **shortening the nav bar for everyone** instead, which the
-interaction review calls *"a defensible outcome"*. What it needed, and now has, is the docs saying so:
-three status notes, one above each place the fictional mode is cited as current. Plus the removal of the
-switch paragraph from the Settings comment and a "Simple user" reference in `MainActivity`.
-
-**Caught while verifying:** the plan says the bar has "five tabs" in two places and it has **four**. Fixed in
-the status notes rather than by rewriting the plan, because the number was true when written and a plan is a
-record of intent.
-
-### F-12 and F-13 (P2): the same defect, in the two places it costs most
-
-Both are **an absence with no explanation**.
-
-**F-12:** `GivenBackCard` returned early when every number was zero — which is **day one, precisely when
-somebody is deciding whether to keep the app.** Now showed a dial, a timeline, and nothing about what the
-app had bought. The function's own doc comment claims this number *"is not allowed to live behind a tab"*;
-it was living behind a *condition*, which is worse. The honest zero copy already existed one branch down
-(*"Nothing blocked yet today"*), so the card now stays and says what it counts and what will fill it.
-
-**F-13:** `ComparisonCard` renders only when `state.screenTime` is non-null, which needs Usage access **and**
-a whole day on each side. A reader could not tell *not yet* from *not working* from *nothing worth showing*.
-There is now a placeholder naming the actual prerequisite, and **distinguishing the two cases**, because
-they have different next steps: one is "grant Usage access on Health", the other is "come back tomorrow".
-
-This is the treatment the screen already gives its per-app list — the one the review calls the best empty
-state in the app, because it explains the *scope* of what is not measured. The principle was already in the
-codebase; these were the two places not following it.
-
-### And a doc comment was attached to the wrong function
-
-Removing F-12's early return put *"The banner that admits Curfew was not watching"* directly above
-`GivenBackCard` — **where it had been all along.** `DowntimeBanner`, the function it describes, had no doc
-comment at all. So the one banner whose entire job is to explain itself was the one with no explanation in
-the source, while the card beside it carried a paragraph about something else.
-
-That is the **sixth** comment on this branch describing something the code does not do, and the most
-literal: not a false claim, but a comment filed against the wrong symbol.
-
-### Verification
-
-**65 Android tests pass across 11 classes.** The **string ratchet caught all eight new sentences** from
-these fixes before they could be committed unrecorded. Counts: 328 untranslated, 77 interpolated, 68
-Material. Rust untouched at **861 passed**; fmt and clippy clean.
-
-**Limits:** the Compose changes are compile-verified only. What did not need eyes: a confirmation that was
-missing, a number that was counted wrongly, and two absences that now explain themselves. What did not need eyes: a shared failure path,
-twenty named kinds, a string that leaked a token, and a name instead of a slug.
----
-
 ## 47. Two verified P1s, and one finding the review got wrong
 
 **Findings:** F-7 and F-6 fixed; **F-3 rejected.**
@@ -2773,3 +2691,122 @@ truth in a five-way `when`, and Windows states it in zero ways.
 
 861 Rust tests pass; fmt and clippy clean; the `#using-it` anchor the new footnote links to resolves
 (`README.md:45`). No Android change this commit.
+
+## 50. Every remaining "not re-assessed" finding, assessed
+
+**Findings:** F-2, F-34, F-48 fixed; F-49 assessed and scoped. **No unassessed rows remain.**
+
+Entry 46 left five findings marked *"not re-assessed"* and said that was a real status rather than a soft one —
+checking each properly costs the same as fixing it, and filling them in from memory is the habit that produced
+the coverage gap in the first place. This closes them.
+
+### F-2 (P2): the first run wrote a policy and never mentioned it
+
+`seedStarterProfile` writes a profile called "Distractions" and blocks every starter app it finds installed.
+The rationale is good and in the source — *"a blocker earns its place by blocking something within a minute of
+being opened, not by handing over a form"* — but it was silent, and the only way to learn what had been set up
+was to open Plan and look. A self-binding tool that has already written a policy owes the user a sentence.
+
+**The signal for "once" is the audit log's newest row.** `seedStarterProfile` writes `profile.seeded` and runs
+before the first `refresh` (`CurfewRuntime:502`); `recent()` is `ORDER BY at DESC`. If that is still the most
+recent entry, nothing has happened since. So the notice's one-time-ness is **derived rather than stored** — no
+flag to drift out of step with the config, no dismiss button to forget, and it retires itself the moment the
+user does anything.
+
+`describeSeed` is pure, so the four shapes are tested here: nothing blocked, one app, two, and more than two —
+and `and 1 others` is pinned, because that is the small wrongness that makes a reader distrust the large
+claims nearby. Mutation-tested four ways.
+
+### F-34 (P2): two rows promising a path they do not implement
+
+**The second is the interesting one.** "Always on" in the profile editor fell into a catch-all that said *"Add
+a window covering the whole week to leave it always on"* — send the user to Plan, build a window, pick the
+profile back out of a pill row. **Four branches above it, the same file argues against exactly that:**
+*"Being told to go somewhere else, find the same list, and remember which profile you were half way through
+building is how a profile gets abandoned."* The file stated the principle and then broke it in its own last
+branch. It now creates the full-week window itself, as the four above it do.
+
+That needed the core's `end_minute == start_minute` semantic — midnight to midnight is a **whole day**, not a
+window of no length — and **nothing tested it**. The `start == end` case had no cover at all; only the
+23:00→07:00 shape that "no phone after 11pm" uses did. Two tests added, and the `<=` in `span_on` is
+mutation-tested: flipping it to `<` breaks the always-on window and is caught.
+
+The first row said "Pick a meeting, or set a schedule" while its own tap opens only the calendar picker. The
+page kept the promise — "Add a window" is a button below — the row did not, and a row naming an action it does
+not perform is indistinguishable from a broken button.
+
+### F-48 (P1): the false sentence, and where the card lives
+
+The review says the privacy card's "central sentence is false". It is — **on one of the two copies**.
+Settings said *"nothing you record leaves the devices you paired"*. Health said *"Nothing Curfew records leaves
+**this device**"* and then, in the next clause, *"the only network traffic is to devices you paired"* — which
+contradicts it. Both cards carry a comment correctly identifying the honest claim; only one made its sentence
+match. That is the **eighth** time on this branch that a claim was right in one copy and wrong in another, so
+the fix is structural: one `Privacy.NO_SERVER`, used by both.
+
+The claim matters because it is the sentence somebody reads to decide whether to trust a tool that watches
+which app is in front. *"Nothing leaves this device"* is checkable and false the moment sync is on, and a
+falsifiable claim costs every other claim on the screen its credibility. *"Nothing goes to a server"* is
+narrower, true, and carries the part that matters.
+
+**And the buried half.** The card now also appears on the first-run notice on Now — the card that has just
+said "we set up a profile blocking Instagram, YouTube and 7 others". The next thought of anyone reasonable is
+what that thing sends, and answering it one screen later is answering it too late.
+
+**Verified while fixing:** the rest of Health's card is true. `DatabaseKey` generates a random passphrase,
+seals it with an AES key in the Android keystore that cannot be exported, and the file is useless if copied
+off the device.
+
+### F-49 (P1): assessed — four of nine cells stale, the rest a decision
+
+The finding is *"the two platforms are not one product"*, with a table of what each surface can do. **Four of
+its nine rows are now out of date**, each closed by an earlier entry:
+
+| Table cell | Review says | Today |
+| :--- | :--- | :--- |
+| Start a block | **—** on Windows | built — F-16, entry 33 |
+| Where time went | **—** on Windows (designed) | built — entry 28 |
+| Profile naming | raw **id** in tray/CLI/extension | names — F-28, entries 30 and 32 |
+| Pair a device | **—** everywhere | Android has it; Windows scoped as F-18, entry 49 |
+
+**What remains is not a "missing affordance" defect like F-16 was.** `Request` has **no config-mutating variant
+at all** — the enum is Status, Start, End, Unlock, Token, Release, RequestRelease, Emergency, CancelFreeze,
+ConfirmFreeze, Reload, Beat, Seen, Check, Stats. So a Windows schedule editor is a new protocol surface *plus*
+a UAC question: the config lives in `%ProgramData%` and editing it needs elevation. And the build is already
+honest about it in its own words: *"Editing it needs an administrator, so it is done from a terminal for now —
+and the file it reads is: …"*. That is a product decision with a stated reason, not a defect to patch, and it is
+recorded as such rather than as "open".
+
+### Two concrete findings that came out of assessing F-49
+
+**1. The canvas's brief taught a mode that does not exist** — fixed. The first annotation on the canvas, which
+is the design authority, read *"Simple mode: 4 tabs, plain words. Power mode: 7 tabs, exact numbers, rule
+syntax. One toggle in Settings."* There is no Simple mode, no Power mode and no toggle; F-11 removed the last
+of those from the code and the docs, and the canvas still taught it. `canvas.json`'s annotations **are**
+rendered (the canvas viewer's bundle handles a `notes` collection), so this was live on the canvas a reviewer
+reads. Corrected in place, one line changed.
+
+**2. `design/Plan.dc.html` does not match `build.py`'s generator — and the generator is the stale side.**
+Running `build.py` reports `Plan.dc.html` as differing and refuses to rewrite it (the guard added in entry 37).
+The committed artboard is the **richer** one: it lists the events belonging to each calendar rule *under* that
+rule, with a comment explaining why — *"a profile can be started by several meetings, and each one used to
+claim a whole card of its own on this page."* **The app does that too** (`ScheduleScreen.kt:273`,
+`caught.take(4).forEach { CaughtEvent(...) }`, with "and N more"), and the generator does not.
+
+So `--force` would silently revert a deliberate design decision that the build implements. **That is exactly
+what entry 37's guard exists to prevent, and this is the first time it has fired on a real disagreement.** The
+generator's `plan()` block needs porting to match the committed artboard — mechanical, and verifiable by
+running `build.py` and confirming a zero diff, but a real piece of work rather than a late-round edit. Recorded
+so it is decided deliberately; the artboard is correct as it stands and needs no change.
+
+### Verification
+
+**72 Android tests pass across 12 classes**; the string ratchet caught all of the new copy from these fixes
+before it could ship unrecorded. Rust **863** (two new schedule tests); fmt and clippy clean. `canvas.json`
+valid, one line changed, and `build.py`'s output is identical with and without that change.
+
+**Limits:** the Compose changes remain compile-verified only.
+
+**One limit is now retired.** Every finding in the coverage table has a verified status; there are **no
+"not re-assessed" rows left**. The four that were there are recorded above, and F-49 — the largest — turned
+out to be four-fifths done and one-fifth a decision with a stated reason.
