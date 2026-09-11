@@ -2,12 +2,15 @@ package dev.curfew.app.ui
 
 import android.app.Application
 import android.net.Uri
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.curfew.app.data.AuditRow
 import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.app.data.CalendarReader
 import dev.curfew.app.data.Downtime
+import dev.curfew.app.R
 import dev.curfew.app.curfew
 import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.Action
@@ -286,13 +289,13 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * two screens.
      */
     fun offerPairing() {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         runCatching { hub.sync.invite(runtime.clock.now()) }
             .onSuccess { json ->
                 pending = null
                 _state.update { it.copy(sync = it.sync.copy(offering = Offer(json, ""))) }
             }
-            .onFailure { say(it.message ?: "That invite could not be made.") }
+            .onFailure { say(it.message ?: str(R.string.invite_failed)) }
     }
 
     /**
@@ -303,19 +306,19 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * phrase exists, so [confirmPairing] is deliberately a separate press.
      */
     fun answerPairing(inviteJson: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         val invite = inviteJson.trim()
         runCatching { Offer(hub.sync.replyTo(invite), hub.sync.phrase(invite), isReply = true) }
             .onSuccess { offer ->
                 pending = invite
                 _state.update { it.copy(sync = it.sync.copy(offering = offer)) }
             }
-            .onFailure { say("That is not a Curfew invite.") }
+            .onFailure { say(str(R.string.not_an_invite)) }
     }
 
     /** Read back the reply from the invited device, so this side can show its phrase too. */
     fun readReply(replyJson: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         val reply = replyJson.trim()
         runCatching { hub.sync.phrase(reply) }
             .onSuccess { phrase ->
@@ -324,13 +327,13 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(sync = it.sync.copy(offering = Offer(reply, phrase, isReply = true)))
                 }
             }
-            .onFailure { say("That is not a Curfew reply.") }
+            .onFailure { say(str(R.string.not_a_reply)) }
     }
 
     /** Pair, now that the person has said the two phrases matched. */
     fun confirmPairing() {
         val hub = runtime.sync ?: return
-        val invite = pending ?: return say("Read the other device code first.")
+        val invite = pending ?: return say(str(R.string.read_other_code_first))
         viewModelScope.launch {
             runCatching { hub.sync.accept(invite, runtime.clock.now()) }
                 .onSuccess {
@@ -338,9 +341,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     hub.refreshPeers()
                     pending = null
                     _state.update { it.copy(sync = it.sync.copy(offering = null)) }
-                    note("Paired.")
+                    note(str(R.string.paired))
                 }
-                .onFailure { say(it.message ?: "That pairing could not be completed.") }
+                .onFailure { say(it.message ?: str(R.string.pairing_failed)) }
             refresh()
         }
     }
@@ -365,9 +368,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess {
                     hub.save()
                     hub.refreshPeers()
-                    note("That device will be ignored from now on.")
+                    note(str(R.string.device_ignored))
                 }
-                .onFailure { say(it.message ?: "That device could not be removed.") }
+                .onFailure { say(it.message ?: str(R.string.device_remove_failed)) }
             refresh()
         }
     }
@@ -377,10 +380,10 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val pass = runtime.syncPass()
             when {
-                pass == null -> say("Sync is not running on this device.")
+                pass == null -> say(str(R.string.sync_not_running))
                 pass.adopted.isNotEmpty() ->
-                    note("Took up ${pass.adopted.size} block(s) from another device.")
-                else -> note("Up to date.")
+                    note(plural(R.plurals.adopted_blocks, pass.adopted.size))
+                else -> note(str(R.string.up_to_date))
             }
             refresh()
         }
@@ -388,15 +391,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Exchange through a folder both devices can see, for devices never on one network. */
     fun folderPass(root: String) {
-        val hub = runtime.sync ?: return say("Sync is not running on this device.")
+        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
         viewModelScope.launch {
             runCatching { hub.sync.folderPass(root.trim()) }
                 .onSuccess { pass ->
                     hub.save()
-                    note("Took in ${pass.accepted} update(s), left ${pass.written} behind.")
+                    note(plural(R.plurals.took_in_updates, pass.accepted, pass.written))
                     runtime.syncPass()
                 }
-                .onFailure { say(it.message ?: "That folder could not be used.") }
+                .onFailure { say(it.message ?: str(R.string.folder_failed)) }
             refresh()
         }
     }
@@ -419,7 +422,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.endSession(session.id, satisfied)
-                note("${session.profile} ended.")
+                note(str(R.string.session_ended, runtime.profileName(session.profile)))
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -452,7 +455,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.scanToken(session.id, payload)
-                note("${session.profile} ended.")
+                note(str(R.string.session_ended, runtime.profileName(session.profile)))
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -471,7 +474,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun releasePeer(id: String) {
         viewModelScope.launch {
             runtime.releasePeer(id)
-            note("Released. The other device will act on it within a few seconds.")
+            note(str(R.string.released))
             refresh()
         }
     }
@@ -480,8 +483,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun requestRelease(session: Session) {
         viewModelScope.launch {
             runCatching { runtime.requestRelease(session.id) }
-                .onSuccess { note("Release for ${session.profile} lands ${relative(it, runtime.clock.now())}.") }
-                .onFailure { say("That session cannot be released early.") }
+                .onSuccess { note(str(R.string.release_lands, runtime.profileName(session.profile), relative(it, runtime.clock.now()))) }
+                .onFailure { say(str(R.string.cannot_release_early)) }
             refresh()
         }
     }
@@ -497,7 +500,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.spendPass(session.id)
-                note("${session.profile} ended with an emergency pass.")
+                note(str(R.string.ended_with_pass, runtime.profileName(session.profile)))
             } catch (e: NoPass) {
                 say(describePassRefusal(e.refusal, runtime.clock.now()))
             } catch (refused: Refused) {
@@ -536,7 +539,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveConfig(toml: String) {
         viewModelScope.launch {
             runtime.setConfig(toml)
-                .onFailure { say(it.message ?: "That config could not be loaded.") }
+                .onFailure { say(it.message ?: str(R.string.config_load_failed)) }
             refresh()
         }
     }
@@ -581,7 +584,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 lock = LockSet(conditions = locks, endsAt = now + seconds),
             )
             runCatching { runtime.startSession(session) }
-                .onFailure { say(it.message ?: "That could not be started.") }
+                .onFailure { say(it.message ?: str(R.string.start_failed)) }
             refresh()
         }
     }
@@ -589,7 +592,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveProfile(id: String, name: String, description: String = "") {
         viewModelScope.launch {
             runtime.saveProfile(id, name, description)
-                .onFailure { say(it.message ?: "That profile could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.profile_save_failed)) }
             refresh()
         }
     }
@@ -605,7 +608,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.saveProfile(id, name)
                 .mapCatching { runtime.saveWeekly(window).getOrThrow() }
-                .onFailure { say(it.message ?: "That window could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
             refresh()
         }
     }
@@ -623,12 +626,12 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.deleteProfile(id)
                 .onSuccess {
-                    note("Removed. A session it already started keeps running.")
+                    note(str(R.string.removed))
                     onDone()
                 }
                 // The core's message names the schedules still pointing at it, which is exactly
                 // what the user needs in order to fix it.
-                .onFailure { say(it.message ?: "That profile could not be removed.") }
+                .onFailure { say(it.message ?: str(R.string.profile_remove_failed)) }
             refresh()
         }
     }
@@ -636,7 +639,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveWeekly(window: WeeklySchedule) {
         viewModelScope.launch {
             runtime.saveWeekly(window)
-                .onFailure { say(it.message ?: "That window could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
             refresh()
         }
     }
@@ -646,8 +649,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // Said plainly, because it is the part people get wrong: deleting the rule that
             // started a session does not end the session.
             runtime.deleteWeekly(id)
-                .onSuccess { note("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That window could not be removed.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.window_remove_failed)) }
             refresh()
         }
     }
@@ -655,7 +658,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCalendarRule(rule: CalendarSchedule) {
         viewModelScope.launch {
             runtime.saveCalendarRule(rule)
-                .onFailure { say(it.message ?: "That rule could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.rule_save_failed)) }
             refresh()
         }
     }
@@ -663,8 +666,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCalendarRule(id: String) {
         viewModelScope.launch {
             runtime.deleteCalendarRule(id)
-                .onSuccess { note("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That rule could not be removed.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.rule_remove_failed)) }
             refresh()
         }
     }
@@ -678,7 +681,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveRule(profile: String, rule: Rule) {
         viewModelScope.launch {
             runtime.saveRule(profile, rule)
-                .onFailure { say(it.message ?: "That could not be blocked.") }
+                .onFailure { say(it.message ?: str(R.string.block_failed)) }
             refresh()
         }
     }
@@ -686,8 +689,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteRule(profile: String, target: Target) {
         viewModelScope.launch {
             runtime.deleteRule(profile, target)
-                .onSuccess { note("Removed. A session it already started keeps running.") }
-                .onFailure { say(it.message ?: "That could not be unblocked.") }
+                .onSuccess { note(str(R.string.removed)) }
+                .onFailure { say(it.message ?: str(R.string.unblock_failed)) }
             refresh()
         }
     }
@@ -711,7 +714,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 if (asCsv) runtime.statsCsv() else Json.encodeToString(Stats.serializer(), state.value.stats)
             }.getOrNull()
             if (text == null) {
-                say("Those figures could not be prepared.")
+                say(str(R.string.stats_failed))
                 return@launch
             }
             runCatching {
@@ -719,7 +722,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.write(text.toByteArray())
                 }
             }
-                .onFailure { say("That file could not be written.") }
+                .onFailure { say(str(R.string.file_write_failed)) }
         }
     }
 
@@ -738,9 +741,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), profile, packages)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
                 }
-                .onFailure { say(it.message ?: "That change could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
             refresh()
         }
     }
@@ -759,15 +762,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), target, apps)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: "That change could not be saved.") }
+                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
                 }
-                .onFailure { say(it.message ?: "That change could not be saved.") }
+                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
             // Everything that is not an app package — domains, urls, keywords — one at a time,
             // because those go through the ordinary rule path rather than the picker's.
             val had = rulesBeyondApps(target).map { it.target }.toSet()
             rulesBeyondApps(source).filterNot { had.contains(it.target) }.forEach { rule ->
                 runtime.saveRule(target, rule)
-                    .onFailure { say(it.message ?: "That could not be blocked.") }
+                    .onFailure { say(it.message ?: str(R.string.block_failed)) }
             }
             refresh()
         }
@@ -786,10 +789,38 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             .firstNotNullOfOrNull { (it.action as? Action.Budget)?.seconds }
 
     /**
+     * A string resource, with arguments, for the messages this class raises.
+     *
+     * The ViewModel is where most of the app's error copy lives — a save that failed, a device that
+     * could not be paired, a config that would not parse — and it has no Composable scope, so
+     * `stringResource` is not available. `AndroidViewModel` does have an application, so this is the
+     * path: `getString` on the application context.
+     *
+     * The `strings.xml` entries these read are the reason a translator can reach the app's most
+     * important sentences. A refused save is precisely the message that has to be understood.
+     */
+    private fun str(@StringRes id: Int, vararg args: Any): String =
+        getApplication<Application>().getString(id, *args)
+
+    /**
+     * Plurals the same way, because "3 apps · 1 site" is not a string a translator can fix.
+     *
+     * English pluralises by appending an `s` and every other language does something else — Russian
+     * has three forms, Arabic six — so `"$n app" + if (n == 1) "" else "s"` is untranslatable in
+     * principle, not merely awkward. `quantityString` is the Android mechanism for it, and this
+     * class is the first place in the app to need one.
+     */
+    private fun plural(@PluralsRes id: Int, count: Int, vararg args: Any): String =
+        getApplication<Application>().resources.getQuantityString(id, count, count, *args)
+
+    /**
      * One line naming what a profile takes away: "2 apps · 1 site · 1h a day".
      *
-     * The Plan page shows a profile once, with its reasons nested under it, so this is the only
-     * place the contents get counted — a card that named neither would be a title and a switch.
+     * The Plan page shows a profile once, with its reasons nested under it, so this is the only place
+     * the contents get counted — a card that named neither would be a title and a switch.
+     *
+     * Every count goes through `plural`, so a language with more than two forms gets them. The
+     * separator is a resource too: a middle dot is punctuation, and punctuation is not universal.
      */
     fun describeBlocks(profile: String): String {
         val apps = blockedApps(profile).size
@@ -797,11 +828,11 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             .count { it.target is Target.Domain || it.target is Target.Url }
         val budget = budgetSeconds(profile)
         val parts = buildList {
-            if (apps > 0) add("$apps app" + if (apps == 1) "" else "s")
-            if (sites > 0) add("$sites site" + if (sites == 1) "" else "s")
-            if (budget != null) add(spellDuration(budget / 60) + " a day")
+            if (apps > 0) add(plural(R.plurals.apps_blocked, apps))
+            if (sites > 0) add(plural(R.plurals.sites_blocked, sites))
+            if (budget != null) add(str(R.string.per_day, spellDuration(budget / 60)))
         }
-        return if (parts.isEmpty()) "Nothing yet" else parts.joinToString(" · ")
+        return if (parts.isEmpty()) str(R.string.nothing_blocked_yet) else parts.joinToString(" · ")
     }
 
     fun blockedApps(profile: String): List<String> =

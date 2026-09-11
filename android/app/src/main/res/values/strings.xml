@@ -71,4 +71,66 @@
     <string name="health_without_it">Without it: %1$s</string>
     <string name="settings_grant_allowed">%1$s, allowed</string>
     <string name="settings_grant_refused">%1$s, not allowed. %2$s</string>
+
+    <!--
+      The messages CurfewViewModel raises. This is where most of the app's error copy lives — a save
+      that failed, a device that could not be paired, a config that would not parse — and it is the
+      copy that most needs to be understood, because a refusal nobody can read is a refusal that
+      looks like a bug.
+    -->
+    <string name="sync_not_running">Sync is not running on this device.</string>
+    <string name="invite_failed">That invite could not be made.</string>
+    <string name="not_an_invite">That is not a Curfew invite.</string>
+    <string name="not_a_reply">That is not a Curfew reply.</string>
+    <string name="read_other_code_first">Read the other device code first.</string>
+    <string name="paired">Paired.</string>
+    <string name="pairing_failed">That pairing could not be completed.</string>
+    <string name="device_ignored">That device will be ignored from now on.</string>
+    <string name="device_remove_failed">That device could not be removed.</string>
+    <string name="up_to_date">Up to date.</string>
+    <string name="folder_failed">That folder could not be used.</string>
+    <string name="session_ended">%1$s ended.</string>
+    <string name="ended_with_pass">%1$s ended with an emergency pass.</string>
+    <string name="released">Released. The other device will act on it within a few seconds.</string>
+    <string name="release_lands">Release for %1$s lands %2$s.</string>
+    <string name="cannot_release_early">That session cannot be released early.</string>
+    <string name="config_load_failed">That config could not be loaded.</string>
+    <string name="start_failed">That could not be started.</string>
+    <string name="profile_save_failed">That profile could not be saved.</string>
+    <string name="profile_remove_failed">That profile could not be removed.</string>
+    <string name="window_save_failed">That window could not be saved.</string>
+    <string name="window_remove_failed">That window could not be removed.</string>
+    <string name="rule_save_failed">That rule could not be saved.</string>
+    <string name="rule_remove_failed">That rule could not be removed.</string>
+    <string name="removed">Removed. A session it already started keeps running.</string>
+    <string name="block_failed">That could not be blocked.</string>
+    <string name="unblock_failed">That could not be unblocked.</string>
+    <string name="change_save_failed">That change could not be saved.</string>
+    <string name="stats_failed">Those figures could not be prepared.</string>
+    <string name="file_write_failed">That file could not be written.</string>
+
+    <!-- The one-line summary on a profile card, and the counts inside it. -->
+    <string name="nothing_blocked_yet">Nothing yet</string>
+    <string name="per_day">%1$s a day</string>
+    <plurals name="apps_blocked">
+        <item quantity="one">%1$d app</item>
+        <item quantity="other">%1$d apps</item>
+    </plurals>
+    <plurals name="sites_blocked">
+        <item quantity="one">%1$d site</item>
+        <item quantity="other">%1$d sites</item>
+    </plurals>
+    <plurals name="adopted_blocks">
+        <item quantity="one">Took up %1$d block from another device.</item>
+        <item quantity="other">Took up %1$d blocks from another device.</item>
+    </plurals>
+    <!--
+      Two counts in one sentence, which is why the second travels as an argument rather than being
+      part of the plural: the quantity that selects the form is the first, and a language is free to
+      put the other wherever it belongs.
+    -->
+    <plurals name="took_in_updates">
+        <item quantity="one">Took in %1$d update, left %2$d behind.</item>
+        <item quantity="other">Took in %1$d updates, left %2$d behind.</item>
+    </plurals>
 </resources>

@@ -162,21 +162,73 @@ object UntranslatedCopy {
     /** The same, but with `$` — these need numbered format arguments, which is a separate job. */
     fun interpolated(): List<Found> = scan(interpolated = true)
 
+    /**
+     * Read the arguments of a call, given the index of its opening parenthesis.
+     *
+     * Returns the half-open range **inside** the parentheses, with nesting balanced. That balance is
+     * the whole point: a cast like `(application as Application)` inside an argument list contains
+     * parentheses, and a scanner that stops at the first `)` would end the argument list early and
+     * miss everything after it.
+     */
+    private fun argumentText(code: String, openParen: Int): String {
+        var depth = 0
+        var i = openParen
+        var inString = false
+        while (i < code.length) {
+            val c = code[i]
+            if (inString) {
+                if (c == '\\') i++
+                else if (c == '"') inString = false
+            } else {
+                when (c) {
+                    '"' -> inString = true
+                    '(' -> depth++
+                    ')' -> {
+                        depth--
+                        if (depth == 0) return code.substring(openParen + 1, i)
+                    }
+                }
+            }
+            i++
+        }
+        // Unbalanced source — a truncated file, or a `)` inside a raw string. Taking the rest of the
+        // file is the tolerant answer, and the literals found are still real ones.
+        return code.substring(openParen + 1)
+    }
+
     private fun scan(interpolated: Boolean): List<Found> {
         val callAlternatives = textCalls.joinToString("|") { Regex.escape(it) }
         val paramAlternatives = textParams.joinToString("|") { Regex.escape(it) }
-        val calls = Regex("""\b($callAlternatives)\s*\(\s*"((?:[^"\\]|\\.)*)"""")
+        val calls = Regex("""\b($callAlternatives)\s*\(""")
         val params = Regex("""\b($paramAlternatives)\s*=\s*"((?:[^"\\]|\\.)*)"""")
+        val literal = Regex(""""((?:[^"\\]|\\.)*)"""")
 
         val found = mutableListOf<Found>()
         for (file in sourceRoot.walkTopDown().filter { it.extension == "kt" }) {
             val code = stripComments(file.readText())
-            for (regex in listOf(calls, params)) {
-                for (m in regex.findAll(code)) {
-                    val literal = m.groupValues[2]
-                    if (literal.contains('$') != interpolated) continue
-                    if (!isCopy(literal)) continue
-                    found += Found(file.name, literal)
+
+            // A named copy parameter: the literal is right there after the `=`.
+            for (m in params.findAll(code)) {
+                val value = m.groupValues[2]
+                if (value.contains('$') == interpolated && isCopy(value)) {
+                    found += Found(file.name, value)
+                }
+            }
+
+            // A text call: **every** literal in its argument list, not just the first.
+            //
+            // This is the correction that matters. Scanning only the literal directly after the
+            // parenthesis missed `say(it.message ?: "That invite could not be made.")` — 159
+            // literals across the app, including most of the error copy in the ViewModel. A
+            // measurement that cannot see a third of its subject is not a measurement, and this is
+            // the second time this scanner has been widened after finding its own blind spot.
+            for (m in calls.findAll(code)) {
+                val open = m.range.last // the `(` the regex consumed
+                for (l in literal.findAll(argumentText(code, open))) {
+                    val value = l.groupValues[1]
+                    if (value.contains('$') == interpolated && isCopy(value)) {
+                        found += Found(file.name, value)
+                    }
                 }
             }
         }
