@@ -42,9 +42,9 @@ must run.
 | 21 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
 | 22 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
 | 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
-| 24 | Control channel unbounded read / no timeout / serial accept (P1-1) | **P1** | Pending |
+| 24 | Control channel unbounded read / serial accept (P1-1) | **P1** | **Fixed** (read cap + concurrency; read deadline still impossible — see entry 24) |
 | 25 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
-| 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | Pending |
+| 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
 | 27 | A blocked site shows the browser's own error page (F-21) | **P1** | Pending |
 | 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | Pending |
 
@@ -64,7 +64,9 @@ it is corrected against `git log` whenever an entry is added.)*
 | `f2f0956` | The block the user configured is the block that starts (entries 5, 13) |
 | `fde2973` | Locks that promised an exit now have one (entries 8, 9, 12) |
 | `1a63581` | The emergency ration is enforced by the type, and the docs name the real config (entries 7, 10, 11) |
-| *(this commit)* | Windows can start a block at last (entries 6, 14, 15, 16, 17) |
+| `668c6df` | Windows can start a block at last (entries 6, 14, 15, 16, 17) |
+| `44b3c63` | An edit to the config reaches the service that enforces it (entry 26) |
+| *(this commit)* | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
 
 ### A note on the Android verification environment
 
@@ -898,3 +900,108 @@ concluded the button was broken. The tray has always handled this case correctly
 `include_str!`s it. **Not covered by an executing test** — these are DOM handlers, and the honest
 statement is that the reasoning is checked and the behaviour is not. What *is* pinned is the wire shape
 (entry 6's contract test) and the strength vocabulary.
+
+---
+
+## 26. An edit to the config never reached the service that enforces it
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-23 (P1).
+
+**What was wrong.** The service reads its config at startup, or on `Request::Reload`. Nothing sent
+`Reload` except a user typing the verb by hand, and no edit command did:
+
+```
+$ git grep -n "Request::Reload" -- crates/
+crates/curfew-svc/src/main.rs:102   ← the verb, dispatched from argv
+crates/curfew-win/src/tick.rs:...   ← the handler
+```
+
+So `curfew add-window …` printed **"Added"**, the window read the same file and showed the new window,
+and the running service kept enforcing the old plan — while the Plan page said *"This is what the
+service is enforcing"*. That is the worst shape this failure can take: every surface the user can see
+agrees the change landed, and the one that blocks never heard about it. `add-source` even printed
+*"The service picks it up on its next reload"*, telling the user to do something they could not
+usefully do.
+
+**What was changed.**
+
+- `curfew_cli::writes_config(command)` separates the two reading verbs (`schedules`, `blocks`) from the
+  seven that write. `CONFIG_ARG` names where every writing verb takes its path.
+- The **dispatcher** in `curfew-svc/src/main.rs` follows any successful write with a best-effort
+  reload. It lives there rather than in each verb because every config verb goes through one place, so
+  a verb added later cannot forget — the same reasoning as `begin(id)` in entry 5.
+- Deliberately quiet. A machine with no service is not an error case: someone preparing a config to
+  copy elsewhere, or running `curfew check` on Linux, should not be told off. The one case worth a
+  sentence is a write to the file the service reads when nothing answered, because *there* the user is
+  entitled to think it is already live.
+- `add-source`'s line is corrected. It is picked up now, and telling someone to do something that has
+  already happened is how they learn to distrust the output.
+
+**Why `same_file` canonicalizes.** Deciding "is this the config the service reads" by comparing strings
+is wrong in the case that actually happens: `curfew add-window curfew.toml …` run from
+`%ProgramData%\Curfew`, or a path containing `..`, both name the service's own config. So canonicalize
+first, and fall back to a literal comparison because the file may not exist yet — and where neither
+resolves, answer "not the same", because a missing sentence is a smaller error than telling someone
+their edits are live when they are not.
+
+**Verification.** 5 new tests: the read/write split in both directions (a reading verb that owed a
+reload would restart enforcement's view for no reason; a writing verb missing from the list *is* the
+bug), that every writing verb still takes its config at index 1, and `same_file` across the same path,
+a different path, and the same file reached by two spellings plus a path that does not exist.
+`cargo test --workspace`: 829 passed.
+
+---
+
+## 24. The control channel read without a limit and served one client at a time
+
+**Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P1-1. **Fixed in part** — the part that can be fixed is
+fixed, and the part that cannot is named below rather than left as a surprise.
+
+**What was wrong.** `serve` was one loop over `listener.incoming()` doing three things in sequence:
+
+```rust
+let mut line = String::new();
+if reader.read_line(&mut line).is_err() { continue; }
+```
+
+1. **`read_line` into an unbounded `String`.** The service runs as SYSTEM and the client does not have
+   to be privileged — `PIPE_SDDL` deliberately admits `BUILTIN\Interactive Users`. A client sending
+   megabytes with no newline had the service allocate all of it.
+2. **A single connection slot for the whole machine.** One connection at a time meant a client that
+   connected and never sent a newline held the channel for ever. The tray, the window, the command line
+   and every browser host went unanswered, and nothing made the bad connection go away.
+
+The second is the serious one, and the review is right about what it costs: **`curfew release` is the
+24-hour last-resort exit that §11 of the architecture calls the thing separating a commitment device
+from a trap, and it is issued over this same channel.** Wedging the pipe did not merely blind the
+window — it removed the user's documented way out.
+
+**What was changed.**
+
+- `read_request` is now a `fill_buf`/`consume` loop capped at `MAX_REQUEST` (64 KiB). Nothing allocates
+  more than the cap in total, and a line that reaches the cap comes back **truncated**, which fails to
+  parse, which is answered with an error — so the cap refuses rather than merely shrinking the attack,
+  and no separate length check is needed.
+- **One thread per connection**, with `MAX_CONNECTIONS = 32` bounding how many the service will hold.
+  The accept loop is single-threaded, so the load-then-add count is exact rather than racy.
+- The per-connection work moved into `answer_one`, and the slot is released whether or not it returns,
+  so a panic in a handler cannot leak a slot for ever.
+
+**The residual, stated plainly.** A wedged client still occupies *its own* thread, because a read
+deadline cannot be set on these streams: `interprocess`'s Windows named-pipe stream returns
+`Unsupported` for `set_read_timeout`. Bounding the count is what removes the total-wedge property — the
+accept loop and every other slot keep working, so the escape hatch stays reachable — but a client that
+opens 32 connections and sits on them can still exhaust the cap. A supervisor that closed the stream
+from another thread would need `CancelIoEx` on a handle this crate does not expose. This is recorded in
+the function's own doc comment as well, so the next person meets it before writing the fix that does
+not compile.
+
+**Why the read cap rather than a timeout.** The obvious fix — `set_read_timeout` — is the one that does
+not work here, and the review warned about exactly that. The cap is provable on a byte slice, needs no
+platform support, and closes the unbounded-allocation half outright.
+
+**Verification.** 4 tests, all on `read_request` as a pure function over `BufRead` so no socket is
+needed: a whole line; a line truncated by EOF; **an oversized request bounded at exactly the cap and
+then failing to parse** (the assertion cannot hold under an unbounded read, so it is not vacuous); and
+a line split one byte at a time across buffers, with a *second* request read afterwards to prove the
+bounded read does not eat the rest of the stream. `cargo test -p curfew-svc`: 26 passed.

@@ -12,6 +12,7 @@ use interprocess::local_socket::traits::ListenerExt as _;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -314,33 +315,119 @@ fn control_listener() -> std::io::Result<interprocess::local_socket::Listener> {
     ListenerOptions::new().name(name).create_sync()
 }
 
+/// The largest request the service will read, in bytes.
+///
+/// A request is one line of JSON naming a session id and a handful of fields; a generous page is
+/// plenty. The cap exists because `read_line` into an unbounded `String` is a SYSTEM process
+/// allocating whatever a client tells it to, and the client does not have to be privileged.
+pub const MAX_REQUEST: u64 = 64 * 1024;
+
+/// How many control connections may be in flight at once.
+///
+/// The legitimate clients are the tray, the window, the command line and one native-messaging host
+/// per browser, so this is far above anything real and far below anything that would matter. Its job
+/// is to bound how many threads a hostile client can make the service hold.
+const MAX_CONNECTIONS: usize = 32;
+
+/// Read one request line, stopping at [`MAX_REQUEST`].
+///
+/// Split out from the socket so it can be tested on a byte slice: the property that matters — an
+/// oversized request is *truncated and refused*, never allocated — is about this function and not
+/// about the transport.
+///
+/// Written as a `fill_buf`/`consume` loop rather than `read_line`, because `read_line` into a `String`
+/// grows without limit and this runs as SYSTEM. Nothing here allocates more than the cap in total,
+/// and a line that reaches the cap is returned truncated — which fails to parse, which is answered
+/// with an error, which is the right outcome and needs no separate length check.
+fn read_request(reader: &mut impl BufRead) -> std::io::Result<String> {
+    const CAP: usize = MAX_REQUEST as usize;
+    let mut bytes: Vec<u8> = Vec::new();
+    loop {
+        let room = CAP - bytes.len();
+        if room == 0 {
+            break;
+        }
+        // The borrow of the buffer has to end before `consume`, so the useful parts are copied out
+        // first. One bounded copy per buffer refill, against an unbounded allocation.
+        let (chunk, consumed, done) = {
+            let available = reader.fill_buf()?;
+            if available.is_empty() {
+                break; // the client closed without finishing a line
+            }
+            let window = &available[..available.len().min(room)];
+            match window.iter().position(|b| *b == b'\n') {
+                Some(at) => (window[..=at].to_vec(), at + 1, true),
+                None => (window.to_vec(), window.len(), window.len() == room),
+            }
+        };
+        bytes.extend_from_slice(&chunk);
+        reader.consume(consumed);
+        if done {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Serve control messages until the process ends. One connection, one request, one line back.
+///
+/// **One thread per connection**, and that is a correctness fix rather than a convenience. This used
+/// to be a single-threaded loop, so the channel had one slot for every client on the machine and a
+/// client that connected and never sent a newline held it for ever: the tray, the window, the command
+/// line and every browser host all went unanswered until that connection went away, and nothing made
+/// it go away. The last-resort exit — `curfew release`, the 24-hour delayed release §11 of the
+/// architecture calls the thing that separates a commitment device from a trap — is issued over this
+/// same channel, so wedging it locked the user out of their own way out.
+///
+/// **What this does not fix, and why.** A wedged client still occupies its own thread, because a
+/// read deadline cannot be set on these streams: `interprocess`'s Windows named-pipe stream returns
+/// `Unsupported` for `set_read_timeout`. Bounding the *count* is what removes the total-wedge
+/// property — the accept loop and every other slot keep working — and a supervisor that closed the
+/// stream from another thread would need `CancelIoEx` on a handle this crate does not expose.
+/// Recorded here rather than discovered later.
 fn serve(enforcer: Arc<Mutex<Enforcer>>) -> std::io::Result<()> {
     let listener = control_listener()?;
+    let live = Arc::new(AtomicUsize::new(0));
     for connection in listener.incoming() {
         let Ok(stream) = connection else { continue };
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
-        if reader.read_line(&mut line).is_err() {
+        // The accept loop is one thread, so load-then-add is exact here: nothing else increments.
+        if live.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+            // Dropping the stream closes it. An answer would be kinder, but a client that has been
+            // refused for queueing too many connections is not one this service owes a sentence to.
             continue;
         }
-        let response = match parse_request(&line) {
-            Ok(request) => {
-                let mut guard = enforcer.lock().expect("enforcer");
-                // Trusted time, not the wall clock. `can_release` grants a release as soon as
-                // `is_expired(now)` holds, so answering `End` with a wall clock the user has wound
-                // forward would end a timer lock just as surely as claiming the timer had run out —
-                // the same bypass through a different door.
-                let now = guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds());
-                guard.handle(now, request)
-            }
-            Err(detail) => Response::Error { detail },
-        };
-        let mut stream = reader.into_inner();
-        let _ = stream.write_all(encode(&response).as_bytes());
-        let _ = stream.flush();
+        live.fetch_add(1, Ordering::SeqCst);
+        let served = Arc::clone(&enforcer);
+        let held = Arc::clone(&live);
+        std::thread::spawn(move || {
+            answer_one(stream, &served);
+            // Released whatever happened, so a panic in the handler cannot leak a slot for ever.
+            held.fetch_sub(1, Ordering::SeqCst);
+        });
     }
     Ok(())
+}
+
+/// Read one request from one connection and write one reply. Never panics out: the caller's slot
+/// count depends on this returning.
+fn answer_one(stream: interprocess::local_socket::Stream, enforcer: &Mutex<Enforcer>) {
+    let mut reader = BufReader::new(stream);
+    let Ok(line) = read_request(&mut reader) else { return };
+    let response = match parse_request(&line) {
+        Ok(request) => {
+            let mut guard = enforcer.lock().expect("enforcer");
+            // Trusted time, not the wall clock. `can_release` grants a release as soon as
+            // `is_expired(now)` holds, so answering `End` with a wall clock the user has wound
+            // forward would end a timer lock just as surely as claiming the timer had run out — the
+            // same bypass through a different door.
+            let now = guard.observe_clock(wall_now(), curfew_win::windows::uptime_seconds());
+            guard.handle(now, request)
+        }
+        Err(detail) => Response::Error { detail },
+    };
+    let mut stream = reader.into_inner();
+    let _ = stream.write_all(encode(&response).as_bytes());
+    let _ = stream.flush();
 }
 
 /// Run the loop until `stop` says otherwise. `stop` is how the service control manager asks us to
@@ -529,6 +616,82 @@ pub fn run(
     let guard = enforcer.lock().expect("enforcer");
     if guard.sessions.running.is_empty() {
         let _ = hosts::clear(&guard.hosts_path);
+    }
+}
+
+#[cfg(test)]
+mod read_request_tests {
+    use super::{read_request, MAX_REQUEST};
+
+    /// The ordinary case, and the frame delimiter is part of the line the parser gets.
+    #[test]
+    fn one_line_is_read_whole() {
+        let mut input = &b"{\"request\":\"status\"}\n"[..];
+        assert_eq!(read_request(&mut input).unwrap(), "{\"request\":\"status\"}\n");
+    }
+
+    /// A client that closes mid-line is answered with what it sent. It will fail to parse, and that
+    /// is the correct outcome — the alternative is reading for ever.
+    #[test]
+    fn a_truncated_line_is_returned_as_what_arrived() {
+        let mut input = &b"{\"request\":\"sta"[..];
+        assert_eq!(read_request(&mut input).unwrap(), "{\"request\":\"sta");
+    }
+
+    /// The property the cap exists for: a request larger than the cap is **bounded**, not allocated.
+    ///
+    /// This is the DoS the unwritten `read_line` allowed — a client with no privileges making a
+    /// SYSTEM process allocate whatever it was told to. The read stops at the cap, so what comes back
+    /// is a truncated line that cannot parse, and the service answers an error instead of the machine
+    /// running out of memory.
+    #[test]
+    fn an_oversized_request_is_truncated_rather_than_allocated() {
+        let huge = format!("{{\"request\":\"{}\"}}\n", "a".repeat(MAX_REQUEST as usize * 2));
+        let mut input = huge.as_bytes();
+        let read = read_request(&mut input).unwrap();
+        assert_eq!(
+            read.len() as u64,
+            MAX_REQUEST,
+            "the read was not bounded by the cap, so the service allocated whatever it was sent"
+        );
+        // And a truncated request is not a request, which is what makes the cap safe rather than
+        // merely smaller.
+        assert!(
+            curfew_win::ipc::parse_request(&read).is_err(),
+            "an oversized request still parsed, so the cap does not refuse anything"
+        );
+    }
+
+    /// A line that arrives split across several buffers is reassembled, because a socket has no
+    /// obligation to deliver a request in one piece.
+    #[test]
+    fn a_line_split_across_reads_is_reassembled() {
+        // A `BufRead` that hands out one byte at a time, which is the worst a socket may do.
+        struct Dribble<'a>(&'a [u8]);
+        impl std::io::Read for Dribble<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.is_empty() || buf.is_empty() {
+                    return Ok(0);
+                }
+                buf[0] = self.0[0];
+                self.0 = &self.0[1..];
+                Ok(1)
+            }
+        }
+        impl std::io::BufRead for Dribble<'_> {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                Ok(self.0)
+            }
+            fn consume(&mut self, amt: usize) {
+                self.0 = &self.0[amt.min(self.0.len())..];
+            }
+        }
+
+        let mut reader = Dribble(b"{\"request\":\"status\"}\n{\"request\":\"status\"}\n");
+        assert_eq!(read_request(&mut reader).unwrap(), "{\"request\":\"status\"}\n");
+        // The *second* request is still there and still whole: a bounded read must not eat the rest
+        // of the stream, or a pipelined client would lose every message after the first.
+        assert_eq!(read_request(&mut reader).unwrap(), "{\"request\":\"status\"}\n");
     }
 }
 
