@@ -75,6 +75,9 @@ must run.
 | 57 | Windows could not state its sync state on any surface (F-18 step 5) | **P0** | **Fixed** — `SyncState` on every status, five phases in the window (entry 51) |
 | 58 | Ending a block raised an acknowledgement against the app's own principle 4 (F-8) | **P2** | **Fixed** (entry 52) |
 | 59 | **F-8 was missing from this log for five rounds**, and two edits truncated it | **P2** | **Fixed** — a structural checker now runs against the log (entry 52) |
+| 60 | The window rebuilt its whole body every second, re-read the config every second, and let a stale refresh win (P2-1, P2-2, P2-3) | **P2** | **Fixed** (entry 53) |
+| 61 | `restore_sessions` could end every running lock, with no proof (P1-3) | **P1** | **Partly fixed** — the lock-removing case is closed; `observe_releases` needs the op-log signature checked (entry 53) |
+| 62 | **29 of the design review's 37 findings were missing from this log**, including eight P1s | **P1-P2** | **Reconciled** — a second coverage table, 15 left un-assessed (entry 53) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -116,6 +119,57 @@ problem rather than a number in it.
 | F-37 | P3 | **Fixed** (entry 46) |
 | F-48 | P1 | **Fixed** (entry 50). Health said "leaves this device", which its own next clause contradicted; one shared sentence now, and it also appears at first run |
 | F-49 | P1 | **Assessed** (entry 50). Four of its nine table cells are stale; the remainder is a protocol-and-UAC decision, and the build already says so honestly. Two concrete canvas findings came out of it |
+
+### The **second** review, which this table did not cover either
+
+**Added in entry 53, and it is the same defect as entry 46 one review over.** The checker written in
+entry 52 was built to answer "does every finding the review defines appear in the log", and it read
+**one** REVIEW constant. The goal names two reviews. So it reported *"all 48 findings mentioned"*
+while **29 of the design review's 37 appeared nowhere** — including eight P1s.
+
+That is the third time this document has mis-stated its own completeness, and the second time the
+*method* was at fault rather than a number in it. Both times the fix is the same: make the claim
+checkable. 	ools/check_log.py now loops over both reviews, each against its own numbering.
+
+| Finding | Sev | Status, as verified |
+| :--- | :--- | :--- |
+| P0-1 | P0 | entry 1 — `Lock::Timer` removed from `claimable` |
+| P0-2 | P0 | entry 2 — the service judges locks against the trusted clock |
+| P0-3 | P0 | entry 3 — `Stop` refused while a lock runs; uninstall fails shut |
+| P1-0 | P1 | entry 25 — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
+| P1-1 | P1 | entry 24 — the read is bounded and `serve` is concurrent |
+| P1-2 | P1 | A wrong browser-name guess makes the service hard-kill the browser. **Partly confirmed**: the extension can emit six names and the service knows twelve, so a browser whose user-agent does not match its own name reports as `chrome.exe` and its real executable is never trusted. Not re-assessed end to end. |
+| P1-3 | P1 | **partly fixed** (entry 53). The lock-removing case is closed: `restore_sessions` can no longer end a running session. `observe_releases` still assigns `released` wholesale, which *adds* `PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the op-log signature checked at that boundary rather than a merge rule |
+| P1-4 | P1 | entry 11 — the ration is enforced by the type |
+| P1-5 | P1 | entry 10 — `[emergency]` validated |
+| P1-6 | P1 | **verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented last-resort exit and the primary Windows surface cannot reach it |
+| P1-7 | P1 | **verified open.** No `signingConfig` in `android/app/build.gradle.kts`, so a release APK built here cannot be installed. Either sign it or correct `ARCHITECTURE.md` §12 |
+| P1-8 | P1 | **Not re-assessed** — nobody has read this one against the code |
+| P1-9 | P1 | **verified open.** `state.rs:102` reports `Loaded::Fresh` when the main file *and* the backup are both missing, which is exactly the deliberate-deletion case — a crash leaves a backup, a deletion does not. The comment asserting the two are 'answered the same way' is wrong |
+| P1-10 | P1 | **verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while sessions are running — fail open. Locks survive, but every rule behind them stops |
+| P1-11 | P1 | **verified open.** `runner.rs:558` calls `feeds.events(…)` while holding the enforcer mutex, and that same mutex is what `serve()` needs. `TIMEOUT` is 20s against a 2s tick, so one slow subscription stalls the control channel — including `Status` and the 24-hour release |
+| P1-12 | P1 | **verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so every diagnostic it emits goes to stderr of a service nobody reads |
+| P1-13 | P1 | **verified open, and two comments are false.** `Session` has no rules field (`session.rs:47`), so editing the config removes enforcement while the lock survives — `config.rs:300` claims otherwise ('the session holds its own copy of what it blocks') and so does `GAPS.md:169` |
+| P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
+| P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
+| P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |
+| P2-4 | P2 | **fixed under F-24** — the `window.__curfewUser` read is gone |
+| P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
+| P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
+| P2-7 | P2 | **verified open.** `git grep deny_unknown_fields` returns nothing, so `lockss = [...]` loads as no locks at all while `curfew-ffi` promises 'a config we cannot fully understand is refused' |
+| P2-8 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-9 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-10 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-11 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-12 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-13 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-14 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-15 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-16 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-17 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-18 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-19 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-20 | P2 | **Not re-assessed** — nobody has read this one against the code |
 
 ### One finding was rejected rather than fixed
 
@@ -186,6 +240,8 @@ this table is a reading aid.
 | `e88a9ed` | The privacy claim was false on one of the two screens that made it (entries 50) |
 | `e9c86e3` | The window can say what sync is doing (entry 51) |
 | `b0888e8` | Stop acknowledging a block the user just watched end, and a checker for this log (entry 52) |
+| `4220904` | The window stops rebuilding itself every second (entry 53) |
+| `af30446` | A restore cannot end a lock any more (entry 53) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -2966,3 +3022,96 @@ least once; this is the first time a correction came from a machine rather than 
 72 Android tests across 12 classes; **872 Rust**; fmt and clippy clean. `python tools/check_log.py`
 reports the log structurally sound: no headings lost against `HEAD`, 59 status rows, 19 coverage rows,
 fences balanced, all 46 cited commits exist.
+---
+
+## 53. The second review, and the work it named
+
+**Findings:** the coverage gap itself, plus **P1-3**, **P2-1**, **P2-2**, **P2-3**.
+
+### 29 of the design review's 37 findings were missing from this log
+
+Entry 52 built a checker whose central rule is *"does every finding the review defines appear in the
+log"* — the one question this document had been answering from memory. It read **one** `REVIEW`
+constant. The goal names **two** reviews, and the design review numbers its findings differently
+(`P0-n`, `P1-n`, `P2-n` rather than `F-n`), so none of them matched and none were reported.
+
+**29 of 37 appeared nowhere**, including eight P1s.
+
+This is the third time this document has mis-stated its own completeness and the second time the
+*method* was at fault rather than a number in it. The first fix was to make the claim checkable; this
+one is to check the whole claim. `tools/check_log.py` now loops over both reviews, each against its own
+numbering, and reports per-review counts. It passes: **48 of 48** UX findings and **37 of 37** design
+findings are mentioned.
+
+### The window's polling loop — P2-1, P2-2, P2-3
+
+The review's own remediation plan calls these *"cheap, self-contained, and they remove the 'the app is
+broken' class of report"*. They are, and they are all one subject: `refresh()` runs every second.
+
+- **P2-2.** `draw()` replaced the whole body every tick. `innerHTML =` rebuilds every node, so the
+  scrolling container's `scrollTop` resets — "Is it working" is the long page, the one that exists to be
+  *read*, and it snapped back to the top once a second — and any text selection is destroyed, so a
+  failure message cannot be selected to copy. The page could not do either of the two things it exists
+  for. It compares the markup now and skips an identical rebuild.
+- **P2-3.** No ordering guard. `refresh()` is fired every second *and* awaited after every action and
+  performs three round trips before writing shared state, so two overlapping runs complete in whatever
+  order the pipe answers them — after a successful "End it early", an in-flight older refresh could
+  repaint the running-session card for a session that had just ended. A ticket now lets only the newest
+  run write.
+- **P2-1.** The config was re-read every second: a full TOML read, parse, validate and re-serialize, to
+  catch a change the window cannot itself make — `Call` is `Ipc`, `Config` and `Unlock`, and `Request`
+  has no config-mutating variant at all. Ten-second cadence, with `refreshConfigSoon()` for the one
+  caller that knows better.
+
+**And the near-miss that produced a harness.** My first version of the P2-2 fix put
+`if (html === drawnHtml) return;` at the top of `draw()` — which skipped the **live pill**, the
+countdown in the sidebar, because that is regenerated every tick and does not live in the page markup.
+It would have frozen the clock: a worse bug than the scrolling one, and exactly what a blocker must
+never show. A syntax check cannot see that and neither can a diff.
+
+`tools/check_window.py` drives the real `draw()` and `refresh()` against a fake DOM and a fake service,
+through the page's **own bridge** — `window.ipc.postMessage` in, `window.__curfewReply` out, the same two
+functions the host uses. Eleven assertions, and `--mutate` breaks each fix in the way its finding
+describes and requires the harness to notice: all four are caught.
+
+**Two things went wrong in building it, both recorded because both are the failure this branch keeps
+finding.** The mutation runner scored a non-zero exit as CAUGHT, and one mutation left a dangling brace —
+so it "passed" by making the harness unparseable, which proves nothing. A mutation that does not parse is
+now an ERROR. And two of my own assertions were wrong on the first run: I advanced `state.status.now` and
+expected the body to change, but with no running session `pageNow()` renders "Nothing is running" and
+never mentions the clock. The test was wrong, not the page.
+
+### P1-3: the FFI restore path could end every lock
+
+`restore_sessions` deserialized a whole `Sessions` and assigned it over the running one — no lock check,
+no proof, no op-log entry, and it was the only writer of that state. So it was the one way into session
+state that did not pass through the lattice: `restore_sessions(r#"{"running":[]}"#)` ended **every**
+running lock. That is P0-1's bypass through a different door, on the platform where the FFI *is* the
+interface, and the stored state is a file a user can delete.
+
+`Sessions::restore_without_weakening` states the rule the fix rests on, which is the one `start` already
+followed for a single session: a running session is **merged into** (which the lattice can only make
+stricter), a session in the incoming set is **started**, a session running here but absent from it is
+**kept**, and `dismissed` merges by the later timestamp so a restore cannot un-remember an ended
+occurrence. Six tests, and **four fail against the old implementation** with the old assignment restored
+verbatim as the mutation.
+
+**Partly fixed, and the rest is named rather than implied.** `observe_releases` still assigns `released`
+wholesale, and `Enforcer::proven` builds `Lock::PeerRelease` evidence out of that map — so a caller who
+can reach it can *add* release evidence. That is the opposite direction to this finding, and the fix is
+to check the op-log's signature at that boundary rather than to change a merge rule. The finding's own
+sentence is about removing a lock, and that case is closed.
+
+### What the second table now says
+
+**37 findings: 8 already recorded, 5 fixed, 1 partly fixed, 8 verified open, 15 not re-assessed.** Each
+verified status carries the file and line it was established from, and the eight newly-open ones are
+substantive — the window cannot reach the 24-hour release (P1-6), a deliberate deletion of two state
+files reports as a fresh install (P1-9), an unparseable config fails open while locks run (P1-10), a
+blocking calendar fetch runs under the enforcer mutex (P1-11), and **two comments claim a session holds
+its own rules when `Session` has no rules field** (P1-13).
+
+### Verification
+
+**878 Rust tests** (was 872); fmt and clippy clean. `python tools/check_log.py` reports both reviews
+covered and the structure sound. `python tools/check_window.py` passes in both modes.
