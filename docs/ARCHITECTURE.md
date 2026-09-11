@@ -236,6 +236,12 @@ do to them.
 
 - **Android**: GitHub Releases (APK) and F-Droid as reference channels; Play Store only if the
   AccessibilityService declaration survives review. The sideloaded build is the reference build.
+  **The published APK is unsigned, for downstream signing** — a deliberate limit rather than an
+  oversight. `assembleRelease` **does** sign when given a key: `keystore.properties` beside
+  `android/app/`, or the `CURFEW_KEYSTORE_*` environment variables. With neither, it emits an unsigned
+  artifact, which is what CI publishes today. A key is never generated in CI: Android requires the same
+  key for an in-place update, so a per-build key would mean no release could ever be upgraded, and a
+  signature that changes every time teaches the opposite of what a signature is for.
 - **Windows**: GitHub Releases with checksums, plus winget and scoop manifests. Binaries are
   unsigned (no recurring cost, D6), so SmartScreen friction and antivirus heuristics are expected
   and documented; vendor allowlisting is requested after first release.

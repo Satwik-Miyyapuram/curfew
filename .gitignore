@@ -66,3 +66,10 @@ desktop.ini
 # not a build input, not referenced anywhere in this repository, and not something to commit — but it is
 # 1.3 MB of vendored code, so it is named here rather than left to show up in git status for ever.
 .archify-probe/
+
+# Android signing key material for ssembleRelease. **Never commit these**: a signing key in a public
+# repository is a signing key everyone has, and Android refuses an in-place update signed by a
+# different one. Absent both, the release build is unsigned, which is the published artifact today.
+keystore.properties
+*.jks
+*.keystore
