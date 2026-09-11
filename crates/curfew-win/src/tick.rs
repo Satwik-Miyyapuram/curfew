@@ -505,6 +505,15 @@ impl Enforcer {
                 unwatched: self.last.processes.unwatched.clone(),
                 delayed: self.last.processes.delayed.clone(),
                 freeze: self.freeze.clone(),
+                // Rebuilt from the config on every status rather than cached: a profile renamed by an
+                // edit is a name the very next status should already be using, and this is a handful
+                // of short strings once a second.
+                profile_names: self
+                    .config
+                    .profiles
+                    .iter()
+                    .map(|p| (p.id.clone(), p.name.clone()))
+                    .collect(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
                 clock_warning: self.clock_warning(),
@@ -725,7 +734,16 @@ impl Enforcer {
                 match curfew_core::decide(now, &state, &obs, &self.config) {
                     curfew_core::Decision::Block { reason } => Response::Verdict {
                         blocked: true,
-                        reason: Some(crate::extension::explain(&reason)),
+                        // Names resolved from this machine's config, so the block page says
+                        // "Deep work" rather than the slug `deep-work`.
+                        reason: Some(crate::extension::explain_named(&reason, &|id| {
+                            self.config
+                                .profiles
+                                .iter()
+                                .find(|p| p.id == id)
+                                .map(|p| p.name.clone())
+                                .unwrap_or_else(|| id.to_string())
+                        })),
                     },
                     // A delay or a mute has no meaning for a page load, and blocking on a decision
                     // the engine did not make is the bug that gets a blocker uninstalled.

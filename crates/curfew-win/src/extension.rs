@@ -222,19 +222,39 @@ pub fn manifest(family: Family, exe: &std::path::Path, id: &str) -> String {
 ///
 /// Written here rather than in the extension so that a page shown by a tampered extension cannot
 /// claim a reason the engine did not give, and so the wording stays the same as the tray's.
+///
+/// `names` resolves a profile id to the name its owner gave it. It is a parameter rather than a
+/// lookup because this module has no config and should not grow one — the service holds the names on
+/// the status it already sends, and the caller passes them in. The block page is shown *inside a
+/// browser*, where a slug like `deep-work` looks like a leak from somebody's config file rather than
+/// the name the user chose.
 pub fn explain(reason: &curfew_core::BlockReason) -> String {
+    explain_named(reason, &|id| id.to_string())
+}
+
+/// [`explain`], with profile ids resolved to names.
+pub fn explain_named(reason: &curfew_core::BlockReason, names: &dyn Fn(&str) -> String) -> String {
     use curfew_core::BlockReason::*;
+    // The id is passed through `names` at every site, so a new `BlockReason` that carries a profile
+    // cannot be added without deciding what to call it.
+    let p = |id: &str| names(id);
     match reason {
-        Blocked { profile } => format!("Blocked by your {profile} profile."),
+        Blocked { profile } => format!("Blocked by your {} profile.", p(profile)),
         NotAllowlisted { profile } => {
-            format!("Your {profile} profile allows only a few sites, and this is not one of them.")
+            format!(
+                "Your {} profile allows only a few sites, and this is not one of them.",
+                p(profile)
+            )
         }
         BudgetExhausted { profile, seconds } => {
             let minutes = seconds / 60;
-            format!("You have used the {minutes} minutes this site gets under {profile}.")
+            format!("You have used the {minutes} minutes this site gets under {}.", p(profile))
         }
         LaunchLimitReached { profile, count } => {
-            format!("You have opened this {count} times today, which is what {profile} allows.")
+            format!(
+                "You have opened this {count} times today, which is what {} allows.",
+                p(profile)
+            )
         }
     }
 }

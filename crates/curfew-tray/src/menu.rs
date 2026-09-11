@@ -104,14 +104,14 @@ pub fn menu(status: &Status) -> Vec<Item> {
             curfew_core::frozen::Due::AwaitingConfirmation => {
                 items.push(Item::Note(format!(
                     "Another device asked to freeze {} — nothing has happened yet",
-                    countdown.profile
+                    status.name_of(&countdown.profile)
                 )));
                 items
                     .push(Item::ConfirmFreeze { label: "Yes, freeze this device too".to_string() });
             }
             _ => items.push(Item::Note(format!(
                 "{} freezes everything in {} s — save your work",
-                countdown.profile,
+                status.name_of(&countdown.profile),
                 curfew_core::frozen::remaining(countdown, status.now)
             ))),
         }
@@ -126,7 +126,7 @@ pub fn menu(status: &Status) -> Vec<Item> {
     for session in &status.running {
         items.push(Item::Note(format!(
             "{} — {}",
-            session.profile,
+            status.name_of(&session.profile),
             remaining(status.now, session.lock.ends_at)
         )));
 
@@ -162,7 +162,10 @@ pub fn menu(status: &Status) -> Vec<Item> {
             } else {
                 items.push(Item::PeerRelease {
                     id: session.id.clone(),
-                    label: format!("Release {} — this device is the one it asks", session.profile),
+                    label: format!(
+                        "Release {} — this device is the one it asks",
+                        status.name_of(&session.profile)
+                    ),
                 });
             }
         }
@@ -172,7 +175,10 @@ pub fn menu(status: &Status) -> Vec<Item> {
         } else if credential {
             items.push(Item::Unlock {
                 id: session.id.clone(),
-                label: format!("End {} with your Windows password", session.profile),
+                label: format!(
+                    "End {} with your Windows password",
+                    status.name_of(&session.profile)
+                ),
             });
         } else if confirm {
             // Offered with a Yes/No in front of it, which is what "ask me first" asked for. The
@@ -181,7 +187,10 @@ pub fn menu(status: &Status) -> Vec<Item> {
             items.push(Item::End {
                 id: session.id.clone(),
                 confirm: true,
-                label: format!("End {} — it asks to be confirmed", session.profile),
+                label: format!(
+                    "End {} — it asks to be confirmed",
+                    status.name_of(&session.profile)
+                ),
             });
         } else if session.lock.ends_at.is_some_and(|ends| ends > status.now) {
             // A timer that has not run out is a lock; the service will refuse, and it is honest to
@@ -191,7 +200,7 @@ pub fn menu(status: &Status) -> Vec<Item> {
             items.push(Item::End {
                 id: session.id.clone(),
                 confirm: false,
-                label: format!("End {}", session.profile),
+                label: format!("End {}", status.name_of(&session.profile)),
             });
         }
 
@@ -203,7 +212,8 @@ pub fn menu(status: &Status) -> Vec<Item> {
                 id: session.id.clone(),
                 label: format!(
                     "Use an emergency pass on {} ({} left)",
-                    session.profile, status.passes_left
+                    status.name_of(&session.profile),
+                    status.passes_left
                 ),
             });
         }
@@ -350,6 +360,135 @@ mod tests {
 
     fn status(running: Vec<Session>) -> Status {
         Status { now: NOW, running, ..Default::default() }
+    }
+
+    /// The same, with the profile's id and name deliberately different.
+    ///
+    /// They differ in every test below on purpose: the starter config's id is `distractions`, which
+    /// reads enough like a word that printing the id instead of the name went unnoticed for the whole
+    /// life of this menu. A fixture where the two are the same string cannot catch that.
+    fn named_status(running: Vec<Session>) -> Status {
+        let mut status = status(running);
+        status.profile_names.insert("deep-work".to_string(), "Deep work".to_string());
+        status
+    }
+
+    /// Every label this menu can print, for a profile whose id and name differ.
+    ///
+    /// Returns the strings, so a caller can assert over all of them rather than over the two branches
+    /// its own fixture happens to reach.
+    fn every_label_with_a_name(status: &Status) -> Vec<String> {
+        menu(status)
+            .iter()
+            .filter_map(|i| match i {
+                Item::Note(text) => Some(text.clone()),
+                Item::Unlock { label, .. }
+                | Item::End { label, .. }
+                | Item::Emergency { label, .. }
+                | Item::PeerRelease { label, .. }
+                | Item::Release { label, .. }
+                | Item::CancelFreeze { label }
+                | Item::ConfirmFreeze { label } => Some(label.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every place this menu prints a profile, it prints the *name*.
+    ///
+    /// `Session.profile` is the id from the config, so the menu used to say "End deep-work" while the
+    /// window said "End Deep work" — the same session described two ways, on two surfaces the user can
+    /// see at once.
+    ///
+    /// **Every branch, deliberately.** The first version of this test used one fixture — a credential
+    /// lock, which reaches `Item::Unlock` and nothing else — and a mutation check proved it vacuous:
+    /// reverting the *`End`* label to the raw id still passed, because that fixture never builds an
+    /// `End` item. So the shapes below are chosen to reach each label the menu can produce, and each
+    /// is asserted independently.
+    #[test]
+    fn the_menu_names_the_profile_rather_than_printing_its_id() {
+        // One shape per branch: unlock, confirm-before-ending, plain end, the two notes, the pass,
+        // and a peer release this device is named for.
+        let mut releasable =
+            named_status(vec![session([Lock::PeerRelease { device_id: "PHONE7".into() }], None)]);
+        releasable.releasable = vec!["s1".to_string()];
+
+        // The pass is only offered where it is the only way out *and* there is one to spend, so this
+        // is the one fixture that reaches two labels at once.
+        let mut with_a_pass =
+            named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        with_a_pass.passes_left = 2;
+
+        let shapes: Vec<(&str, Status)> = vec![
+            ("unlock", named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))])),
+            ("with-a-pass", with_a_pass),
+            ("confirm", named_status(vec![session([Lock::Confirm], Some(NOW + 3600))])),
+            ("end", named_status(vec![session([], None)])),
+            ("timer-not-yet", named_status(vec![session([], Some(NOW + 3600))])),
+            ("no-conditions-but-running", named_status(vec![session([], Some(NOW - 1))])),
+            ("peer-release", releasable),
+        ];
+
+        for (shape, status) in shapes {
+            let labels = every_label_with_a_name(&status);
+            assert!(!labels.is_empty(), "the {shape} fixture produced nothing to check");
+            for label in &labels {
+                assert!(
+                    !label.contains("deep-work"),
+                    "the {shape} branch printed the id where the name belongs: {label:?}"
+                );
+            }
+            assert!(
+                labels.iter().any(|l| l.contains("Deep work")),
+                "the {shape} branch never printed the name: {labels:?}"
+            );
+        }
+    }
+
+    /// The same, for a freeze, whose label is built from the countdown rather than a session.
+    #[test]
+    fn a_freeze_also_names_the_profile() {
+        let mut status = named_status(vec![]);
+        status.freeze = Some(curfew_core::Countdown {
+            profile: "deep-work".into(),
+            seconds: 3600,
+            origin: curfew_core::Origin::Peer,
+            announced_at: NOW,
+            fires_at: NOW + 30,
+            confirmed: false,
+        });
+
+        let labels = every_label_with_a_name(&status);
+        assert!(!labels.is_empty(), "the freeze produced no menu items at all");
+        for label in &labels {
+            assert!(!label.contains("deep-work"), "the freeze printed the id: {label:?}");
+        }
+        assert!(labels.iter().any(|l| l.contains("Deep work")), "{labels:?}");
+    }
+
+    /// And a profile with no name to look up falls back to its id rather than to nothing.
+    ///
+    /// This is the real case, not a hypothetical: a session started from a profile that was then
+    /// deleted keeps running until its own lock lets it go, and by then there is no name to find.
+    /// Printing the id is worse than printing the name and much better than printing an empty string
+    /// or panicking in a UI thread.
+    #[test]
+    fn a_profile_with_no_name_falls_back_to_its_id() {
+        let status = status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        assert_eq!(status.name_of("deep-work"), "deep-work");
+        assert_eq!(status.name_of("anything-at-all"), "anything-at-all");
+
+        let labels: Vec<String> = menu(&status)
+            .iter()
+            .filter_map(|i| match i {
+                Item::Unlock { label, .. } => Some(label.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            labels.iter().any(|l| l.contains("deep-work")),
+            "the id did not survive as the fallback: {labels:?}"
+        );
     }
 
     #[test]

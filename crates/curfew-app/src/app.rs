@@ -219,6 +219,72 @@ pub fn run() {
 mod page_tests {
     use super::{lock_kinds_referenced, PAGE};
 
+    /// The window can be used without a mouse.
+    ///
+    /// Everything on this page used to be a `div` or a `span` with a click handler and nothing else,
+    /// so a keyboard user could not reach the pages that explain what is blocked — but *could* tab to
+    /// "End it early". That is the wrong way round for a program whose whole promise is that the exits
+    /// are deliberate, so these are the three pieces that make the difference, and a refactor that
+    /// drops any of them puts the window back to mouse-only.
+    ///
+    /// The same shape as the Start-button test below: it checks the page still contains the wiring,
+    /// not that the wiring behaves. `node --check` in the review's own steps is what proves it parses;
+    /// nothing on this host can run a browser.
+    #[test]
+    fn the_page_can_be_driven_from_the_keyboard() {
+        assert!(
+            PAGE.contains(r#"document.addEventListener("keydown""#),
+            "the window has no key handler, so nothing on it can be reached without a mouse"
+        );
+        assert!(
+            PAGE.contains("function makeInteractive("),
+            "nothing marks the click targets as focusable, so a keyboard cannot get to them"
+        );
+        assert!(
+            PAGE.contains(r#"if (event.key === "Escape")"#),
+            "a modal that cannot be dismissed from the keyboard is a trap for a keyboard user"
+        );
+        assert!(
+            PAGE.contains(r#"<div class="sheet" role="dialog" aria-modal="true">"#),
+            "the sheet is not announced as a dialog, so a screen reader reads it as more page text"
+        );
+        // The one that is easy to lose in a CSS tidy-up, and the one with no visual symptom: without
+        // it the config path and the command on the Plan page cannot be copied. Anchored to the
+        // selector, because `user-select:text` also appears on the input rule and that one would not
+        // have restored selection over the page.
+        //
+        // Both of these read more specifically than they need to for one reason: a mutation check
+        // showed the loose versions were vacuous. `role="dialog"` also appears in the comment above
+        // the code that sets it, so deleting the real attribute still passed — an assertion short
+        // enough to be prose is an assertion that can match prose.
+        assert!(
+            PAGE.contains(".body,.sheet,.mono,.flush,.card{user-select:text}"),
+            "the body suppresses selection and nothing restores it, so nothing can be copied"
+        );
+    }
+
+    /// A freeze can be called off from the window.
+    ///
+    /// The window used to render "A freeze is counting down" as a pill — no duration, no action —
+    /// while the tray put "Cancel the freeze" first in its own menu. Telling someone their whole
+    /// machine is about to close and offering them nothing is the failure this pins against.
+    #[test]
+    fn the_page_offers_a_way_out_of_a_freeze() {
+        assert!(
+            PAGE.contains(r#"data-act="cancel-freeze""#),
+            "the window shows a countdown with no way to cancel it"
+        );
+        assert!(
+            PAGE.contains(r#"request: "cancel_freeze""#),
+            "the cancel control does not ask the service to cancel anything"
+        );
+        // And the countdown says how long, which the pill never did.
+        assert!(
+            PAGE.contains("function freezeSentence("),
+            "the freeze is described by a bare pill again, with no time on it"
+        );
+    }
+
     /// The window is the only way to start a block on Windows, so the affordance is the fix for a
     /// P0 rather than a decoration. This test exists because that was a whole-product bug — the
     /// service had always accepted `Request::Start` and nothing but the command line could send it —

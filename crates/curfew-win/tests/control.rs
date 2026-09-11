@@ -249,6 +249,43 @@ fn the_windows_page_can_start_a_block_over_the_wire() {
     }
 }
 
+/// The rest of the requests the Curfew window sends, in the page's own JSON.
+///
+/// Cancelling a freeze is the one that matters most here: the window used to *mention* a freeze and
+/// offer no way out of it, so the button is the whole fix and this pins that the service accepts what
+/// it sends. `cancel_freeze` is also a request with no fields at all, which is the shape most easily
+/// broken by a serde rename and least easily noticed — a button that silently does nothing.
+#[test]
+fn the_windows_page_can_ask_for_everything_else_over_the_wire() {
+    // (the page's literal JSON, what it must parse to)
+    let cases: Vec<(&str, Request)> = vec![
+        (r#"{"request":"cancel_freeze"}"#, Request::CancelFreeze),
+        (r#"{"request":"confirm_freeze"}"#, Request::ConfirmFreeze),
+        (r#"{"request":"reload"}"#, Request::Reload),
+        (r#"{"request":"status"}"#, Request::Status),
+        (
+            r#"{"request":"end","id":"s1","satisfied":[]}"#,
+            Request::End { id: "s1".into(), satisfied: BTreeSet::new() },
+        ),
+        (r#"{"request":"release","id":"s1"}"#, Request::Release { id: "s1".into() }),
+        (r#"{"request":"request_release","id":"s1"}"#, Request::RequestRelease { id: "s1".into() }),
+        (r#"{"request":"emergency","id":"s1"}"#, Request::Emergency { id: "s1".into() }),
+        (
+            r#"{"request":"start","profile":"p","seconds":60,"locks":[]}"#,
+            Request::Start { profile: "p".into(), seconds: 60, locks: vec![] },
+        ),
+    ];
+
+    for (line, expected) in cases {
+        assert_eq!(
+            parse_request(line)
+                .unwrap_or_else(|e| panic!("the page's own request was refused: {e}")),
+            expected,
+            "the page's {line} no longer means what it used to"
+        );
+    }
+}
+
 // --- the state file -----------------------------------------------------------------------------
 
 fn locked_state() -> Persisted {
@@ -550,7 +587,20 @@ fn the_service_answers_a_url_check_and_says_which_rule_did_it() {
     match answer {
         Response::Verdict { blocked, reason } => {
             assert!(blocked);
-            assert!(reason.unwrap().contains("deep-work"));
+            let reason = reason.expect("a blocked verdict must say why");
+            // The *name*, not the id. This assertion used to require `deep-work` — the slug from the
+            // config — which made the test a guard on the bug rather than on the behaviour: the page
+            // shown inside a browser said "Blocked by your deep-work profile." while the tray and the
+            // phone both said "Deep work". `URL_CONFIG` gives the profile `id = "deep-work"` and
+            // `name = "Deep work"` precisely so the two cannot be confused.
+            assert!(
+                reason.contains("Deep work"),
+                "the block page did not use the profile's name: {reason}"
+            );
+            assert!(
+                !reason.contains("deep-work"),
+                "the block page leaked the profile's id: {reason}"
+            );
         }
         other => panic!("expected a verdict, got {other:?}"),
     }

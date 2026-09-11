@@ -192,6 +192,19 @@ pub struct Status {
     /// can be showing a stale "nothing is about to happen" while the machine counts down.
     #[serde(default)]
     pub freeze: Option<curfew_core::Countdown>,
+    /// Profile **ids** mapped to the names their owner gave them.
+    ///
+    /// Carried rather than looked up, because every consumer of this struct that prints a profile has
+    /// the same problem and had all solved it the same wrong way: `Session.profile` is the id, so the
+    /// tray overlay said *"Steam is blocked during distractions."* where the phone says
+    /// *"Distractions"*. The starter config's id happens to read like a word, which is why this went
+    /// unnoticed — with `deep-work` it would have been obvious immediately.
+    ///
+    /// The service already holds the config, so resolving it once here means the tray, the overlay,
+    /// the extension and the command line all get the name without each re-reading a file that only
+    /// the service knows the path of.
+    #[serde(default)]
+    pub profile_names: std::collections::BTreeMap<String, String>,
     /// Why website blocking is not working, if it is not.
     pub hosts_error: Option<String>,
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
@@ -220,6 +233,29 @@ pub struct Status {
     /// release is given once and there is nothing further to press.
     #[serde(default)]
     pub released: Vec<String>,
+}
+
+impl Status {
+    /// What to call a profile in a sentence a person reads.
+    ///
+    /// **Every** surface that prints a profile name goes through this, and that is the point: the
+    /// fallback has to be written once. Falling back to the id is deliberate — a profile deleted while
+    /// a session from it is still running has no name to look up, and showing the id beats showing
+    /// nothing, or panicking in a UI thread.
+    /// The returned reference is either the name from [Self::profile_names] or the `id` handed in, so
+    /// both are tied to the same lifetime — which in practice is always the status itself, since call
+    /// sites pass `&session.profile` from a session inside it.
+    pub fn name_of<'a>(&'a self, id: &'a str) -> &'a str {
+        self.profile_names.get(id).map(String::as_str).unwrap_or(id)
+    }
+
+    /// The name of the profile the user is currently inside, if any.
+    ///
+    /// The overlay, the tooltip and the menu all want "which profile is this about", and they all want
+    /// the first running session's — the one the user is actually in.
+    pub fn running_name(&self) -> Option<&str> {
+        self.running.first().map(|s| self.name_of(&s.profile))
+    }
 }
 
 /// The control channel's name. Namespaced, so on Windows this is a named pipe under

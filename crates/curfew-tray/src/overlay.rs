@@ -58,7 +58,11 @@ pub fn message(closed: &[String], status: &Status) -> String {
         many => format!("{} and {} others", many[0], many.len() - 1),
     };
 
-    let profile = status.running.first().map(|s| s.profile.clone());
+    // The name the user gave the profile, not the slug from the config. `Session.profile` is the id,
+    // so this sentence used to read *"Steam is blocked during distractions."* where the phone says
+    // *"Distractions"* — a starter config whose id happens to look like a word hid it, and a
+    // `deep-work` profile would have made it obvious.
+    let profile = status.running_name().map(str::to_string);
     let mut text = match profile {
         Some(profile) => format!("{what} is blocked during {profile}."),
         // No session and yet something was closed: the pass that closed it has since ended. Saying

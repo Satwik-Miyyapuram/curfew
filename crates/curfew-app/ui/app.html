@@ -13,6 +13,18 @@
 html,body{height:100%}
 body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;
  overflow:hidden;font-size:13px;user-select:none}
+/* Text the user may need to copy is selectable again.
+   `user-select:none` on the body is right for a window whose controls are divs — it stops a click
+   dragging a blue smear across the chrome — but it also stopped anyone copying the one thing this
+   window prints *in order to be copied*: the path of the config the service actually reads, and the
+   command that edits it. Telling a user to run a command they cannot select is not an instruction. */
+.body,.sheet,.mono,.flush,.card{user-select:text}
+/* A focus ring, because the window is now usable from the keyboard and an invisible caret is the
+   same as no keyboard support at all. `:focus-visible` so a mouse click does not leave a ring behind
+   on whatever was pressed last. */
+[data-act]:focus-visible,.nav:focus-visible,[data-tab]:focus-visible,[data-profile]:focus-visible,
+.btn:focus-visible,input:focus-visible,textarea:focus-visible{
+ outline:2px solid var(--acc);outline-offset:2px}
 .main{height:100%;display:flex;overflow:hidden}
 .side{width:212px;flex:none;border-right:1px solid var(--line);padding:14px 10px;display:flex;
  flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
@@ -339,11 +351,40 @@ function blockedSummary() {
         <div class="mono meta">${esc(hhmm(w.start_minute))}&ndash;${esc(hhmm(w.end_minute))}</div></div>`).join("")
         || '<div class="meta">No windows are scheduled.</div>'}
       <div style="height:12px"></div>
-      <div class="strip"><span class="pill">${domains.length} sites blocked</span>
-      ${s.freeze ? '<span class="pill" style="color:var(--live)">A freeze is counting down</span>' : ""}</div>
+      <div class="strip"><span class="pill">${domains.length} sites blocked</span></div>
     </div>`;
-  return `<div style="display:flex;gap:14px;align-items:flex-start">${left}${right}</div>`;
+  // A freeze counting down gets its own card above everything, with the time left and a way out.
+  //
+  // It used to be a pill in the corner reading "A freeze is counting down" — no duration, and no
+  // action. So the window told a user their whole machine was about to close and offered them
+  // nothing, while the tray puts "Cancel the freeze" first in its own menu and the design's
+  // `Overlay.dc.html` shows a Dismiss button and a countdown. Cancelling is free and available right
+  // up to the moment it fires, which is exactly the thing a person in that moment needs to know.
+  const freeze = s.freeze
+    ? `<div class="card" style="border-color:rgba(242,166,90,.5);background:rgba(242,166,90,.08)">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div class="grow">
+            <div class="name" style="font-size:15px;font-weight:650">Everything is about to close</div>
+            <div class="meta wrap" style="margin-top:4px">${esc(freezeSentence(s))}</div>
+          </div>
+          <button class="btn ghost" data-act="cancel-freeze">Cancel the freeze</button>
+        </div>
+      </div>
+      <div style="height:14px"></div>`
+    : "";
+  return `${freeze}<div style="display:flex;gap:14px;align-items:flex-start">${left}${right}</div>`;
 }
+
+/** What the freeze card says. Reads the countdown the service reported; never guesses at it. */
+function freezeSentence(status) {
+  const f = status.freeze;
+  const left = Math.max(0, f.fires_at - status.now);
+  const who = f.origin === "peer" ? " Another of your devices asked for it." : "";
+  const then = f.seconds ? ` Then ${profileName(f.profile)} runs for ${clock(f.seconds)}.` : "";
+  return `In ${clock(left)}, ${profileName(f.profile)} closes every app on this machine.${then}${who} ` +
+    "Cancelling is free, and works until the moment it starts.";
+}
+
 function row(bg, glyph, name, meta) {
   return `<div class="row"><span class="tile" style="background:${bg}">${glyph}</span>
     <div class="grow"><div class="name">${esc(name)}</div><div class="meta">${esc(meta)}</div></div></div>`;
@@ -561,10 +602,14 @@ function pageHealth() {
 // ---- drawing ----------------------------------------------------------------------------------
 function draw() {
   const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, health: pageHealth };
-  document.getElementById("body").innerHTML = (pages[state.page] || pageNow)();
+  const body = document.getElementById("body");
+  body.innerHTML = (pages[state.page] || pageNow)();
+  // After every redraw, because every redraw replaces the nodes that need it.
+  makeInteractive(body);
   for (const nav of document.querySelectorAll(".nav")) {
     nav.classList.toggle("on", nav.dataset.page === state.page);
   }
+  makeInteractive(document.querySelector(".side"));
   const running = state.status?.running || [];
   const pill = document.getElementById("livepill");
   if (running.length) {
@@ -577,7 +622,33 @@ function draw() {
 }
 
 // ---- what the buttons do ----------------------------------------------------------------------
-function sheet(html) { document.getElementById("modal").innerHTML = html ? `<div class="scrim"><div class="sheet">${html}</div></div>` : ""; }
+/**
+ * Put something over the page, or take it away.
+ *
+ * `role="dialog"` and `aria-modal`, because a sheet that is not announced as a dialog is read as
+ * more page text by a screen reader, and a keyboard user has no idea the page behind it has stopped
+ * being the thing that takes input. Focus moves into the sheet for the same reason: otherwise the
+ * next Tab continues through the page *underneath*, so the visible dialog is not the one being typed
+ * into. The focused control is remembered and restored, so closing a sheet does not drop the user
+ * back at the top of the document.
+ */
+let focusBeforeSheet = null;
+function sheet(html) {
+  const modal = document.getElementById("modal");
+  if (!html) {
+    modal.innerHTML = "";
+    if (focusBeforeSheet && document.contains(focusBeforeSheet)) focusBeforeSheet.focus();
+    focusBeforeSheet = null;
+    return;
+  }
+  if (!modal.innerHTML) focusBeforeSheet = document.activeElement;
+  modal.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
+  makeInteractive(modal);
+  // The first thing worth pressing, so Enter does what the user came to do. A field takes precedence
+  // over a button: a password sheet should put the caret in the box, not on Cancel.
+  const first = modal.querySelector("input, .btn, button, [data-act]");
+  setTimeout(() => first?.focus(), 0);
+}
 function say(title, text) {
   sheet(`<div style="font-size:17px;font-weight:650">${esc(title)}</div>
     <div style="height:10px"></div><div class="wrap" style="color:var(--mut);line-height:1.6">${esc(text)}</div>
@@ -699,6 +770,22 @@ async function startBlock() {
   sheet("");
 }
 
+/**
+ * Call off an announced freeze.
+ *
+ * Sent straight after the click with nothing in between — no confirmation — because cancelling costs
+ * nothing and is reversible in the only direction that matters: the freeze can be started again. It
+ * is also the one action on this page whose whole purpose is to *not* lock something, so putting a
+ * dialog in front of it would be the app arguing with the user about their own machine.
+ */
+async function cancelFreeze() {
+  const answer = await askService({ request: "cancel_freeze" });
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  if (answer.value.response === "error") return say("That could not be cancelled", answer.value.detail);
+  await refresh();
+  sheet("");
+  return say("The freeze is off", "Nothing will close. Starting it again is the same two clicks as before.");
+}
 // Ending a session is the one place the promise is kept or broken, so it is done in two steps: ask
 // the service plainly, and only if it names a condition do we offer the way to satisfy it.
 //
@@ -747,16 +834,29 @@ function password(id) {
   setTimeout(() => document.getElementById("pw")?.focus(), 0);
 }
 
-document.addEventListener("click", async (event) => {
-  const nav = event.target.closest(".nav");
+/**
+ * Do whatever the thing under the pointer *or the caret* is.
+ *
+ * One function for both input methods, and that is the fix rather than an implementation detail.
+ * Everything on this page used to be a `div` or a `span` with a click handler and nothing else, so
+ * the window was mouse-only: a keyboard user could not reach the pages that explain what is blocked
+ * — but *could* tab to "End it early", which is the wrong way round for a program whose entire
+ * promise is that the exits are deliberate.
+ *
+ * Written as one dispatcher on purpose: a control added later gets Enter and Space for free, and
+ * there is no second wiring to forget. The alternative — a key handler per control — is how the
+ * mouse-only state arose in the first place.
+ */
+async function activate(target) {
+  const nav = target.closest(".nav");
   if (nav) { state.page = nav.dataset.page; return draw(); }
-  const tab = event.target.closest("[data-tab]");
+  const tab = target.closest("[data-tab]");
   if (tab) { state.tab = tab.dataset.tab; return draw(); }
-  const profile = event.target.closest("[data-profile]");
+  const profile = target.closest("[data-profile]");
   if (profile) { state.profile = profile.dataset.profile; return draw(); }
   // The Start-a-block sheet. Every control redraws the sheet rather than the page, so a choice is
   // visible where it was made and nothing else on screen moves under the pointer.
-  const byAct = event.target.closest("[data-act]");
+  const byAct = target.closest("[data-act]");
   if (byAct) {
     switch (byAct.dataset.act) {
       case "start-open": return startSheet();
@@ -766,12 +866,13 @@ document.addEventListener("click", async (event) => {
       default: break;
     }
   }
-  const button = event.target.closest("[data-act]");
+  const button = target.closest("[data-act]");
   if (!button) return;
   const id = button.dataset.id;
   switch (button.dataset.act) {
     case "close": return sheet("");
     case "start-go": return startBlock();
+    case "cancel-freeze": return cancelFreeze();
     case "end": return end(id);
     case "confirm-end": {
       const answer = await askService({ request: "end", id, satisfied: [{ kind: "confirm" }] });
@@ -815,7 +916,58 @@ document.addEventListener("click", async (event) => {
       return refresh();
     }
   }
+}
+
+document.addEventListener("click", (event) => activate(event.target));
+
+/**
+ * Enter and Space, on anything that is meant to be a button.
+ *
+ * The selector list is the same set `activate` dispatches on, so the two cannot drift: if a control
+ * is reachable by one input method it is reachable by the other. Space is included because that is
+ * what a Windows user presses on a button, and Enter because that is what they press in a dialog.
+ *
+ * `preventDefault` on Space only, and only for these: without it the page scrolls under the focused
+ * control, which looks like the key did nothing while something else moved.
+ */
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    // The modal is the topmost thing, so Escape belongs to it first.
+    if (document.getElementById("modal").innerHTML) {
+      event.preventDefault();
+      sheet("");
+    }
+    return;
+  }
+  if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+  const target = event.target.closest('[data-act], .nav, [data-tab], [data-profile]');
+  // A real <button> or <input> already activates itself, and would otherwise fire twice.
+  if (!target || target.tagName === "BUTTON" || target.tagName === "INPUT") return;
+  event.preventDefault();
+  activate(target);
 });
+
+/**
+ * Anything tappable must be reachable and must announce itself as tappable.
+ *
+ * Otherwise a screen reader reads a wall of text with no idea what can be pressed, and a keyboard
+ * cannot get past the first control. Applied once, here, rather than written into the markup: the nav
+ * is static and the tabs are regenerated on every redraw, so an attribute typed by hand in one place
+ * would simply be missing in the other.
+ */
+function makeInteractive(root) {
+  for (const el of root.querySelectorAll("[data-act], .nav, [data-tab], [data-profile]")) {
+    if (el.tagName === "BUTTON" || el.tagName === "INPUT") continue;
+    el.setAttribute("role", "button");
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    // "Which one am I on" is not in the text for these two, so it is said explicitly.
+    if (el.classList.contains("nav")) {
+      el.setAttribute("aria-current", el.classList.contains("on") ? "page" : "false");
+    } else if (el.hasAttribute("data-tab") || el.hasAttribute("data-profile")) {
+      el.setAttribute("aria-pressed", el.classList.contains("on") ? "true" : "false");
+    }
+  }
+}
 
 refresh();
 // A second is the resolution of the clock on the page; the pipe call is cheap and local.

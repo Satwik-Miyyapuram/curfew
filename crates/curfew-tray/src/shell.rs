@@ -87,7 +87,7 @@ fn tooltip(status: &Status) -> String {
     }
     match status.running.len() {
         0 => "Curfew — nothing running".to_string(),
-        1 => format!("Curfew — {} running", status.running[0].profile),
+        1 => format!("Curfew — {} running", status.name_of(&status.running[0].profile)),
         n => format!("Curfew — {n} sessions running"),
     }
 }
