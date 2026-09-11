@@ -362,3 +362,119 @@ fn ending_one_occurrence_leaves_the_next_one_alone() {
     assert_eq!(started.len(), 1);
     assert_eq!(s.running.len(), 1);
 }
+
+// --- restoring from storage ----------------------------------------------------------------------
+//
+// The restore path is the one way into session state that does not come from the lattice, and it used
+// to be a whole-structure assignment: `restore_sessions` in `curfew-ffi` deserialized a `Sessions`
+// and wrote it over the running one, with no lock check, no proof and no op-log entry. Anyone who
+// could call it could end every lock by handing over `{"running":[]}`.
+//
+// These tests are the promise that the door is shut, from the side that matters: what a *caller* can
+// achieve by sending arbitrary JSON. Every one of them fails against the old implementation.
+
+#[test]
+fn an_empty_restore_cannot_end_a_running_lock() {
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    // The bypass, in one line: the stored state says nothing is running.
+    s.restore_without_weakening(Sessions::default());
+
+    assert_eq!(s.running.len(), 1, "an empty restore ended a running lock");
+    assert!(s.get("a").is_some());
+    assert!(s.get("a").unwrap().lock.conditions.contains(&Lock::Timer));
+}
+
+#[test]
+fn a_restore_cannot_shorten_a_lock_or_drop_its_conditions() {
+    let mut s = Sessions::default();
+    s.start(session(
+        "a",
+        "deep-work",
+        LockSet::new([Lock::Confirm, Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+
+    // The same session, reported as far weaker than it is: no conditions, ending in a minute.
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([], Some(NOW + 60))));
+    s.restore_without_weakening(incoming);
+
+    let lock = &s.get("a").unwrap().lock;
+    assert!(
+        lock.conditions.contains(&Lock::Confirm)
+            && lock.conditions.contains(&Lock::DeviceCredential),
+        "a restore dropped a lock condition"
+    );
+    assert_eq!(lock.ends_at, Some(NOW + 3600), "a restore shortened the end time");
+}
+
+/// The legitimate use: everything that was running before a restart comes back.
+#[test]
+fn a_restore_starts_sessions_that_are_not_running_yet() {
+    let mut s = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+    incoming.start(session("b", "evening", LockSet::new([Lock::Confirm], Some(NOW + 60))));
+
+    s.restore_without_weakening(incoming);
+
+    assert_eq!(s.running.len(), 2, "a restore dropped a session it should have started");
+    assert!(s.get("a").is_some() && s.get("b").is_some());
+}
+
+/// A restore may strengthen, which is the other half of "necessary and sufficient".
+#[test]
+fn a_restore_can_strengthen_a_running_session() {
+    let mut s = Sessions::default();
+    s.start(session("a", "deep-work", LockSet::new([Lock::Confirm], Some(NOW + 60))));
+
+    let mut incoming = Sessions::default();
+    incoming.start(session(
+        "a",
+        "deep-work",
+        LockSet::new([Lock::DeviceCredential], Some(NOW + 3600)),
+    ));
+    s.restore_without_weakening(incoming);
+
+    let lock = &s.get("a").unwrap().lock;
+    assert!(
+        lock.conditions.contains(&Lock::Confirm)
+            && lock.conditions.contains(&Lock::DeviceCredential),
+        "the stronger set should hold both conditions"
+    );
+    assert_eq!(lock.ends_at, Some(NOW + 3600));
+}
+
+/// A dismissal is a memory that a schedule occurrence was ended. A restore must not un-remember it,
+/// because forgetting one lets tonight's window start again straight after being ended.
+#[test]
+fn a_restore_cannot_un_dismiss_an_occurrence() {
+    let mut s = Sessions::default();
+    s.dismissed.insert("weekly-night".into(), NOW);
+
+    s.restore_without_weakening(Sessions::default());
+    assert_eq!(s.dismissed.get("weekly-night").copied(), Some(NOW), "a restore forgot a dismissal");
+
+    // And a later dismissal wins, whichever side it came from.
+    let mut incoming = Sessions::default();
+    incoming.dismissed.insert("weekly-night".into(), NOW + 10);
+    s.restore_without_weakening(incoming);
+    assert_eq!(s.dismissed.get("weekly-night").copied(), Some(NOW + 10));
+}
+
+/// Restoring the same thing twice is the ordinary case — a service restart loop, or a retry — and it
+/// must be idempotent rather than accumulating duplicates.
+#[test]
+fn restoring_twice_changes_nothing_the_second_time() {
+    let mut s = Sessions::default();
+    let mut incoming = Sessions::default();
+    incoming.start(session("a", "deep-work", LockSet::new([Lock::Timer], Some(NOW + 3600))));
+
+    s.restore_without_weakening(incoming.clone());
+    let after_first = s.running.len();
+    s.restore_without_weakening(incoming);
+
+    assert_eq!(s.running.len(), after_first, "a second restore duplicated a session");
+    assert_eq!(after_first, 1);
+}

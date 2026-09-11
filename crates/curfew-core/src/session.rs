@@ -115,6 +115,38 @@ impl Sessions {
         self.running.iter().find(|s| s.id == id)
     }
 
+    /// Adopt sessions read back from storage, **without ever weakening what is already running**.
+    ///
+    /// This exists because the restore path was the one way into session state that did not go
+    /// through the lattice: `curfew-ffi`'s `restore_sessions` deserialized a whole `Sessions` and
+    /// assigned it over the running one, with no lock check, no proof and no op-log entry. Anyone who
+    /// could call it could end every lock by handing over `{"running":[]}` — the same bypass as the
+    /// claimable `Lock::Timer` that was P0-1, through a different door, and on the platform where the
+    /// FFI is the whole interface.
+    ///
+    /// The rule is the same one `start` follows, applied to a set:
+    ///
+    /// * A session already running is **merged** into, never replaced. `LockSet::merge` can only add
+    ///   conditions and push the end time later, so a restore may strengthen a lock and cannot weaken
+    ///   one.
+    /// * A session in the incoming set that is not running is **started**, which is what a legitimate
+    ///   restore after a restart needs.
+    /// * A session running here and **absent** from the incoming set is **kept**. Deleting the stored
+    ///   state is therefore not a way to end a lock — which is the case that matters, because the
+    ///   stored state is a file a user can delete.
+    ///
+    /// `dismissed` is merged by taking the later dismissal per occurrence, so a restore cannot
+    /// un-dismiss a schedule that was ended and let tonight's window start again.
+    pub fn restore_without_weakening(&mut self, incoming: Sessions) {
+        for session in incoming.running {
+            self.start(session);
+        }
+        for (occurrence, at) in incoming.dismissed {
+            let entry = self.dismissed.entry(occurrence).or_insert(at);
+            *entry = (*entry).max(at);
+        }
+    }
+
     pub fn for_profile(&self, profile: &str) -> Option<&Session> {
         self.running.iter().find(|s| s.profile == profile)
     }

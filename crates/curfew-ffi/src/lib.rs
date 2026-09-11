@@ -580,9 +580,27 @@ impl Curfew {
     /// Restore sessions materialized from storage after a restart. The lock a session was under
     /// survives a reboot, a force-stop and an app update -- that is the entire point of persisting
     /// them (design invariant 2).
+    ///
+    /// **Strengthening only, and that is the whole of this function's contract.**
+    ///
+    /// This used to deserialize a whole `Sessions` and assign it over the running one:
+    ///
+    /// ```ignore
+    /// *self.sessions.write().expect("sessions lock") = sessions;
+    /// ```
+    ///
+    /// No lock check, no proof, no op-log entry — and it was the only writer of that state, so it was
+    /// the one way into it that did not pass through the lattice. `restore_sessions(r#"{"running":[]}"#)`
+    /// ended every running lock. That is P0-1's bypass through a different door, on the platform where
+    /// this FFI *is* the interface, and the stored state is a file a user can delete.
+    ///
+    /// The rule now lives in [`Sessions::restore_without_weakening`]: a running session is merged into
+    /// (which the lattice can only make stricter), a session in the incoming set is started, and a
+    /// session running here but absent from the incoming set is **kept**. Deleting the file is
+    /// therefore not a way out, which is the case that matters.
     pub fn restore_sessions(&self, sessions_json: String) -> Result<(), CurfewError> {
         let sessions: Sessions = serde_json::from_str(&sessions_json).map_err(payload)?;
-        *self.sessions.write().expect("sessions lock") = sessions;
+        self.sessions.write().expect("sessions lock").restore_without_weakening(sessions);
         Ok(())
     }
 
