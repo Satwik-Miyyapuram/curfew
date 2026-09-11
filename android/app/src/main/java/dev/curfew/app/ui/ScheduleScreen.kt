@@ -280,9 +280,14 @@ fun ScheduleScreen(
 
                 if (windows.isEmpty() && calendar.isEmpty()) {
                     Rule()
+                    // F-34: the note used to read "Pick a meeting, or set a schedule", but this row's
+                    // own tap opens the calendar picker and nothing else — the weekly path is the
+                    // "Add a window" button further down the page. The page kept the promise; the row
+                    // did not, and a row that names an action it does not perform is indistinguishable
+                    // from a broken button. It now names both and says where the second one is.
                     TriggerRow(
                         title = "Nothing starts it yet",
-                        note = "Pick a meeting, or set a schedule",
+                        note = "Pick a meeting, or add a window below",
                         tint = Palette.Muted,
                         enabled = false,
                         onToggle = {},

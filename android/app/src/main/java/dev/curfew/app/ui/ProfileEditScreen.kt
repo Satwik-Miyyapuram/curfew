@@ -267,10 +267,40 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 picking = "budget"
                             }
                         }
-                        else ->
-                            model.say(
-                                "Add a window covering the whole week to leave it always on.",
-                            )
+                        // F-34: this branch used to be a `say` telling the user to go to Plan, add a
+                        // window covering the whole week, and pick this profile out of a pill row to
+                        // come back. **The comment four branches above is the argument against that**:
+                        // "Being told to go somewhere else, find the same list, and remember which
+                        // profile you were half way through building is how a profile gets abandoned."
+                        // The file stated the principle and then broke it in its own last branch, so
+                        // the row now does what it says, the way the four above it do.
+                        "Always on" -> {
+                            if (name.isBlank()) {
+                                model.say("Give it a name first.")
+                            } else if (windows.isNotEmpty()) {
+                                // Same as the repeating-schedule branch: already set, and the window's
+                                // own card below is where it gets edited or removed.
+                                Unit
+                            } else {
+                                model.saveProfileWithWindow(
+                                    profileId,
+                                    name.trim(),
+                                    WeeklySchedule(
+                                        id = "w-${state.now}",
+                                        profile = profileId,
+                                        // All seven days, midnight to midnight. `end_minute ==
+                                        // start_minute` is how the core spells "runs into the following
+                                        // day" (`schedule.rs`: "A window whose end is at or before its
+                                        // start runs into the following day"), so 0 to 0 is a full day
+                                        // rather than a window of no length.
+                                        days = listOf(0, 1, 2, 3, 4, 5, 6),
+                                        startMinute = 0,
+                                        endMinute = 0,
+                                        locks = listOf(Lock.Confirm),
+                                    ),
+                                )
+                            }
+                        }
                     }
                 }
             }

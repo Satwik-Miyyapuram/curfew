@@ -58,7 +58,8 @@ import dev.curfew.policy.Stats
 @Composable
 fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
-    val activity = LocalContext.current as? FragmentActivity
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
 
     // The conditions this screen can satisfy are gathered one at a time, in a fixed order, and
     // handed to the core together. The core is still the judge: it refuses if the set is short,
@@ -224,6 +225,34 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
 
         Gap(14.dp)
         GivenBackCard(stats = state.stats, detailed = true)
+
+        // F-2: say what was written on this device's behalf, once.
+        //
+        // The signal is the audit log's newest row: `seedStarterProfile` writes `profile.seeded` and
+        // it is the first thing a fresh install does (`CurfewRuntime:502`, before the first
+        // `refresh`). `recent()` is `ORDER BY at DESC`, so if that is still the most recent entry
+        // then nothing has happened since — the user has not run a block, changed a rule, or saved
+        // anything. The card then retires itself with no stored flag and no dismiss button, which is
+        // the property worth having: a one-time notice whose one-time-ness is *derived* cannot get
+        // out of step with the thing it is describing.
+        // The row's `detail` is the profile's id - commitConfig("profile.seeded", STARTER_PROFILE) -
+        // so this needs no shared constant and cannot disagree with the config.
+        val seedRow = state.audit.firstOrNull()?.takeIf { it.kind == "profile.seeded" }
+        if (seedRow != null && live == null) {
+            Gap(14.dp)
+            val starter = state.profiles.firstOrNull { it.id == seedRow.detail }
+            if (starter != null) {
+                // Labels resolved here rather than in the pure function: this needs a Context, and
+                // the sentence is the part worth testing without one.
+                val labels = model.blockedApps(starter.id).map { appLabel(context, it) }
+                Text(
+                    describeSeed(starter.name, labels),
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = Palette.Muted,
+                )
+            }
+        }
 
         state.downtime?.let { downtime ->
             Gap(14.dp)

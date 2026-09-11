@@ -183,6 +183,31 @@ fun describeLock(lock: Lock): String = when (lock) {
  * when it started, so counting both would report a lock twice for as long as it runs; the schedule is
  * the durable answer and the one the user can still edit.
  */
+/**
+ * What to say about the profile Curfew wrote on a fresh install - F-2.
+ *
+ * A self-binding tool that has **already written a policy** owes the user a sentence about it. The
+ * seeding is deliberate and documented (`CurfewRuntime.seedStarterProfile`: *"a blocker earns its
+ * place by blocking something within a minute of being opened, not by handing over a form"*), but it
+ * was silent, and the only way to find out what had been set up was to open Plan and look.
+ *
+ * The sentence names **two apps and counts the rest**, because a list long enough to be complete is a
+ * list nobody reads, and two names are enough to recognise the shape of the choice.
+ *
+ * Pure, so every shape can be tested on this host: nothing blocked, one app, two, and more than two
+ * - plus the singular, which is the one that reads badly if it is wrong ("and 1 others").
+ */
+fun describeSeed(profileName: String, blockedLabels: List<String>): String {
+    val named = blockedLabels.take(2)
+    val others = blockedLabels.size - named.size
+    val what = when {
+        blockedLabels.isEmpty() -> "with nothing in it yet"
+        others == 0 -> "blocking ${named.joinToString(" and ")}"
+        others == 1 -> "blocking ${named.joinToString(", ")} and 1 other"
+        else -> "blocking ${named.joinToString(", ")} and $others others"
+    }
+    return "Curfew set up a profile called $profileName, $what. Change it on Plan."
+}
 fun locksAwaitingDevice(
     weekly: List<WeeklySchedule>,
     rules: List<CalendarSchedule>,

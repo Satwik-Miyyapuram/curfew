@@ -184,7 +184,6 @@ ProfileEditScreen.kt|A name you would say out loud. You can change it whenever.
 ProfileEditScreen.kt|A repeating schedule
 ProfileEditScreen.kt|A session it has already started keeps running until its own lock lets it 
 ProfileEditScreen.kt|A timer I start myself
-ProfileEditScreen.kt|Add a window covering the whole week to leave it always on.
 ProfileEditScreen.kt|Add some apps first and the budget will apply to those.
 ProfileEditScreen.kt|Always on
 ProfileEditScreen.kt|Anything in my calendar
@@ -193,6 +192,7 @@ ProfileEditScreen.kt|Cancel
 ProfileEditScreen.kt|Delete
 ProfileEditScreen.kt|Delete
 ProfileEditScreen.kt|Delete
+ProfileEditScreen.kt|Give it a name first.
 ProfileEditScreen.kt|Give it a name first.
 ProfileEditScreen.kt|Give it a name first.
 ProfileEditScreen.kt|Give it a name first.
@@ -248,7 +248,7 @@ ScheduleScreen.kt|Keep it
 ScheduleScreen.kt|Keep it
 ScheduleScreen.kt|Nothing can start a block yet. Make a profile first \u2014 a profile is the 
 ScheduleScreen.kt|Nothing starts it yet
-ScheduleScreen.kt|Pick a meeting, or set a schedule
+ScheduleScreen.kt|Pick a meeting, or add a window below
 ScheduleScreen.kt|Plan
 ScheduleScreen.kt|Remove
 ScheduleScreen.kt|Remove

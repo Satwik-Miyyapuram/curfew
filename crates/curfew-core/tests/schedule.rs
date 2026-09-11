@@ -106,6 +106,51 @@ fn an_activation_carries_its_schedules_locks_and_ends_when_the_window_does() {
     assert_eq!(lock.ends_at, Some(local(2026, 9, 4, 12, 0)));
 }
 
+/// The window `ProfileEditScreen`'s "Always on" trigger writes: seven days, midnight to midnight.
+///
+/// **`end_minute == start_minute` is a full day, not a window of no length.** `span_on` reads an end
+/// at or before the start as "the following day", so 0 to 0 is 24 hours — which is the whole
+/// meaning of "always on", and is not obvious from the numbers. Written as its own test because the
+/// Android side depends on it and nothing here asserted it: the `start == end` case had no cover at
+/// all before this, only the 23:00→07:00 one that the "no phone after 11pm" shape uses.
+fn always_on() -> WeeklySchedule {
+    WeeklySchedule {
+        id: "always".into(),
+        profile: "always".into(),
+        days: vec![0, 1, 2, 3, 4, 5, 6],
+        start_minute: 0,
+        end_minute: 0,
+        locks: vec![Lock::Confirm],
+        enabled: true,
+    }
+}
+
+#[test]
+fn a_window_from_midnight_to_midnight_is_a_whole_day() {
+    let w = always_on();
+    // Every hour of Thursday, including both midnight edges, on one span.
+    for hour in [0, 1, 6, 12, 18, 23] {
+        let a = w
+            .active_at(local(2026, 9, 3, hour, 0), LONDON)
+            .unwrap_or_else(|| panic!("not active at {hour}:00"));
+        assert_eq!(a.start, local(2026, 9, 3, 0, 0), "the span starts at midnight");
+        assert_eq!(a.end, local(2026, 9, 4, 0, 0), "and ends at the next midnight");
+    }
+    // And it does the same the next day, so it never lapses between days.
+    let friday = w.active_at(local(2026, 9, 4, 0, 0), LONDON).expect("midnight belongs to a day");
+    assert_eq!(friday.end, local(2026, 9, 5, 0, 0));
+}
+
+#[test]
+fn a_whole_day_window_covers_all_seven_days() {
+    let w = always_on();
+    // 2026-09-07 is a Monday; seven consecutive days are all covered.
+    for day in 7..14 {
+        let at = local(2026, 9, day, 13, 0);
+        assert!(w.active_at(at, LONDON).is_some(), "2026-09-{day} is not covered");
+    }
+}
+
 /// A schedule must not fail to start because the clock skipped its start time. London's
 /// spring-forward on 2026-03-29 removes 01:00-02:00 entirely.
 #[test]
