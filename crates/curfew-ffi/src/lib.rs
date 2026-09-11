@@ -119,6 +119,41 @@ fn restoration(json: &str) -> Result<&str, CurfewError> {
     Ok(json)
 }
 
+/// **Refuse an edit that would take a rule away from a session that is running** — P1-13.
+///
+/// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated here:
+/// a second copy of a security check is how two platforms come to disagree.
+///
+/// **A free function, not a method.** Everything inside an exported `impl` is part of the UniFFI
+/// interface, and a check that only Rust calls has no business being there — the first version of this was
+/// a method and UniFFI refused to build it, wanting `Config` to be liftable across the boundary.
+///
+/// **This belongs on every call that changes a rule, not only on a whole-document write.** Windows guards
+/// `Request::Reload` because the file is edited freely and the service decides whether to *adopt* it;
+/// Android has no file/adopt split, because the FFI **is** the config. So `remove_rule` weakens a running
+/// session the moment it is called, and a guard on the commit alone can never fire — by then the config it
+/// compares against has already changed. My own tests said so: two of them failed against a check that was
+/// in the wrong place for this platform.
+fn refuse_weakening(curfew: &Curfew, next: &Config) -> Result<(), CurfewError> {
+    let current = curfew.config.read().expect("config lock");
+    let running = curfew.sessions.read().expect("sessions lock").running.clone();
+    let names: std::collections::BTreeMap<String, String> =
+        current.profiles.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+
+    let lost = current.weakening_a_running_session(next, &running, &names);
+    if lost.is_empty() {
+        return Ok(());
+    }
+    Err(CurfewError::Payload {
+        detail: format!(
+            "This would stop enforcing part of a block that is running now: {}. End the session first, \
+             or leave it — it stops on its own at the end of its window. Nothing short of the 24-hour \
+             release shortens a lock that is already running.",
+            lost.join("; ")
+        ),
+    })
+}
+
 impl Curfew {
     /// Everything this device can prove about a session's lock without being told.
     ///
@@ -176,11 +211,25 @@ impl Curfew {
         }))
     }
 
+    /// **Refuse an edit that would take a rule away from a session that is running** — P1-13.
+    ///
+    /// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated
+    /// here: a second copy of a security check is how two platforms come to disagree.
+    ///
+    /// **This belongs on every call that changes a rule, not only on a whole-document write.** Windows
+    /// guards `Request::Reload` because the file is edited freely and the service decides whether to
+    /// *adopt* it; Android has no file/adopt split, because the FFI **is** the config. So `remove_rule`
+    /// weakens the running session the moment it is called, and a guard on the commit alone can never
+    /// fire — by then the config it compares against has already changed. My own tests said so: two of
+    /// them failed against a check that was in the wrong place for this platform.
     /// Replace the config. Running sessions are untouched: a config edit is not a way out of a
     /// lock, and the session already holds its own copy of what it promised.
+    ///
+    /// **Refuses an edit that would take a rule away from a running session** — see [`refuse_weakening`].
     pub fn set_config(&self, config_toml: String) -> Result<(), CurfewError> {
         let config = Config::from_toml(&config_toml)
             .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &config)?;
         *self.config.write().expect("config lock") = config;
         Ok(())
     }
@@ -210,18 +259,30 @@ impl Curfew {
     /// title — is written without the user editing TOML.
     pub fn upsert_rule(&self, profile: String, rule_json: String) -> Result<(), CurfewError> {
         let rule = serde_json::from_str(&rule_json).map_err(payload)?;
-        self.config
-            .write()
-            .expect("config lock")
-            .upsert_rule(&profile, rule)
-            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+        // Built as a copy first so the check can compare, then stored. The config is small and this runs
+        // on a form save, so the clone costs nothing worth measuring.
+        let mut next = self.config.read().expect("config lock").clone();
+        next.upsert_rule(&profile, rule)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
     }
 
     /// Drop every rule in a profile pointing at `target_json`, a serialized `Target`, and say how
     /// many went.
     pub fn remove_rule(&self, profile: String, target_json: String) -> Result<u32, CurfewError> {
         let target = serde_json::from_str(&target_json).map_err(payload)?;
-        Ok(self.config.write().expect("config lock").remove_rule(&profile, &target) as u32)
+        // **The check goes here, not only on the commit** — P1-13. This call is what the profile editor
+        // uses to delete a rule, and it takes effect immediately: the config it would be compared against
+        // at commit time is this one.
+        let mut next = self.config.read().expect("config lock").clone();
+        let removed = next.remove_rule(&profile, &target) as u32;
+        if removed > 0 {
+            refuse_weakening(self, &next)?;
+        }
+        *self.config.write().expect("config lock") = next;
+        Ok(removed)
     }
 
     /// Everything a profile blocks, as a serialized `Vec<Rule>`, for a screen to list.
@@ -269,6 +330,28 @@ impl Curfew {
     /// duplicate case — a window identical to one already in the plan is discarded and the screen
     /// shows success. Closing it means returning the outcome across the FFI, which changes the
     /// generated Kotlin binding, so it is recorded rather than smuggled in here.
+    /// **Write the config, refusing an edit that would take a rule away from a running session** —
+    /// P1-13's Android half.
+    ///
+    /// Android saved the config and reconciled, with no check at all: a user could open the profile
+    /// editor, delete the rule that was holding them, save, and the lock would carry on while nothing
+    /// behind it was enforced. Windows has refused this since entry 54 and Android did not, which is the
+    /// same one-platform-only shape as the browser identity in P1-2.
+    ///
+    /// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated
+    /// here — a second copy of a security check is how two platforms come to disagree.
+    ///
+    /// **Refused with a sentence, not a code.** The caller shows it: it names the profile and what would
+    /// stop being enforced, which is what a person needs in order to decide whether to end the session
+    /// first. `CurfewError::Refused` carries a refusal about a *lock*; this is about a config edit, so it
+    /// is a payload error with wording fit to display.
+    pub fn commit_config(&self, config_toml: String) -> Result<(), CurfewError> {
+        let next = Config::from_toml(restoration(&config_toml)?).map_err(payload)?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
+    }
+
     pub fn upsert_weekly(&self, window_json: String) -> Result<(), CurfewError> {
         let window = serde_json::from_str(&window_json).map_err(payload)?;
         self.config

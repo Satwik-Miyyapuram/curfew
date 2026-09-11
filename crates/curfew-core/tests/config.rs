@@ -1138,3 +1138,90 @@ fn a_rule_decided_without_a_window_does_not_need_the_foreground() {
         );
     }
 }
+
+// --- a config edit that takes a rule from a running session (P1-13) ------------------------------
+//
+// Windows refused this since entry 54 and Android did not, so the decision moved into the core and both
+// platforms consult it. These pin the shared version, which is what stops the two from drifting.
+
+/// The sentence a caller shows, naming the profile a user recognises.
+#[test]
+fn weakening_a_running_session_names_the_profile() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.retain(|r| r.target.key() != "domain:reddit.com");
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    let names =
+        std::collections::BTreeMap::from([("deep-work".to_string(), "Deep work".to_string())]);
+
+    let lost = current.weakening_a_running_session(&next, &running, &names);
+    assert!(!lost.is_empty(), "removing a rule from a running profile was not reported");
+    assert!(
+        lost[0].starts_with("Deep work:"),
+        "the refusal should name the profile the user recognises, not the id: {lost:?}"
+    );
+}
+
+/// **Nothing running means nothing to lose**, which is what keeps the plan editable. A profile with no
+/// session can be changed freely, and refusing that would make the editor unusable.
+#[test]
+fn a_change_that_weakens_nothing_running_is_allowed() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.retain(|r| r.target.key() != "domain:reddit.com");
+
+    assert!(current.weakening_a_running_session(&next, &[], &Default::default()).is_empty());
+}
+
+/// An edit that only *adds* is never refused, however much is running.
+#[test]
+fn a_change_that_only_strengthens_is_allowed() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    let profile = next.profiles.iter_mut().find(|p| p.id == "deep-work").expect("the fixture");
+    profile.rules.push(curfew_core::Rule {
+        target: curfew_core::Target::Domain { domain: "example.test".into() },
+        action: curfew_core::Action::Block,
+        platforms: Vec::new(),
+    });
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    assert!(
+        current.weakening_a_running_session(&next, &running, &Default::default()).is_empty(),
+        "adding a rule was refused"
+    );
+}
+
+/// With no name map the id is used, which is degraded rather than wrong.
+#[test]
+fn a_missing_name_falls_back_to_the_id() {
+    let current = Config::from_toml(GOLDEN).unwrap();
+    let mut next = current.clone();
+    next.profiles.retain(|p| p.id != "deep-work");
+
+    let running = [curfew_core::Session {
+        id: "s1".into(),
+        profile: "deep-work".into(),
+        source: curfew_core::session::SessionSource::Manual,
+        started_at: 1_788_510_600,
+        lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], None),
+    }];
+    let lost = current.weakening_a_running_session(&next, &running, &Default::default());
+    assert!(!lost.is_empty(), "removing a whole profile was not reported");
+    assert!(lost[0].starts_with("deep-work:"), "{lost:?}");
+}

@@ -235,7 +235,15 @@ fn replacing_the_config_does_not_release_a_running_session() {
     start(&c, "s1", "deep-work", json!([{"kind": "device_credential"}]), Some(NOW + 3600));
     // Rename the profile everywhere it is named, so the replacement config is itself valid: what
     // is under test is the running session, not the config checker.
-    c.set_config(config().replace("\"deep-work\"", "\"renamed\"")).expect("loads");
+    //
+    // **The replacement is now refused rather than accepted** — P1-13. It used to load and the session
+    // survived, which was the point of this test; renaming the profile takes its rules away from the
+    // session that is running, so it is a weakening and is refused outright. The session surviving is
+    // still asserted, and now for a stronger reason: nothing about the config changed at all.
+    assert!(
+        c.set_config(config().replace("\"deep-work\"", "\"renamed\"")).is_err(),
+        "renaming a profile a session is running under was accepted"
+    );
     assert_eq!(c.active_profiles(NOW), vec!["deep-work".to_string()]);
     assert!(c.end_session("s1".into(), NOW, String::new()).is_err());
 }
@@ -847,4 +855,124 @@ fn an_ordinary_restore_still_works() {
         .expect("the witness serializes")
         .expect("a witness exists after a reading");
     c.restore_clock(witness).expect("a normal witness restores");
+}
+
+// --- the Android half of P1-13 -------------------------------------------------------------------
+//
+// `CurfewRuntime.commitConfig` on Android wrote the config and reconciled with no check at all, so the
+// profile editor could delete the rule holding the user while the lock carried on enforcing nothing behind
+// it. Windows refused since entry 54; this is the same door for Android.
+
+/// **An edit that takes a rule from a running session is refused**, and the sentence says which.
+#[test]
+fn an_edit_that_weakens_a_running_session_is_refused() {
+    let c = curfew();
+    // Start something, so there is a session whose rules must survive.
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    // **The removal itself is refused**, not the write that follows it. Android has no file/adopt split:
+    // the FFI *is* the config, so `remove_rule` is where the weakening happens and a guard on the commit
+    // could never fire — by then the config it would compare against has already changed. My first version
+    // of this test asserted the opposite order and failed, which is how the guard's placement was found.
+    match c
+        .remove_rule(
+            "deep-work".into(),
+            json!({ "kind": "domain", "domain": "reddit.com" }).to_string(),
+        )
+        .unwrap_err()
+    {
+        CurfewError::Payload { detail } => {
+            assert!(
+                detail.contains("running now"),
+                "the refusal should say what is happening: {detail}"
+            );
+            assert!(
+                detail.contains("Deep work"),
+                "the refusal should name the profile a user recognises: {detail}"
+            );
+            assert!(
+                detail.contains("24-hour release"),
+                "the refusal should say what the way out is: {detail}"
+            );
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And the config is untouched after a refusal**, which is what makes the failure safe to show: the user
+/// fixes their edit rather than discovering a half-applied one.
+#[test]
+fn a_refused_edit_leaves_the_config_as_it_was() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+    let before = c.config_toml().expect("the config");
+
+    assert!(c
+        .remove_rule(
+            "deep-work".into(),
+            json!({ "kind": "domain", "domain": "reddit.com" }).to_string()
+        )
+        .is_err());
+
+    assert_eq!(
+        c.config_toml().expect("the config"),
+        before,
+        "the refused edit was applied anyway, so the user would find a half-applied config"
+    );
+}
+
+/// **With nothing running, the same edit goes through.** Refusing every removal would make the plan
+/// uneditable, which is the failure in the other direction.
+#[test]
+fn the_same_edit_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    let before = c.config_toml().expect("the config");
+    c.remove_rule(
+        "deep-work".into(),
+        json!({ "kind": "domain", "domain": "reddit.com" }).to_string(),
+    )
+    .expect("the rule is removable");
+    let weakened = c.config_toml().expect("the config");
+
+    c.commit_config(weakened.clone())
+        .expect("nothing is running, so the edit is the user's to make");
+    assert_eq!(c.config_toml().unwrap(), weakened, "the edit did not take");
+    assert_ne!(c.config_toml().unwrap(), before);
+}
+
+/// **A rule weakened through `upsert_rule` is refused too**, not only a removal.
+///
+/// `upsert_rule` replaces the rule with the same target, so `block` becoming `delay` leaves the target
+/// listed and stops blocking it — an edit that looks like an addition in a list and is a weakening in
+/// effect. No test did this, so removing the check from `upsert_rule` survived the mutation run.
+#[test]
+fn an_upsert_that_weakens_a_running_session_is_refused() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    // The same target, a softer action: still one rule, and no longer a block.
+    let softer = json!({
+        "target": { "kind": "domain", "domain": "reddit.com" },
+        "action": { "kind": "delay", "seconds": 5 },
+    });
+
+    match c.upsert_rule("deep-work".into(), softer.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => assert!(
+            detail.contains("running now"),
+            "the refusal should say what is happening: {detail}"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// And the same upsert is allowed with nothing running, which is what keeps the editor usable.
+#[test]
+fn the_same_upsert_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    let softer = json!({
+        "target": { "kind": "domain", "domain": "reddit.com" },
+        "action": { "kind": "delay", "seconds": 5 },
+    });
+    c.upsert_rule("deep-work".into(), softer.to_string())
+        .expect("nothing is running, so the edit is the user's to make");
 }

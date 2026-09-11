@@ -368,6 +368,19 @@ class CurfewRuntime internal constructor(
      * request: if the window covers this minute, the session is running before the form closes.
      */
     private suspend fun commitConfig(kind: String, detail: String) {
+        // **Checked, then written** — P1-13. `policy.commitConfig` refuses an edit that would take a
+        // rule away from a session that is running, and throws with a sentence naming the profile and
+        // what would stop being enforced. The file is not touched in that case, so the user's edit is
+        // theirs to fix rather than half-applied.
+        //
+        // Before this, Android wrote the config and reconciled with no check at all: a user could
+        // delete the rule that was holding them and the lock would carry on enforcing nothing behind
+        // it. Windows has refused that since entry 54.
+        //
+        // No getOrThrow: UniFFI maps a Result<(), E> to a function that throws, so the failure
+        // arrives as an exception rather than a value. A .getOrThrow() here would not compile, which
+        // is how this was found.
+        policy.commitConfig(policy.configToml())
         config.write(policy.configToml()).getOrThrow()
         val now = clock.now()
         audit(now, kind, detail)

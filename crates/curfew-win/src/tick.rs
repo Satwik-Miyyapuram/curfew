@@ -1051,24 +1051,22 @@ impl Enforcer {
                         // does not adopt it while anything is running. Refusing the *adoption* rather
                         // than the *edit* also means an administrator editing the file directly gets
                         // the same protection, which a check inside `curfew` would not have given them.
-                        let mut lost: Vec<String> = Vec::new();
-                        for session in &self.sessions.running {
-                            // The name the user gave the profile, not the slug — the refusal is a
-                            // sentence somebody reads. Same lookup the browser verdict uses.
-                            let named = self
-                                .config
-                                .profiles
-                                .iter()
-                                .find(|p| p.id == session.profile)
-                                .map(|p| p.name.clone())
-                                .unwrap_or_else(|| session.profile.clone());
-                            for detail in self.config.rules_weakened_by(&config, &session.profile) {
-                                lost.push(format!("{named}: {detail}"));
-                            }
-                        }
+                        // **The decision is the core's, not this loop's** — P1-13. Windows grew this
+                        // inline and Android had none at all; the shared version lives beside
+                        // `rules_weakened_by` so the two platforms cannot come to disagree about a
+                        // security check.
+                        let names: std::collections::BTreeMap<String, String> = self
+                            .config
+                            .profiles
+                            .iter()
+                            .map(|p| (p.id.clone(), p.name.clone()))
+                            .collect();
+                        let lost = self.config.weakening_a_running_session(
+                            &config,
+                            &self.sessions.running,
+                            &names,
+                        );
                         if !lost.is_empty() {
-                            lost.sort();
-                            lost.dedup();
                             return Response::Error {
                                 detail: format!(
                                     "not adopting this config while a session is running, because it \

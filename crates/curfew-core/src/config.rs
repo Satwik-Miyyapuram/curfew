@@ -200,6 +200,41 @@ impl Config {
         lost
     }
 
+    /// **Which rules a config change would take away from each running session** — P1-13.
+    ///
+    /// Empty means the change is safe to adopt. Anything else is a list of sentences naming the profile
+    /// and what would stop being enforced, ready to put in front of a user.
+    ///
+    /// **One implementation, two platforms.** The decision is a property of the core — a session carries
+    /// its own copy of what it blocks, so a rule removed underneath it stops being enforced while the lock
+    /// runs on — and both Windows and Android have to make it. Windows grew this loop inline (entry 54)
+    /// and Android had no check at all, which is the state this fixes. A second copy of a security check is
+    /// how the two come to disagree, so the loop lives here and both callers pass what they have.
+    ///
+    /// `profile_names` maps a profile id to the name the user gave it, because the refusal is a sentence
+    /// somebody reads and an id is not a name. A caller with no map passes an empty one and gets the id —
+    /// degraded, never wrong.
+    pub fn weakening_a_running_session(
+        &self,
+        next: &Config,
+        running: &[crate::session::Session],
+        profile_names: &std::collections::BTreeMap<String, String>,
+    ) -> Vec<String> {
+        let mut lost: Vec<String> = Vec::new();
+        for session in running {
+            let named = profile_names
+                .get(&session.profile)
+                .cloned()
+                .unwrap_or_else(|| session.profile.clone());
+            for detail in self.rules_weakened_by(next, &session.profile) {
+                lost.push(format!("{named}: {detail}"));
+            }
+        }
+        lost.sort();
+        lost.dedup();
+        lost
+    }
+
     /// Add a rule to a profile, or replace the one already pointing at the same thing.
     ///
     /// Keyed on the target's own identity rather than on the whole rule, because "block
