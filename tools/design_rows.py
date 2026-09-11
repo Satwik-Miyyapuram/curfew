@@ -123,8 +123,15 @@ STATUS = {
               "**verified open.** Every overlay's text lives in one `thread_local` and `WM_PAINT` reads that slot, so a second `show()` overwrites it before the first window paints and the earlier notice renders the later text. **Not done**: Win32 window code with no test harness here, and the fix — per-window text rather than a shared slot — restructures the paint path rather than patching it"),
     "P2-15": ("open",
               "**verified open.** The overlay is positioned with `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`, the primary display in physical pixels, with no `MonitorFromPoint`/`GetMonitorInfoW` and no `WM_DPICHANGED`, so on a multi-monitor or scaled desk the notice can land on the wrong screen or off a scaled one. **Not done**: the same reason as P2-14 — placement that cannot be verified on this host, and a blind change would be worse than a named gap"),
-    "P2-16": ("open",
-              "**verified open.** `shell.rs` is the only sender of `Request::Seen` and it runs on a timer inside the tray's window, so choosing Quit destroys the window and both timers, `Enforcer::seen` goes stale permanently, and window-title rules and app budgets stop being enforced while the session still runs. **Not done**: the fix is to move the *watch* into the service, which is its right home but a structural change — the service must then enumerate the foreground window itself rather than being told"),
+    "P2-16": ("fixed",
+              "**fixed** (entry 68), though not the way the review proposed. **Its suggested fix — move "
+              "the watch into the service — cannot be done**: a service is in session 0, which has no "
+              "interactive desktop, so the user session's foreground window is not addressable from "
+              "there. The only process that can answer is the tray, and the tray is what is gone. So the "
+              "gap is reported instead: `Rule::needs_foreground` says which rules depend on it, "
+              "`foreground_warning` names the profiles that stopped being enforced, `Status` carries both "
+              "so a surface can warn *before* the action, and `QUIT_NOTE` no longer claims the service "
+              "\"keeps enforcing everything you asked for\""),
     "P2-18": ("open",
               "**verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one"),
 }

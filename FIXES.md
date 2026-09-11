@@ -95,6 +95,7 @@ must run.
 | 77 | A calendar with no events released every block it was driving (P2-9) | **P2** | **Fixed** — an empty document is a placeholder when a good copy exists (entry 65) |
 | 78 | One over-long URL killed the native host, and the browser was then closed (P2-13) | **P2** | **Fixed** — the frame is skipped rather than fatal, and the extension caps the URL (entry 66) |
 | 79 | A wedged service grew the window's threads without bound, and the service leaked its slots on a panic (P2-17) | **P2** | **Fixed** — a shared `Capacity` whose permit is released by `Drop` (entry 67) |
+| 80 | Hiding the tray silently stopped window-title and budget enforcement (P2-16) | **P2** | **Fixed** — the gap is named on `Status`, in the menu and in the quit text (entry 68) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -182,7 +183,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-13 | P2 | **fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front |
 | P2-14 | P2 | **verified open.** Every overlay's text lives in one `thread_local` and `WM_PAINT` reads that slot, so a second `show()` overwrites it before the first window paints and the earlier notice renders the later text. **Not done**: Win32 window code with no test harness here, and the fix — per-window text rather than a shared slot — restructures the paint path rather than patching it |
 | P2-15 | P2 | **verified open.** The overlay is positioned with `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`, the primary display in physical pixels, with no `MonitorFromPoint`/`GetMonitorInfoW` and no `WM_DPICHANGED`, so on a multi-monitor or scaled desk the notice can land on the wrong screen or off a scaled one. **Not done**: the same reason as P2-14 — placement that cannot be verified on this host, and a blind change would be worse than a named gap |
-| P2-16 | P2 | **verified open.** `shell.rs` is the only sender of `Request::Seen` and it runs on a timer inside the tray's window, so choosing Quit destroys the window and both timers, `Enforcer::seen` goes stale permanently, and window-title rules and app budgets stop being enforced while the session still runs. **Not done**: the fix is to move the *watch* into the service, which is its right home but a structural change — the service must then enumerate the foreground window itself rather than being told |
+| P2-16 | P2 | **fixed** (entry 68), though not the way the review proposed. **Its suggested fix — move the watch into the service — cannot be done**: a service is in session 0, which has no interactive desktop, so the user session's foreground window is not addressable from there. The only process that can answer is the tray, and the tray is what is gone. So the gap is reported instead: `Rule::needs_foreground` says which rules depend on it, `foreground_warning` names the profiles that stopped being enforced, `Status` carries both so a surface can warn *before* the action, and `QUIT_NOTE` no longer claims the service "keeps enforcing everything you asked for" |
 | P2-17 | P2 | **fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now |
 | P2-18 | P2 | **verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one |
 | P2-19 | P2 | **fixed** (entry 57). Every read from the shared folder went through `std::fs::read` with no size cap, unlike the LAN path. `read_capped` is now the only reader, sharing `lan::MAX_FRAME` |
@@ -274,6 +275,7 @@ this table is a reading aid.
 | `e58292a` | A calendar with no events no longer releases the blocks it was driving (entry 65) |
 | `d5c1b54` | A long URL skips a frame instead of killing the host (entry 66) |
 | `ddfa83e` | Bound what a wedged service can hold, and release the slot on a panic (entry 67) |
+| `992db90` | Say what stops being enforced when the tray goes (entry 68) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3802,3 +3804,74 @@ Three tests on the permit, and **the panic case is the one that matters**: it ta
 asserts both that the count came back to zero and that a fresh permit can still be taken. That test fails
 against the old statement-based release, which is how the leak was confirmed rather than argued. Two
 mutations caught: emptying the `Drop` body, and not enforcing the limit.
+
+
+---
+
+## 68. P2-16: hiding the tray silently stopped window-title and budget enforcement
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-16**. **Fixed** — though not the way the review
+proposed, and the correction is the substance of this entry.
+
+### What was wrong
+
+`shell.rs` is the only sender of `Request::Seen`, and it runs on a timer inside the tray's window.
+Choosing Quit destroys the window and both timers, so the report goes stale and `Enforcer::seen` never
+updates again. Window-title and keyword rules stop matching, and app budgets stop being charged — while
+the session keeps running. The app the user is avoiding stops costing them anything, and nothing says so.
+
+The tray presents quitting as harmless: the item is labelled "Hide this icon", and `QUIT_NOTE` read
+*"The service keeps enforcing everything you asked for."* That sentence is false, and it is the reason
+this went unnoticed rather than being reported by a user.
+
+### The review's fix cannot be done
+
+It proposes moving the watch into the service. **That is impossible**, and it is worth stating why rather
+than leaving it as an unimplemented to-do: a service runs in session 0, session 0 has its own window
+station and no interactive desktop, so the foreground window of the user's session is not merely hard to
+read from there — it is not addressable at all. The only process that can answer is one in the user's own
+session, which is the tray, and the tray is the thing that is gone.
+
+**I had repeated that suggestion in this branch's own coverage table** — *"the fix is to move the watch
+into the service, which is its right home"* — without checking it. That is the same defect class as the
+ten false comments this branch has already removed, except the false claim was mine. Corrected in
+`tools/design_rows.py`.
+
+### What was done instead
+
+The gap is **closed as far as it can be and then reported**, which is this project's own rule: *"a
+blocker that quietly fails to block is worse than one that admits it."*
+
+- `Rule::needs_foreground()` decides which rules actually depend on it: a window-title or keyword
+  target, or a budget or launch-limit action. Everything else is decided from the process list or the
+  resolver and loses nothing.
+- `Enforcer::foreground_warning` produces a sentence naming the profiles whose rules stopped and the one
+  action that fixes it — and only when a rule really needs the foreground. A machine running only exe and
+  domain rules stays quiet, because warning about enforcement that is still working is how people learn
+  to ignore the warning that matters.
+- `Status` carries `foreground_warning` **and** `needs_foreground`, so a surface can warn *before* the
+  action that causes it rather than only after.
+- The window shows it in red on "Is it working"; the tray counts it among the things not being enforced,
+  and its "Hide this icon" item is preceded by what hiding costs.
+- `QUIT_NOTE` keeps the reassurance that is true — locks stay, app and site blocks keep working,
+  `curfew status` still answers — and names the cost.
+
+### Two guards of my own that could not fail
+
+I wrote `foreground()` to also return whether the answer came from the tray, and the warning to check
+`foreground.is_some() || reported`. **No mutation of that clause could fail a test**, because no input
+reaches it: a fresh report always carries a window, so `reported` is true only when the foreground is
+already `Some`. Removed rather than kept — a guard that cannot fire reads exactly like one that can, and
+this branch has already paid for four of those. A test now pins the property that made it dead, so if the
+distinction ever becomes real that test fails and says so.
+
+A test written alongside it **could not fail either**, for the same reason and in the same way: it
+reported a window and then asserted no warning. It is rewritten to assert what is load-bearing — no
+warning while the tray is alive, warning the moment it stops — which is one report's difference.
+
+### Verification
+
+958 Rust tests (was 943). **Seven mutations caught**, across the core predicate (a window-title rule and
+a budget each dropped from `needs_foreground`), the enforcer (the gap never reported; the gap reported
+when no rule needs it, which is the crying-wolf direction), `Status` dropping the exposure, the tray
+dropping the pre-emptive warning, and the quit note reverting to its old claim.
