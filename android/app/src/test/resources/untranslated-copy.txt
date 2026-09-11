@@ -131,7 +131,6 @@ NowScreen.kt|1 peer
 NowScreen.kt|Another of your devices has a session only this one can end.
 NowScreen.kt|Ask to end in 24 hours
 NowScreen.kt|Blocking now
-NowScreen.kt|Cancel
 NowScreen.kt|Check the schedules now
 NowScreen.kt|Confirm it is you.
 NowScreen.kt|Curfew is watching your schedule. It will start one when its time comes.
@@ -142,8 +141,6 @@ NowScreen.kt|End now
 NowScreen.kt|Got it
 NowScreen.kt|Got it
 NowScreen.kt|Hold the tag against the back of the phone, or type what is on it.
-NowScreen.kt|Keep it
-NowScreen.kt|Keep it running
 NowScreen.kt|Let it out
 NowScreen.kt|Let the other device out?
 NowScreen.kt|Locked: needs 
@@ -151,12 +148,10 @@ NowScreen.kt|Missed a stretch
 NowScreen.kt|Next up
 NowScreen.kt|No peers
 NowScreen.kt|Not yet
-NowScreen.kt|Not yet
 NowScreen.kt|Nothing blocked yet today
 NowScreen.kt|Nothing is blocked
 NowScreen.kt|Nothing is set to start on its own. Start a block by hand whenever you want.
 NowScreen.kt|Nothing scheduled in the next day.
-NowScreen.kt|OK
 NowScreen.kt|Present
 NowScreen.kt|Present a tag
 NowScreen.kt|Present the tag
@@ -173,14 +168,10 @@ NowScreen.kt|Use an emergency pass?
 NowScreen.kt|Use one
 NowScreen.kt|Waiting on you
 NowScreen.kt|You chose \"ask me first\" for this one, so this is the asking. Nothing else 
-NowScreen.kt|Your other device is holding a session that only this one can end. Saying 
-NowScreen.kt|is standing in the way.
+NowScreen.kt|Your other device is holding a session that only this one can end. Saying yes 
 NowScreen.kt|no end time
-NowScreen.kt|paired device, it is written into your history, and it cannot be given 
 NowScreen.kt|reopening it is not a restart.
 NowScreen.kt|right now.
-NowScreen.kt|way to take it back.
-NowScreen.kt|yes ends it there as soon as the two devices next talk, and there is no 
 ProfileEditScreen.kt| else 
 ProfileEditScreen.kt|A daily budget
 ProfileEditScreen.kt|A daily budget

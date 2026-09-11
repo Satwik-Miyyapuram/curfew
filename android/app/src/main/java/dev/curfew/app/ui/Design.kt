@@ -31,6 +31,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -86,6 +90,65 @@ object Dsn {
      */
     val BottomRoom = 116.dp
 }
+
+/**
+ * The three numbers the app's one elevated surface is made of.
+ *
+ * They were written out **twice** — once in the nav bar and once on the block screen — and had already
+ * drifted: the nav used `Surface` at 0.86 with a 0.06 sheen and a 0.09 edge, the block screen `Raised`
+ * at 0.88 with 0.07 and 0.10. The block screen's own comment read *"The same pane of glass as the nav
+ * bar"*, which was **false**, and false in the way this codebase keeps producing: a comment asserting a
+ * consistency the code does not have.
+ *
+ * A one-hundredth of an alpha is not the point. The point is that two surfaces claiming to be one
+ * material will keep diverging until somebody makes it one value, and the third caller — the sheet,
+ * which is what this was extracted for — would have been a third opinion.
+ */
+object Glass {
+    /** How much of the page shows through the ground. */
+    const val Ground = 0.87f
+
+    /** The lit top edge: white at this alpha fading to nothing, so the pane catches light. */
+    const val Sheen = 0.065f
+
+    /** The hairline around it, just brighter than the surface behind. */
+    const val Edge = 0.095f
+}
+
+/**
+ * The pane of glass: what the nav bar, the block screen and the sheets are all made of.
+ *
+ * `ground` stays a parameter because the three genuinely sit on different things — the nav floats over
+ * a page, the block button over a full-bleed dark screen, a sheet over the page it rose from — and a
+ * surface that was *exactly* the same colour in all three would read as a hole in one of them. The
+ * **glass** is identical; the thing behind it differs.
+ *
+ * `elevation` is zero for a surface that is not floating. The nav bar casts a shadow because it hovers
+ * over content that scrolls under it; a sheet is anchored to an edge and a shadow under it would fall
+ * on nothing.
+ */
+fun Modifier.glass(
+    shape: Shape,
+    ground: Color = Palette.Surface,
+    elevation: Dp = 0.dp,
+): Modifier = this
+    .then(
+        if (elevation > 0.dp) {
+            Modifier.shadow(elevation, shape, clip = false)
+        } else {
+            Modifier
+        },
+    )
+    .clip(shape)
+    .background(ground.copy(alpha = Glass.Ground))
+    // The sheen is a second background rather than a colour stop in the first, because it has to sit
+    // *over* the translucent ground: a gradient replacing the ground would make the pane opaque.
+    .background(
+        Brush.verticalGradient(
+            listOf(Color.White.copy(alpha = Glass.Sheen), Color.Transparent),
+        ),
+    )
+    .border(1.dp, Color.White.copy(alpha = Glass.Edge), shape)
 
 /**
  * A screen: the gutter, the scroll, and the space at the bottom, in one place.
@@ -619,6 +682,43 @@ fun DSheet(
     onConfirm: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    SheetFrame(
+        title = title,
+        sub = sub,
+        onDismiss = onDismiss,
+        content = content,
+        buttons = {
+            GhostButton("Cancel", Modifier.weight(1f), onClick = onDismiss)
+            Box(Modifier.weight(1f)) {
+                PrimaryButton(confirm, enabled = confirmEnabled, onClick = onConfirm)
+            }
+        },
+    )
+}
+
+/**
+ * The chrome every sheet in the app is made of: the scrim, the pane, the grip, the title, the body and
+ * a row of buttons.
+ *
+ * Extracted so the material lives in **one** place. `DSheet` was the only sheet, and the three
+ * confirmation dialogs on the Now screen were Material `AlertDialog`s — a different surface colour, a
+ * different corner radius, a different type scale and different buttons, on the screen a user sees
+ * most. That is F-40 in the interaction review, and the fix is not "restyle three dialogs" but "have
+ * one sheet", so every sheet added later is the app's material by construction rather than by care.
+ *
+ * `glass` rather than a flat `Palette.Surface`, which is F-39: the design canvas asks for the sheets to
+ * be *"the page's own material, not a platform dialog — same surface, same hairline, same 22px corner
+ * as every card behind it"*, and the app's own answer to "the page's own material" is the pane the nav
+ * bar and the block screen already wear. It was the only elevated surface without it.
+ */
+@Composable
+private fun SheetFrame(
+    title: String,
+    sub: String?,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+    buttons: @Composable RowScope.() -> Unit,
+) {
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
@@ -626,8 +726,12 @@ fun DSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-                .background(Palette.Surface)
+                .glass(
+                    shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                    // `Raised` rather than `Surface`: a sheet lies over a page made of Surface, and the
+                    // same colour on both would read as a hole rather than as a pane laid on top.
+                    ground = Palette.Raised,
+                )
                 .padding(horizontal = Dsn.Gutter)
                 .padding(top = 8.dp, bottom = 20.dp),
         ) {
@@ -664,14 +768,80 @@ fun DSheet(
                 content()
             }
             Gap(22.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GhostButton("Cancel", Modifier.weight(1f), onClick = onDismiss)
-                Box(Modifier.weight(1f)) {
-                    PrimaryButton(confirm, enabled = confirmEnabled, onClick = onConfirm)
-                }
-            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { buttons() }
         }
     }
+}
+
+/**
+ * A decision: a sentence, and two buttons.
+ *
+ * The shape every "are you sure" in the app takes, so they are all the same thing. `destructive`
+ * changes *which button is the prominent one*, and that is a deliberate reading of the design canvas
+ * rather than a preference: the canvas styles the app's one destructive control — Delete on a profile
+ * — as a **ghost button in the warning colour**, and puts the filled accent on the action that is safe.
+ * So when the confirm is the destructive one, the emphasis moves to the way out.
+ *
+ * That is also why there is no "danger" fill: a solid red button invites the tap it is warning about,
+ * and the canvas never draws one.
+ */
+@Composable
+fun DConfirm(
+    title: String,
+    sub: String? = null,
+    body: String? = null,
+    dismiss: String,
+    confirm: String,
+    destructive: Boolean = false,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    SheetFrame(
+        title = title,
+        sub = sub,
+        onDismiss = onDismiss,
+        content = {
+            if (body != null) {
+                Text(body, fontSize = 14.sp, lineHeight = 21.sp, color = Palette.Muted)
+            }
+        },
+        buttons = {
+            if (destructive) {
+                Box(Modifier.weight(1f)) {
+                    PrimaryButton(dismiss, onClick = onDismiss)
+                }
+                GhostButton(
+                    confirm,
+                    Modifier.weight(1f),
+                    colour = Palette.Bad,
+                    onClick = onConfirm,
+                )
+            } else {
+                GhostButton(dismiss, Modifier.weight(1f), onClick = onDismiss)
+                Box(Modifier.weight(1f)) {
+                    PrimaryButton(confirm, onClick = onConfirm)
+                }
+            }
+        },
+    )
+}
+
+/**
+ * Something the user asked for and cannot have, or cannot do.
+ *
+ * One button, because there is no decision — the point is the sentence. It is a sheet rather than a
+ * platform dialog for the same reason the others are: the app has one material, and a refusal is not
+ * an occasion to borrow another one.
+ */
+@Composable
+fun DNote(title: String, body: String, dismiss: String = "OK", onDismiss: () -> Unit) {
+    SheetFrame(
+        title = title,
+        sub = null,
+        onDismiss = onDismiss,
+        content = { Text(body, fontSize = 14.sp, lineHeight = 21.sp, color = Palette.Muted) },
+        buttons = { Box(Modifier.weight(1f)) { PrimaryButton(dismiss, onClick = onDismiss) } },
+    )
 }
 
 /** A block of the form: its label, and what it asks for. */

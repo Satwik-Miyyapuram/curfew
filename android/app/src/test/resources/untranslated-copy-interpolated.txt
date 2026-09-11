@@ -41,15 +41,15 @@ NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStre
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
 NowScreen.kt|Ask to end ${session.profile} in 24 hours
 NowScreen.kt|Emergency pass ($passesLeft)
-NowScreen.kt|End ${session.profile}
+NowScreen.kt|End ${named(session.profile)}
+NowScreen.kt|End ${named(session.profile)}?
 NowScreen.kt|End ${session.profile} now
-NowScreen.kt|End ${session.profile}?
 NowScreen.kt|Ends ${relative(endsAt, now)} (${clockTime(endsAt)})
 NowScreen.kt|Let $id out
 NowScreen.kt|Let session $id out
 NowScreen.kt|Present a tag for ${session.profile}
 NowScreen.kt|The tag that ends $profile
-NowScreen.kt|This ends ${session.profile} now. It counts against your ration on every 
+NowScreen.kt|This ends ${named(session.profile)} now. It counts against your ration on 
 NowScreen.kt|Use an emergency pass on ${session.profile}, $passesLeft left
 NowScreen.kt|left · ends ${clockOf(it)}
 ProfileEditScreen.kt|$emoji $value

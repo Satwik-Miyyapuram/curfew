@@ -293,17 +293,11 @@ private fun GlassBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(22.dp, RoundedCornerShape(26.dp), clip = false)
-                .clip(RoundedCornerShape(26.dp))
-                // Two layers: a translucent ground so the page shows through, then a top-down
-                // sheen so the slab has a lit edge rather than one flat tone.
-                .background(Palette.Surface.copy(alpha = 0.86f))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.06f), Color.Transparent),
-                    ),
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(26.dp))
+                // The app's one elevated surface, defined in `Design.kt` with the block screen and the
+                // sheets. The two layers — a translucent ground so the page shows through, a top-down
+                // sheen so the slab has a lit edge rather than one flat tone — were written out here
+                // and again on the block screen, and had already drifted apart.
+                .glass(RoundedCornerShape(26.dp), elevation = 22.dp)
                 .padding(horizontal = 6.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,

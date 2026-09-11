@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -82,13 +81,27 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // because the dialog names the profile that is about to end.
     var confirmingEnd by remember { mutableStateOf<Session?>(null) }
 
+    /**
+     * A profile as a person reads it: the name they gave it, never the slug from the config.
+     *
+     * One helper because there were four call sites each doing the lookup inline and one that did not
+     * do it at all — the biometric prompt's title read `End deep-work`. That is the same defect as
+     * F-28 on Windows, where every surface printed `Session.profile`, except this one reaches the
+     * *system* fingerprint dialog, so the slug appears in a box the app does not draw.
+     *
+     * Falling back to the id is deliberate: a profile deleted while a session from it is still running
+     * has no name to look up, and the id beats an empty title.
+     */
+    fun named(id: String): String =
+        state.profiles.firstOrNull { it.id == id }?.name ?: id
+
     fun finish(session: Session, satisfied: List<Lock>) {
         pending = null
         val credential = session.lock.conditions.filterIsInstance<Lock.DeviceCredential>()
         if (credential.isNotEmpty() && activity != null) {
             Auth.prove(
                 activity,
-                title = "End ${session.profile}",
+                title = "End ${named(session.profile)}",
                 subtitle = "Confirm it is you.",
             ) { proven ->
                 // A cancelled prompt still goes to the core, which refuses and says what is
@@ -122,9 +135,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     val live = state.sessions.firstOrNull()
-    val liveName = live?.let { session ->
-        state.profiles.firstOrNull { it.id == session.profile }?.name ?: session.profile
-    }
+    val liveName = live?.let { session -> named(session.profile) }
 
     Screen(spacing = 0.dp) {
         if (live != null) {
@@ -215,8 +226,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Gap(14.dp)
             SessionCard(
                 session = session,
-                name = state.profiles.firstOrNull { it.id == session.profile }?.name
-                    ?: session.profile,
+                name = named(session.profile),
                 now = state.now,
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
@@ -313,76 +323,58 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     confirmingEnd?.let { session ->
-        AlertDialog(
-            onDismissRequest = { confirmingEnd = null },
-            title = { Text("End ${session.profile}?") },
-            text = {
-                Text(
-                    "You chose \"ask me first\" for this one, so this is the asking. Nothing else " +
-                        "is standing in the way.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = session
-                    confirmingEnd = null
-                    // `Lock.Confirm` is a condition the caller is the only witness to — the core
-                    // cannot check that a dialog was shown — so it is named here and nowhere else.
-                    // That is exactly the kind of claim `claimable` exists to allow, and exactly
-                    // the kind it must not be widened beyond.
-                    finish(chosen, listOf(Lock.Confirm))
-                }) { Text("End it") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingEnd = null }) { Text("Keep it running") }
+        DConfirm(
+            title = "End ${named(session.profile)}?",
+            body = "You chose \"ask me first\" for this one, so this is the asking. Nothing else " +
+                "is standing in the way.",
+            dismiss = "Keep it running",
+            confirm = "End it",
+            onDismiss = { confirmingEnd = null },
+            onConfirm = {
+                val chosen = session
+                confirmingEnd = null
+                // `Lock.Confirm` is a condition the caller is the only witness to — the core cannot
+                // check that a dialog was shown — so it is named here and nowhere else. That is
+                // exactly the kind of claim `claimable` exists to allow, and exactly the kind it must
+                // not be widened beyond.
+                finish(chosen, listOf(Lock.Confirm))
             },
         )
     }
 
     confirmingPass?.let { session ->
-        AlertDialog(
-            onDismissRequest = { confirmingPass = null },
-            title = { Text("Use an emergency pass?") },
-            text = {
-                Text(
-                    "This ends ${session.profile} now. It counts against your ration on every " +
-                        "paired device, it is written into your history, and it cannot be given " +
-                        "back.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = session
-                    confirmingPass = null
-                    model.spendPass(chosen)
-                }) { Text("Use one") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingPass = null }) { Text("Keep it") }
+        DConfirm(
+            title = "Use an emergency pass?",
+            body = "This ends ${named(session.profile)} now. It counts against your ration on " +
+                "every paired device, it is written into your history, and it cannot be given back.",
+            dismiss = "Keep it",
+            confirm = "Use one",
+            // Scarce, recorded, and shared with every paired device — the app's one genuinely
+            // irreversible action, so the emphasis goes on keeping it.
+            destructive = true,
+            onDismiss = { confirmingPass = null },
+            onConfirm = {
+                val chosen = session
+                confirmingPass = null
+                model.spendPass(chosen)
             },
         )
     }
 
     confirmingRelease?.let { id ->
-        AlertDialog(
-            onDismissRequest = { confirmingRelease = null },
-            title = { Text("Let the other device out?") },
-            text = {
-                Text(
-                    "Your other device is holding a session that only this one can end. Saying " +
-                        "yes ends it there as soon as the two devices next talk, and there is no " +
-                        "way to take it back.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = id
-                    confirmingRelease = null
-                    model.releasePeer(chosen)
-                }) { Text("Let it out") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingRelease = null }) { Text("Not yet") }
+        DConfirm(
+            title = "Let the other device out?",
+            body = "Your other device is holding a session that only this one can end. Saying yes " +
+                "ends it there as soon as the two devices next talk, and there is no way to take it " +
+                "back.",
+            dismiss = "Not yet",
+            confirm = "Let it out",
+            destructive = true,
+            onDismiss = { confirmingRelease = null },
+            onConfirm = {
+                val chosen = id
+                confirmingRelease = null
+                model.releasePeer(chosen)
             },
         )
     }
@@ -727,12 +719,9 @@ private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
             }
         }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
-        title = { Text("Not yet") },
-        text = { Text(text) },
-    )
+    // A sheet, not a platform dialog: the app has one material, and a refusal is not an occasion to
+    // borrow another one.
+    DNote(title = "Not yet", body = text, onDismiss = onDismiss)
 }
 
 /**
@@ -797,40 +786,39 @@ private fun TagDialog(
             onDispose { stop() }
         }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Present the tag") },
-        text = {
-            Column {
-                Text(
-                    if (activity != null && Tags.isAvailable(activity)) {
-                        "Hold the tag against the back of the phone, or type what is on it."
-                    } else {
-                        // Said plainly rather than hidden: someone whose NFC is switched off should
-                        // know why tapping is doing nothing.
-                        "This phone is not reading tags right now. Type what is on it instead."
-                    },
-                )
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    singleLine = true,
-                    label = { Text("Tag") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .semantics { contentDescription = "The tag that ends $profile" },
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onPresent(typed.trim()) },
-                enabled = typed.isNotBlank(),
-            ) { Text("Present") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    // `DSheet` rather than a Material dialog: this is a form with a field, which is exactly the shape
+    // `DSheet` was built for, and it was the last Material surface on this screen.
+    DSheet(
+        title = "Present the tag",
+        sub = null,
+        onDismiss = onDismiss,
+        confirm = "Present",
+        confirmEnabled = typed.isNotBlank(),
+        onConfirm = { onPresent(typed.trim()) },
+    ) {
+        Text(
+            if (activity != null && Tags.isAvailable(activity)) {
+                "Hold the tag against the back of the phone, or type what is on it."
+            } else {
+                // Said plainly rather than hidden: someone whose NFC is switched off should know why
+                // tapping is doing nothing.
+                "This phone is not reading tags right now. Type what is on it instead."
+            },
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
+            color = Palette.Muted,
+        )
+        Gap(12.dp)
+        OutlinedTextField(
+            value = typed,
+            onValueChange = { typed = it },
+            singleLine = true,
+            label = { Text("Tag") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "The tag that ends $profile" },
+        )
+    }
 }
 
 /** An end that is waiting on the user to work through a challenge. */

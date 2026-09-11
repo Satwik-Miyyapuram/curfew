@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.curfew
 import dev.curfew.app.ui.CurfewTheme
+import dev.curfew.app.ui.glass
 import dev.curfew.app.ui.Palette
 import kotlinx.coroutines.delay
 
@@ -272,15 +273,11 @@ private fun BlockScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .clip(RoundedCornerShape(16.dp))
-                // The same pane of glass as the nav bar: translucent ground, lit top edge.
-                .background(Palette.Raised.copy(alpha = 0.88f))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.07f), Color.Transparent),
-                    ),
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+                // The app's one pane of glass, from `Design.kt`. This said "the same pane of glass as
+                // the nav bar" and was not: Raised at 0.88 with a 0.07 sheen and a 0.10 edge, against
+                // the nav bar's Surface at 0.86/0.06/0.09. The comment asserted a consistency the code
+                // did not have, which is the failure mode this codebase keeps producing.
+                .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
                 .clickable(onClick = onClose),
             contentAlignment = Alignment.Center,
         ) {
