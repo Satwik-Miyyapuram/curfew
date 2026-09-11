@@ -71,6 +71,7 @@ must run.
 | 50 | Removing a device was unconfirmed, and can take away a lock's only exit (F-14) | **P1** | **Fixed** (entry 48) |
 | 51 | Simple mode was cited by a comment that contradicted itself and a plan that promises it (F-11) | **P1** | **Fixed** as documentation (entry 48) |
 | 52 | Two absences with no explanation: day one on Now, the comparison on Usage (F-12, F-13) | **P2** | **Fixed** (entry 48) |
+| 53 | The README advertised a pairing step the Windows build cannot do (F-18) | **P0** | **Partly fixed** — the advertisement is honest; the front door is scoped, not built (entry 49) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -100,7 +101,7 @@ problem rather than a number in it.
 | F-13 | P2 | **Fixed** (entry 48). `UsageScreen.kt:64` rendered the comparison only when non-null; the two reasons it can be null now have a placeholder that names them |
 | F-14 | P1 | **Fixed** (entry 48). `DevicesScreen.kt:302` revoked on a single tap; now confirmed, naming the locks that would lose their exit |
 | F-15 | P3 | **Fixed** (entry 46) |
-| F-18 | **P0** | **Not fixed, and now correctly labelled.** The Windows pairing front door does not exist. It *was* recorded in `Still open` under entry 28 — the defect was that it was never given its finding number, so a P0 read as covered |
+| F-18 | **P0** | **Partly fixed** (entry 49). The README no longer advertises a step the PC cannot do; the front door itself is still unbuilt, with its scope recorded |
 | F-33 | P1 | **Fixed** (entry 46) |
 | F-34 | P2 | **Not re-assessed.** Two rows that promise a path they do not implement |
 | F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
@@ -172,6 +173,8 @@ this table is a reading aid.
 | `83ba4f0` | The 24-hour release confirmed, an unsatisfiable lock withheld, and a finding rejected (entry 47) |
 | `a8d420a` | Removing a device is confirmed, and Simple mode stops being cited (entries 48) |
 | `b171ed4` | An absence with no explanation, in the two places it matters most (entries 48) |
+| `6a53653` | Entry 48, and four coverage rows corrected (entries 48) |
+| `3be9a24` | The README advertised a pairing step Windows cannot do (entry 49) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -2701,5 +2704,72 @@ literal: not a false claim, but a comment filed against the wrong symbol.
 these fixes before they could be committed unrecorded. Counts: 328 untranslated, 77 interpolated, 68
 Material. Rust untouched at **861 passed**; fmt and clippy clean.
 
-**Limits:** the Compose changes are compile-verified only. What did not need eyes: a confirmation that was
-missing, a number that was counted wrongly, and two absences that now explain themselves.
+---
+
+## 49. F-18: the advertisement corrected, and the front door scoped rather than half-built
+
+**Finding:** `UX_INTERACTION_REVIEW.md` **F-18 (P0)** — *"Pairing, the advertised headline feature, has no
+Windows front door."* **Partly fixed.**
+
+### The part that is a fix
+
+The README's setup list opens *"The two devices are set up the same way, in the same order"*, and step 4 is
+*"Pair the devices — Devices → Pair, scanning a QR from the other one."*
+
+Steps 1–3 each give **both** a phone path and a PC command. **Step 4 gives only a phone path**, because
+there is no Devices page in the Windows window — and nothing said so. A reader setting up a PC concludes
+either that they missed something or that the feature is broken. A footnote on the comparison table and a
+note under step 4 now say plainly that pairing is Android-only today.
+
+That is the **seventh** comment or doc on this branch describing something the code does not do, and the
+first where the misstatement is an **omission**: no line is false, but the line sits in a list that implies
+a symmetry the build does not have. Worth naming separately — checking claims against the code does not
+catch a claim that was never made, only one that is missing where a reader expects it.
+
+### The part that is not, and why
+
+**The front door is a feature, not broken behaviour.** What exists today:
+
+| Piece | State |
+| :--- | :--- |
+| Sync engine, invite format, six-digit comparison | **built and tested** (`curfew-sync`) |
+| FFI surface: `invite`, `accept_invite`, `revoke` | **built** (`curfew-ffi/src/sync.rs:105,135,157`) |
+| The service's sync node, peers on disk, the mirror | **built** (`curfew-svc/src/runner.rs:232`) |
+| Any Windows caller of the three pairing calls | **none** — `git grep` finds no caller in `curfew-win`, `curfew-tray`, `curfew-app` or `curfew-svc` |
+| A Devices page in the Windows window | **does not exist** — the nav is Now, Plan, Apps & sites, Where time went, Is it working |
+| Sync state in `Response::Status` | **absent** — the window cannot even say whether it is paired |
+
+So the work is: a `Devices` page, three new `Request` variants and their handlers, and sync state on the
+status. Several hundred lines, and the awkward part is a **design question rather than a typing one**:
+
+> `runner.rs:225-231` says *"**Nothing is bound until this device is paired with something**… an unpaired
+> device binds nothing at all, and `resume_sync` brings the node up on the pass after the first pairing
+> lands."* That is deliberate — it stops Windows Defender Firewall prompting an administrator about a
+> listener for a feature nobody has switched on. But `start_sync` **discards `shared` when peers is empty**,
+> so today there is no path by which an unpaired machine can reach its own identity to *offer* an invite.
+> Restructuring that so identity exists before peers, without binding anything, is the actual design work.
+
+**And two-device pairing cannot be exercised on this host at all.** Shipping the protocol surface without
+the UI — or the UI without the protocol — would put something in place that claims support it does not
+have, which is worse than a documented gap. So it is scoped here and left for a round that can test it.
+
+### Scope, so the next round starts from a plan rather than from this investigation
+
+1. Split identity from the node: open `store::open` and keep `shared` even with no peers, while still not
+   calling `Node::start`. The existing comment must survive — nothing may bind before a peer exists.
+2. `Request::{Peers, Invite, Accept, Revoke}` and their `Response`s. `Accept` carries the other device's
+   reply; `Invite` returns the JSON the phone renders as a QR.
+3. Handlers in `tick.rs`/`runner.rs`. The comparison step stays human: nothing on either side may accept
+   without the user confirming the six digits, which is the whole point of the phrase.
+4. A Devices page in `app.html` beside the existing five, with the invite as text (a QR needs a renderer
+   this window does not have — text plus a paste field is the honest minimum).
+5. Sync state on `Response::Status`, which is independently useful: today the window says nothing about
+   sync at all, so a user cannot tell paired from unpaired even after pairing works.
+
+**Step 5 is worth doing on its own**, and is the smallest: the review praises Android for stating sync
+truth in a five-way `when`, and Windows states it in zero ways.
+
+### Verification
+
+861 Rust tests pass; fmt and clippy clean; the `#using-it` anchor the new footnote links to resolves
+(`README.md:45`). No Android change this commit.
