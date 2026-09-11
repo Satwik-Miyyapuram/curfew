@@ -171,7 +171,7 @@ function describeRefusal(refusal) {
 }
 
 // ---- state ------------------------------------------------------------------------------------
-const state = { page: "now", status: null, trouble: null, config: null, configError: null, tab: "apps", profile: null };
+const state = { page: "now", status: null, trouble: null, config: null, configPath: null, configError: null, tab: "apps", profile: null };
 
 async function refresh() {
   const answer = await askService({ request: "status" });
@@ -188,6 +188,8 @@ async function refresh() {
   const config = await readConfig();
   if (config.ok) { state.config = config.value; state.configError = null; }
   else { state.config = null; state.configError = config.detail; }
+  // Kept even on failure, so a page can name the file that could not be read.
+  state.configPath = config.path || null;
   draw();
 }
 
@@ -345,8 +347,21 @@ function pagePlan() {
     <div style="height:18px"></div>
     <div class="lbl">From your calendar</div><div style="height:8px"></div><div class="flush">${rules}</div>
     <div style="height:16px"></div>
-    <div class="note">This is what the service is enforcing, read from its own config. Editing it needs
-      an administrator, so it is done from a terminal for now:\n\tcurfew add-window &lt;config&gt; ...</div>`;
+    <div class="note wrap">This is what the service is enforcing, read from its own config. Editing it
+      needs an administrator, so it is done from a terminal for now — and the file it reads is:
+${esc(configHint())}</div>`;
+}
+// The command a user can actually run.
+//
+// This used to end in an unresolved placeholder — `curfew add-window <config> …` — which is the one
+// instruction on the page nobody can act on, because `<config>` is exactly the thing they do not
+// know. The service's config lives under %ProgramData%, while every example in the README says
+// `curfew.toml`, so following the documentation edits a file the service never reads and says
+// nothing about it. Naming the real path here is the shortest way to stop that.
+function configHint() {
+  const path = state.configPath;
+  if (!path) return "curfew add-window <config.toml> ...  (the path is shown on Is it working)";
+  return `curfew add-window "${path}" ...`;
 }
 function describeMatcher(matcher) {
   if (!matcher) return "Every event";

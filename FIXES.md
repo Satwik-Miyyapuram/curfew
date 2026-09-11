@@ -25,11 +25,11 @@ must run.
 | 4 | Android UI reconciled with the raw wall clock (A-1) | **P0** | **Fixed** |
 | 5 | First block lost after the accessibility detour (F-1) | **P0** | **Fixed** |
 | 6 | Windows had no way to start a block (F-16) | **P0** | Pending |
-| 7 | README documented a config the service never reads (F-17) | **P0** | Pending |
+| 7 | README documented a config the service never reads (F-17) | **P0** | **Fixed** |
 | 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | **Fixed** |
 | 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | **Fixed** |
-| 10 | `[emergency]` never validated | **P1** | Pending |
-| 11 | `end_with_pass` took the caller's word | **P1** | Pending |
+| 10 | `[emergency]` never validated | **P1** | **Fixed** |
+| 11 | `end_with_pass` took the caller's word | **P1** | **Fixed** |
 | 12 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
 | 13 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
 | 14 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
@@ -54,7 +54,11 @@ it is corrected against `git log` whenever an entry is added.)*
 | `843bc52` | The Windows service judges locks against a trusted clock (entry 2) |
 | `e095b4f` | A stop is refused while a lock is held, and uninstall fails shut (entry 3) |
 | `d7e1f40` | A watchdog image is verified by content, not by size and timestamp (entry 19) |
-| *(next)* | The Android UI reconciles against the trusted clock (entry 4) |
+| `5dd09d9` | The Android UI judges sessions against the trusted clock (entry 4) |
+| `f2f0956` | The block the user configured is the block that starts (entries 5, 22) |
+| `fde2973` | Locks that promised an exit now have one (entries 8, 9, 16) |
+| *(next)* | The emergency ration is enforced by the type, not by convention (entries 10, 11) |
+| *(next)* | The documented config path is the one the service reads (entry 7) |
 
 ### A note on the Android verification environment
 
@@ -542,3 +546,181 @@ as entry 5, which is why they share a commit.
 that exists in one code path and not in its siblings. Where a rule matters, route every path through
 one function — and where a decision encodes a rule, make the **default** the safe answer, because the
 bug is always in the branch nobody wrote.
+
+---
+
+## 10. `[emergency]` was never validated
+
+**Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P1-5.
+
+**What was wrong.** `Config::validate` checked the timezone, profile ids and names, zero budgets, zero
+launch limits, token ids and fingerprints, weekly minutes and days, schedule profile references and
+calendar sources — and **never looked at `self.emergency` at all**. `git grep emergency -- config.rs`
+returned the field declaration, its default, and an unused import.
+
+With `window_seconds = 0`, `EmergencyPolicy::recent` computes `since = now - 0`, so it never finds a
+spent pass; `QuotaSpent` and `CoolingDown` can never fire and `remaining()` always reports the full
+quota. **The escape hatch becomes unlimited.** With `cooldown_seconds = 0` the documented "minimum gap
+between two uses" disappears.
+
+`validate`'s own doc-comment states the principle it was breaking: *"a config that would behave
+surprisingly is rejected at load, where the user can still see why, rather than at 4am inside a lock."*
+The zero-budget refusal at `:434-446` is the precedent.
+
+**What was changed.** Three checks, in the existing style, each naming the field and the fix:
+
+- `emergency.window_seconds == 0` → refused, pointing at `passes = 0` as the way to switch the hatch
+  off deliberately.
+- `emergency.cooldown_seconds == 0` **when `passes > 0`** → refused. Gated on `passes`, because with
+  the hatch off there is nothing to ration and the number is meaningless; turning it on is when it
+  starts to matter.
+- `Refill::Rolling { seconds: 0 }` → refused. The same defect one level down: `used_since(Some(now))`
+  would match only rollups stamped at or after `now`, so the budget could never be exhausted and the
+  rule would never fire.
+
+**Verification.** 4 new tests in `crates/curfew-core/tests/config.rs`, including the negative case — a
+zero cooldown *is* accepted while the hatch is off, so the check is not merely refusing everything.
+`cargo test --workspace`: **817 passed, 0 failed.**
+
+---
+
+## 11. The emergency ration was enforced by convention, not by the type
+
+**Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P1-4.
+
+**What was wrong.** `Pass` was `pub struct Pass { pub at: Timestamp }` — publicly constructible — and
+`Sessions::end_with_pass` opened with `let _ = pass;` before declaring **every** condition satisfied:
+
+```rust
+pub fn end_with_pass(&mut self, id: &str, now: Timestamp, pass: Pass) -> Result<Session, Refusal> {
+    let _ = pass;
+    ...
+    let satisfied = session.lock.conditions.clone();
+    self.end(id, now, &satisfied)
+}
+```
+
+So `end_with_pass(id, now, Pass { at: 0 })` released any lock — `DeviceCredential`, `Token`,
+`PeerRelease`, `RestartRequired` — with no quota, no cooldown and no bookkeeping. Both in-tree callers
+happened to spend properly first (`tick.rs` and the FFI both call `Passes::spend`), so this was not a
+live bypass — but the safety property rested entirely on caller discipline, in the one function whose
+whole purpose is to be the rationed hatch, and the module's own doc argues the ration *"is the service's
+to enforce, not the caller's"*.
+
+**What was changed.** The field is now **private**, with a `pub fn at(&self)` accessor for the
+documented "write it to the op-log" contract. That makes a `Pass` a **receipt**: the only way to obtain
+one is `Passes::spend`, which is the only thing that checks the quota and the cooldown. The
+`let _ = pass;` is no longer "we trust the caller" but "the caller could not have this unless the ration
+allowed it", and the method's doc comment now says exactly that.
+
+**Why this shape rather than a runtime check.** The alternatives were to pass `&Passes` in and verify
+membership, or to add a `Refusal` variant. The first duplicates accounting `spend` already did; the
+second changes a serialized enum Android matches on. Making the constructor private is one line of
+intent and moves the invariant into the compiler, which is where `#[must_use]` and the deliberate
+absence of `Clone` already put the same kind of guarantee.
+
+**Verification — and this one has real evidence.** I wrote a temporary test that attempted
+`Pass { at: 0 }` from outside the module and confirmed the compiler refuses it:
+
+```
+error[E0451]: field `at` of struct `Pass` is private
+ --> crates\curfew-core\tests\forge_attempt.rs:7:20
+```
+
+The probe file was then deleted. The build then confirmed nothing else read the field: the only
+external read was one `assert_eq!(spent.at, now)` in `curfew-sync`'s tests, now `spent.at()`.
+`cargo test --workspace`: 817 passed.
+
+---
+
+## 7. The documented config path was not the one the service reads
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-17 (P0).
+
+**What was wrong.** The service reads `%ProgramData%\Curfew\curfew.toml` (`runner.rs:34-37`; the window
+reads the same path, `app.rs:39-42`). `README.md` opened its "Using it" walkthrough with four commands
+that all take a path — and every one of them said a bare `curfew.toml`:
+
+```
+curfew add-profile curfew.toml --id deep-work
+curfew block curfew.toml --profile deep-work --site reddit.com
+curfew schedules curfew.toml
+```
+
+On an installed machine, following the README verbatim creates a config the service never opens, and
+`schedules` then fails outright. Nothing reported the discrepancy. The window's **Plan** page made it
+worse by rendering an unresolved placeholder — `curfew add-window <config> …` — the one instruction on
+that page a user cannot act on, because `<config>` is precisely what they do not know.
+
+**What was changed.**
+
+- `README.md` quotes the path, names `%ProgramData%\Curfew\curfew.toml` explicitly, states why it
+  matters — *"a path pointing at a file the service never opens edits a plan that is never enforced,
+  silently"* — and points at the window as the reliable place to copy it from.
+- `app.rs` returns the resolved path alongside the config in the `Call::Config` reply, on the failure
+  path too, so a page can name the file that would not parse.
+- `app.html` renders the real command: `curfew add-window "<path>" …`, with a fallback sentence when
+  the path is unknown.
+- That note also gains the `wrap` class. `.note` had no `pre-wrap`, so the command rendered as one
+  run-on line — the third of three separate reasons a user could not act on it.
+
+**Not changed, recorded as a follow-up.** The commands still *require* a path. Defaulting it to the
+service's config when omitted is the durable fix — it would let the README say
+`curfew add-profile --id deep-work` and remove the class of error entirely — but it changes argument
+parsing across `curfew-cli/src/schedule.rs` and is a bigger change than this pass should make
+unverified. **Recorded as entry 23.**
+
+**Verification.** `cargo build -p curfew-app` clean; full workspace suite green; the HTML is compiled
+into the binary by `include_str!`, so a syntax error would be a compile error.
+
+---
+
+## Still open
+
+Recorded here so the remaining work is a list rather than a memory. Severity from the two reviews.
+
+**P0 (one left)**
+
+- **Entry 6 — F-16: Windows has no way to start a block.** `Request::Start` still has exactly one
+  non-test sender: `crates/curfew-svc/src/main.rs:627`. The fix is a UI affordance plus
+  `design/win/Setup.dc.html` for first run, and it is the largest single item left. It is UI work on a
+  surface with no test coverage on this machine, which is why it is the one P0 not attempted here.
+
+**P1**
+
+- **Entry 17 — F-38: touch targets.** Nav tabs ~38dp, `Switch` 26dp, Fix/Grant 32dp, against the app's
+  own `PrimaryButton` at 52dp and WCAG 2.2 SC 2.5.8's 24px floor (48dp is the Material figure).
+  Mechanical but broad: it touches `Design.kt` and every screen that uses those components.
+- **Entry 18 — P1-1: the control channel.** `serve` reads an unbounded line with no timeout on a
+  single-threaded accept loop.
+  **Before attempting this, read the note in `DESIGN_AND_CODE_REVIEW_FULL.md`:** `interprocess` returns
+  `Unsupported` for `set_read_timeout` on Windows named-pipe streams, so the obvious fix does not
+  compile-and-work. It needs a supervisor thread or `PIPE_NOWAIT`. I did not want to land a change I
+  could not demonstrate works on a real pipe.
+- **Entry 20 — P1-0 second half: the `%ProgramData%\Curfew` ACL.** The spawn path is closed (entry 19),
+  but the directory still inherits `BUILTIN\Users: Write`, so `calendars/`, `dns-before.json` and the
+  state file can still be pre-created. Needs a change in `curfew install` (`icacls /inheritance:r`),
+  which means it is only observable on a real install.
+- **Entry 21 — the Windows interaction set (F-20, F-22, F-23, F-24, F-25, F-26, F-27, F-28).** The
+  silent wrong password, no feedback on block start, config edits not taking effect, the window's own
+  password box, mouse-only nav, the uncancellable freeze, the unreachable tray menu, and profile **id**
+  where the name belongs. Each is small; together they are a session's work on `app.html`,
+  `menu.rs` and `shell.rs`.
+- **Entry 12 — F-29: one message surface.** `UiState.message` is set from eight places and rendered on
+  two. A snackbar host in `CurfewApp` fixes the whole class — including `deleteProfile`'s invisible
+  refusal (entry 15) and peer revoke.
+
+**P2, and the rest**
+
+- Entry 13 (F-30: an unparseable config looks empty and Save would overwrite it), entry 14 (F-31: a
+  failed calendar read renders as an empty diary), entry 15 (F-32: delete-profile has no confirmation),
+  and the design-craft set (F-39–F-45, F-47).
+
+### Two things this pass learned about the repository, worth acting on separately
+
+1. **The Android unit suite cannot run on Windows ARM64.** Not a code fault — Conscrypt ships no
+   `windows-aarch_64` native build — but it means a maintainer on ARM64 Windows has no local test
+   signal for the platform that carries most of the interaction risk. See the note above entry 1.
+2. **Nothing pins the JDK locally.** Gradle 8.14.3 rejects Java 25 with a bare `What went wrong:
+   25.0.2`. CI pins 21 and never sees it. A `.java-version` or a Gradle toolchain declaration would
+   turn that into an instruction.

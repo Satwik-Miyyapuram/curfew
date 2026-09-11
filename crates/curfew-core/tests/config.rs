@@ -113,6 +113,70 @@ fn a_zero_budget_is_refused_because_it_is_a_block_in_disguise() {
     assert!(err.to_string().contains("zero-second budget"), "got {err}");
 }
 
+/// A zero-length rolling window is the same defect as a zero budget, one level down: the rule is
+/// present and looks enforced, and can never fire.
+#[test]
+fn a_zero_length_rolling_window_is_refused() {
+    let toml = r#"
+        schema_version = 1
+        [[profiles]]
+        id = "x"
+        name = "X"
+        [[profiles.rules]]
+        target = { kind = "app_package", package = "com.a" }
+        action = { kind = "budget", seconds = 1200, refill = { kind = "rolling", seconds = 0 } }
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second rolling window"), "got {err}");
+}
+
+/// The escape hatch is a safety rail, and an unvalidated rail is not one. `validate` never looked at
+/// `[emergency]` at all, so a zero-length window made the ration unlimited: `recent` computes
+/// `since = now - 0`, finds no spent pass, and reports the full quota for ever.
+#[test]
+fn a_zero_length_emergency_window_is_refused() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 3
+        window_seconds = 0
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second window"), "got {err}");
+}
+
+/// The cooldown is what stops one bad evening consuming a month's allowance, so a zero one is a
+/// rail removed — but only when there is a ration for it to protect.
+#[test]
+fn a_zero_cooldown_is_refused_when_there_are_passes_to_protect() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 3
+        window_seconds = 604800
+        cooldown_seconds = 0
+    "#;
+    let err = Config::from_toml(toml).unwrap_err();
+    assert!(err.to_string().contains("zero-second cooldown"), "got {err}");
+}
+
+/// …and accepted when the hatch is switched off, because then there is nothing to ration and the
+/// number means nothing. Turning the hatch on later is when it starts to matter.
+#[test]
+fn a_zero_cooldown_is_fine_while_the_hatch_is_off() {
+    let toml = r#"
+        schema_version = 1
+        [emergency]
+        passes = 0
+        window_seconds = 604800
+        cooldown_seconds = 0
+    "#;
+    assert!(
+        Config::from_toml(toml).is_ok(),
+        "a disabled hatch was refused for an irrelevant number"
+    );
+}
+
 #[test]
 fn a_zero_launch_limit_is_refused_too() {
     let toml = r#"

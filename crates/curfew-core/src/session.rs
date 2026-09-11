@@ -173,6 +173,13 @@ impl Sessions {
     /// what enforces the quota, and it is deliberately not called from in here so the use is
     /// recorded in the op-log whether or not the release that followed it succeeded.
     ///
+    /// **The pass is a receipt, and the type now says so.** `Pass` has a private field, so the only
+    /// way to obtain one is [`Passes::spend`]; the `let _ = pass` below is therefore not "we trust
+    /// the caller" but "the caller could not have this unless the ration allowed it". Before that
+    /// field was private, any code in the process could write `Pass { at: 0 }` — and through the
+    /// FFI, any code in the Android app, on a rooted device from outside it — and release every
+    /// lock the hatch was supposed to be rationed against.
+    ///
     /// [`Passes::spend`]: crate::emergency::Passes::spend
     pub fn end_with_pass(
         &mut self,

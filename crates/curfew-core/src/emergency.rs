@@ -86,11 +86,26 @@ pub enum PassRefusal {
 ///
 /// Deliberately not `Clone`. It is consumed by the call that ends a session, so one pass cannot be
 /// presented twice — the type system carries the rationing that the accounting below promises.
+///
+/// The field is **private**, and that is the point of the type rather than a detail of it. A `Pass`
+/// is a receipt: the only way to obtain one is [`Passes::spend`], which is the only thing that
+/// checks the quota and the cooldown. It used to be `pub at: Timestamp`, which meant any code in the
+/// process — or, through the FFI, any code in the Android app on a rooted device — could write
+/// `Pass { at: 0 }` and hand it to `Sessions::end_with_pass`, which declares every condition
+/// satisfied and releases any lock. The ration was enforced by convention and is now enforced by the
+/// constructor.
 #[derive(Debug, PartialEq, Eq)]
 #[must_use = "a spent pass must be recorded, or the quota it consumed is lost"]
 pub struct Pass {
-    /// When it was spent. The caller writes this to the op-log so the other devices see it.
-    pub at: Timestamp,
+    /// When it was spent. Written to the op-log so the other devices see it.
+    at: Timestamp,
+}
+
+impl Pass {
+    /// When this pass was spent. The only thing a caller may learn about a receipt.
+    pub fn at(&self) -> Timestamp {
+        self.at
+    }
 }
 
 /// Every pass ever spent, on any device.

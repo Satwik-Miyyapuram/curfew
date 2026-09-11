@@ -516,6 +516,40 @@ impl Config {
                 )));
             }
         }
+        // The escape hatch is a safety rail, and an unvalidated rail is not one. Nothing used to
+        // look at `self.emergency` at all, so a zero-length window made the ration unlimited
+        // (`recent` computes `since = now - 0` and therefore never finds a spent pass) and a zero
+        // cooldown removed the minimum gap between two uses. Both are the same class as the
+        // zero-second budget and the zero launch limit above: a config that disables a documented
+        // guard, accepted silently, discovered at 4am inside a lock.
+        if self.emergency.window_seconds == 0 {
+            return Err(ConfigError::Invalid(
+                "[emergency] has a zero-second window, which makes the quota unlimited; \
+                 use a positive number of seconds, or set passes = 0 to switch the hatch off"
+                    .into(),
+            ));
+        }
+        if self.emergency.passes > 0 && self.emergency.cooldown_seconds == 0 {
+            return Err(ConfigError::Invalid(
+                "[emergency] allows passes but sets a zero-second cooldown, which removes the \
+                 minimum gap between two uses; use a positive number of seconds"
+                    .into(),
+            ));
+        }
+        // A rolling window of zero is the same defect one level down: `used_since(Some(now))` would
+        // match only rollups stamped at or after `now`, so the budget could never be exhausted and
+        // the rule would never fire.
+        for p in &self.profiles {
+            for r in &p.rules {
+                if let Action::Budget { refill: Refill::Rolling { seconds: 0 }, .. } = r.action {
+                    return Err(ConfigError::Invalid(format!(
+                        "profile {:?} has a budget with a zero-second rolling window, so it can \
+                         never be spent; use a positive number of seconds",
+                        p.id
+                    )));
+                }
+            }
+        }
         // A minute past the end of the day is not a time. `end == start` is the one that reads as a
         // mistake either way — an empty window or a whole day, depending on who is asked — so it is
         // refused rather than guessed at.

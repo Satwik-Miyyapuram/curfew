@@ -70,16 +70,23 @@ fn answer(call: Call) -> serde_json::Value {
         },
         Call::Config => {
             let path = config_path();
-            match std::fs::read_to_string(&path)
-                .map_err(|e| format!("{}: {e}", path.display()))
-                .and_then(|text| {
-                    curfew_core::Config::from_toml(&text)
-                        .map_err(|e| format!("{}: {e}", path.display()))
-                }) {
-                Ok(config) => serde_json::json!({ "ok": true, "value": config }),
-                Err(detail) => {
-                    serde_json::json!({ "ok": false, "kind": "error", "detail": detail })
-                }
+            // The path travels with the config, because the Plan page has to name it. It used to
+            // render a placeholder — `curfew add-window <config> …` — which is the one instruction
+            // on that page a user cannot act on: they do not know what `<config>` is. Telling them
+            // matters more than it looks, because the file the service reads lives under
+            // `%ProgramData%` and the README's examples all say `curfew.toml`, so editing the file
+            // in the current directory changes nothing and says nothing.
+            let shown = path.display().to_string();
+            match std::fs::read_to_string(&path).map_err(|e| format!("{shown}: {e}")).and_then(
+                |text| curfew_core::Config::from_toml(&text).map_err(|e| format!("{shown}: {e}")),
+            ) {
+                Ok(config) => serde_json::json!({ "ok": true, "value": config, "path": shown }),
+                Err(detail) => serde_json::json!({
+                    "ok": false,
+                    "kind": "error",
+                    "detail": detail,
+                    "path": shown,
+                }),
             }
         }
     }
