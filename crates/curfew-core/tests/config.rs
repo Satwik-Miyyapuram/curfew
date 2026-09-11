@@ -1,7 +1,7 @@
 //! The config document: parsing, validation, round-tripping and forward migration.
 
 use curfew_core::budget::Refill;
-use curfew_core::{Action, Config, ConfigError, Rule, Target, CONFIG_SCHEMA_VERSION};
+use curfew_core::{Action, Config, ConfigError, Rule, Target, Upserted, CONFIG_SCHEMA_VERSION};
 
 const GOLDEN: &str = include_str!("golden/example.toml");
 const GOLDEN_V0: &str = include_str!("golden/v0_example.toml");
@@ -747,4 +747,49 @@ fn a_rule_for_a_profile_that_does_not_exist_is_refused() {
         .is_err());
     assert_eq!(before, cfg.profiles);
     assert_eq!(0, cfg.remove_rule("nope", &Target::Domain { domain: "x.com".into() }));
+}
+
+// --- what an upsert actually did (P2-10) ---------------------------------------------------------
+//
+// `upsert_weekly` deliberately declines to store a duplicate, and before this a caller could not tell
+// that apart from a real insert — so `curfew add-window` printed "Added" for a window the core had
+// just discarded, inferring the outcome from whether the *id* was new. These pin the three cases so
+// the CLI's message has something true to report.
+
+#[test]
+fn an_upsert_says_when_it_added_something() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    assert_eq!(cfg.upsert_weekly(window("evenings", "deep-work")).unwrap(), Upserted::Added);
+}
+
+#[test]
+fn an_upsert_says_when_it_replaced_a_row() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+
+    let mut edited = window("evenings", "deep-work");
+    edited.end_minute = 22 * 60;
+    assert_eq!(cfg.upsert_weekly(edited).unwrap(), Upserted::Replaced);
+}
+
+/// The case the CLI got wrong: a different id, the same minutes, and nothing stored.
+#[test]
+fn an_upsert_says_when_the_plan_already_covers_it() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    cfg.upsert_weekly(window("evenings", "deep-work")).unwrap();
+    let before = cfg.weekly.len();
+
+    let mut twin = window("evenings", "deep-work");
+    twin.id = "evenings-by-another-name".into();
+    assert_eq!(cfg.upsert_weekly(twin).unwrap(), Upserted::AlreadyPresent);
+    assert_eq!(cfg.weekly.len(), before, "an identical window was stored after all");
+}
+
+/// A rejected window reports the error rather than an outcome, so nothing can print a success for it.
+#[test]
+fn a_refused_upsert_reports_no_outcome() {
+    let mut cfg = Config::from_toml(GOLDEN).unwrap();
+    let mut broken = window("evenings", "no-such-profile");
+    broken.profile = "no-such-profile".into();
+    assert!(cfg.upsert_weekly(broken).is_err());
 }

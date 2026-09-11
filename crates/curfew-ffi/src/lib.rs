@@ -240,12 +240,20 @@ impl Curfew {
     }
 
     /// Add or replace a weekly window. `window_json` is a serialized `WeeklySchedule`.
+    ///
+    /// **The outcome is discarded here, and that is a known remaining gap** (P2-10). The core says
+    /// whether it added, replaced or declined to store a duplicate; the CLI now reports which, and
+    /// this surface does not. Android's profile editor is the caller, and it can hit the same
+    /// duplicate case — a window identical to one already in the plan is discarded and the screen
+    /// shows success. Closing it means returning the outcome across the FFI, which changes the
+    /// generated Kotlin binding, so it is recorded rather than smuggled in here.
     pub fn upsert_weekly(&self, window_json: String) -> Result<(), CurfewError> {
         let window = serde_json::from_str(&window_json).map_err(payload)?;
         self.config
             .write()
             .expect("config lock")
             .upsert_weekly(window)
+            .map(|_outcome| ())
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 

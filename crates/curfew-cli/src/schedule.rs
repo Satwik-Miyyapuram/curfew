@@ -14,7 +14,7 @@
 //! guessing at where a value ends. It is said out loud on every write rather than discovered later.
 
 use curfew_core::schedule::{CalendarSchedule, CalendarSource, EventMatcher, WeeklySchedule};
-use curfew_core::{Action, ChallengeKind, Config, Lock, Platform, Rule, Target};
+use curfew_core::{Action, ChallengeKind, Config, Lock, Platform, Rule, Target, Upserted};
 
 pub const USAGE: &str = "\
   curfew add-profile <config.toml> --id <id> [--name <text>] [--description <text>]
@@ -427,7 +427,6 @@ fn add_window(path: &str, args: &[&str]) -> Result<(), String> {
     };
 
     let mut cfg = load(path)?;
-    let replacing = cfg.weekly.iter().any(|w| w.id == window.id);
     let description = format!(
         "{} runs {}, {} to {}",
         window.profile,
@@ -435,9 +434,23 @@ fn add_window(path: &str, args: &[&str]) -> Result<(), String> {
         hhmm(window.start_minute),
         hhmm(window.end_minute)
     );
-    cfg.upsert_weekly(window).map_err(|e| e.to_string())?;
+    // **The core says what happened; this no longer infers it** — P2-10.
+    //
+    // This used to print `Added` unless a row with the same *id* already existed, which is a
+    // different question from whether the window was stored. `upsert_weekly` deliberately declines
+    // to keep a second window with the same profile, days and times under a different id, so the
+    // command reported a lock it had just discarded. On a tool whose whole point is being trusted
+    // about whether a lock exists, that is the wrong thing to be wrong about.
+    match cfg.upsert_weekly(window).map_err(|e| e.to_string())? {
+        Upserted::Added => println!("Added: {description}."),
+        Upserted::Replaced => println!("Replaced: {description}."),
+        Upserted::AlreadyPresent => println!(
+            "Already there: {description}. The plan already holds a window that runs those minutes \
+             on those days, and two of them cannot behave differently from one, so nothing was \
+             added."
+        ),
+    }
     save(path, &cfg)?;
-    println!("{}: {description}.", if replacing { "Replaced" } else { "Added" });
     Ok(())
 }
 

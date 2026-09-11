@@ -103,6 +103,27 @@ pub enum ConfigError {
     Invalid(String),
 }
 
+/// What an upsert did, so a caller can say so instead of guessing.
+///
+/// `AlreadyPresent` is the one that earns its keep. The upsert deliberately declines to store a
+/// duplicate, and before this a caller had no way to know: `curfew add-window` printed "Added"
+/// for a window the core had just discarded, based on whether the *id* was new. On a tool whose
+/// whole job is to be trusted about whether a lock exists, that is the wrong kind of wrong.
+///
+/// `#[must_use]`-shaped by convention rather than by attribute: every caller either reports it or
+/// discards it with `.map(|_| ())`, and the ones that report are the ones that print.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Upserted {
+    /// Stored. It was not there before.
+    Added,
+    /// Stored, replacing the row with the same id.
+    Replaced,
+    /// **Nothing was stored**: an equivalent window already exists under another id, and two of
+    /// them cannot behave differently from one. The caller's request is satisfied by what is
+    /// already in the plan, not by a new row.
+    AlreadyPresent,
+}
+
 impl Config {
     /// Parse, migrating older schema versions forward on the way in.
     pub fn from_toml(s: &str) -> Result<Self, ConfigError> {
@@ -383,10 +404,15 @@ impl Config {
     /// opens for a new window and for an existing one, and which it was is not something the caller
     /// should have to tell us. The whole config is validated afterwards, so a window naming a
     /// profile that does not exist is refused here rather than at the moment it would have fired.
-    pub fn upsert_weekly(&mut self, window: WeeklySchedule) -> Result<(), ConfigError> {
+    ///
+    /// The return value says which of the three happened; see [`Upserted`].
+    pub fn upsert_weekly(&mut self, window: WeeklySchedule) -> Result<Upserted, ConfigError> {
         let before = self.weekly.clone();
-        match self.weekly.iter_mut().find(|w| w.id == window.id) {
-            Some(existing) => *existing = window,
+        let outcome = match self.weekly.iter_mut().find(|w| w.id == window.id) {
+            Some(existing) => {
+                *existing = window;
+                Upserted::Replaced
+            }
             None => {
                 // A new window that runs the same profile on the same days between the same two
                 // minutes is not a second window, it is the first one asked for twice. Two of them
@@ -400,18 +426,25 @@ impl Config {
                         && w.start_minute == window.start_minute
                         && w.end_minute == window.end_minute
                 }) {
-                    return Ok(());
+                    // **Said out loud rather than returned as a bare `Ok`** — P2-10. This branch
+                    // deliberately stores nothing, and a caller that cannot tell it apart from a
+                    // real insert will tell the user the opposite of what happened: `curfew
+                    // add-window` printed "Added" for a window it had just discarded. On a
+                    // self-binding tool the difference matters, because the user is checking
+                    // whether the lock they asked for exists.
+                    return Ok(Upserted::AlreadyPresent);
                 }
-                self.weekly.push(window)
+                self.weekly.push(window);
+                Upserted::Added
             }
-        }
+        };
         // Put the config back exactly as it was if the edit does not stand up. A validate that
         // leaves the invalid value behind turns one bad edit into a config nobody can save.
         if let Err(e) = self.validate() {
             self.weekly = before;
             return Err(e);
         }
-        Ok(())
+        Ok(outcome)
     }
 
     /// Delete a weekly window. Deleting one that is not there is not an error: the caller wanted it

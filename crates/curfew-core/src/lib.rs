@@ -22,7 +22,7 @@ pub use boot::{BootCounter, Boots};
 pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use clock::{ClockWitness, Reading, Verdict};
 pub use config::{
-    Action, Config, ConfigError, Platform, Profile, Resolver, Rule, CONFIG_SCHEMA_VERSION,
+    Action, Config, ConfigError, Platform, Profile, Resolver, Rule, Upserted, CONFIG_SCHEMA_VERSION,
 };
 pub use emergency::{EmergencyPolicy, Pass, PassRefusal, Passes};
 pub use engine::{decide, BlockReason, Decision, State};

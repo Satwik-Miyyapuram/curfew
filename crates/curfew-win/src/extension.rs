@@ -56,6 +56,42 @@ pub fn is_browser(exe: &str) -> bool {
     BROWSERS.iter().any(|b| b.eq_ignore_ascii_case(exe))
 }
 
+/// The browser that launched **this** process, from the process tree rather than from a guess.
+///
+/// `curfew extension-host` is spawned by the browser as its native-messaging host, so this process's
+/// parent **is** the browser. Reading that is exact; the extension can only guess, and its guess is
+/// wrong for every browser not in its own list.
+///
+/// That guess was P1-2, and the harm is not cosmetic. The extension recognises six browsers
+/// (`msedge.exe`, `firefox.exe`, `opera.exe`, `vivaldi.exe`, `brave.exe`, and `chrome.exe` as the
+/// fallback) while the service knows twelve. A **Zen**, **LibreWolf**, **Waterfox**, **Arc**,
+/// **Chromium** or **Opera GX** user therefore reports their heartbeat as `chrome.exe` — so
+/// `chrome.exe` is trusted and the browser they are actually running is never trusted at all.
+/// `unwatched` then names it, and the service closes it outright, repeatedly, for as long as any
+/// path-level rule is in force. The extension's own comment says a wrong guess "fails safe"; it does
+/// not, because the fallback is a *different browser's* name.
+///
+/// Returns `None` when the parent cannot be read, which is the honest answer and leaves the caller
+/// with whatever the message said. It is not a fallback to `chrome.exe`: inventing a name is what
+/// caused this.
+pub fn browser_that_launched_us() -> Option<String> {
+    let me = sysinfo::get_current_pid().ok()?;
+    let mut system = sysinfo::System::new();
+    // `true` for tasks as well as processes: the browser may be a child of a launcher, and this is a
+    // one-off call at host startup rather than something on a tick.
+    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let parent = system.process(me)?.parent()?;
+    let name = system.process(parent)?.name().to_string_lossy().to_string();
+    // Only a name this layer knows how to hold to account. A launcher in between — a browser's own
+    // updater, a taskbar shim — would otherwise be reported as the browser and trusted under a name
+    // that is not on the list, which is the same failure in the other direction.
+    if is_browser(&name) {
+        Some(name.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
 /// Whether anything currently in force needs to see inside a browser.
 ///
 /// Only URL and keyword rules do. A profile that merely blocks whole domains is enforced perfectly
