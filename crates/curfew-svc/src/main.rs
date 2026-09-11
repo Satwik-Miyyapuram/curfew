@@ -11,6 +11,7 @@ mod host;
 // `eprintln!` in this crate was silently discarded (P1-12).
 #[macro_use]
 mod logging;
+mod pairing;
 mod runner;
 // The service control manager is Windows and nothing else, and every caller of `service` is
 // already behind the same gate, so this costs no `cfg` at the call sites; without it a Linux
@@ -536,6 +537,17 @@ fn when(ts: curfew_core::Timestamp) -> String {
 fn report(response: Response) -> i32 {
     match response {
         Response::Ok => 0,
+        // Pairing, from the command line. `curfew pair` is not a verb yet — F-18 step 4 is the page —
+        // but the arms are written rather than wildcarded for the reason given below: adding a request
+        // later should get an answer instead of falling into a catch-all.
+        Response::Pairing { json } => {
+            println!("{json}");
+            0
+        }
+        Response::Paired => {
+            println!("Done.");
+            0
+        }
         // The figures, as the Time page gets them. Nothing on the command line asks for these —
         // `curfew stats` reads the state file directly so that it works with no service running —
         // but the arm is written rather than wildcarded so that adding a request later gets an

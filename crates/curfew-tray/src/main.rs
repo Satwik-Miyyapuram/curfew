@@ -128,6 +128,11 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
 pub fn describe(response: &Response) -> String {
     match response {
         Response::Ok => String::new(),
+        // Nothing on this menu asks for pairing, so both are unreachable in practice — and given a
+        // sentence rather than wildcarded for the reason below. The JSON is not shown: this is a dialog,
+        // and a wall of invite text is not a sentence.
+        Response::Pairing { .. } => String::new(),
+        Response::Paired => "Paired.".to_string(),
         // Nothing on this menu asks for the figures, so this is unreachable in practice — but the
         // match is exhaustive rather than wildcarded on purpose: that is why every other variant in
         // this enum has a sentence, and a catch-all would let the next one arrive silently.

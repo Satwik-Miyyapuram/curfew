@@ -16,6 +16,7 @@ pub mod downtime;
 pub mod extension;
 pub mod hosts;
 pub mod ipc;
+pub mod pairing;
 pub mod procs;
 pub mod prompt;
 pub mod state;

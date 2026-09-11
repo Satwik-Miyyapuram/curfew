@@ -161,6 +161,13 @@ pub struct Enforcer {
     /// **The window enforcement was down before this run** — P1-8. Set once by `note_start`, cleared by
     /// `dismiss_downtime`, and reported on `Status` until somebody has read it.
     pub downtime: Option<crate::downtime::Downtime>,
+    /// **Pairing, when this machine has any** — F-18, step 2.
+    ///
+    /// `None` on a machine that never started sync, and in every test that does not care about pairing.
+    /// The trait is declared in [`crate::pairing`] rather than this crate depending on `curfew-sync`:
+    /// the enforcement layer is the platform floor and the sync crate is built on the core, so the
+    /// handler states what it needs and the binary supplies it.
+    pub pairing: Option<std::sync::Arc<dyn crate::pairing::Pairing>>,
     /// Whether `note_start` has run, so the first pass records the gap and later passes cannot.
     started: bool,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
@@ -238,6 +245,7 @@ impl Enforcer {
             foreground_warning: None,
             downtime: None,
             started: false,
+            pairing: None,
             counter: 0,
         }
     }
@@ -519,6 +527,32 @@ impl Enforcer {
         match &self.seen {
             Some((process, at)) if (now - *at).abs() <= SEEN_SECONDS => Some(process.clone()),
             _ => processes.foreground(),
+        }
+    }
+
+    /// Run a pairing step, or answer the sentence that says why there is none.
+    ///
+    /// One place rather than six copies of the same `match`, and the sentence is written once because it
+    /// is the same fact every time: this machine has no sync identity, so there is nothing to pair with.
+    /// The reason a Devices page needs it is that an empty page and a broken page look identical.
+    ///
+    /// **`Error` rather than `Refused`**, because nothing about a lock was the problem — the request could
+    /// not be answered at all, which is what `Response::Error` means on this channel.
+    fn pairing(
+        &self,
+        step: impl FnOnce(&dyn crate::pairing::Pairing) -> Result<Response, String>,
+    ) -> Response {
+        let Some(pairing) = self.pairing.as_ref() else {
+            return Response::Error {
+                detail: "This machine has no sync identity yet, so there is nothing to pair. Sync is set \
+                         up by the service at startup; if it failed, the reason is on the Is it working \
+                         page."
+                    .into(),
+            };
+        };
+        match step(pairing.as_ref()) {
+            Ok(response) => response,
+            Err(detail) => Response::Error { detail },
         }
     }
 
@@ -890,6 +924,46 @@ impl Enforcer {
                 self.dismiss_downtime();
                 Response::Ok
             }
+
+            // --- pairing (F-18) ------------------------------------------------------------------
+            //
+            // Four steps, and none of them decides anything: the engine in `curfew-sync` holds the
+            // protocol and the phrase, and this is the surface. A machine with no pairing says so in a
+            // sentence rather than answering with an error code, because a Devices page that cannot
+            // explain why it is empty is the failure the finding is about.
+            Request::Peers => self.pairing(|pairing| {
+                let json = pairing.peers_json()?;
+                Ok(Response::Pairing { json })
+            }),
+
+            Request::Invite => self.pairing(|pairing| {
+                let json = pairing.invite_json(now)?;
+                Ok(Response::Pairing { json })
+            }),
+
+            Request::Phrase { invite } => self.pairing(|pairing| {
+                let phrase = pairing.phrase_for(&invite)?;
+                Ok(Response::Pairing { json: phrase })
+            }),
+
+            Request::Reply { invite } => self.pairing(|pairing| {
+                let json = pairing.reply_to(&invite)?;
+                Ok(Response::Pairing { json })
+            }),
+
+            // **Accepted without checking the phrase, deliberately.** The two people reading the six
+            // digits are the check; a service that verified it for them would remove the one thing a
+            // machine in the middle cannot forge. The page is responsible for asking first, and
+            // `Request::Accept`'s doc comment says so.
+            Request::Accept { invite } => self.pairing(|pairing| {
+                pairing.accept_invite(&invite, now)?;
+                Ok(Response::Paired)
+            }),
+
+            Request::Revoke { device } => self.pairing(|pairing| {
+                pairing.revoke(&device, now)?;
+                Ok(Response::Paired)
+            }),
 
             // Recorded and nothing else. A heartbeat is not a request to change anything, which is
             // why it is safe for it to be unauthenticated on a local pipe.

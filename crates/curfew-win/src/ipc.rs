@@ -71,6 +71,30 @@ pub enum Request {
     /// A request rather than a timer, because the notice exists to be *read* and a timer cannot know
     /// that happened. Android dismisses its banner the same way, from the screen that shows it.
     DismissDowntime,
+    /// **Pairing, which had no Windows front door at all** — F-18, step 2.
+    ///
+    /// The engine, the invite format and the six-digit comparison are built and tested in `curfew-sync`,
+    /// and the FFI exposes them to Android. Nothing on Windows could reach any of it: no request, no
+    /// handler, no page. These four are the surface, and they mirror the FFI's calls one for one so the
+    /// two platforms are describing one protocol.
+    ///
+    /// Every payload is JSON, and the four are separate rather than one `Pair` request with a step,
+    /// because they are not a state machine — a device may invite without replying, reply without
+    /// accepting, and revoke at any time.
+    ///
+    /// **The comparison is not here.** `Phrase` computes the six digits; whether they match is answered by
+    /// the two people reading them, which is the only check a machine in the middle cannot forge.
+    Peers,
+    /// Offer to pair, answering with the JSON the other device reads.
+    Invite,
+    /// The six digits for an invite, so a screen can show them.
+    Phrase { invite: String },
+    /// Answer an invite with this device's keys. The second half of the exchange.
+    Reply { invite: String },
+    /// **Accept, and only after the phrases are confirmed to match.**
+    Accept { invite: String },
+    /// Remove a device. Immediate and local.
+    Revoke { device: String },
     /// Spend an emergency pass on one session, ending it whatever its lock says.
     ///
     /// The rationing is the service's to enforce, not the caller's: a tray that decided for itself
@@ -175,6 +199,19 @@ pub enum Response {
     Error {
         detail: String,
     },
+    /// The answer to [`Request::Peers`], [`Request::Invite`], [`Request::Phrase`] or [`Request::Reply`]:
+    /// JSON, carried as text.
+    ///
+    /// One variant for all four rather than four variants, because the service does not look inside any of
+    /// them — the page parses what the engine produced, and a variant per payload would be four types the
+    /// service has no use for. What the page must *not* do is invent any of it, and one opaque field is
+    /// the clearest way to say so.
+    Pairing {
+        json: String,
+    },
+    /// The answer to [`Request::Accept`] or [`Request::Revoke`], which produce no payload beyond success.
+    /// Separate from [`Response::Ok`] so a page cannot mistake a pairing step for an acknowledgement.
+    Paired,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

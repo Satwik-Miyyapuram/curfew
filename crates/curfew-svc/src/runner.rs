@@ -286,13 +286,34 @@ pub fn sync_root() -> PathBuf {
 enum SyncStart {
     /// Listening, with this many peers on disk and this root to save against.
     Up(curfew_sync::node::Node, PathBuf, usize),
-    /// Nothing paired. Ordinary: not an error, not worth a warning, nothing to do.
-    Unpaired,
+    /// Nothing paired, **and the identity is kept** — F-18, step 1.
+    ///
+    /// It used to be a unit variant, which discarded `shared` and with it the one thing a Devices page
+    /// needs to *offer* an invite. Boxed because `Shared` is three `Arc`s and a variant's size is paid by
+    /// every other variant.
+    ///
+    /// Nothing is bound in this state, deliberately: `Node::start` is what opens a listener, and it is
+    /// still only called once a peer exists, so Windows Defender Firewall is not prompted about a feature
+    /// nobody has switched on.
+    Unpaired(Box<curfew_sync::node::Shared>),
     /// It did not start, and this is why — a sentence fit to show a user.
     Failed(String),
 }
 
 impl SyncStart {
+    /// The shared state behind a running node, when there is one.
+    ///
+    /// A `Node` owns its `Shared`; this is how the retry path reaches the same identity the node is
+    /// using rather than opening the store a second time — two `Shared`s over one root would be two peer
+    /// lists, and the one the node reads would be the one the page could not write to.
+    fn shared(&self) -> Option<curfew_sync::node::Shared> {
+        match self {
+            SyncStart::Up(node, ..) => Some(node.shared().clone()),
+            SyncStart::Unpaired(shared) => Some((**shared).clone()),
+            SyncStart::Failed(_) => None,
+        }
+    }
+
     /// What to publish on every status.
     ///
     /// `nearby` is passed in because only the caller can ask the node, and asking it every pass is the
@@ -303,7 +324,11 @@ impl SyncStart {
             SyncStart::Up(_, _, paired) => {
                 SyncState { running: true, paired: *paired, nearby, why_off: None }
             }
-            SyncStart::Unpaired => {
+            // Still `running: false` and `paired: 0`: an identity is not a listener, and saying
+            // otherwise would be the overstatement this branch keeps removing. What changed is that the
+            // service can now *offer* an invite, which is a different fact and lives in the Devices
+            // surface rather than in this flag.
+            SyncStart::Unpaired(_) => {
                 SyncState { running: false, paired: 0, nearby: 0, why_off: None }
             }
             // `paired: 0` rather than a guess: `store::open` failed, so the peers on disk are exactly
@@ -315,10 +340,42 @@ impl SyncStart {
     }
 }
 
+/// Hand the enforcer whatever pairing this machine has, or take it away when there is none.
+///
+/// **One place, called from both paths.** The node starts at service launch and again on the retry after a
+/// pairing lands, and a second copy of this wiring is a second chance for one of them to be forgotten —
+/// which is how the profile-name lookups came to exist in three variants earlier on this branch.
+///
+/// `Failed` clears the handle, because a sync directory the store could not read is not an identity to
+/// offer an invite from. `Up` and `Unpaired` both install one: the whole point of step 1 is that an
+/// unpaired machine holds its identity and can therefore be paired.
+fn install_pairing(enforcer: &Arc<Mutex<Enforcer>>, sync: &SyncStart, root: &Path) {
+    let handle = match sync {
+        SyncStart::Up(..) => sync.shared().map(|shared| {
+            crate::pairing::Pairing::new(shared, root.to_path_buf())
+                as Arc<dyn curfew_win::pairing::Pairing>
+        }),
+        SyncStart::Unpaired(shared) => {
+            Some(crate::pairing::Pairing::new((**shared).clone(), root.to_path_buf())
+                as Arc<dyn curfew_win::pairing::Pairing>)
+        }
+        SyncStart::Failed(_) => None,
+    };
+    let mut guard = enforcer.lock().expect("enforcer");
+    guard.pairing = handle;
+}
+
 fn start_sync() -> SyncStart {
-    let root = sync_root();
-    let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into());
-    let (shared, complaints) = match curfew_sync::store::open(&root, &name) {
+    start_sync_at(sync_root(), &std::env::var("COMPUTERNAME").unwrap_or_else(|_| "this pc".into()))
+}
+
+/// The same, against a given root and machine name — F-18, step 1.
+///
+/// Parameterised so the unpaired path can be tested without touching the real `%ProgramData%`, and
+/// because the interesting property is about the *identity* rather than about where it is stored. The
+/// caller above is two lines of environment lookup.
+fn start_sync_at(root: PathBuf, name: &str) -> SyncStart {
+    let (shared, complaints) = match curfew_sync::store::open(&root, name) {
         Ok(opened) => opened,
         Err(e) => {
             crate::note!("sync is off ({e}). This device still enforces its own locks.");
@@ -330,8 +387,9 @@ fn start_sync() -> SyncStart {
     }
     let paired = shared.peers.lock().map(|peers| peers.active_ids().count()).unwrap_or(0);
     if paired == 0 {
-        // Not an error and not worth a warning: this is simply a device that has not been paired.
-        return SyncStart::Unpaired;
+        // Not an error and not worth a warning: this is simply a device that has not been paired. The
+        // identity is kept so this device can still *offer* an invite — the front door's prerequisite.
+        return SyncStart::Unpaired(Box::new(shared));
     }
     match curfew_sync::node::Node::start(shared) {
         Ok(node) => SyncStart::Up(node, root, paired),
@@ -559,6 +617,9 @@ pub fn run(
     // Sync, if this machine can have it. Held for the life of the loop: dropping the node stops
     // its threads, which is exactly what should happen when the service stops.
     let mut sync = start_sync();
+    // **The identity reaches the handler here** — F-18, step 2. Without this the request surface exists
+    // and answers "this machine has no sync identity" on a machine that has one.
+    install_pairing(&enforcer, &sync, &sync_root());
     // When the node did not start because nothing is paired yet, look again now and then rather
     // than making the user restart the service after pairing. Half a minute is far below anything
     // a person would notice and far above anything this costs.
@@ -724,6 +785,9 @@ pub fn run(
             if sync_retry >= SYNC_RETRY_TICKS {
                 sync_retry = 0;
                 sync = start_sync();
+                // The retry is the path a freshly paired device takes to bring its node up, so the
+                // handle has to be refreshed here too — and it is the same call, for the same reason.
+                install_pairing(&enforcer, &sync, &sync_root());
             }
         }
         // The other half of the pair: killing the watchdog is as obvious an attack as killing the
