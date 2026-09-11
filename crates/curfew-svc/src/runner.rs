@@ -599,11 +599,24 @@ pub fn run(
             Some(before) if now > before => (now - before).min(TICK.as_secs() as i64) as u32,
             _ => 0,
         };
-        {
-            let mut guard = enforcer.lock().expect("enforcer");
-            let events = match guard.config.tz() {
+        // **The calendar fetch happens here, outside the enforcer lock** — P1-11.
+        //
+        // `feeds.events` performs HTTP with a twenty-second timeout (`feeds::TIMEOUT`), against a
+        // two-second tick, and it used to be called while holding the mutex that `serve()` needs to
+        // answer anything at all. So one slow subscription stalled the whole control channel —
+        // `Status`, and the 24-hour `release` with it — for up to twenty seconds, and any local user
+        // could arrange that by pointing a subscription at a host that black-holes packets.
+        //
+        // The lock is taken twice instead: once briefly for the two values the fetch needs, and then
+        // the real pass below. `sources` and `zone` are both `Clone`/`Copy` and neither can change
+        // under us, because the only writer of the config is this loop.
+        let events = {
+            let (sources, zone) = {
+                let guard = enforcer.lock().expect("enforcer");
+                (guard.config.calendar_sources.clone(), guard.config.tz())
+            };
+            match zone {
                 Ok(zone) => {
-                    let sources = guard.config.calendar_sources.clone();
                     let (events, outcomes) = feeds.events(now, &sources, zone, &subscriptions);
                     for outcome in outcomes {
                         if let curfew_win::calendar::Outcome::Failed { id, detail, still_serving } =
@@ -625,7 +638,11 @@ pub fn run(
                     events
                 }
                 Err(_) => Vec::new(),
-            };
+            }
+        };
+
+        {
+            let mut guard = enforcer.lock().expect("enforcer");
             // Only what this machine saw is ever published; the peers' events are merged in for
             // enforcement only, so a calendar cannot be echoed back and forth between devices.
             let mine = events.clone();
