@@ -104,6 +104,9 @@ must run.
 | 86 | The FFI's restore payloads were unbounded, and the comments implied a guarantee they lacked (P1-3) | **P1** | **Partly fixed** — the cap and the bypasses are closed; forging the clock baseline remains possible (entry 74) |
 | 87 | An unexpandable ICS rule widened its match instead of refusing (P2-8) | **P2** | **Fixed** — all-day value form, negative `BYMONTHDAY`, and refusal rather than a dropped token (entry 75) |
 | 88 | `curfew remove` deleted a schedule a running lock derived from, silently (P2-11) | **P2** | **Fixed** — refused when the service is reachable and a session derives from it (entry 76) |
+| 89 | The service discarded its identity when nothing was paired, so it could not offer an invite (F-18 step 1) | **P0** | **Fixed** — `SyncStart::Unpaired` carries the `Shared`; still binds nothing (entry 77) |
+| 90 | Pairing had no Windows request surface at all (F-18 step 2) | **P0** | **Fixed** — six requests, a `Pairing` trait, and six mutations caught (entry 77) |
+| 91 | Pairing had no Windows front door, though it is the advertised headline (F-18 step 4) | **P0** | **Fixed** — the Devices page, with its own nav item and four mutations caught (entry 78) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -137,7 +140,7 @@ problem rather than a number in it.
 | F-13 | P2 | **Fixed** (entry 48). `UsageScreen.kt:64` rendered the comparison only when non-null; the two reasons it can be null now have a placeholder that names them |
 | F-14 | P1 | **Fixed** (entry 48). `DevicesScreen.kt:302` revoked on a single tap; now confirmed, naming the locks that would lose their exit |
 | F-15 | P3 | **Fixed** (entry 46) |
-| F-18 | **P0** | **Partly fixed** (entries 49, 51). The README no longer advertises a step the PC cannot do, and the window can now state its sync state — but the PC still cannot *begin* a pairing, which is steps 1–4 of the recorded scope |
+| F-18 | **P0** | **Fixed** (entries 49, 51, 77, 78). The README no longer advertises a step the PC cannot do; the window states its sync state; the service keeps its identity while unpaired so it can *offer* an invite; the four pairing requests and their handlers exist behind a `Pairing` trait so `curfew-win` needs no dependency on `curfew-sync`; and the Devices page is the front door. **One limit named**: the invite is carried as text, not a code to scan — the window has no QR renderer, and the recorded scope calls text plus a paste field the honest minimum |
 | F-33 | P1 | **Fixed** (entry 46) |
 | F-34 | P2 | **Fixed** (entry 50). "Pick a meeting, or set a schedule" opened only the picker; "Always on" sent the user to Plan — against the file's own stated principle |
 | F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
@@ -292,6 +295,8 @@ this table is a reading aid.
 | `c3c7266` | Bound the restore payloads, and stop implying a guarantee the code lacks (entry 74) |
 | `99f47d0` | Refuse an unexpandable ICS rule rather than widening it (entry 75) |
 | `cf1b2a7` | Refuse to remove a schedule a running lock derives from (entry 76) |
+| `ab4e0fd` | A Windows front door for pairing, steps 1-2 (entry 77) |
+| `2215ff8` | The Devices page, so pairing has a front door (entry 78) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4371,3 +4376,111 @@ direction: there the check was unreachable, here the case was missing.
 The docs are unchanged. The refusal makes the behaviour match what `README.md` and `INSTALL.txt` already
 say, so rewording them would be a second change where one will do — and the sentence the user needs is now
 printed at the moment they need it.
+
+---
+
+## 77. F-18 steps 1-2: the identity, and the request surface
+
+**Finding:** `UX_INTERACTION_REVIEW.md` **F-18 (P0)** — *"Pairing, the advertised headline feature, has no
+Windows front door."* **Steps 1 and 2 of the five-step scope, done and tested.**
+
+### Step 1: the identity survives being unpaired
+
+`start_sync` returned `SyncStart::Unpaired` and **discarded `shared`**, so a machine with no peers had no
+path to its own identity and therefore no way to *offer* an invite. The variant carries the `Shared` now.
+
+**Nothing binds**, which was the constraint the original comment set: `Node::start` opens the listener and
+is still only called once a peer exists, so Windows Defender Firewall is not prompted about a feature
+nobody has switched on. `start_sync_at(root, name)` is extracted so the unpaired path is testable without
+touching the real `%ProgramData%`.
+
+### Step 2: the request surface, and the dependency direction that shaped it
+
+`curfew-win::pairing::Pairing` and `Request::{Peers, Invite, Phrase, Reply, Accept, Revoke}`, with handlers
+and two responses.
+
+**The design work was a dependency direction, and that is the part worth recording.** The handler lives in
+`curfew_win::Enforcer::handle`, and **`curfew-win` does not depend on `curfew-sync`** — correctly, since
+the enforcement layer is the platform floor and the sync crate is built on the core. So the handler cannot
+touch `Shared`. The answer is the one this crate already uses for calendars: **declare what is needed as a
+trait and let the binary supply it.** `Fetch` is the precedent — declared in `curfew-win::calendar`,
+implemented in `curfew-svc::feeds` — and this is the same shape. Everything crosses as JSON, so the trait
+signature does not put the dependency back, which is also why the FFI speaks JSON at the same boundary.
+
+**The comparison stays human.** `Phrase` computes the six digits and `Accept` does not check them: the two
+people reading them are the check, and a service that verified it would remove the only step a machine in
+the middle cannot forge. Both the request and the adapter say so.
+
+### Two real bugs the tests found, both mine
+
+**`device_id()` returned the fingerprint.** There are two identifiers — `identity.id()`, which is what
+peers store and `revoke` accepts, and `public().fingerprint()`, a display string for comparing two screens
+— and the FFI already distinguishes them. I implemented the wrong one, so a Devices page would have shown
+a list it could not revoke from. The adapter test failed on `phone_peers.contains(&pc.device_id())`, which
+is exactly the property that matters.
+
+**My exchange fixture had the protocol backwards.** It had the PC accept its own offer; `Peers::accept`
+refused with `Itself`, which is the protocol being right — a device that could accept its own offer would
+report a successful pairing on both screens. Step 4 is the PC accepting the **reply**. The refusal is now
+pinned deliberately rather than stumbled into.
+
+**And an assertion better than my expectation:** the phrase is `"580 136"`, grouped for reading aloud, and
+I had asserted `len() == 6`. The test counts digits now, and pins the grouping too.
+
+### Verification
+
+1019 Rust tests (was 1009). **Five mutations caught**, including both adapter mutations the integration
+test could not reach: the adapter lives in the service **binary**, so `crates/curfew-sync/tests/` cannot
+import it — which is why the adapter's own tests are binary unit tests.
+
+---
+
+## 78. F-18 step 4: the Devices page
+
+**Finding:** `UX_INTERACTION_REVIEW.md` **F-18 (P0)**. **The front door, built.**
+
+Four things, each answering a question the finding says a user cannot ask today: which device this is (its
+id and the fingerprint to compare against the phone's screen); what it is paired with, each peer revocable
+**behind a confirmation that names it**; how to offer (a code as selectable text, then the six digits); and
+how to answer (paste, see the digits, accept only through a confirmation that says what is being checked).
+
+**Text, not a QR.** The window has no renderer for one, and the recorded scope says so: *"text plus a paste
+field is the honest minimum."* A page that drew something QR-shaped it could not scan would be worse than
+one that says what it is.
+
+**The comparison stays the user's.** Nothing verifies the digits — the page says so twice, and the accept
+confirmation reads *"Only if the six digits on the other screen are the same six."*
+
+**Loaded on open, not every tick.** The status is polled twice a second; pairing is not. Minting an invite
+that often would put a fresh nonce in front of the user sixty times a minute, and re-reading on every nav
+click would discard an invite part-way through being sent.
+
+### Four bugs of mine, and the mutation run found the most important one
+
+**The front door itself was untested.** Every assertion called `loadPairing()` directly, which proves the
+page works and not that anything reaches it — so **removing the nav item survived the whole mutation run**,
+on the finding named after the route. `check_window.py` embeds only the page's script blocks, so the nav
+markup never reaches the harness; there is now a source-level guard for it, with the limit stated: it can
+say the item is present and cannot say it responds, which the driven test covers.
+
+**My harness knob was `false` and the fake service tested `=== null`**, so the no-identity case took the
+success branch and the page failed a test about itself.
+
+**`assertThat` is the extension harness's helper; this one is `check`.** Third time on this branch — two
+harnesses of the same shape with different helper names.
+
+**And a comment in `check_window.py` was corrupted** — `\	ools/\` and `ode\` — by a scripted replace earlier
+on this branch. It compiled and it was prose, which is why it survived. Fixed, along with a second
+identical copy that the first repair missed because a substring appearing twice is not an anchor.
+
+### Verification
+
+The window harness grew seventeen assertions and **four mutations, all caught** — including the nav item.
+This is also the first page the harness exercises that fetches on open rather than on the poll.
+
+### What is still named rather than done
+
+The invite is carried as text rather than a code to scan, and that limit is on the row.
+`docs/index.html` still leads with the pairing claim — which is now **true** rather than advertised-only,
+so no correction is needed there. That is the difference between entry 49's fix (correct the claim) and
+this one (make the claim true).
