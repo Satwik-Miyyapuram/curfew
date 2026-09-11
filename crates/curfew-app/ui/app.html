@@ -76,6 +76,7 @@ input{height:34px;width:100%;background:var(--sur2);border:1px solid var(--line)
     <div class="nav" data-page="plan"><span class="ic">&#9783;</span>Plan</div>
     <div class="nav" data-page="apps"><span class="ic">&#9635;</span>Apps &amp; sites</div>
     <div class="nav" data-page="time"><span class="ic">&#9684;</span>Where time went</div>
+    <div class="nav" data-page="devices"><span class="ic">&#9787;</span>Devices</div>
     <div class="nav" data-page="health"><span class="ic">&#10003;</span>Is it working</div>
     <div class="sp"></div>
     <div id="livepill"></div>
@@ -206,7 +207,12 @@ const state = { page: "now", status: null, trouble: null, config: null, configPa
   stats: null,
   // What the Start-a-block sheet is set to. `null` until it is opened, so the sheet's own defaults
   // apply the first time and a choice the user made survives the refresh that follows it.
-  startProfile: null, startMinutes: null, startStrength: null };
+  startProfile: null, startMinutes: null, startStrength: null,
+  // What the Devices page knows about pairing — F-18 step 4. `null` until the page is opened, and
+  // deliberately *not* refreshed every tick: the status is polled twice a second, and minting an invite
+  // that often would put a new nonce in front of the user sixty times a minute. `invite`, `phrase` and
+  // `reply` are set only by the buttons that produce them.
+  pairing: null };
 
 // The ticket of the newest refresh, and the one a run belongs to. See `refresh` for why.
 let refreshTicket = 0;
@@ -743,12 +749,227 @@ function pageHealth() {
       <div class="grow"><div class="name">${esc(title)}</div><div class="meta wrap">${esc(detail)}</div></div></div>`).join("")}</div>`;
 }
 
+/** The devices this machine is paired with, as the page shows them. */
+function peersOf(json) {
+  try {
+    const parsed = JSON.parse(json);
+    // `Peers` serializes as a map of id to peer, so the id is the key rather than a field.
+    return Object.entries(parsed.devices || parsed || {}).map(([id, peer]) => ({ id, ...peer }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Load what the Devices page needs. Called when the page is opened, not on every tick.
+ *
+ * The peers always; the identity once, because it does not change. A failure is kept as a sentence rather
+ * than thrown away: a Devices page that cannot say why it is empty is the failure F-18 is about.
+ */
+async function loadPairing() {
+  state.pairing = state.pairing || { loading: true, error: null, peers: null, invite: null, phrase: null, device: null, fingerprint: null, reply: null, replyPhrase: null };
+  state.pairing.loading = true;
+  const [peers, device] = await Promise.all([
+    askService({ request: "peers" }),
+    askService({ request: "invite" }),
+  ]);
+  state.pairing.loading = false;
+  if (peers.ok && peers.value.response === "pairing") {
+    state.pairing.peers = peersOf(peers.value.json);
+    state.pairing.error = null;
+  } else {
+    // The sentence the service gave, which says whether there is no identity or no service — the two
+    // look identical from here and only one of them is the user's to fix.
+    state.pairing.error = (peers.value && (peers.value.detail || peers.value.detail)) || "The service did not answer.";
+  }
+  // `invite` doubles as the identity probe: if it answers, this machine has a sync identity at all.
+  if (device.ok && device.value.response === "pairing") {
+    state.pairing.hasIdentity = true;
+  }
+  draw();
+}
+
+/** Mint a fresh invite and show its phrase. */
+async function offerPairing() {
+  const answer = await askService({ request: "invite" });
+  if (!answer.ok || answer.value.response !== "pairing") {
+    return say("Could not make a code", (answer.value && answer.value.detail) || "The service did not answer.");
+  }
+  state.pairing = state.pairing || {};
+  state.pairing.invite = answer.value.json;
+  state.pairing.phrase = null;
+  // The phrase comes from the invite, and the offering side derives it against the answer it will be
+  // given — so what is shown now is *this* device's half. The page says so rather than pretending it is
+  // final, because a user who compares too early sees a mismatch that is not a problem.
+  const phrased = await askService({ request: "phrase", invite: answer.value.json });
+  if (phrased.ok && phrased.value.response === "pairing") state.pairing.phrase = phrased.value.json;
+  draw();
+}
+
+/** Answer a pasted code, and show the phrase plus what to send back. */
+async function answerPairing() {
+  const field = document.getElementById("pair-reply");
+  const pasted = (field && field.value || "").trim();
+  if (!pasted) return say("Nothing to answer", "Paste the code from the other device first.");
+  const answer = await askService({ request: "reply", invite: pasted });
+  if (!answer.ok || answer.value.response !== "pairing") {
+    return say("That code was not readable", (answer.value && answer.value.detail) || "The service did not answer.");
+  }
+  state.pairing = state.pairing || {};
+  state.pairing.reply = answer.value.json;
+  state.pairing.replyPhrase = null;
+  const phrased = await askService({ request: "phrase", invite: answer.value.json });
+  if (phrased.ok && phrased.value.response === "pairing") state.pairing.replyPhrase = phrased.value.json;
+  draw();
+}
+
+/**
+ * Confirm the revocation, naming the device.
+ *
+ * F-14's lesson applied here: revoking is immediate and local, and a revoked phone cannot release a lock
+ * on this machine until it is paired again — so it is not a one-tap action.
+ */
+function confirmRevoke(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Revoke this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6"><span class="mono" style="user-select:text">${esc(id)}</span>
+    will no longer be able to release a lock on this machine, and this machine will no longer release
+    locks on it. Pairing again takes the same ceremony as the first time.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Keep it</button>
+    <button class="btn" data-act="revoke" data-id="${esc(id)}">Revoke it</button></div>`);
+}
+
+/** Confirm the acceptance, and say what is being confirmed. */
+function confirmAccept() {
+  sheet(`<div style="font-size:17px;font-weight:650">Pair this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">Only if the six digits on
+    the other screen are <b>the same six</b>. Nothing on this machine can check that for you &mdash; that is
+    the point of reading them.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Not yet</button>
+    <button class="btn" data-act="pair-accept">They match &mdash; pair</button></div>`);
+}
+
+/**
+ * Devices — pairing and this device's identity. **F-18 step 4**, the front door.
+ *
+ * Windows had no route to pairing at all: no verb, no page, no tray item, and no artboard. The protocol
+ * was built and tested in `curfew-sync` and reachable from Android, and a Windows user reading the
+ * README's *"Devices → Pair"* had nothing to open. `tools/check_window.py` drives this page.
+ *
+ * **The comparison is the user's, and the page says so.** Both screens show six digits and the person
+ * reads them; nothing here can check that for them, which is the design rather than a shortcoming. Every
+ * message that asks for a confirmation names what is being confirmed, because a dialog that says
+ * "Continue?" teaches nothing.
+ *
+ * **Text, not a code to scan.** The window has no QR renderer, so the invite is shown as text with a
+ * selectable field beside it — and `user-select` is enabled on it, because the point is to get the text
+ * onto the other device.
+ */
+function pageDevices() {
+  const s = state.status || {};
+  const pairing = state.pairing || { loading: false, error: null, peers: null, invite: null, phrase: null, device: null, fingerprint: null, reply: null };
+  const lines = [];
+
+  // --- what this device is ----------------------------------------------------------------------
+  lines.push(`<h1>Devices</h1>
+    <div class="sub">Pairing is what makes two devices enforce the same promise. It needs both screens:
+      you read six digits aloud and confirm they match.</div>
+    <div style="height:16px"></div>`);
+
+  if (pairing.error) {
+    lines.push(`<div class="card" style="border-color:rgba(242,114,114,.5)">
+      <div class="lbl bad">Pairing is not available</div>
+      <div style="margin-top:6px;line-height:1.6">${esc(pairing.error)}</div></div>
+      <div style="height:16px"></div>`);
+  }
+
+  if (pairing.device) {
+    lines.push(`<div class="card">
+      <div class="lbl">This device</div>
+      <div class="mono" style="margin-top:6px;user-select:text">${esc(pairing.device)}</div>
+      ${pairing.fingerprint ? `<div class="meta" style="margin-top:4px">Fingerprint <span class="mono" style="user-select:text">${esc(pairing.fingerprint)}</span> &mdash; compare this with the phone's Devices screen before you trust a pairing.</div>` : ""}
+    </div><div style="height:16px"></div>`);
+  }
+
+  // --- what it is paired with -------------------------------------------------------------------
+  const peers = pairing.peers || [];
+  lines.push(`<div class="card">
+    <div class="lbl">Paired devices</div>`);
+  if (pairing.loading && !pairing.peers) {
+    lines.push(`<div class="meta" style="margin-top:6px">Reading&hellip;</div>`);
+  } else if (peers.length === 0) {
+    lines.push(`<div style="margin-top:6px;line-height:1.6">Nothing is paired yet. A paired device can
+      release a lock on this one, and this one can release a lock on it &mdash; that is the whole
+      reason to pair.</div>`);
+  } else {
+    for (const peer of peers) {
+      const revoked = peer.revoked_at !== null && peer.revoked_at !== undefined;
+      lines.push(`<div style="display:flex;align-items:center;gap:14px;margin-top:12px">
+        <div class="grow">
+          <div class="mono" style="user-select:text">${esc(peer.id)}</div>
+          <div class="meta" style="margin-top:2px">${revoked ? "Revoked &mdash; it can no longer release anything here" : "Paired"}</div>
+        </div>
+        ${revoked ? "" : `<button class="btn ghost" data-act="revoke-ask" data-id="${esc(peer.id)}">Revoke&hellip;</button>`}
+      </div>`);
+    }
+  }
+  lines.push(`</div><div style="height:16px"></div>`);
+
+  // --- offering ---------------------------------------------------------------------------------
+  lines.push(`<div class="card">
+    <div class="lbl">Pair a new device</div>
+    <div style="margin-top:6px;line-height:1.6">Show this device's code. On the other device, choose
+      <b>Answer a code</b> and paste it. Both screens will then show six digits &mdash; those must match.</div>
+    <div style="height:12px"></div>
+    <div class="strip"><button class="btn" data-act="pair-offer">Show this device's code</button></div>`);
+
+  if (pairing.invite) {
+    lines.push(`<div style="height:14px"></div>
+      <textarea class="mono" readonly rows="4" style="width:100%;background:var(--sur2);border:1px solid var(--line);color:var(--tx);border-radius:var(--r-ctl);padding:9px;font-size:11px;user-select:text">${esc(pairing.invite)}</textarea>
+      <div class="meta" style="margin-top:6px">This code is not secret &mdash; it cannot authenticate itself.
+        The six digits are what do that.</div>`);
+  }
+  if (pairing.phrase) {
+    lines.push(`<div style="height:14px"></div>
+      <div class="lbl">These six digits, on both screens</div>
+      <div class="mono" style="font-size:30px;font-weight:700;letter-spacing:4px;margin-top:4px;user-select:text">${esc(pairing.phrase)}</div>
+      <div class="meta" style="margin-top:4px">Read them aloud. If the other device shows something else,
+        something is between you and nothing should be accepted.</div>`);
+  }
+  lines.push(`</div><div style="height:16px"></div>`);
+
+  // --- answering --------------------------------------------------------------------------------
+  lines.push(`<div class="card">
+    <div class="lbl">Answer a code</div>
+    <div style="margin-top:6px;line-height:1.6">Paste the other device's code here. This device will show
+      its own six digits, and the two must match before either accepts.</div>
+    <div style="height:12px"></div>
+    <input id="pair-reply" placeholder="Paste the code from the other device" />
+    <div style="height:10px"></div>
+    <div class="strip"><button class="btn" data-act="pair-answer">Answer it</button></div>`);
+
+  if (pairing.reply && pairing.replyPhrase) {
+    lines.push(`<div style="height:14px"></div>
+      <div class="lbl">These six digits, on both screens</div>
+      <div class="mono" style="font-size:30px;font-weight:700;letter-spacing:4px;margin-top:4px;user-select:text">${esc(pairing.replyPhrase)}</div>
+      <div style="height:12px"></div>
+      <textarea class="mono" readonly rows="3" style="width:100%;background:var(--sur2);border:1px solid var(--line);color:var(--tx);border-radius:var(--r-ctl);padding:9px;font-size:11px;user-select:text">${esc(pairing.reply)}</textarea>
+      <div class="meta" style="margin-top:6px">Send this back to the other device, then accept on both.</div>
+      <div style="height:10px"></div>
+      <div class="strip"><button class="btn" data-act="pair-accept-ask">The digits match &mdash; pair</button></div>`);
+  }
+  lines.push(`</div>`);
+
+  return lines.join("");
+}
+
 // ---- drawing ----------------------------------------------------------------------------------
 // The HTML currently in the body, so an identical redraw can be skipped. See `draw`.
 let drawnHtml = null;
 
 function draw() {
-  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, health: pageHealth };
+  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, devices: pageDevices, health: pageHealth };
   const body = document.getElementById("body");
   const html = (pages[state.page] || pageNow)();
 
@@ -1086,7 +1307,15 @@ async function finishUnlock(id) {
  */
 async function activate(target) {
   const nav = target.closest(".nav");
-  if (nav) { state.page = nav.dataset.page; return draw(); }
+  if (nav) {
+    state.page = nav.dataset.page;
+    // **The Devices page reads on open, and only on open** — F-18 step 4. The status is polled twice a
+    // second, but pairing is not a twice-a-second fact, and minting an invite that often would put a new
+    // nonce in front of the user sixty times a minute. Guarded so re-opening the page does not re-read
+    // what it already has, which would also discard an invite the user is part-way through sending.
+    if (state.page === "devices" && !state.pairing) return loadPairing();
+    return draw();
+  }
   const tab = target.closest("[data-tab]");
   if (tab) { state.tab = tab.dataset.tab; return draw(); }
   const profile = target.closest("[data-profile]");
@@ -1131,6 +1360,35 @@ async function activate(target) {
     // to `Request::Release`, which the protocol documents as *"it cannot be withdrawn: a release a peer
     // could take back would let one device shut a lock the user has already been told they are out
     // of."* The tray put a Yes/No in front of the identical action; this page did not.
+    // --- pairing (F-18 step 4) -------------------------------------------------------------------
+    case "pair-offer": return offerPairing();
+    case "pair-answer": return answerPairing();
+    case "pair-accept-ask": return confirmAccept();
+    // **Only after the confirmation**, which named what is being confirmed. There is no way for this page
+    // to check the digits, and pretending otherwise would remove the only step a machine in the middle
+    // cannot forge.
+    case "pair-accept": {
+      const pasted = state.pairing && state.pairing.reply;
+      if (!pasted) return say("Nothing to accept", "Answer a code first.");
+      const answer = await askService({ request: "accept", invite: pasted });
+      sheet("");
+      if (!answer.ok || answer.value.response !== "paired") {
+        return say("Not paired", (answer.value && answer.value.detail) || "The service did not answer.");
+      }
+      state.pairing.reply = null;
+      state.pairing.replyPhrase = null;
+      await loadPairing();
+      return refresh();
+    }
+    case "revoke-ask": return confirmRevoke(id);
+    case "revoke": {
+      const answer = await askService({ request: "revoke", device: id });
+      sheet("");
+      if (!answer.ok || answer.value.response !== "paired") {
+        return say("Not revoked", (answer.value && answer.value.detail) || "The service did not answer.");
+      }
+      return loadPairing();
+    }
     case "dismiss-downtime": {
       // Best-effort: if the service is not answering, the notice stays, which is the right way round —
       // claiming it was read when the service never heard would lose it silently.

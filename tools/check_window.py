@@ -41,6 +41,34 @@ function makeNode(id) {
     contains() { return false }, addEventListener() {}, focus() {},
   };
 }
+/// A stand-in for a clicked element, for `activate`.
+///
+/// `activate` reaches its target through `closest`, so this answers for `[data-act]` and returns `null`
+/// for `.nav` — which is what keeps a test on the action path rather than the page-switch one.
+function fakeNode(data) {
+  return {
+    dataset: data,
+    closest(selector) {
+      if (selector === "[data-act]") return this;
+      return null;
+    },
+  };
+}
+
+/// A stand-in for a clicked nav item.
+///
+/// `activate` reaches the nav through `closest(".nav")`, and a nav node has no `[data-act]` — so this
+/// answers for the nav selector and returns `null` for the action one, which is the mirror of `fakeNode`.
+function fakeNav(page) {
+  return {
+    dataset: { page },
+    closest(selector) {
+      if (selector === ".nav") return this;
+      return null;
+    },
+  };
+}
+
 const nodes = {};
 const body = (nodes.body = makeNode("body"));
 const pill = (nodes.livepill = makeNode("livepill"));
@@ -74,6 +102,10 @@ let running = [];
 let offers = {};
 // The window enforcement was down before this run (P1-8). Null for an ordinary start.
 let downtime = null;
+// Whether the fake service has a sync identity. `false` stands in for a machine that never started sync.
+let pairing = true;
+// The requests the page has made, so a test can assert the *order* of a confirmation.
+let asked = [];
 
 function buildReply(message) {
   if (message.kind === "config") {
@@ -81,6 +113,7 @@ function buildReply(message) {
     return { ok: true, value: { profiles: [], weekly: [], calendar_rules: [] }, path: "x.toml" };
   }
   const request = message.payload && message.payload.request;
+  asked.push(request);
   if (request === "status") {
     replies.statusCalls++;
     const now = ++replies.statusSeq;
@@ -94,6 +127,23 @@ function buildReply(message) {
     return reply;
   }
   if (request === "stats") return { ok: true, value: { response: "stats" } };
+  // Pairing, as `Response::Pairing { json }` and `Response::Paired` produce it. `pairing` in the harness
+  // is what the fake service believes: set to `null` to stand in for a machine with no sync identity.
+  if (request === "peers") {
+    if (!pairing) return { ok: true, value: { response: "error", detail: "This machine has no sync identity yet." } };
+    return { ok: true, value: { response: "pairing", json: JSON.stringify({ devices: { "PHONE7": { paired_at: 1, revoked_at: null } } }) } };
+  }
+  if (request === "invite") {
+    if (!pairing) return { ok: true, value: { response: "error", detail: "This machine has no sync identity yet." } };
+    return { ok: true, value: { response: "pairing", json: JSON.stringify({ from: "PC", nonce: [1, 2, 3], issued_at: 1, expires_at: 600 }) } };
+  }
+  if (request === "phrase") return { ok: true, value: { response: "pairing", json: "580 136" } };
+  if (request === "reply") {
+    if (request === "reply" && !pairing) return { ok: true, value: { response: "error", detail: "no identity" } };
+    return { ok: true, value: { response: "pairing", json: JSON.stringify({ from: "PHONE7", nonce: [1, 2, 3] }) } };
+  }
+  if (request === "accept") return { ok: true, value: { response: "paired" } };
+  if (request === "revoke") return { ok: true, value: { response: "paired" } };
   return { ok: true, value: { response: "ok" } };
 }
 
@@ -346,6 +396,110 @@ async function testDowntimeNotice() {
 }
 
 
+
+// --- F-18 step 4: the Devices page --------------------------------------------------------------
+//
+// Pairing was the advertised headline feature with **no Windows front door at all** — no verb, no page,
+// no tray item, no artboard. The protocol was built and reachable from Android, and a Windows user
+// reading the README's "Devices -> Pair" had nothing to open. These drive the page that now exists.
+
+async function testDevicesPage() {
+  // **The front door, driven the way a user drives it.** The assertions below call `loadPairing()`
+  // directly, which proves the page works and *not* that anything reaches it — removing the nav item
+  // survived every one of them until this was added. F-18 is named after the route, so the route is the
+  // first thing to test.
+  reset();
+  pairing = true;
+  state.pairing = null;
+  await activate(fakeNav("devices"));
+  assertThatTheFrontDoorWorks();
+
+  function assertThatTheFrontDoorWorks() {
+    check("the nav reaches the Devices page", state.page === "devices",
+          `a nav click left the page at ${state.page}`);
+    check("and opening it loads the pairing data", state.pairing !== null,
+          "the page opened and read nothing, so it would render empty");
+  }
+
+  // A machine with a sync identity: the page shows its id, its peers, and both halves of the exchange.
+  reset();
+  pairing = true;
+  state.pairing = null;
+  state.page = "devices";
+  await loadPairing();
+  const shown = body.innerHTML;
+
+  check("the Devices page renders", shown.includes("Pairing is what makes two devices"),
+             "the front door is missing");
+  check("it offers to show this device's code", shown.includes("Show this device's code"),
+             "there is no way to offer an invite");
+  check("it offers to answer a code", shown.includes("Answer a code"),
+             "there is no way to answer an invite");
+  check("it lists a paired device", shown.includes("PHONE7"),
+             "the peers the service reported are not shown");
+  check("and offers to revoke it", shown.includes('data-act="revoke-ask"'),
+             "a paired device cannot be revoked from the page");
+
+  // **Revoking asks first, and the question names the device** — F-14's lesson applied here.
+  asked = [];
+  await activate(fakeNode({ act: "revoke-ask", id: "PHONE7" }));
+  const confirm = document.getElementById("modal").innerHTML;
+  check("revoking asks before it revokes", confirm.includes("Revoke this device?"),
+             "revocation is one click, which is how F-14 happened on the phone");
+  check("and the question names the device", confirm.includes("PHONE7"),
+             "the confirmation does not say what is being revoked");
+  check("and nothing was sent yet", !asked.includes("revoke"),
+             "the revoke request went out before the user confirmed");
+
+  // Offering produces a code and a phrase.
+  reset();
+  pairing = true;
+  state.pairing = null;
+  state.page = "devices";
+  await loadPairing();
+  await offerPairing();
+  const offered = body.innerHTML;
+  check("offering shows the code as text", offered.includes("nonce"),
+             "the invite was not shown, so it cannot be carried to the other device");
+  check("and shows the six digits", offered.includes("580 136"),
+             "the comparison step has nothing to compare");
+
+  // Answering a code shows the phrase and what to send back, then asks before accepting.
+  reset();
+  pairing = true;
+  state.pairing = null;
+  state.page = "devices";
+  await loadPairing();
+  document.getElementById("pair-reply").value = JSON.stringify({ from: "PC", nonce: [1, 2, 3] });
+  await answerPairing();
+  const answered = body.innerHTML;
+  check("answering shows the phrase", answered.includes("580 136"), "no digits to compare");
+  check("and what to send back", answered.includes("Send this back"),
+             "the reply cannot be carried to the other device");
+
+  asked = [];
+  await activate(fakeNode({ act: "pair-accept-ask" }));
+  const acceptConfirm = document.getElementById("modal").innerHTML;
+  check("accepting asks first", acceptConfirm.includes("Pair this device?"),
+             "accepting is one click, and it is the step the digits exist to guard");
+  check("and says what is being confirmed", acceptConfirm.includes("the same six"),
+             "the confirmation does not say what the user is checking");
+  check("and nothing was accepted yet", !asked.includes("accept"),
+             "the accept went out before the user confirmed");
+
+  // **A machine with no sync identity says why**, rather than showing an empty page. An empty page and a
+  // broken page look identical, which is the failure this whole finding is about.
+  reset();
+  pairing = false;
+  state.pairing = null;
+  state.page = "devices";
+  await loadPairing();
+  check("a machine with no identity explains itself",
+             body.innerHTML.includes("no sync identity") || body.innerHTML.includes("not available"),
+             "the page is empty with no reason given");
+}
+
+
 // --- P2-1: the config is not re-read on every tick ---------------------------------------------
 async function testConfigCadence() {
   reset();
@@ -377,6 +531,7 @@ async function testConfigCadence() {
   await testConfigCadence();
   await testOffersDriveTheCard();
   await testDowntimeNotice();
+  await testDevicesPage();
   console.log();
   console.log(failures === 0 ? "window polling: OK" : `window polling: ${failures} problem(s)`);
   process.exit(failures === 0 ? 0 : 1);
@@ -390,8 +545,8 @@ def capture():
     blocks = re.findall(r"<script>(.*?)</script>", PAGE.read_text(encoding="utf-8"), re.S)
     harness = PRELUDE + blocks[-1] + CHECKS
     # Written to the system temp directory rather than beside this script: it is a build artifact of
-    # running the check, and a harness file left in \	ools/\ is one somebody has to wonder about.
-    # Nothing reads it after ode\ does.
+    # running the check, and a harness file left in `tools/` is one somebody has to wonder about.
+    # Nothing reads it after node does.
     path = pathlib.Path(tempfile.gettempdir()) / "curfew_window_harness.js"
     path.write_text(harness, encoding="utf-8")
     try:
@@ -400,6 +555,30 @@ def capture():
     except subprocess.TimeoutExpired:
         return "TimeoutExpired: the page is waiting on something"
     return (out.stdout or "") + (out.stderr or "")
+
+
+def check_nav():
+    """**The nav item exists**, which no driven test can see.
+
+    `run` below embeds only the page's `<script>` blocks, so the nav markup never reaches the harness — and
+    every Devices assertion calls `loadPairing()` directly. Removing the nav item survived the whole
+    mutation run because of that, and F-18 is named after the route: Windows had no way *to reach* pairing.
+
+    A source-level check, and the limit is worth stating: it can say the item is present and cannot say it
+    responds. The driven test above covers the response; this covers the door.
+    """
+    html = PAGE.read_text(encoding="utf-8")
+    wanted = {
+        "devices": "Devices",
+        "time": "Where time went",
+        "health": "Is it working",
+    }
+    missing = [name for name in wanted if f'data-page="{name}"' not in html]
+    if missing:
+        print(f"  FAIL the nav has no item for: {', '.join(missing)}")
+        return 1
+    print("  ok   every page has a nav item to reach it")
+    return 0
 
 
 def run():
@@ -413,8 +592,8 @@ def run():
 
     harness = PRELUDE + blocks[-1] + CHECKS
     # Written to the system temp directory rather than beside this script: it is a build artifact of
-    # running the check, and a harness file left in \	ools/\ is one somebody has to wonder about.
-    # Nothing reads it after ode\ does.
+    # running the check, and a harness file left in `tools/` is one somebody has to wonder about.
+    # Nothing reads it after node does.
     path = pathlib.Path(tempfile.gettempdir()) / "curfew_window_harness.js"
     path.write_text(harness, encoding="utf-8")
     try:
@@ -541,5 +720,13 @@ def mutate():
     return 1 if bad else 0
 
 
+def main() -> int:
+    # **The nav first**, because it is the door rather than the room: `run` embeds only the page's script
+    # blocks, so no driven test can see that a page is reachable at all.
+    if check_nav() != 0:
+        return 1
+    return mutate() if "--mutate" in sys.argv else run()
+
+
 if __name__ == "__main__":
-    sys.exit(mutate() if "--mutate" in sys.argv else run())
+    sys.exit(main())
