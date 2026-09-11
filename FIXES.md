@@ -80,6 +80,11 @@ must run.
 | 62 | **29 of the design review's 37 findings were missing from this log**, including eight P1s | **P1-P2** | **Reconciled** — a second coverage table, 15 left un-assessed (entry 53) |
 | 63 | A config reload could stop enforcing a rule while the session and its lock carried on (P1-13) | **P1** | **Fixed on Windows**; Android still takes a weakening edit (entry 54) |
 | 64 | A cloud-sync client was breaking the Android build and corrupting `.git` refs | **build** | **Fixed** — 329 strays removed, `git fsck` clean, a checker added (entry 55) |
+| 65 | The browser guessed its own identity and reported as the wrong one for six of twelve browsers (P1-2) | **P1** | **Fixed** — the host reads its own parent process (entry 56) |
+| 66 | `curfew add-window` printed "Added" for a window the core had discarded (P2-10) | **P1** | **Fixed for the CLI**; the FFI still discards the outcome (entry 56) |
+| 67 | A session across midnight was counted as two blocks, and a test enshrined it (P2-20) | **P2** | **Fixed** (entry 56) |
+| 68 | `ARCHITECTURE.md` advertised in-page blocking the manifest cannot do; live rules never took effect (P2-12) | **P2** | **Fixed** — docs corrected, `tabs.onActivated` re-checks (entry 56) |
+| 69 | The shared-folder reader had no size cap, unlike the LAN path (P2-19) | **P2** | **Fixed** — `read_capped` shares `lan::MAX_FRAME` (entry 57) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -140,7 +145,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P0-3 | P0 | entry 3 — `Stop` refused while a lock runs; uninstall fails shut |
 | P1-0 | P1 | entry 25 — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
 | P1-1 | P1 | entry 24 — the read is bounded and `serve` is concurrent |
-| P1-2 | P1 | A wrong browser-name guess makes the service hard-kill the browser. **Partly confirmed**: the extension can emit six names and the service knows twelve, so a browser whose user-agent does not match its own name reports as `chrome.exe` and its real executable is never trusted. Not re-assessed end to end. |
+| P1-2 | P1 | **fixed** (entry 56). The extension guessed its own identity and fell back to `chrome.exe`, so a Zen, LibreWolf, Waterfox, Arc, Chromium or Opera GX user was never trusted under their real name and had the browser closed outright. The host now reads its own parent process, which *is* the browser, and overrides the message's claim |
 | P1-3 | P1 | **partly fixed** (entry 53). The lock-removing case is closed: `restore_sessions` can no longer end a running session. `observe_releases` still assigns `released` wholesale, which *adds* `PeerRelease` evidence rather than removing locks — the opposite direction, and it needs the op-log signature checked at that boundary rather than a merge rule |
 | P1-4 | P1 | entry 11 — the ration is enforced by the type |
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
@@ -161,17 +166,17 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-7 | P2 | **verified open.** `git grep deny_unknown_fields` returns nothing, so `lockss = [...]` loads as no locks at all while `curfew-ffi` promises 'a config we cannot fully understand is refused' |
 | P2-8 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-9 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-10 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-10 | P2 | **fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing `Added` for a window it had discarded. **Android not covered**: the FFI still discards the outcome |
 | P2-11 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-12 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-12 | P2 | **fixed** (entry 56). `ARCHITECTURE.md` advertised in-page element blocking the manifest cannot implement (no `content_scripts`, `scripting` or `declarativeNetRequest`); corrected in both places it appeared. And the functional half: a rule starting while a matching page was already open never took effect, which `tabs.onActivated` and `windows.onFocusChanged` now fix |
 | P2-13 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-14 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-15 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-16 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-17 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-18 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-19 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-20 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-19 | P2 | **fixed** (entry 57). Every read from the shared folder went through `std::fs::read` with no size cap, unlike the LAN path. `read_capped` is now the only reader, sharing `lan::MAX_FRAME` |
+| P2-20 | P2 | **fixed** (entry 56). `total_sessions` was the sum of the per-day session counters, so a session across midnight counted twice in the number the UI prints as blocks kept. A test had enshrined the bug as intent; both corrected |
 
 ### One finding was rejected rather than fixed
 
@@ -246,6 +251,9 @@ this table is a reading aid.
 | `af30446` | A restore cannot end a lock any more (entry 53) |
 | `92c6ff0` | A reload may not weaken a running session (entry 54) |
 | `7494f5e` | A cloud-sync client was breaking the Android build and corrupting git (entry 55) |
+| `6f57b04` | The browser is identified by its process, and the CLI stops claiming "Added" (entry 56) |
+| `a033870` | One session is one block, and the extension's claims match what it can do (entries 56, 57) |
+| `49c946a` | The shared-folder reader refuses a file larger than a frame (entry 57) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 

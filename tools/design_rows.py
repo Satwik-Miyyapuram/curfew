@@ -63,17 +63,36 @@ STATUS = {
     "P2-6": ("fixed",
              "**fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the "
              "page contains no `type=\"password\"`"),
+    "P1-2": ("fixed",
+             "**fixed** (entry 56). The extension guessed its own identity and fell back to `chrome.exe`, so "
+             "a Zen, LibreWolf, Waterfox, Arc, Chromium or Opera GX user was never trusted under "
+             "their real name and had the browser closed outright. The host now reads its own parent "
+             "process, which *is* the browser, and overrides the message's claim"),
+    "P2-10": ("fixed",
+              "**fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, "
+              "Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing "
+              "`Added` for a window it had discarded. **Android not covered**: the FFI still "
+              "discards the outcome"),
+    "P2-12": ("fixed",
+              "**fixed** (entry 56). `ARCHITECTURE.md` advertised in-page element blocking the "
+              "manifest cannot implement (no `content_scripts`, `scripting` or "
+              "`declarativeNetRequest`); corrected in both places it appeared. And the functional "
+              "half: a rule starting while a matching page was already open never took effect, which "
+              "`tabs.onActivated` and `windows.onFocusChanged` now fix"),
+    "P2-19": ("fixed",
+              "**fixed** (entry 57). Every read from the shared folder went through `std::fs::read` "
+              "with no size cap, unlike the LAN path. `read_capped` is now the only reader, sharing "
+              "`lan::MAX_FRAME`"),
+    "P2-20": ("fixed",
+              "**fixed** (entry 56). `total_sessions` was the sum of the per-day session counters, "
+              "so a session across midnight counted twice in the number the UI prints as blocks "
+              "kept. A test had enshrined the bug as intent; both corrected"),
     "P2-7": ("open",
              "**verified open.** `git grep deny_unknown_fields` returns nothing, so `lockss = [...]` loads "
              "as no locks at all while `curfew-ffi` promises 'a config we cannot fully understand is refused'"),
 }
 
-NOTES = {
-    "P1-2": "A wrong browser-name guess makes the service hard-kill the browser. **Partly confirmed**: the "
-            "extension can emit six names and the service knows twelve, so a browser whose user-agent does "
-            "not match its own name reports as `chrome.exe` and its real executable is never trusted. Not "
-            "re-assessed end to end.",
-}
+NOTES = {}
 
 
 def main():
