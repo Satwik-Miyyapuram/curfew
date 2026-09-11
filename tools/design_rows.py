@@ -38,20 +38,28 @@ STATUS = {
              "`keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is "
              "unchanged. A key is never generated in CI: Android needs the same key for an in-place "
              "update, so a per-build key would mean no release could ever be upgraded"),
-    "P1-9": ("open",
-             "**verified open.** `state.rs:102` reports `Loaded::Fresh` when the main file *and* the backup "
-             "are both missing, which is exactly the deliberate-deletion case — a crash leaves a backup, a "
-             "deletion does not. The comment asserting the two are 'answered the same way' is wrong"),
-    "P1-10": ("open",
-             "**verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while "
-             "sessions are running — fail open. Locks survive, but every rule behind them stops"),
-    "P1-11": ("open",
-             "**verified open.** `runner.rs:558` calls `feeds.events(…)` while holding the enforcer mutex, "
-             "and that same mutex is what `serve()` needs. `TIMEOUT` is 20s against a 2s tick, so one slow "
-             "subscription stalls the control channel — including `Status` and the 24-hour release"),
-    "P1-12": ("open",
-             "**verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so "
-             "every diagnostic it emits goes to stderr of a service nobody reads"),
+    "P1-9": ("fixed",
+             "**fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a "
+             "lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, "
+             "which keeps the watchdog alive. Written before the state and removed last, so the worst a "
+             "crash can do is the safe direction. **Honest limit**: deleting this file too gets the old "
+             "behaviour, so it raises the cost by one file rather than preventing it"),
+    "P1-10": ("fixed",
+              "**fixed** (entry 60). The last config that parsed is kept beside the state as "
+              "`curfew.toml.good` and used when the live file is unreadable, so the rules behind a running "
+              "lock keep being enforced. An empty config remains the last resort, because a machine "
+              "holding a lock must still start, but it is no longer the first answer"),
+    "P1-11": ("fixed",
+              "**fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly "
+              "for the two values it needs — so a slow subscription cannot stall `serve()` and with it the "
+              "24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being "
+              "retried every two seconds against a 20-second timeout. **The mutex half is not covered by a "
+              "test**: moving the fetch back under the lock would not fail anything"),
+    "P1-12": ("fixed",
+              "**fixed** (entry 62). `logging.rs` installs one sink at service startup writing to "
+              "`%ProgramData%\\Curfew\\curfew.log` and to stderr, rolling at 2 MB with one previous file "
+              "kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the "
+              "startup call is guarded textually because that entry point cannot be exercised here"),
     "P1-13": ("partial",
              "**fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is "
              "adopted, so a config that would enforce less than a running session promised is refused. Two "
@@ -89,9 +97,12 @@ STATUS = {
               "**fixed** (entry 56). `total_sessions` was the sum of the per-day session counters, "
               "so a session across midnight counted twice in the number the UI prints as blocks "
               "kept. A test had enshrined the bug as intent; both corrected"),
-    "P2-7": ("open",
-             "**verified open.** `git grep deny_unknown_fields` returns nothing, so `lockss = [...]` loads "
-             "as no locks at all while `curfew-ffi` promises 'a config we cannot fully understand is refused'"),
+    "P2-7": ("fixed",
+             "**fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, "
+             "`Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, "
+             "`CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so "
+             "`refil = \"daily\"` was silently defaulting. Only the config: the state file and op-log are "
+             "read by other versions, where refusing an unknown field would break forward compatibility"),
 }
 
 NOTES = {}

@@ -86,6 +86,11 @@ must run.
 | 68 | `ARCHITECTURE.md` advertised in-page blocking the manifest cannot do; live rules never took effect (P2-12) | **P2** | **Fixed** — docs corrected, `tabs.onActivated` re-checks (entry 56) |
 | 69 | The shared-folder reader had no size cap, unlike the LAN path (P2-19) | **P2** | **Fixed** — `read_capped` shares `lan::MAX_FRAME` (entry 57) |
 | 70 | The published Android APK could not be installed by anyone (P1-7) | **P1** | **Fixed** — `assembleRelease` signs when given a key, unsigned without one (entry 58) |
+| 71 | Deleting the state files ended every lock and retired the watchdog (P1-9) | **P1** | **Fixed** — an out-of-band witness distinguishes a deletion from a first run (entry 59) |
+| 72 | A broken config stopped enforcing every rule behind a running lock (P1-10) | **P1** | **Fixed** — the last config that parsed is kept and used (entry 60) |
+| 73 | One slow calendar subscription stalled the whole control channel (P1-11) | **P1** | **Fixed** — the fetch is hoisted out of the enforcer lock; a failing source backs off (entry 61) |
+| 74 | Every service diagnostic was silently discarded (P1-12) | **P1** | **Fixed** — a rolling log sink, 62 call sites redirected (entry 62) |
+| 75 | A typo in the config was silently ignored, including inside an action (P2-7) | **P2** | **Fixed** — `deny_unknown_fields` on ten config types (entry 63) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -153,10 +158,10 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-6 | P1 | **verified open.** The window has no route to the 24-hour release: `Request::RequestRelease` has no caller in `curfew-app` (only `curfew-tray/src/main.rs`). This is the documented last-resort exit and the primary Windows surface cannot reach it |
 | P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
 | P1-8 | P1 | **Not re-assessed** — nobody has read this one against the code |
-| P1-9 | P1 | **verified open.** `state.rs:102` reports `Loaded::Fresh` when the main file *and* the backup are both missing, which is exactly the deliberate-deletion case — a crash leaves a backup, a deletion does not. The comment asserting the two are 'answered the same way' is wrong |
-| P1-10 | P1 | **verified open.** `runner.rs:140` starts with an empty config when it cannot parse one while sessions are running — fail open. Locks survive, but every rule behind them stops |
-| P1-11 | P1 | **verified open.** `runner.rs:558` calls `feeds.events(…)` while holding the enforcer mutex, and that same mutex is what `serve()` needs. `TIMEOUT` is 20s against a 2s tick, so one slow subscription stalls the control channel — including `Status` and the 24-hour release |
-| P1-12 | P1 | **verified open.** No event-log sink in `curfew-svc`: `git grep EventLog` returns nothing, so every diagnostic it emits goes to stderr of a service nobody reads |
+| P1-9 | P1 | **fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, which keeps the watchdog alive. Written before the state and removed last, so the worst a crash can do is the safe direction. **Honest limit**: deleting this file too gets the old behaviour, so it raises the cost by one file rather than preventing it |
+| P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
+| P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
+| P1-12 | P1 | **fixed** (entry 62). `logging.rs` installs one sink at service startup writing to `%ProgramData%\Curfew\curfew.log` and to stderr, rolling at 2 MB with one previous file kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the startup call is guarded textually because that entry point cannot be exercised here |
 | P1-13 | P1 | **fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is adopted, so a config that would enforce less than a running session promised is refused. Two comments that claimed this already worked were false — `Session` has no rules field — and are corrected. **Android not covered**: `commitConfig` takes a weakening edit without the check |
 | P2-1 | P2 | **fixed** (entry 53) — the config is re-read on a ten-second cadence |
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
@@ -164,7 +169,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-4 | P2 | **fixed under F-24** — the `window.__curfewUser` read is gone |
 | P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
 | P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
-| P2-7 | P2 | **verified open.** `git grep deny_unknown_fields` returns nothing, so `lockss = [...]` loads as no locks at all while `curfew-ffi` promises 'a config we cannot fully understand is refused' |
+| P2-7 | P2 | **fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, `Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so `refil = "daily"` was silently defaulting. Only the config: the state file and op-log are read by other versions, where refusing an unknown field would break forward compatibility |
 | P2-8 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-9 | P2 | **Not re-assessed** — nobody has read this one against the code |
 | P2-10 | P2 | **fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing `Added` for a window it had discarded. **Android not covered**: the FFI still discards the outcome |
@@ -256,6 +261,11 @@ this table is a reading aid.
 | `a033870` | One session is one block, and the extension's claims match what it can do (entries 56, 57) |
 | `49c946a` | The shared-folder reader refuses a file larger than a frame (entry 57) |
 | `8839b90` | The release build signs when given a key (entry 58) |
+| `f3dae90` | Deleting the state files no longer retires the watchdog (entry 59) |
+| `7341ebe` | A broken config no longer stops enforcing the rules behind a lock (entry 60) |
+| `cca75eb` | A slow calendar no longer stalls the control channel (entry 61) |
+| `f26a157` | A log sink, so the service's diagnostics survive (entry 62) |
+| `2e87f60` | A typo in the config is refused, not silently ignored (entry 63) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3328,3 +3338,231 @@ itself is not verified here**, and this entry says so rather than implying a gre
 ### Verification
 
 72 Android tests across 12 classes; Rust untouched at **895**; fmt and clippy clean.
+
+---
+
+## 59. P1-9: deleting the state files ended every lock and retired the watchdog
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-9**. **Fixed.**
+
+### What was wrong
+
+`load` could not tell a first run from a deliberate deletion, because both leave the same two things
+missing: `state.json` and its `.bak`. A crash mid-write leaves the backup, so the **deletion** is the case
+that produces `Loaded::Fresh` — and `Fresh` is what retires the watchdog, because
+`watchdog::locks_running` answers `false` for it.
+
+So deleting two files released every lock *and* switched off the process whose entire job is to notice that
+enforcement stopped. The comment claiming the two cases were "answered the same way" was true of the loader
+and wrong about the consequence, which is why this survived: a reader checking the loader finds a coherent
+argument.
+
+### The fix
+
+`state.json.locked` is an **out-of-band witness**. Its *existence* is the whole signal — no content is read
+— so a truncated or empty one still answers the only question asked of it, which is what lets it survive
+the failure it exists for. `save` writes it whenever the state holds a running session and removes it when
+it does not; `load` consults it before answering `Fresh`.
+
+**Order inside `save` is load-bearing.** The witness is written *first*, before the state and before the
+backup copy. Written afterwards, a crash between the two could lose it — exactly the case it must not miss.
+Written first, the worst a crash leaves is a witness for a lock that has just ended, which reads as "a lock
+was running" and is the safe direction: it produces `Lost` rather than `Fresh`, and `Lost` keeps the
+watchdog.
+
+### What was deliberately not changed
+
+This is **not a secret and not a lock**. Someone who deletes the witness too gets the old behaviour, so the
+accurate description is *"raises the cost of the deletion by one file"*, not *"prevents it"*. The review
+asks for a witness, and a witness is what this is; claiming more would be the same class of overstatement
+this branch has removed repeatedly.
+
+### Verification
+
+Five tests. **Three mutations caught**, including both directions: removing the check from `load`, stopping
+`save` writing the witness, and never removing it — which would leave a clean machine permanently watched.
+A pre-existing test also had to be corrected: my new test originally shared a temp directory with
+`deleting_the_state_file_does_not_end_a_lock`, so its `.bak` survived and the "both copies gone" case never
+actually arose.
+
+---
+
+## 60. P1-10: a broken config stopped enforcing every rule behind a running lock
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-10**. **Fixed.**
+
+### What was wrong
+
+The fallback for an unparseable config while locks were running was `Config::default()`. That keeps the
+sessions and honours their locks while enforcing **none of their rules** — every domain, app, path and
+budget behind them stops — and the only signal was one line on stderr of a service nobody reads (see entry
+62, which is why "nobody reads" was literally true). That is fail-open on the config file, and "break the
+config file" was therefore a way to stop being blocked while keeping the appearance of a lock.
+
+### The fix
+
+The last config that parsed is kept beside the state as `curfew.toml.good`, rewritten on every successful
+load, and used when the live file cannot be read. The same companion-file idea as `state.json.locked`
+(entry 59) and the calendar cache. An empty config remains the last resort, because a machine holding a
+lock must still start, but it is no longer the *first* answer and it now says which rules are not being
+enforced rather than only that the file was unreadable.
+
+### Verification
+
+Four tests driving `build()` directly — which is why its three paths are parameters rather than the globals
+the service uses. **Two mutations caught**: restoring the old empty-config fallback, and removing the code
+that keeps the good copy.
+
+---
+
+## 61. P1-11: a slow calendar stalled the control channel, and a failing one was hammered
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-11**. **Fixed.** Two defects in one call site, which is
+why the review lists them together.
+
+### The mutex
+
+`feeds.events` does HTTP with a twenty-second timeout (`feeds::TIMEOUT`) against a two-second tick, and it
+was called while holding the lock that `serve()` needs to answer anything at all. So one slow subscription
+stalled the whole control channel — `Status`, and with it the 24-hour `release` — for up to twenty seconds.
+**Any local user could arrange that** by subscribing to a URL that black-holes packets, which makes it a
+denial of the way *out* of a lock.
+
+The lock is now taken twice: once briefly for the two values the fetch needs (`calendar_sources` and the
+timezone, both `Clone`/`Copy`), and then for the pass. Neither can change underneath, because this loop is
+the only writer.
+
+### The retry
+
+A failed fetch never updated `cached.at`, so `due` stayed true and the source was retried on the *next
+tick* — every two seconds, against that twenty-second timeout. `Feeds` now backs off: 30 seconds after the
+first failure, doubling per consecutive failure, capped at 10 minutes. A success clears the count, so a host
+that flaps recovers at the short wait instead of climbing to the ceiling and staying there. `saturating` on
+the shift, because a source broken for a very long time would otherwise wrap to a *small* delay — the one
+wrong answer, since a long-broken feed is exactly the one that should cost the least.
+
+### Two of my own errors, both caught by the tests
+
+The first had the shift off by one — `2^failures` instead of `2^(failures-1)` — so the opening wait was 60
+seconds rather than 30, and a source that recovered after one bad minute was still ignored.
+
+The second is more useful: my test for "a success clears the backoff" asserted only that the recovered pass
+reported no failure, **which is true whether or not the count was reset**. Deleting the reset left it
+passing. The consequence of a stale count is the *next* failure's delay, so the test now fails, succeeds,
+fails again, and asserts the third attempt lands at the base window rather than the next doubling.
+
+### Verification
+
+Four backoff tests plus the existing calendar suite, 23 in that file. **Three mutations caught**: ignoring
+the backoff, never clearing it, and the off-by-one shift.
+
+**What is not covered, stated rather than implied:** the mutex half is verified by reading and by the lock
+discipline in the comment. Moving the fetch back under the lock would not fail any test.
+
+---
+
+## 62. P1-12: every service diagnostic was silently discarded
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-12**. **Fixed.**
+
+### What was wrong
+
+An SCM-started service has null standard handles, and Rust's `std` documents `eprintln!` against them as
+**silent success**: it writes nothing and reports no error. This crate emitted diagnostics on sixty-odd
+paths — a state save that failed, an unreadable config, a calendar fetch that failed, hosts failures, sync
+failures, a watchdog that would not spawn — and every one was discarded. That contradicts §10's "no silent
+failure" and this project's own rule: *"a blocker that quietly fails to block is worse than one that admits
+it."*
+
+### The fix
+
+`logging.rs` installs one sink at service startup and writes each record **both** to
+`%ProgramData%\Curfew\curfew.log` and to stderr — the two callers want different things: an installed
+service has only the file, a developer at a console wants the line in front of them. Rolling at 2 MB,
+keeping one previous file, so the worst case is 4 MB and not unbounded. Hand-rolled rather than a logging
+crate: the requirement is "these lines must survive on disk and must not grow without bound", which is a
+`Mutex<File>` and a size check, and a framework would add a dependency, a runtime and a configuration format
+to a job this size.
+
+Deliberate details: **flushed per line**, because a service that is killed is exactly the situation these
+lines exist to explain and a buffered tail would be lost precisely then; **rolled before writing**, so one
+line cannot push the file past the cap and be immediately lost by the roll that follows; **a sink that
+cannot be opened is not fatal**, because a service that refuses to start over a log is worse than one that
+starts without one, and the failure goes to stderr where the installer sees it; and **installed first thing
+in `service::run`**, because the failures worth logging are the early ones.
+
+62 call sites redirected — `warn!` where the text says something failed, `note!` otherwise. The literal
+`"curfew: "` prefix was stripped from each, since `line()` adds it, or every record would read
+`curfew: curfew: …`.
+
+### Three of my own guards were vacuous
+
+Removing the `install` call from `service::run` survived every executable test — `run` is a
+`#[cfg(windows)]` entry point that hands control to the dispatcher and never returns, so nothing can call it
+and observe that logging was set up. That is the same *kind* of failure as P1-12 itself: the sink exists, is
+correct, and nothing reaches it. The guard is now a textual one over `include_str!("service.rs")`, which is
+the honest maximum from here.
+
+And the first version of that guard **passed with the call deleted**, because the test's own assertion
+contains the string it searches for. The same trap caught the `eprintln!` check in the same test — it failed
+on its own message text. Both now search only the production half of the file, split at `#[cfg(test)]`.
+**Third instance on this branch of a test measuring itself instead of its subject.**
+
+### What was deliberately not changed
+
+The service binary is not started here, so this is verified by unit tests over the sink and a textual guard
+over the call site — not by starting the service and reading the log. That limit is stated rather than
+implied.
+
+### Verification
+
+Three mutations caught: the sink dropping records, `install` not setting it, and the service not calling
+`install`.
+
+---
+
+## 63. P2-7: a typo in the config was silently ignored
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-7**. **Fixed.**
+
+### What was wrong
+
+Serde ignores keys it does not know, which is the wrong default for a file whose entire job is to state
+what is forbidden. `[[weekly]] lockss = [...]` — one transposition — loaded successfully with **no locks at
+all**, so the window ran a session the user believed was locked and could be ended with one tap.
+`curfew-ffi` already promised the opposite in a doc comment: *"a config we cannot fully understand is
+refused so it can never be written back with the user's rules missing."* **That sentence was false when it
+was written. It is true now.**
+
+### The fix
+
+`deny_unknown_fields` on the ten types a user writes: `Config`, `Resolver`, `Profile`, `Rule`, `Action`,
+`Refill` (`config.rs` / `budget.rs`); `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`
+(`schedule.rs`); `EmergencyPolicy` (`emergency.rs`).
+
+**Only the config.** The state file, the op-log and the sync wire format are not user-edited and are read
+by *other versions* of this program, where refusing an unknown field would turn a forward-compatible file
+into a broken one. The v0 migration fixture is asserted to still parse, and it does, because an older config
+has *fewer* fields rather than unknown ones.
+
+### `Action` and `Refill` were the ones the outer guard could not reach
+
+Finding that is the reason to probe rather than assume: they are internally tagged enums, so `kind` and the
+variant's fields sit in one table, and the `Rule` guard cannot see them.
+`action = { kind = "budget", seconds = 600, refil = "daily" }` was accepted and the refill silently took
+its default — somebody who meant "refill daily at 04:00" got the default and no message.
+
+### The mutation run made the tests honest, in two rounds
+
+The first pass showed **four of the eight types carrying the attribute with nothing asserting it** —
+`Resolver`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy` — so it could have been deleted from
+any of them silently. The second pass, over all ten, is green.
+
+One of my own test fixtures was also wrong in a way that would have passed for the wrong reason: I wrote
+`days = ["mon", "tue"]` when the format is `days = [0, 1]`, so the config failed to parse on the day list.
+The assertion *naming* `lockss` is what caught it — a test that only asserted `is_err()` would have passed
+while testing nothing about typos.
+
+### Verification
+
+Twelve tests. **All ten mutations caught**, one per guarded type.
