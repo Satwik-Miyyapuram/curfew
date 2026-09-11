@@ -35,6 +35,29 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Read a file from the shared folder, or refuse it for being larger than a frame may be — P2-19.
+///
+/// **This is the only safe way to read anything here.** `std::fs::read` allocates the whole file
+/// before anybody can object, and the folder is not ours: it is a Google Drive or OneDrive account,
+/// and everything in it was put there by a participant, by the sync client mid-copy, or by somebody
+/// who has write access to a shared folder. `lan.rs` has capped its frames from the start; this
+/// transport had no cap at all, on every segment and on `heads.json`.
+///
+/// The cap is [`crate::lan::MAX_FRAME`] rather than a second number, because two constants that agree
+/// today are two constants that disagree later — and this branch has spent a dozen rounds removing
+/// exactly that.
+///
+/// A file over the cap is `skipped`, not an error: a sync client part-way through copying a large
+/// file is the ordinary case, and the next pass reads it once it has settled. Deleting it would be
+/// the wrong answer, because the writer still owns it.
+fn read_capped(path: &Path) -> Option<Vec<u8>> {
+    let size = std::fs::metadata(path).ok()?.len();
+    if size > u64::from(crate::lan::MAX_FRAME) {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
 /// How many segments one writer keeps for one reader before it stops writing new ones.
 ///
 /// A reader that has been offline for a long time is the normal case — a laptop on holiday — so the
@@ -123,7 +146,7 @@ impl Folder {
         for id in peers.active_ids() {
             let inbox = self.outbox(id, &me.id());
             for path in self.segments(&inbox)? {
-                let Ok(bytes) = std::fs::read(&path) else {
+                let Some(bytes) = read_capped(&path) else {
                     pass.skipped += 1;
                     continue;
                 };
@@ -174,7 +197,7 @@ impl Folder {
         peer_id: &DeviceId,
     ) -> io::Result<Option<BTreeMap<DeviceId, u64>>> {
         let path = self.outbox(peer_id, &me.id()).join("heads.json");
-        let Ok(bytes) = std::fs::read(&path) else {
+        let Some(bytes) = read_capped(&path) else {
             return Ok(None);
         };
         let Ok(packet) = serde_json::from_slice::<Packet>(&bytes) else {
@@ -222,7 +245,7 @@ impl Folder {
     fn prune(&self, dir: &Path, theirs: &BTreeMap<DeviceId, u64>) -> io::Result<usize> {
         let mut pruned = 0;
         for path in self.segments(dir)? {
-            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let Some(bytes) = read_capped(&path) else { continue };
             let Ok(segment) = serde_json::from_slice::<Segment>(&bytes) else { continue };
             let taken = segment
                 .covers
@@ -495,5 +518,93 @@ mod tests {
         w.folder.collect(&w.phone, &w.on_phone, &mut restarted).unwrap();
 
         assert_eq!(restarted.replay(NOW + 2), w.pc_log.replay(NOW + 2));
+    }
+    // --- the folder is somebody else's account (P2-19) -------------------------------------------
+    //
+    // The LAN transport has capped its frames from the start (`lan::MAX_FRAME`). This one had no cap
+    // at all, on every segment and on `heads.json`, and `std::fs::read` allocates the whole file
+    // before anybody can object. Everything in a shared folder was put there by a participant, by
+    // the sync client mid-copy, or by somebody with write access — so a file of any size is a file
+    // somebody else chose.
+
+    #[test]
+    fn a_segment_larger_than_a_frame_is_skipped_rather_than_read() {
+        let mut w = world();
+        w.pc_log.append(&w.pc, NOW, start("s1"));
+        // A real segment first, so the pass has something it should still take.
+        w.folder.publish(&w.pc, &w.phone.public(), &w.pc_log).unwrap();
+
+        // And then a file nobody would send: one byte over the cap.
+        let inbox = w.folder.outbox(&w.pc.id(), &w.phone.id());
+        std::fs::create_dir_all(&inbox).unwrap();
+        let huge = inbox.join("999999.curfew");
+        let file = std::fs::File::create(&huge).unwrap();
+        file.set_len(u64::from(crate::lan::MAX_FRAME) + 1).unwrap();
+        drop(file);
+
+        let pass = w.folder.collect(&w.phone, &w.on_phone, &mut w.phone_log).unwrap();
+
+        // The real segment still arrived.
+        assert_eq!(w.phone_log.replay(NOW + 1).sessions.running.len(), 1);
+        // **`skipped` alone proves nothing here, and the first version of this test claimed it did.**
+        // A sparse file of zeros fails `serde_json::from_slice` whether or not the cap exists, so the
+        // counter increments either way — removing the size check left this assertion passing. What
+        // the cap changes is that the file is never *read*, which a counter cannot observe. The
+        // direct test on `read_capped` below is the one that pins it.
+        assert!(pass.skipped >= 1);
+        // It is left where it is: the writer still owns it, and deleting somebody else's file
+        // because we could not read it would be the wrong answer.
+        assert!(huge.exists(), "the oversized segment was deleted");
+    }
+
+    #[test]
+    fn a_heads_file_larger_than_a_frame_is_refused() {
+        let mut w = world();
+        w.pc_log.append(&w.pc, NOW, start("s1"));
+        w.folder.publish(&w.pc, &w.phone.public(), &w.pc_log).unwrap();
+
+        let inbox = w.folder.outbox(&w.pc.id(), &w.phone.id());
+        let heads = inbox.join("heads.json");
+        let file = std::fs::File::create(&heads).unwrap();
+        file.set_len(u64::from(crate::lan::MAX_FRAME) + 1).unwrap();
+        drop(file);
+
+        // Reported as nothing rather than read and failed on: the next pass reads it once the sync
+        // client has finished copying.
+        assert_eq!(w.folder.heads_from(&w.phone, &w.pc.public(), &w.pc.id()).unwrap(), None);
+    }
+    /// The cap itself, measured where it can be: on the function that applies it.
+    ///
+    /// This is the guard the integration test above cannot be. `read_capped` is the only thing that
+    /// reads a file from the shared folder, so asserting its two answers asserts the whole defence —
+    /// and removing the size check fails **this** test, which is how it was verified.
+    #[test]
+    fn the_folder_reader_refuses_a_file_over_the_cap() {
+        let dir = std::env::temp_dir().join(format!("curfew-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let under = dir.join("under.curfew");
+        std::fs::write(&under, b"small").unwrap();
+        assert_eq!(read_capped(&under).as_deref(), Some(&b"small"[..]));
+
+        // `set_len` makes a sparse file, so this costs no disk and still reports the size the reader
+        // would have to allocate.
+        let over = dir.join("over.curfew");
+        std::fs::File::create(&over)
+            .unwrap()
+            .set_len(u64::from(crate::lan::MAX_FRAME) + 1)
+            .unwrap();
+        assert!(read_capped(&over).is_none(), "a file over the cap was read anyway");
+
+        // Exactly the cap is allowed: the limit is a frame, and a frame of exactly this size is one
+        // the LAN transport would accept, so the two paths agree at the boundary.
+        let exact = dir.join("exact.curfew");
+        std::fs::File::create(&exact).unwrap().set_len(u64::from(crate::lan::MAX_FRAME)).unwrap();
+        assert!(read_capped(&exact).is_some(), "a file exactly at the cap was refused");
+
+        // And a file that is not there is `None` rather than a panic.
+        assert!(read_capped(&dir.join("absent.curfew")).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

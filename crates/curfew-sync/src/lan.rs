@@ -47,12 +47,17 @@ pub const BEACON_SECONDS: u64 = 2;
 /// — does not make a peer flicker out of the list.
 pub const BEACON_GRACE_SECONDS: i64 = 15;
 
-/// The largest message this transport will read.
+/// The largest message this transport will read, and the largest file the folder transport will.
 ///
 /// A first sync after a long time apart is the biggest thing sent, and it is still small; anything
 /// past this is either a bug or somebody on the network trying to make us allocate a gigabyte, and
 /// both deserve the same answer.
-const MAX_FRAME: u32 = 8 * 1024 * 1024;
+///
+/// `pub(crate)` because the **folder** transport needs the same number. It had no cap at all
+/// (P2-19), and a shared folder is somebody else's cloud account: a participant, or the sync client
+/// itself mid-copy, can leave a file of any size there for us to `fs::read` into memory. Two
+/// constants that agree today are two constants that disagree later, so there is one.
+pub(crate) const MAX_FRAME: u32 = 8 * 1024 * 1024;
 
 /// How long to wait on a peer that has stopped talking mid-exchange. A phone that walks out of the
 /// room does exactly this, and it must cost seconds, not a hung thread.
