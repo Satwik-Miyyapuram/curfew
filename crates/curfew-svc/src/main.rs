@@ -681,18 +681,60 @@ fn start(args: &[String]) -> i32 {
     } else {
         vec![]
     };
+    // Read before the request, because the request takes the lock list by value and the confirmation
+    // afterwards needs to know whether there was one.
+    let locked = !locks.is_empty();
     // Said out loud before it starts, because after it starts is too late: this is the whole point
     // of a commitment device, and a user surprised by it is a user who was not warned properly.
-    if !locks.is_empty() {
+    if locked {
         println!(
             "Starting a locked session for {minutes} minutes. It will need your Windows password \
              to end early, and if you cannot use it, the 24-hour release is the way out."
         );
     }
     match ask(Request::Start { profile: profile.clone(), seconds: minutes * 60, locks }) {
+        // Confirmed out loud, because this is the one command whose entire purpose is to change
+        // something and it used to print nothing at all.
+        //
+        // `report` is silent on `Ok` on purpose — "end" and "release" are asked for and their effect
+        // is visible elsewhere, so a line saying "done" would be noise. `start` is different: nothing
+        // about the machine looks different afterwards until an app you try to open disappears, which
+        // may be minutes later. A user who is not told it worked concludes it did not, and either runs
+        // it again or gives up on the feature.
+        Ok(Response::Ok) => {
+            print!("{}", started_message(profile, minutes, locked));
+            0
+        }
         Ok(response) => report(response),
         Err(code) => code,
     }
+}
+
+/// What `curfew start` says once a session has actually begun.
+///
+/// Split out from the command so the wording can be read and tested — the same reason the tray keeps
+/// `unreachable_service` out of its Win32 layer. The property worth testing is not the wording but the
+/// *branch*: what a user is told their way out is has to match the lock they chose, and getting it
+/// wrong sends them to a command that will refuse them.
+///
+/// The locked case is the one that matters. `curfew end` claims nothing satisfied — deliberately, so
+/// that a command line cannot assert a password was typed — which means a credential lock is refused
+/// there. Telling somebody to run it would be exactly the failure this log keeps finding: the product
+/// naming an exit that does not exist.
+fn started_message(profile: &str, minutes: u32, locked: bool) -> String {
+    let mut text = format!(
+        "Started. {profile} is running for the next {minutes} minute{}.\n",
+        if minutes == 1 { "" } else { "s" }
+    );
+    if locked {
+        text.push_str(
+            "To stop it early you need your Windows password — the Curfew icon can ask for it — or \
+             you can start the 24-hour release.\n",
+        );
+    } else {
+        text.push_str("To stop it early: `curfew status`, then `curfew end <id>`.\n");
+    }
+    text
 }
 
 fn end(args: &[String]) -> i32 {
@@ -1028,5 +1070,57 @@ mod same_file_tests {
         assert!(same_file(missing.to_str().unwrap(), &missing));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod started_message_tests {
+    use super::started_message;
+
+    /// `curfew start` says something.
+    ///
+    /// It printed nothing on success at all, which is the remaining half of F-22: the one command
+    /// whose entire purpose is to change something gave no sign that it had. Nothing looks different
+    /// until an app you open disappears, which can be minutes later, so a user who is not told
+    /// concludes it failed and either runs it again or gives up on the feature.
+    #[test]
+    fn a_started_session_is_confirmed() {
+        let text = started_message("deep-work", 30, false);
+        assert!(text.contains("Started"), "{text}");
+        assert!(text.contains("deep-work"), "the confirmation does not name the profile: {text}");
+        assert!(text.contains("30 minutes"), "the confirmation does not say how long: {text}");
+    }
+
+    /// One minute is a minute, not "1 minutes".
+    #[test]
+    fn a_single_minute_is_not_pluralised() {
+        let text = started_message("deep-work", 1, false);
+        assert!(text.contains("1 minute."), "{text}");
+        assert!(!text.contains("1 minutes"), "{text}");
+    }
+
+    /// An unlocked session points at `curfew end`, which will actually work.
+    #[test]
+    fn an_unlocked_session_names_the_command_that_ends_it() {
+        let text = started_message("deep-work", 30, false);
+        assert!(text.contains("curfew end"), "{text}");
+        assert!(text.contains("curfew status"), "the id has to come from somewhere: {text}");
+    }
+
+    /// A locked one does **not**, because `curfew end` claims nothing satisfied and would refuse.
+    ///
+    /// This is the assertion that earns its place. Sending somebody to a command that fails is exactly
+    /// the defect this whole log is about — a product naming an exit that does not exist — and it
+    /// would be introduced by a confident-sounding line of copy, not by a logic error.
+    #[test]
+    fn a_locked_session_never_points_at_a_command_that_would_refuse_it() {
+        let text = started_message("deep-work", 30, true);
+        assert!(
+            !text.contains("curfew end"),
+            "a credential-locked session was told to run a command that refuses it: {text}"
+        );
+        // …and it does say what does work.
+        assert!(text.contains("Windows password"), "{text}");
+        assert!(text.contains("24-hour release"), "{text}");
     }
 }
