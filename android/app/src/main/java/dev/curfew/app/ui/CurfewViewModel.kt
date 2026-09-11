@@ -152,8 +152,17 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // The browsing window, not the enforcement one: this list is also what the Events
             // screen shows, and a calendar that stopped at tomorrow looked to the user like a
             // calendar that had lost most of their year.
-            val events = runCatching { runtime.calendarEvents(now, CalendarReader.BROWSE_SECONDS) }
-                .getOrDefault(emptyList())
+            //
+            // The failure is kept, not swallowed into an empty list. `getOrDefault(emptyList())`
+            // made a calendar that could not be *read* indistinguishable from a calendar with
+            // nothing in it: the Events screen drew its ordinary "nothing on today" empty state over
+            // a read that had failed, which is the app asserting something it does not know. It is
+            // the same rule as the downtime banner in §10 — say what actually happened.
+            val calendarRead = runCatching { runtime.calendarEvents(now, CalendarReader.BROWSE_SECONDS) }
+            val events = calendarRead.getOrDefault(emptyList())
+            val calendarError = calendarRead.exceptionOrNull()?.let {
+                it.message ?: "Your calendar could not be read just now."
+            }
             val sessions = runCatching { runtime.policy.sessions().running }.getOrDefault(emptyList())
             val activations = runCatching { runtime.policy.activations(now, events) }
                 .getOrDefault(emptyList())
@@ -187,6 +196,20 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 .sortedByDescending { it.second }
             val opens = usage?.launches.orEmpty().mapValues { (_, l) -> l.opens.size }
 
+            // The config is read once and the failure kept, rather than `getOrDefault("")`.
+            //
+            // An empty string is a *valid* config to every reader here, so a failed read made the
+            // raw editor on the Schedule screen open on a blank page — and `saveConfig` validates what
+            // it is given, not that it replaced what was there, so saving that page replaced the
+            // user's whole config with whatever they had just typed. The export button was worse: it
+            // wrote `state.configToml` to a file, so a failed read exported an empty backup over a
+            // good one. Both are guarded on `configError` now.
+            val configRead = runCatching { runtime.policy.configToml() }
+            val configToml = configRead.getOrDefault("")
+            val configError = configRead.exceptionOrNull()?.let {
+                it.message ?: "Your config could not be read."
+            }
+
             _state.update { previous ->
                 previous.copy(
                     now = now,
@@ -197,13 +220,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
                     spentSeconds = spent,
                     launchCounts = opens,
-                    configToml = runCatching { runtime.policy.configToml() }.getOrDefault(""),
+                    configToml = configToml,
+                    configError = configError,
                     weekly = runCatching { runtime.weeklySchedules() }.getOrDefault(emptyList()),
                     calendarRules = runCatching { runtime.calendarSchedules() }.getOrDefault(emptyList()),
                     // Anything that has not finished yet, soonest first. Events already over are
                     // dropped rather than greyed out: the list exists to be pointed at, and a
                     // finished meeting is not something a new rule can usefully be built from.
                     calendarEvents = events.filter { it.end > now }.sortedBy { it.start },
+                    calendarError = calendarError,
                     eventRules = eventRules,
                     calendarGranted = CalendarReader(getApplication()).hasPermission(),
                     profiles = runCatching { Policy.profiles(runtime.policy.configToml()) }
@@ -585,10 +610,22 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteProfile(id: String) {
+    /**
+     * Remove a profile, and say whether it worked.
+     *
+     * `onDone` runs **only on success**, which is the point of it. The one caller used to call
+     * `deleteProfile(id)` and navigate back on the very next line, so the screen left before the core
+     * had answered — and the routine refusal ("a window still points at this profile", named
+     * precisely so the user can fix it) arrived on a screen that no longer existed. Failure now leaves
+     * the user where the problem is, with the banner explaining it.
+     */
+    fun deleteProfile(id: String, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             runtime.deleteProfile(id)
-                .onSuccess { note("Removed. A session it already started keeps running.") }
+                .onSuccess {
+                    note("Removed. A session it already started keeps running.")
+                    onDone()
+                }
                 // The core's message names the schedules still pointing at it, which is exactly
                 // what the user needs in order to fix it.
                 .onFailure { say(it.message ?: "That profile could not be removed.") }
@@ -857,6 +894,15 @@ data class UiState(
     val spentSeconds: List<Pair<String, Int>> = emptyList(),
     val launchCounts: Map<String, Int> = emptyMap(),
     val configToml: String = "",
+    /**
+     * Why the config could not be read, if it could not.
+     *
+     * Non-null means [configToml] is empty *because the read failed*, not because the config is
+     * empty — and everything that would act on the empty string (the editor, the export) is disabled
+     * while this is set. Without it, "" meant both "nothing configured" and "we could not look", and
+     * acting on the second destroyed the user's work.
+     */
+    val configError: String? = null,
     /** The weekly windows and calendar rules, as the schedule editor lists them. */
     val weekly: List<WeeklySchedule> = emptyList(),
     val calendarRules: List<CalendarSchedule> = emptyList(),
@@ -868,6 +914,15 @@ data class UiState(
      * that silently never fires, and the user has no way to tell that from a rule that works.
      */
     val calendarEvents: List<CalendarEvent> = emptyList(),
+    /**
+     * Why the calendar could not be read, if it could not.
+     *
+     * Without this, a read that failed produced an empty [calendarEvents] and the Events screen drew
+     * its ordinary "nothing on today" empty state over it — the app asserting something it does not
+     * know. Separate from [calendarGranted], which is about permission: permission can be granted and
+     * the provider still fail, and the two need different sentences.
+     */
+    val calendarError: String? = null,
     /**
      * The calendar rules that catch each event, by event id.
      *

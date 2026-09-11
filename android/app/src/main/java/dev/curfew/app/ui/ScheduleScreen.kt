@@ -112,13 +112,20 @@ fun ScheduleScreen(
     val exportFile = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain"),
     ) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use {
-                    it.write(state.configToml.toByteArray())
-                }
-            }.onFailure { model.say("That file could not be written.") }
+        // Guarded on `configError`, not just on the write succeeding. `state.configToml` is "" when the
+        // read failed, and "" is a valid file to write — so exporting after a failed read would have
+        // saved an empty backup over a good one, silently, from a button whose whole purpose is to
+        // keep a copy.
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (state.configError != null) {
+            model.say("Your config could not be read, so there is nothing to export. Nothing was written.")
+            return@rememberLauncherForActivityResult
         }
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(state.configToml.toByteArray())
+            }
+        }.onFailure { model.say("That file could not be written.") }
     }
 
     val running = state.weekly.count { it.enabled } + state.calendarRules.count { it.enabled }
@@ -334,6 +341,24 @@ fun ScheduleScreen(
             Gap(14.dp)
             SectionLabel("curfew.toml")
             Gap(10.dp)
+            // A failed read is said out loud and the editor is not offered at all.
+            //
+            // The box used to open on whatever `configToml` held, and a failed read left it empty —
+            // which is a perfectly valid config, so nothing looked wrong. `saveConfig` validates what
+            // it is given but has no way to know it is replacing a config it never managed to read,
+            // so saving the blank page would have replaced everything the user had with whatever they
+            // typed. Refusing to open the editor is the only honest answer: there is nothing to edit
+            // *from*.
+            if (state.configError != null) {
+                Text(
+                    "Your config could not be read, so it cannot be edited here yet.\n\n" +
+                        state.configError +
+                        "\n\nNothing has been changed. Reopening this screen tries again.",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Palette.Bad,
+                )
+            } else {
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it; editing = true },
@@ -367,6 +392,7 @@ fun ScheduleScreen(
                 lineHeight = 18.sp,
                 color = Palette.Muted,
             )
+            }
         }
     }
 

@@ -182,12 +182,24 @@ internal fun CalendarList(
 
         if (state.calendarEvents.isEmpty()) {
             item {
+                // A read that failed is not an empty diary.
+                //
+                // Both used to arrive here as an empty list, so a calendar Curfew could not read drew
+                // the same "nothing on today" sentence as a genuinely free afternoon — the app
+                // asserting something it had no way to know. This is the §10 rule: say what actually
+                // happened, and let the user decide whether to care.
+                val failure = state.calendarError
                 Text(
-                    "Nothing in the next day and a half. Curfew only reads a narrow window around " +
-                        "now, because that is all a rule can act on.",
+                    if (failure != null) {
+                        "Your calendar could not be read just now, so this is not a complete list.\n\n" +
+                            failure
+                    } else {
+                        "Nothing in the next day and a half. Curfew only reads a narrow window " +
+                            "around now, because that is all a rule can act on."
+                    },
                     fontSize = 14.sp,
                     lineHeight = 21.sp,
-                    color = Palette.Muted,
+                    color = if (failure != null) Palette.Bad else Palette.Muted,
                 )
             }
         } else if (shown.isEmpty()) {

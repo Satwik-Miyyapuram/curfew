@@ -73,6 +73,10 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     // Which of the triggers has opened its own picker, so choosing what a profile blocks never
     // means leaving the profile.
     var picking by remember { mutableStateOf<String?>(null) }
+    // Deleting a profile is the one action on this screen that cannot be undone, and it used to run
+    // on a single tap with no question at all — while *removing a window*, which is far easier to
+    // put back, has asked for confirmation all along. The order was the wrong way round.
+    var confirmingDelete by remember { mutableStateOf(false) }
     val existing = state.profiles.firstOrNull { it.id == (id ?: slug(name)) }
 
     LaunchedEffect(existing?.id) {
@@ -320,10 +324,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     text = "Delete",
                     modifier = Modifier.weight(1f),
                     colour = Palette.Bad,
-                ) {
-                    model.deleteProfile(existing.id)
-                    onDone()
-                }
+                ) { confirmingDelete = true }
             }
             PrimaryButton(
                 text = "Save",
@@ -365,6 +366,40 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     // fail silently and leave a profile with no schedule and no explanation. It is a banner in
     // `CurfewApp` now rather than a dialog here, so the sentence is shown wherever the user is —
     // including the screens that used to render nothing at all.
+
+    // Asked before it happens, and the screen only leaves once it has.
+    //
+    // `deleteProfile` used to be followed immediately by `onDone()`, so the screen navigated away
+    // before the core had answered. A refusal — and there is a routine one, "a window still points at
+    // this profile", which the core names precisely so it can be fixed — arrived after the user was
+    // already somewhere else, describing something they could no longer see. The callback runs only
+    // on success now: on failure the user stays exactly where the problem is.
+    if (confirmingDelete && existing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete ${existing.name}?") },
+            text = {
+                Text(
+                    "It stops blocking anything, and its apps, sites and windows go with it. " +
+                        "A session it has already started keeps running until its own lock lets it " +
+                        "go.\n\nIf you only want it off for a while, turn it off from the schedule " +
+                        "list instead — that is reversible.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = existing.id
+                    confirmingDelete = false
+                    model.deleteProfile(target) { onDone() }
+                }) {
+                    Text("Delete", color = Palette.Bad)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) { Text("Keep it") }
+            },
+        )
+    }
 }
 
 /**

@@ -38,9 +38,9 @@ must run.
 | 17 | Exit paths chosen by comparing display strings (P2-5) | **P1** | **Fixed** |
 | 18 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
 | 19 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | **Fixed** |
-| 20 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
-| 21 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
-| 22 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
+| 20 | A failed config read looked empty; Save and Export destroyed it (F-30) | **P1** | **Fixed** |
+| 21 | A failed calendar read looked like an empty diary (F-31) | **P1** | **Fixed** |
+| 22 | Delete-profile: no confirm, refusal never read, screen left early (F-32) | **P1** | **Fixed** |
 | 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
 | 24 | Control channel unbounded read / serial accept (P1-1) | **P1** | **Fixed** (read cap + concurrency; read deadline still impossible — see entry 24) |
 | 25 | `%ProgramData%\Curfew` had no explicit ACL (P1-0, second half) | **P1** | **Fixed** |
@@ -68,7 +68,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `44b3c63` | An edit to the config reaches the service that enforces it (entry 26) |
 | `dbdfb07` | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
 | `d1bc146` | The data directory is made what it was always claimed to be (entry 25) |
-| *(this commit)* | One place for the app to say something, on whatever screen raised it (entry 19) |
+| `34af161` | One place for the app to say something, on whatever screen raised it (entry 19) |
+| *(this commit)* | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
 
 ### A note on the Android verification environment
 
@@ -1118,3 +1119,94 @@ my first pass piped file *contents* to `Select-String -Path` and reported zero m
 patterns while the replace itself had worked, so the guard was the re-listing rather than the count.
 **Not covered by an executing test**: the Conscrypt limitation in entry 4 still applies to this host,
 and this is composition-level behaviour in any case.
+
+---
+
+## 20 and 21. A read that failed was rendered as an empty result
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-30 (the config) and F-31 (the calendar). One defect in two
+places, so one commit and one entry.
+
+**What was wrong.** Both were `runCatching { … }.getOrDefault(emptyList())` / `.getOrDefault("")`:
+
+```kotlin
+val events = runCatching { runtime.calendarEvents(now, …) }.getOrDefault(emptyList())
+val configToml = runCatching { runtime.policy.configToml() }.getOrDefault("")
+```
+
+An empty list and an empty string are both **valid** values to every reader, so a failure was
+indistinguishable from an honest nothing. Three consequences, and the third is data loss:
+
+1. **The Events screen** drew its ordinary *"Nothing in the next day and a half"* empty state over a
+   calendar it had failed to read — the app asserting something it had no way to know. §10 of the
+   architecture is explicit that downtime is admitted rather than papered over.
+2. **The config editor** on the Schedule screen opened on a blank page. Nothing looked wrong: an empty
+   config is a legal config.
+3. **`saveConfig` validates what it is given, not that it replaced what was there.** So saving that
+   blank page would have replaced the user's entire config — profiles, windows, rules, blocked apps —
+   with whatever they had just typed. And **Export** was worse: it writes `state.configToml` to a file,
+   so exporting after a failed read saved an empty backup **over a good one**, from a button whose whole
+   purpose is to keep a copy.
+
+**What was changed.**
+
+- `UiState.configError` and `UiState.calendarError`, both `String?`, set from `exceptionOrNull()`
+  rather than discarded. `null` means "read fine, and here is what is there"; non-null means "this is
+  empty because we could not look".
+- **The config editor is not offered at all** while `configError` is set. Not disabled-but-visible:
+  there is nothing to edit *from*, so the screen says so, names the reason, and states that nothing has
+  been changed. Reopening retries.
+- **Export refuses**, with a sentence, and writes nothing.
+- **The Events screen** says *"Your calendar could not be read just now, so this is not a complete
+  list"* in the warning colour, rather than the free-afternoon sentence.
+- `calendarError` is deliberately separate from `calendarGranted`: permission can be granted and the
+  provider still fail, and the two need different sentences and different remedies.
+
+**One sub-item left, recorded rather than quietly dropped.** `AppPickerScreen` still derives its tick
+state from `state.configToml`, so with a failed read it shows everything unticked. **This is a display
+fault and not a destructive one** — I checked the write path: `Policy.setBlockedApps(runtime.policy.
+configToml(), …)` re-reads the config from the runtime rather than using the possibly-empty state, so a
+toggle after a failed read either works on the real config or throws into the banner. Guarding the
+picker's display is entry 27 below.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings in the touched files. **Not covered by an
+executing test** — the Conscrypt limitation in entry 4. The write-path claim above was verified by
+reading the call sites, and that is stated as reading rather than as a test.
+
+---
+
+## 22. Deleting a profile asked nothing, and left before hearing the answer
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-32 (P1).
+
+**What was wrong.** Two things, one line apart:
+
+```kotlin
+) {
+    model.deleteProfile(existing.id)
+    onDone()                       // ← navigates back immediately
+}
+```
+
+1. **No confirmation.** A single tap on "Delete" destroyed a profile and its apps, sites and windows.
+   *Removing a window* — trivially recreated — has asked for confirmation all along, so the app was
+   more careful about the cheap thing than the expensive one.
+2. **`onDone()` ran before the core had answered.** `deleteProfile` launches a coroutine, so the screen
+   popped while the write was still in flight. There is a *routine* refusal here — the core names the
+   schedules still pointing at the profile, and names them precisely so the user can fix them — and it
+   arrived on a screen that no longer existed. The user was told about a problem, on a page where the
+   problem was not.
+
+**What was changed.**
+
+- A confirmation that says what is actually lost and how it interacts with a running session: *"A
+  session it has already started keeps running until its own lock lets it go."* It also points at the
+  reversible alternative — turning the profile off from the schedule list — because the destructive
+  option should not be the only one a hurried user can find.
+- `deleteProfile(id, onDone)` now runs `onDone` **only on success**. On failure the user stays exactly
+  where the problem is, with the banner (entry 19) explaining it. `onDone` defaults to `{}`, so the
+  other caller in `ScheduleScreen`, which does not navigate, is unchanged.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings. **Not covered by an executing test** for
+the usual host reason; the callback-ordering change is a control-flow change in a coroutine, which is
+the part a test *would* have caught on a working host, and I am not claiming otherwise.
