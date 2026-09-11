@@ -54,7 +54,13 @@ must run.
 | 33 | Nothing anywhere said that a block had started (F-22) | **P1** | **Fixed** |
 | 34 | The tray menu did not open when the service was unreachable (F-27) | **P2** | **Fixed** |
 | 35 | The window drew its own password box (F-24) | **P2** | **Fixed** |
-| 36 | The design-craft set: `DSheet`, duration formats, amber, `Welcome` (F-39–F-45, F-47) | **P2** | Pending |
+| 36 | The design-craft set: `DSheet` glass and Material dialogs (F-39, F-40); `Welcome`/`Setup` unbuilt (F-44) | **P2** | Pending |
+| 37 | The design canvas was out of sync with itself (F-43) | **P2** | **Fixed** |
+| 38 | `curfew start` said nothing on success (the F-22 CLI half) | **P2** | **Fixed** |
+| 39 | Four duration formats and three clock formats (F-41) | **P2** | **Fixed** |
+| 40 | Amber's documented meaning, broken in four places plus two in the Material scheme (F-42) | **P2** | **Fixed** |
+| 41 | `strings.xml` is effectively unused; app copy is not translatable (F-45) | **P2** | Pending |
+| 42 | `PLAN-mobile-polish.md` is stale in both directions (F-47) | **P2** | **Fixed** (entry 42) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -85,6 +91,9 @@ it is corrected against `git log` whenever an entry is added.)*
 | `1f9543f` | Names instead of slugs, keyboard access, and a way out of a freeze (entries 30, 31, 32) |
 | `5e21ecb` | Say when a block starts, and open the menu when the service is down (entries 33, 34) |
 | `3eafae8` | The window asks Windows for the password instead of drawing a box (entry 35) |
+| `a292c44` | The design canvas is complete and the generator cannot silently revert an artboard (entry 37) |
+| `91dc438` | `curfew start` says what it did (entry 38) |
+| `710edce` | One countdown rule, one clock rule, and amber that means what it says (entries 39, 40) |
 | `2efd7e0`, `f8e184b`, `c6b341b` | Documentation only — the log corrected against `git log`: a stale placeholder hash, and three cross-references left pointing at the wrong entry after a round of renumbering |
 
 ### A note on the Android verification environment
@@ -780,19 +789,27 @@ and the Android UI's wall clock — plus the three P0s from the interaction revi
   surface can create a peer and the page would be empty on every machine. This is a key-exchange-and-
   transport feature rather than a UI fix. See entry 28 for the greps.
 
-**P2 — two things, one of them a set**
+**P2 — three things, all needing a device**
 
-- **Entry 36 — the design-craft set (F-39–F-45, F-47).** All visual, and nothing on this host can render
-  any of it. Recorded rather than guessed at; entry 36 has the reasoning and names F-41's clock
-  inconsistency as the one functional defect in the set.
-- **The `curfew start` silence.** `curfew start` prints a pre-flight warning when the block carries a
-  credential lock and then nothing on success. The tray now announces a session beginning (entry 33), so
-  this is the remaining half of F-22 and a small one — the command line is not where a scheduled block
-  starts. It needs `report(Response::Ok)` to say something for this command only, since silence is right
-  for the others.
+Everything left in this document now needs hardware to finish honestly. That is not a coincidence: the
+findings that could be settled by reading code have been, and what remains is work whose verification is
+"look at it" or "walk it".
+
+- **Entry 36 — F-39, F-40, F-44: the visual craft.** `DSheet` lacks the glass the nav bar and block screen
+  have (F-39); `NowScreen` still uses eight Material `AlertDialog`s, so the screen a user sees most has two
+  visual languages (F-40); `Welcome` and `Setup` are designed and unbuilt, and the first-run card sits for
+  up to 40 seconds (F-44). Every one is a judgement about how something looks, and nothing on this host can
+  render a Compose composition or screenshot the GDI overlay. F-41 — the one *functional* defect in the set
+  — is done, as entry 39.
+- **Entry 41 — F-45: externalise the strings.** 122 literals across a dozen files. Purely mechanical, no
+  visual judgement, but no executable check is available here beyond "it compiles", and the failure mode of
+  doing it carelessly is a screen showing `%1$s` where a sentence was. The largest single remaining item.
 - **The `curfew-cli` path default** (recorded in entry 7): making the config path optional would let the
-  README stop quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it
-  was left for a pass that can test it properly.
+  README stop quoting it at all. It changes argument parsing across `curfew-cli/src/schedule.rs`, so it was
+  left for a pass that can test it properly.
+
+**Fixed this round, having been listed as open in the previous revision:** `curfew start`'s silence (entry
+38), the design canvas (entry 37), `UX-FLOWS.md` (entry 42), and F-41 and F-42 (entries 39, 40).
 
 ### Two things this pass learned about the repository, worth acting on separately
 
@@ -1768,5 +1785,211 @@ measure a composition cannot run here (see the note above entry 1), and the Wind
 window I cannot screenshot. Landing a visual change whose only evidence is "it compiles" is how a review's
 craft findings turn into a regression, so they are recorded rather than guessed at.
 
-The one item in the set with a *functional* rather than visual defect is F-41's clock inconsistency, and
-it is the first thing to do when this set is picked up.
+The one item in the set with a *functional* rather than visual defect was F-41's clock inconsistency, and
+**it is done — entry 39**, in the round after this one was written. What remains of F-39, F-40 and F-44 is
+the part that needs eyes on a screen.
+
+---
+
+## 37. The design canvas was out of sync with itself
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-43 (P2), all three sub-items. The third is the interesting one,
+because the obvious fix would have destroyed work.
+
+**The orphan.** `EditWindow.dc.html` sat in `design/` absent from `canvas.json`, so it was invisible to
+anyone reviewing the design — and the canvas is where the design is reviewed. Added at x=1920, y=2984,
+continuing the last row's grid. `canvas.json` now lists 19 artboards, matches the disk exactly, and has no
+overlapping rectangles.
+
+**The empty files.** `_base.css` and `_parts.py` were both 0 bytes and referenced nowhere; only the two
+review documents mention them. Deleted. `_profiles.py` is 11KB, is `exec`'d by `build.py`, and regenerating
+the three artboards it produces gives byte-identical output — checked rather than assumed, because "unused
+0-byte file" and "unused 11KB file" are different claims.
+
+**The generator, where the review's premise is backwards.** It says *"the committed `Plan.dc.html` is not
+reproducible from build.py"*. True — and the implied fix is to regenerate. But the committed artboard is
+**newer** than the script: 150 lines with one card per profile and the events that start it nested inside,
+against the 112-line flat version `build.py` still emits. Running the script as it was would have silently
+reverted a newer design, and the loss would have looked like a successful build.
+
+So the fix is not to regenerate but to make the drift impossible to cause by accident. `page()` now refuses
+to rewrite an existing artboard whose content differs from what it would produce, names what it left alone,
+and explains how to force it. Verified three ways: a plain run leaves `Plan.dc.html` byte-identical and
+reports it; a fresh directory builds all 18 generated artboards with no skips; `--force` overwrites.
+
+**And a check that would have caught the orphan**, in `build.py` because that is what owns the artboard
+lifecycle and there is no Python test harness: every `.dc.html` on disk must be listed in `canvas.json`, and
+every listed file must exist. Mutation-tested both directions. They are **not symmetric**, which the comment
+records because it is not obvious: "listed but gone" can only fire for a hand-written artboard, since
+anything `build.py` generates has been put back by the time the check runs — confirmed by deleting
+`Permission.dc.html` and watching the check stay silent. `EditWindow.dc.html` is the one hand-written
+artboard, which is exactly why it was the one that got forgotten: nothing produced it, so nothing noticed it
+was unlisted.
+
+**Verification.** `python -c "ast.parse(...)"` clean; a full `build.py` run produces no canvas warnings;
+`canvas.json` parses, matches the disk, and has no overlaps.
+
+---
+
+## 38. `curfew start` said nothing on success
+
+**Findings:** the CLI half of `UX_INTERACTION_REVIEW.md` F-22 (P1). The tray half was entry 33.
+
+**What was wrong.** `curfew start` printed a pre-flight warning for a locked session and then **nothing**.
+The one command whose entire purpose is to change something gave no sign that it had. Nothing about the
+machine looks different until an app you try to open disappears, which can be minutes later — so a user who
+is not told concludes it failed, and either runs it again or gives up on the feature.
+
+**Why the fix is here and not in `report`.** `report(Response::Ok)` is silent, and that is right for `end`
+and `release`: they are asked for, and their effect is visible elsewhere, so a line saying "done" would be
+noise. `start` is the exception, so the confirmation lives in `start`.
+
+**The branch that matters is the way out, and it depends on the lock.** `curfew end` sends an empty
+satisfied set deliberately — a command line must not be able to assert that a password was typed — which
+means a credential lock is **refused** there. Telling somebody to run it would be precisely the defect this
+log keeps finding: the product naming an exit that does not exist. So an unlocked session is pointed at
+`curfew status` then `curfew end <id>`, and a locked one is told about the Windows password and the 24-hour
+release instead. The pre-flight warning already said that before it started; repeating it afterwards makes
+the pair read as one instruction rather than a warning that vanished.
+
+**Verification.** The copy is a pure function, split out so it can be tested — the same reason the tray
+keeps `unreachable_service` out of its Win32 layer. Four tests, mutation-tested: removing the locked branch,
+dropping the profile name, and breaking the singular/plural are all caught.
+
+---
+
+## 39. Four duration formats and three clock formats
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-41 (P2).
+
+**What was wrong.** Two countdown implementations, and below an hour they **disagreed**: the same fourteen
+minutes remaining read `14m` on Now and `14:00` on the block screen. That is not a difference of precision —
+`14:00` reads as two in the afternoon, so the screen somebody stares at while an app is blocked appeared to
+say their session ends at 2pm.
+
+Four epoch-to-`HH:mm` implementations existed, three hardcoded to 24-hour. On a phone set to a 12-hour clock
+the Now dial read `13:30` while the stats card beside it read `1 hr 30 min` and the calendar on the next tab
+read `1:30 PM`.
+
+**What was changed.**
+
+- **One `countdown` in `Format.kt`**, one rule, with a `withSeconds` flag. The block screen is the only
+  caller that sets it: it is the screen you sit in front of, and a number that visibly moves is the point.
+  Above an hour both screens already agreed on `1:12` and that is kept.
+- **One localised clock.** `NowScreen.clockOf` and `BlockActivity.clockAt` now call the app's `clockTime`.
+- **The schedule editor is deliberately still 24-hour**, and is now a named function (`clockMinute`) with
+  the reason written down: the same text is written into the config and read back, so a window saved as
+  `9:00 PM` where a 12-hour clock is set comes back as an error rather than as a window. It also takes
+  minutes-past-midnight rather than an epoch second, because a weekly window has no date.
+
+**Verification — and this is the first Android change in this log with a genuinely executable test.**
+`WordsTest` is plain JUnit rather than Robolectric, so it runs on this host. Three new tests: the rule, the
+seconds variant, and — as a rule over every duration band rather than two literals — that the two screens
+agree everywhere except the one band where the block screen is allowed to differ. Mutation-tested by
+restoring the old mm:ss rule and by making the plain form a clock face: **both caught**. 13 tests in that
+class, 42 across the five runnable classes, all green.
+
+---
+
+## 40. Amber meant four things, and its documented job was not one of them
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-42 (P2) — three places named, **two more found**, and two more
+again in the Material scheme.
+
+**The contract.** `Theme.kt`: *"[Live] means a block is running right now. It appears when one is, and never
+otherwise."* It is the only signal in the app that crosses the screen, the notification shade and the
+home-screen tile.
+
+**The three the review named**, all confirmed in the source:
+
+1. `DragDial`'s `colour` defaulted to `Live`, and its only caller is the **setup** screen — so the planning
+   screen wore the "a block is running" colour while nothing ran.
+2. An idle trigger row on the profile editor was tinted amber.
+3. `DevicesScreen` and `SettingsScreen` coloured a **neutral** sync line amber — and specifically the *not
+   listening* case, which is nearly backwards: "Not listening on this network right now" read as "something
+   is live", on the screen a user opens to check their devices.
+
+**Two more of the same kind, found while checking:** a weekly window row on the schedule list (amber was the
+only thing distinguishing it from the calendar row, a difference the title already carries), and "Missed a
+stretch" on Now — a *bad thing that already happened*, not a running block.
+
+**Two more again, in the Material colour scheme, and this is the one I did not expect.** `secondary` was
+mapped to `Live` — Material's general-purpose accent role pointed at the one colour with a single meaning.
+And `secondaryContainer` was left **unset**, which does not mean "no colour": Material falls back to its own
+baseline palette, which is a lavender that appears nowhere else in this app. So the one `FilterChip` in the
+app — the app-picker's kind selector — was rendering a colour from a different design system. Both are now
+palette values.
+
+**What each became, and why that one.** `Accent` for the two dial/row cases, because Accent means *you can
+touch this* and both are interactive controls. `Bad` for sync-not-listening, the missed stretch and the
+pairing caution, because those are state that has already happened and is bad. The palette's own doc comment
+now spells out what the `Live` rule rules out — planning screens, neutral status, and warnings — because it
+is the rule that keeps being broken.
+
+**Left alone deliberately, twice.** `Dial`'s default really is `Live` and that is correct: it only draws its
+arc when `fraction > 0`, so the colour appears exactly when there is time left, which is exactly when a block
+is running. The contrast with `DragDial` is now written down, because the two look like the same decision and
+are not. And the "Lock it in" button stays amber on the existing documented judgement that the tap *is* the
+moment the phone enters that state — overriding a stated decision without being able to see the screen would
+be guesswork.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings in the touched files. **Every remaining
+`Palette.Live` use was then enumerated and classified** — the block screen, the running-session card,
+`Pill("Blocking now")`, the "Still blocking here" notice, and `Dial`'s conditional arc — and all of them are
+on a screen with a running block. Not covered by an executing test: colour is not asserted anywhere in the
+Android suite, and this is a visual change verified by reading rather than seeing. That limitation is why
+F-39, F-40 and F-44 are still open rather than guessed at.
+
+---
+
+## 41. `strings.xml` is effectively unused
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-45 (P2). **Not attempted** — a scoping decision rather than a
+limitation.
+
+**What it is.** `strings.xml` holds 12 strings and only 6 are consumed, all by non-Compose surfaces (manifest
+labels, the notification channel, the tile). Compose screens contain **122** inline string literals in text
+positions, so the app's copy is good and simply not translatable — `GAPS.md:191` E6 requires externalisation
+"from day one".
+
+**Why it is not done here.** It is 122 mechanical edits across a dozen files with no executable check
+available on this host beyond "it compiles", and the failure mode of doing it carelessly is a screen showing
+`%1$s` or an empty string where a sentence was. That is the same reason F-39, F-40 and F-44 are open. Unlike
+those three this one **is** purely mechanical and needs no visual judgement — it needs a working device to
+check the result and a session that can do 122 edits and verify them. It is the largest single remaining item
+and the first thing to pick up with a device attached.
+
+---
+
+## 42. `UX-FLOWS.md` was stale in both directions
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-47 (P2).
+
+**What was wrong.** The document's own opening said *"The gaps are the build list"*, and three of its five
+build items had been finished for a while while the list still read as though they had not. A build list that
+lists finished work is neither a spec nor a status report, which is the review's point.
+
+**Each claim checked against the code rather than against the prose:**
+
+| Claim | Verdict |
+| :--- | :--- |
+| **Gap 2** — accessibility asked from Health rather than at the moment of need | **Closed.** `TimerScreen` asks for the switch and starts the block on return from Settings. `HealthScreen` no longer asks — it only explains a *blocked* switch, which is a different problem. |
+| **Gap 6** — the pre-Curfew baseline does not exist | **Closed.** `CurfewRuntime` takes it once, on the first launch with usage access, and never rewrites it. |
+| **Gap 7** — pairing | **Built.** `offerPairing`, `cancelPairing`, `confirmPairing`, `answerPairing` and the six-word ceremony all exist with tests. Only the two-real-devices walk is outstanding, which is a hardware claim and stays open. |
+| **Gaps 3, 4, 5** | Were already marked closed-by-tests and still are. |
+| Glass material on sheets and dialogs | **Still open** — the one item that was accurate, which is why entry 36 exists. |
+
+**And a fourth thing the review did not mention.** Flow 8 asserted *"no internet permission anywhere in the
+app"* — the same false claim corrected on three screens and a manifest comment in entry 12, still standing
+here. `AndroidManifest.xml` declares `INTERNET`, and the manifest's own comment says that sentence *"had
+reached"* other places. I missed this copy then; it is corrected now. That is recorded as a miss rather than
+folded in silently, because it means entry 12's sweep was incomplete.
+
+**What the document is now.** A specification with a status column: the flows describe the app as it should
+behave, the gap lines record what was missing and what closed it, and the hardware-verification sections are
+untouched because I cannot walk a phone. The header says all of this, and the file carries the date the check
+was done and names the claims that were wrong.
+
+**Verification.** Each verdict is a grep or a read of the named file, and the whole document was re-read for
+other `Gap` references and for the internet claim — `git grep` for the latter now returns only the three
+comments that *explain* the correction.
