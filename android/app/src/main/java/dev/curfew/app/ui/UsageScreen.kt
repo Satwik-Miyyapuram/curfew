@@ -38,8 +38,8 @@ import dev.curfew.policy.Stats
  * and the log below them is the record of every session that started or ended — which is what makes
  * the claim "it only does what you asked" something a user can check rather than take on trust.
  *
- * None of this leaves the device: the app holds no INTERNET permission, and the database it is read
- * from is encrypted.
+ * None of this leaves the device: the only network traffic Curfew makes is to devices the user
+ * paired, on their own network, and the database this is read from is encrypted.
  */
 @Composable
 fun UsageScreen(model: CurfewViewModel) {

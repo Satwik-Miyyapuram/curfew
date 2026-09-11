@@ -195,6 +195,11 @@ private fun BlockScreen(
     }
     val name = remember(target) { appLabel(context, target) }
     val passes = remember(lock) { runCatching { context.curfew.passesRemaining() }.getOrDefault(0) }
+    // Why there are none, when there are none. Without this the screen said "No emergency pass left
+    // this month" to a user who had never been given one — a default install configures no passes at
+    // all — which reads as "you spent them". The refusal already carries the honest sentence, and
+    // `Format.describePassRefusal` is the one place that copy lives.
+    val passRefusal = remember(lock) { runCatching { context.curfew.passRefusal() }.getOrNull() }
 
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(endsAt) {
@@ -291,11 +296,16 @@ private fun BlockScreen(
         Text(
             if (passes > 0) {
                 "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
+            } else if (passRefusal != null) {
+                // The sentence names what is missing and, where there is one, when it comes back.
+                // A blocked screen is the worst place in the app to be vague.
+                dev.curfew.app.ui.describePassRefusal(passRefusal, now)
             } else {
-                "No emergency pass left this month"
+                "No emergency pass right now"
             },
             fontSize = 13.sp,
             color = Palette.Dim,
+            textAlign = TextAlign.Center,
         )
     }
 }

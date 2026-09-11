@@ -78,6 +78,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // is never lifted into this state, so a recomposition cannot leave it lying around.
     var presenting by remember { mutableStateOf<Session?>(null) }
 
+    // The session whose `Lock.Confirm` is being honoured. Held as a `Session` rather than an id
+    // because the dialog names the profile that is about to end.
+    var confirmingEnd by remember { mutableStateOf<Session?>(null) }
+
     fun finish(session: Session, satisfied: List<Lock>) {
         pending = null
         val credential = session.lock.conditions.filterIsInstance<Lock.DeviceCredential>()
@@ -99,6 +103,16 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     fun end(session: Session) {
+        // A confirmation the user asked to be shown, shown. `Lock.Confirm` was never branched on
+        // anywhere in the UI, so it went to the core with an empty satisfied set, the core refused
+        // because the condition was unmet, and the refusal dialog offered nothing that could meet
+        // it. "One confirmation, so it is never an accident" — the default strength on the Timer
+        // screen, and the lock behind a seeded weeknight window — was in fact a lock with no exit.
+        val needsConfirm = session.lock.conditions.any { it is Lock.Confirm }
+        if (needsConfirm) {
+            confirmingEnd = session
+            return
+        }
         val challenge = session.lock.conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
         if (challenge == null) {
             finish(session, emptyList())
@@ -293,6 +307,33 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 Pill("${state.audit.size} logged")
             }
         }
+    }
+
+    confirmingEnd?.let { session ->
+        AlertDialog(
+            onDismissRequest = { confirmingEnd = null },
+            title = { Text("End ${session.profile}?") },
+            text = {
+                Text(
+                    "You chose \"ask me first\" for this one, so this is the asking. Nothing else " +
+                        "is standing in the way.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = session
+                    confirmingEnd = null
+                    // `Lock.Confirm` is a condition the caller is the only witness to — the core
+                    // cannot check that a dialog was shown — so it is named here and nowhere else.
+                    // That is exactly the kind of claim `claimable` exists to allow, and exactly
+                    // the kind it must not be widened beyond.
+                    finish(chosen, listOf(Lock.Confirm))
+                }) { Text("End it") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingEnd = null }) { Text("Keep it running") }
+            },
+        )
     }
 
     confirmingPass?.let { session ->
@@ -581,11 +622,15 @@ private fun SessionCard(
                 )
             }
 
-            // Why the hatch is not on this card. Said only where someone would look for it, and
-            // never for a hatch nobody switched on: that one is not missing, it is unwanted.
-            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null &&
-                passRefusal !is PassRefusal.Disabled
-            ) {
+            // Why the hatch is not on this card.
+            //
+            // This used to exclude `PassRefusal.Disabled` — "a hatch nobody switched on is not
+            // missing" — which is a fair instinct and was the wrong call. A fresh install configures
+            // no passes, so `Disabled` is the *only* state a new user can be in, and excluding it
+            // meant the one person who would go looking for the hatch was the one person not told
+            // why it was absent. The sentence for it names the config field, which is the honest and
+            // actionable answer; saying nothing left "Still locked" with no explanation at all.
+            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null) {
                 Text(
                     describePassRefusal(passRefusal, now),
                     style = MaterialTheme.typography.bodySmall,

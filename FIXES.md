@@ -22,24 +22,25 @@ must run.
 | 1 | `Lock::Timer` was claimable — one pipe line ended any timer lock | **P0** | **Fixed** |
 | 2 | Windows service never used the trusted clock | **P0** | **Fixed** |
 | 3 | Service `Stop` obeyed, not refused; uninstall failed open | **P0** | **Fixed** |
-| 4 | Android UI reconciled with the raw wall clock (A-1) | **P0** | Pending |
-| 5 | First block lost after the accessibility detour (F-1) | **P0** | Pending |
+| 4 | Android UI reconciled with the raw wall clock (A-1) | **P0** | **Fixed** |
+| 5 | First block lost after the accessibility detour (F-1) | **P0** | **Fixed** |
 | 6 | Windows had no way to start a block (F-16) | **P0** | Pending |
 | 7 | README documented a config the service never reads (F-17) | **P0** | Pending |
-| 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | Pending |
-| 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | Pending |
+| 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | **Fixed** |
+| 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | **Fixed** |
 | 10 | `[emergency]` never validated | **P1** | Pending |
 | 11 | `end_with_pass` took the caller's word | **P1** | Pending |
 | 12 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
 | 13 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
 | 14 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
 | 15 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
-| 16 | Three false product claims, incl. "no internet permission" (F-46) | **P1** | Pending |
+| 16 | Three false product claims, incl. "no internet permission" (F-46) | **P1** | **Fixed** |
 | 17 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
 | 18 | Control channel unbounded read / no timeout / serial accept (P1-1) | **P1** | Pending |
 | 19 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
 | 20 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
 | 21 | Windows: no feedback, silent wrong password, config edits inert | **P1** | Pending |
+| 22 | "Start without it" skipped the long-timer confirmation | **P1** | **Fixed** |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -380,3 +381,164 @@ Three things worth recording rather than leaving implicit:
   plainly here rather than dressed up as a green suite.
 - **What would close it properly** is a Windows-ARM64 or Linux-x86_64 host to run the suite on. A
   JVM test for `trustedNowLight` would need the FFI loaded and would hit the same wall.
+
+---
+
+## 5 and 22. The first block a user configures is the block that starts
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-1 (P0), plus the "Start without it" defect from the UI audit.
+
+**What was wrong — two bugs in one dialog.**
+
+`TimerScreen`'s accessibility dialog has two buttons. The **primary** one, "Turn it on", did this:
+
+```kotlin
+TextButton(onClick = {
+    pending = null                                   // ← forgets what the user configured
+    Grant.Accessibility.settingsIntent(context)?.let { context.startActivity(it) }
+}) { Text("Turn it on") }
+```
+
+It cleared `pending` and opened Settings, and **nothing started the timer on the way back.** There is
+no `LaunchedEffect`, `ResumeEffect` or lifecycle observer anywhere in the file. So a user who did
+exactly what they were asked ended up with no block, no receipt, and a Now screen saying nothing was
+blocked. The *dismiss* path ("Start without it") worked; the recommended path did not.
+
+This is the first block a new user ever attempts, and `UX-FLOWS.md` principle 1 is "the first block
+must happen in under a minute". The honest count with the permission detour was seven interactions and
+a Settings round-trip, with the app behaving as if the first five never happened.
+
+Separately (entry 22), the four-hour confirmation was checked **only** on the primary button. Both
+dialog paths skipped it, so "Start without it" would start the strongest lock in the app from a
+twelve-hour dial in one tap — the exact case `LONG_MINUTES` exists to catch.
+
+**What was changed.**
+
+- `pending` is **no longer cleared** by "Turn it on" — it is what the resume effect watches, and
+  clearing it was the whole bug.
+- A `LifecycleResumeEffect(pending)` starts the block once `Grant.Accessibility.isGranted` is true,
+  reading `minutes` and `strength` **when it fires** rather than capturing them, so a value changed
+  before leaving is the one that takes effect.
+- All three routes to a start now go through one local `begin(id)`: the primary button, the return
+  from Settings, and "Start without it". One function means a route added later cannot quietly skip a
+  check the others make — which is exactly how the long-timer bug got in.
+- The dialog's copy says what actually happens on each path now: *"Turn it on and this 30m block
+  starts the moment you come back. Or start it now, and nothing will be blocked until the switch is
+  on."* The old sentence described only the dismiss path.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings. **Not covered by an executing test** —
+see the Conscrypt limitation in entry 4. This is a lifecycle fix whose correct behaviour is only
+observable by leaving the app and returning, so a JVM test could not reach it even with the FFI
+loaded; it needs a device.
+
+---
+
+## 8. `Lock.Confirm` never confirmed anything
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-4 (P1).
+
+**What was wrong.** `TimerScreen.kt:64` sells the strength `Confirm("Ask me first", "One confirmation,
+so it is never an accident.")` — it is the **default**, and it is offered in four more places
+(`ScheduleEditor` "Ask before ending", `ProfileEditScreen` twice, `CalendarScreen`). The ending path
+branched on `Lock.Challenge` only:
+
+```kotlin
+val challenge = session.lock.conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
+if (challenge == null) { finish(session, emptyList()) } else { ... }
+```
+
+`Lock.Confirm` is not a `Challenge`, so it went to the core with an empty satisfied set. The core
+refused, correctly — the condition was unmet — and the refusal dialog offered nothing that could meet
+it. A grep for `Lock.Confirm` under `android/app/src/main` returned six hits, **all constructing the
+lock, none satisfying it.**
+
+So the default strength, and the lock behind a seeded weeknight window, was a lock with **no early
+exit at all** — the inverse of invariant 2's "except the unlock conditions the user chose".
+
+**What was changed.** `NowScreen.end()` checks for `Lock.Confirm` first and opens a confirmation
+naming the profile and the exit ("Keep it running" / "End it"). Confirming calls
+`finish(session, listOf(Lock.Confirm))` — the one place in the UI that names that condition, which is
+exactly the kind of claim `claimable` exists to permit (a dialog the core cannot see for itself).
+
+**Worth noting.** This is the mirror of entry 1. There, `Lock::Timer` should never have been
+*claimable*; here, `Lock::Confirm` should always have been *satisfiable* and had no code path at all.
+Both are the same class of bug: a lock condition the UI and the core disagreed about.
+
+---
+
+## 9. The block screen said the user had spent a pass they were never given
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-5 (P1), spread across two screens.
+
+**What was wrong.** `EmergencyPolicy.passes` defaults to **0** — `emergency.rs:35-38`: *"Zero — the
+default — disables the hatch entirely."* Nothing in either UI creates one; the only route is editing
+`curfew.toml`. Yet the block screen printed, when `passes == 0`:
+
+> **"No emergency pass left this month"**
+
+*"left this month"* tells the user they **spent** a ration they were never given. And
+`NowScreen.kt:627` then **deliberately hid** the honest explanation: the "no pass, and here is why"
+line rendered only when `passRefusal !is PassRefusal.Disabled` — suppressing the single case a default
+user is in. `TimerScreen.kt:67` made the same promise from the other side, labelling the strongest
+lock *"No way out but an emergency pass"*.
+
+**What was changed.**
+
+- `BlockActivity` reads the actual refusal (`context.curfew.passRefusal()`, already exposed) and
+  renders it through `describePassRefusal` — the one place that copy lives, and the one that already
+  had honest wording for all three cases. Centred, because it is a sentence now rather than a label.
+- `NowScreen` no longer excludes `Disabled`. The old comment — *"a hatch nobody switched on is not
+  missing, it is unwanted"* — is a fair instinct and the wrong call: a fresh install configures no
+  passes, so `Disabled` is the **only** state a new user can be in, and excluding it meant the one
+  person who goes looking for the hatch is the one person not told why it is absent.
+- `TimerScreen`'s note now reads *"Nothing ends this early. The 24-hour release is the way out."* —
+  true on a default install, where the release **is** offered (`NowScreen` gates it on
+  `isLocked && delayedReleaseAt == null`, and a timer session is locked).
+
+**Not changed.** The default of zero passes. `emergency.rs` argues for it — *"somebody who wants an
+escape hatch says so in their config, which means the decision is made while calm rather than at the
+moment of wanting out"* — and that is a product decision, not a bug. The bug was the copy and the
+suppression.
+
+---
+
+## 16. Three product claims were false, including the one a user can check
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-46 (P1).
+
+**What was wrong.** Three screens and one manifest comment asserted Curfew **"has no internet
+permission at all"** — `SettingsScreen.kt:207`, `HealthScreen.kt:183` (*"so nothing it records can
+leave this device even if it wanted to"*), `UsageScreen.kt:41`, and `AndroidManifest.xml:7`.
+`AndroidManifest.xml:54` declares `android.permission.INTERNET`, because LAN sync needs it.
+
+This is the most damaging copy finding in the review, for a reason worth stating: it is the app's core
+privacy promise, on the exact screen a user opens to check that promise, and it is falsifiable in ten
+seconds in Android Settings. Everything beside it on that card — encryption at rest, no telemetry,
+nothing to a server — is true, and one checkable falsehood costs the rest their credibility.
+
+**What was changed.** All four now state the narrower, true, still-strong claim, following wording
+`DevicesScreen` already used correctly: *"Nothing goes to a server. Your devices sync directly to each
+other — no account, no cloud, and nothing you record leaves the devices you paired."* The manifest
+comment now says why it holds `INTERNET` and records that the previous comment was false.
+
+**Not changed.** The permission itself. It is needed, and the design decision behind it — direct
+pairing, no account — is sound. Only the claim was wrong.
+
+---
+
+## 22. "Start without it" skipped the long-timer confirmation
+
+**Findings:** UI audit; fixed with entry 5 and recorded separately because it is a distinct defect.
+
+**What was wrong.** `LONG_MINUTES` (4 hours) exists so that "a thumb that dragged too far" cannot cost
+an evening. It was checked on the primary button and nowhere else, so declining the accessibility
+permission started whatever was on the dial — up to twelve hours — with no confirmation. With the
+strongest lock selected by default, that is an unbreakable twelve-hour block in one tap.
+
+**What was changed.** Every route now goes through `begin(id)`, which performs that check. The same fix
+as entry 5, which is why they share a commit.
+
+**A pattern worth naming.** Entry 5, entry 22 and the original `Lock::Timer` bug are one shape: a check
+that exists in one code path and not in its siblings. Where a rule matters, route every path through
+one function — and where a decision encodes a rule, make the **default** the safe answer, because the
+bug is always in the branch nobody wrote.
