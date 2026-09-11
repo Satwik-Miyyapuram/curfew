@@ -45,7 +45,7 @@ must run.
 | 24 | Control channel unbounded read / serial accept (P1-1) | **P1** | **Fixed** (read cap + concurrency; read deadline still impossible — see entry 24) |
 | 25 | `%ProgramData%\Curfew` had no explicit ACL (P1-0, second half) | **P1** | **Fixed** |
 | 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
-| 27 | A blocked site shows the browser's own error page (F-21) | **P1** | Pending |
+| 27 | A blocked site shows the browser's own error page (F-21) | **P1** | **Fixed as far as the design allows** — the "serve a page" fix is already refused in-code (entry 27) |
 | 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | Pending |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
@@ -70,7 +70,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `d1bc146` | The data directory is made what it was always claimed to be (entry 25) |
 | `34af161` | One place for the app to say something, on whatever screen raised it (entry 19) |
 | `cd1021f` | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
-| *(this commit)* | The nav and the toggle get hit areas that can be hit (entry 23) |
+| `7f11fbe` | The nav and the toggle get hit areas that can be hit (entry 23) |
+| *(this commit)* | A blocked site's symptom is named where the user will read it (entry 27) |
 
 ### A note on the Android verification environment
 
@@ -1328,3 +1329,64 @@ verification note above entry 1: `createComposeRule()` under Robolectric was tri
 hit the Conscrypt wall, so the recipe is recorded there for a host that can run it. The dimension claims
 above come from reading the modifier chain and the literal `dp` values, and they are offered as reading,
 not as measurement.
+
+---
+
+## 27. A blocked site: the fix the review implies is already refused, and the real gap is smaller
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-21 (P1). **Fixed as far as the design allows** — and this is
+the second finding this round whose premise needed correcting, so both halves are set out.
+
+**The claim.** *"A blocked website with no extension shows the browser's own error page … The user gets
+`ERR_CONNECTION_REFUSED`: no Curfew surface, no reason, no exit — from the user's point of view the
+internet broke."* The implied remedy is a block page.
+
+**The design already considered a block page and refused it, in the code, with reasons.** Two separate
+comments, and both are sound:
+
+```rust
+// hosts.rs — the address blocked names are pointed at
+// `0.0.0.0` rather than `127.0.0.1`: a local web server is common on a developer's machine, and
+// pointing a blocked site at it serves that server's pages instead of failing, which is confusing
+// at best and a data leak at worst.
+
+// dns.rs — build the refusal for a query
+// `0.0.0.0` rather than NXDOMAIN, and rather than a page of our own: NXDOMAIN makes some clients
+// retry against a hard-coded resolver, and serving a real page from a blocker means holding a
+// certificate for someone else's domain, which is a thing Curfew is never going to do.
+```
+
+So there is no version of "show a Curfew page for reddit.com" that this program can implement: over
+HTTPS it requires a certificate for somebody else's domain, and over plain HTTP it requires binding a
+local port that may already be a developer's server. The review's own comparison — *"the opposite of
+Curfew's own excellent Android block screen"* — is the tell: on Android the app **is** the thing drawing
+the screen, and on Windows the browser is, and Curfew has no seam to draw in.
+
+**What was actually wrong, and is now fixed.** The refusal is right; **leaving the user to guess was
+not.** The cost of the `0.0.0.0` decision is that a person sees *"This site can't be reached"* and has no
+way to learn Curfew caused it — and that is the largest population of users, since a domain rule needs no
+extension. Curfew cannot show a page, but it *can* name the symptom, and neither surface that mentions
+blocked domains was doing so:
+
+- **The tray's "What is blocked" list** printed the domains and stopped. It now adds, when there is at
+  least one: *"A blocked site shows your browser's own 'can't be reached' page. Curfew refuses the name
+  rather than serving a page, because it will not hold a certificate for somebody else's domain. If a
+  site fails that way while a session is running, that is Curfew and not your connection."* That is the
+  whole of the honest fix: it names the symptom, says why Curfew cannot do better, and supplies the one
+  fact the user lacks — that this is the product working.
+- **The window's "Is it working" page** said *"12 sites in the hosts file — written by the service,
+  checked every tick"*, which describes the mechanism rather than the experience. It now says what the
+  user will see, and pluralises correctly at one site. With nothing blocked it keeps the old wording,
+  because then the symptom means something else — a dead connection or a broken hosts file — and blaming
+  Curfew for it would be a lie.
+
+**Verification.** Two new tests on `details()`, a pure function over `Status` and therefore the one part
+of this that *is* executable on this host: `the_details_say_what_a_blocked_site_looks_like` (the symptom
+is named, and the sentence says this is Curfew and not a connection fault) and
+`an_idle_tray_does_not_explain_a_page_it_did_not_block` (the negative case — nothing blocked means the
+symptom is not Curfew's, so it is not mentioned). `node --check` clean on the window's extracted script.
+`cargo test --workspace`: **839 passed**; clippy and fmt clean.
+
+**What is still missing, and cannot be fixed here.** A user who never opens the tray or the window still
+sees only the browser's error page. Closing that properly needs one of the two things Curfew has ruled
+out, so it is recorded as a genuine limitation rather than left to look like an oversight.

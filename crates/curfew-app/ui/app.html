@@ -445,7 +445,21 @@ function pageHealth() {
   }
   lines.push(["ok", "The service answered", "That is the part that does the blocking."]);
   if (s.hosts_error) lines.push(["bad", "Website blocking is not working", s.hosts_error]);
-  else lines.push(["ok", `${(s.blocked_domains || []).length} sites in the hosts file`, "Written by the service, checked every tick."]);
+  else {
+    const sites = (s.blocked_domains || []);
+    // The detail says what the user will actually see, because this is the only page that can.
+    //
+    // A blocked domain is answered 0.0.0.0 rather than served a page of Curfew's own — a deliberate
+    // choice recorded in `hosts::SINK` and `dns::refusal`, and the right one: a local web server is
+    // common on a developer's machine, and serving somebody else's domain means holding a certificate
+    // for it. The price is that the browser shows its own "can't be reached" page and nothing else,
+    // so an unexplained broken-looking site is the most common way a user meets this product's
+    // blocking. Naming the symptom here is the closest thing to a block page that the design allows.
+    lines.push(["ok", `${sites.length} ${sites.length === 1 ? "site" : "sites"} in the hosts file`,
+      sites.length
+        ? "A blocked site shows your browser's own \u201ccan't be reached\u201d page — Curfew refuses the name rather than serving a page. That is Curfew working, not a broken connection."
+        : "Written by the service, checked every tick."]);
+  }
   if (s.state_warning) lines.push(["bad", "Saved locks may have been lost", s.state_warning]);
   // Amber, not red: there is nothing to fix and nothing was lost. A moved clock is refused rather
   // than obeyed, and time credited across a shutdown is ordinary life. Both are still worth saying,

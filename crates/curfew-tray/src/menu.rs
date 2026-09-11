@@ -278,6 +278,23 @@ pub fn details(status: &Status) -> String {
         for domain in &status.blocked_domains {
             text.push_str(&format!("  {domain}\n"));
         }
+        // What the user will actually see, said here because Curfew cannot say it in the browser.
+        //
+        // A blocked domain is answered `0.0.0.0`, deliberately and for good reasons (`hosts::SINK`,
+        // `dns::refusal`): a local web server is common on a developer's machine, so `127.0.0.1` would
+        // serve that server's pages, and showing a page of Curfew's own for somebody else's domain
+        // means holding a certificate for it, which is not a thing this program will ever do.
+        //
+        // The cost of that decision is that the user gets the browser's own "can't be reached" page
+        // and no other sign that Curfew is involved. From where they are sitting the internet broke.
+        // Serving a page is closed off, so the next best thing is to make the *symptom* legible — and
+        // this list is the only place Curfew has to do it, so it does it here rather than nowhere.
+        text.push_str(
+            "A blocked site shows your browser's own \u{201c}can't be reached\u{201d} page. Curfew \
+             refuses the name rather than serving a page, because it will not hold a certificate for \
+             somebody else's domain. If a site fails that way while a session is running, that is \
+             Curfew and not your connection.\n",
+        );
     }
     for exe in &status.failing {
         text.push_str(&format!(
@@ -497,6 +514,41 @@ mod tests {
         let text = details(&status);
         assert!(text.contains("reddit.com"));
         assert!(text.contains("steam.exe"));
+    }
+
+    /// The symptom is named, because Curfew cannot show a page of its own.
+    ///
+    /// A blocked domain is answered `0.0.0.0`, so the user gets the browser's error page and no other
+    /// sign that Curfew was involved — the largest population of users meets this product as "the
+    /// internet broke". Serving a page is closed off for good reasons (see `hosts::SINK`), so the
+    /// detail text is the only surface that can connect the two, and this pins that it does.
+    #[test]
+    fn the_details_say_what_a_blocked_site_looks_like() {
+        let mut status = status(vec![]);
+        status.blocked_domains.insert("reddit.com".into());
+
+        let text = details(&status);
+
+        assert!(
+            text.contains("can't be reached"),
+            "the browser's own symptom was not named: {text}"
+        );
+        assert!(
+            text.contains("Curfew") && text.contains("not your connection"),
+            "the sentence does not say this is Curfew and not a fault: {text}"
+        );
+    }
+
+    /// …and is not said when nothing is blocked, because then the symptom means something else — a
+    /// dead connection, or a broken hosts file — and blaming Curfew for it would be a lie.
+    #[test]
+    fn an_idle_tray_does_not_explain_a_page_it_did_not_block() {
+        let text = details(&status(vec![]));
+        assert!(text.contains("No websites are blocked"));
+        assert!(
+            !text.contains("can't be reached"),
+            "a machine blocking nothing explained a blocked-page symptom: {text}"
+        );
     }
 
     #[test]
