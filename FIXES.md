@@ -54,7 +54,7 @@ must run.
 | 33 | Nothing anywhere said that a block had started (F-22) | **P1** | **Fixed** |
 | 34 | The tray menu did not open when the service was unreachable (F-27) | **P2** | **Fixed** |
 | 35 | The window drew its own password box (F-24) | **P2** | **Fixed** |
-| 36 | The design-craft set: `DSheet` glass and Material dialogs (F-39, F-40); `Welcome`/`Setup` unbuilt (F-44) | **P2** | Pending |
+| 36 | The design-craft set: `DSheet` glass and Material dialogs (F-39, F-40); `Welcome`/`Setup` unbuilt (F-44) | **P2** | **Partly fixed** — F-39 and F-40 done, F-44 open (entry 45) |
 | 37 | The design canvas was out of sync with itself (F-43) | **P2** | **Fixed** |
 | 38 | `curfew start` said nothing on success (the F-22 CLI half) | **P2** | **Fixed** |
 | 39 | Four duration formats and three clock formats (F-41) | **P2** | **Fixed** |
@@ -63,6 +63,7 @@ must run.
 | 42 | `PLAN-mobile-polish.md` is stale in both directions (F-47) | **P2** | **Fixed** (entry 42) |
 | 43 | The string ratchet and the permission table (the first slice of F-45) | **P2** | **Fixed as far as it goes** (entry 43) |
 | 44 | The copy detector was blind to 159 literals; the arity guard was vacuous twice | **P2** | **Fixed** (entry 44) |
+| 45 | One material instead of two drifting copies; Material dialogs on NowScreen (F-39, F-40) | **P2** | **Fixed** for NowScreen; 81 usages remain elsewhere, ratcheted (entry 45) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -104,7 +105,9 @@ this table is a reading aid.
 | `c9cdc5b` | `UX-FLOWS.md` corrected, and the log for that round (entry 42) |
 | `31bdd1b` | A ratchet on untranslated copy, and the permission table moved out (entry 43) |
 | `d69572b` | The copy detector was blind to a third of its subject, and the ViewModel slice (entries 43, 44) |
-| `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
+| `5f72985` | One sheet, one glass, and a ratchet on the second visual language (entry 45) |
+| `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
+| *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
 ### A note on the Android verification environment
 
@@ -799,24 +802,30 @@ and the Android UI's wall clock — plus the three P0s from the interaction revi
   surface can create a peer and the page would be empty on every machine. This is a key-exchange-and-
   transport feature rather than a UI fix. See entry 28 for the greps.
 
-**P2 — two things, separated by what actually gates them**
+**P2 — and this section has now been wrong twice in the same way**
 
-The claim *"everything left needs hardware"* was **wrong in the previous revision**, and this round disproved
-it: it filed F-45 as needing a device, and F-45 turned out to be mechanical edits with a test that runs on
-this host. What it needed was a detector — a thing that could be written here. So the remaining two are
-separated by what really blocks them rather than by an assumption:
+The claim *"everything left needs hardware"* was wrong in the revision before last. This round it was wrong
+again, in a subtler form: it had separated the work by *"does this need eyes"*, which is **true of a screen
+that does not exist yet and false of a screen that already does.** F-39 and F-40 were not visual
+judgements — they were inconsistencies, and an inconsistency is a fact you read. Both are done (entry 45),
+and the correction is recorded in entry 36 rather than quietly dropped.
 
-- **Entry 36 — F-39, F-40, F-44: the visual craft, and this one does need eyes.** `DSheet` is a **bottom
-  sheet**; the fourteen `AlertDialog`s it would replace are **centred modals**. Swapping them is a change of
-  interaction, not a reskin, and no amount of compile-verification tells you whether a bottom-anchored sheet
-  is the right shape for "End this session?" — `NowScreen` alone has five of them, on the screen a user sees
-  most. Nothing on this host can render a Compose composition or screenshot the GDI overlay, so it stays open
-  rather than guessed at. (F-41, the one *functional* defect in that set, is done — entry 39.)
+The pattern across all three corrections to this section: it kept grouping work by an **assumption about how**
+the work must be verified rather than by what the work **is**. So, plainly:
+
+- **Entry 36 — F-44: `Welcome` and `Setup`.** Designed and unbuilt, with the first-run card sitting for up to
+  40 seconds. **This genuinely needs a device**, and it is the one item where that is true: the screens are
+  drawn, but no device has ever rendered this component set, and a first-run flow is the one place where
+  being wrong is close to unrecoverable — the user meets it before anything else works, and there is no
+  second chance at a first run. *(F-39, F-40 and F-41 from the same set are done — entries 45 and 39.)*
 - **Entry 43 — F-45: the rest of the copy.** **408 strings**, and **not gated on hardware at all** — only on
-  volume. The ratchet is in place and two patterns are proven: the permission table (Compose `stringResource`)
-  and `CurfewViewModel` (`getString` on the application, plus the app's first `<plurals>`). The remaining
-  files are all Compose text, so they are repeats of the first pattern. The largest remaining item, and the
-  best candidate for the next round.
+  volume. Two patterns are proven: the permission table (Compose `stringResource`) and `CurfewViewModel`
+  (`getString` on the application, plus the app's first `<plurals>`). The remaining files are all Compose
+  text, so they are repeats of the first pattern. **The largest remaining item, and the best candidate for
+  the next round.**
+- **Entry 45 — the other 81 Material usages.** Not blocked by anything either: `ScheduleEditor` (13),
+  `ScheduleScreen` (11) and the rest are component-by-component migrations, each now counted in
+  `material-usage.txt`, so the ratchet can only watch them shrink. Lower value than F-45, but unambiguous.
 
 Also open, and small:
 
@@ -1795,16 +1804,32 @@ formats (F-41), one of which is a real user-visible bug: the same remaining dura
 and `14:00` on the block screen. Amber's documented meaning — *"a block is running right now"* — broken in
 three places (F-42). `Welcome` and `Setup` designed and unbuilt (F-44).
 
-**Why they are last, and why they are still open.** These are craft rather than correctness, and nearly
-every one is a *visual* judgement: whether a Material dialog beside a glass sheet reads as two languages
-depends on looking at it. **Nothing on this host can render any of it** — the Android suite that would
-measure a composition cannot run here (see the note above entry 1), and the Windows overlay is a GDI
-window I cannot screenshot. Landing a visual change whose only evidence is "it compiles" is how a review's
-craft findings turn into a regression, so they are recorded rather than guessed at.
+**Why they were last.** These are craft rather than correctness, and nearly every one is a *visual*
+judgement: whether a Material dialog beside a glass sheet reads as two languages depends on looking at it.
+**Nothing on this host can render any of it** — the Android suite that would measure a composition cannot
+run here (see the note above entry 1), and the Windows overlay is a GDI window I cannot screenshot. Landing
+a visual change whose only evidence is "it compiles" is how a review's craft findings turn into a
+regression, so they were recorded rather than guessed at.
 
 The one item in the set with a *functional* rather than visual defect was F-41's clock inconsistency, and
-**it is done — entry 39**, in the round after this one was written. What remains of F-39, F-40 and F-44 is
-the part that needs eyes on a screen.
+**it is done — entry 39**.
+
+**Correction: that reasoning was right about F-44 and wrong about F-39 and F-40, and this entry kept all
+three behind it for two rounds.** The conflation was mine — *"needs eyes"* is true of a screen that does not
+exist yet, and false of a screen that already does. F-39 and F-40 were not visual *judgements*; they were
+**inconsistencies**, and an inconsistency is a fact you can read:
+
+- F-39 was two hand-rolled copies of one material whose comments claimed they were identical. Comparing
+  their numbers is reading, not looking.
+- F-40 was Material components sitting where the app has its own. Finding them is a grep, and *which* values
+  each set uses is a read of `Design.kt` against the design canvas.
+
+Both are done — **entry 45**. The distinction worth keeping: *"I cannot verify this"* and *"I cannot judge
+this"* are different statements, and this entry had been treating them as one.
+
+**F-44 remains open and genuinely is the first kind.** `Welcome` and `Setup` are designed and unbuilt, and
+the first-run card sits for up to 40 seconds. Building a screen nobody has drawn, in a component set no
+device has ever rendered, is the case where "it compiles" really is the only evidence available.
 
 ---
 
@@ -2171,3 +2196,99 @@ not evidence that it guards anything.
 
 `:app:compileDebugKotlin` clean; **50 Android tests pass across 7 classes**; the Rust suite untouched at
 **861 passed**; clippy and fmt clean.
+
+---
+
+## 45. One sheet, one glass, and the second visual language measured
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-39 and F-40 (both P2). **Fixed.**
+
+### F-39: the glass that was not the same glass
+
+The block screen carried the comment *"The same pane of glass as the nav bar: translucent ground, lit top
+edge."* **It was not.** The nav used `Surface` at `0.86` with a `0.06` sheen and a `0.09` edge; the block
+screen used `Raised` at `0.88` with `0.07` and `0.10`. Two hand-rolled copies of one material, already
+diverged, with a comment asserting the consistency the code did not have — the **same class of defect** as
+the false permission claim and the canvas missing an artboard: a comment describing an intention rather than
+the code.
+
+A hundredth of an alpha is not the problem. The problem is that two surfaces claiming to be one material
+keep diverging until somebody makes it one value, and `DSheet` — the third caller, which is what made this
+worth doing at all — would have been a third opinion.
+
+There is now one `Modifier.glass(shape, ground, elevation)` in `Design.kt`, with the three numbers in a
+`Glass` object. `ground` stays a parameter because the three surfaces genuinely sit on different things —
+the nav over a page, the block button over a full-bleed dark screen, a sheet over the page it rose from —
+and an *exactly* identical colour in all three would read as a hole in one of them. The glass is identical;
+what is behind it differs.
+
+### F-40: five dialogs, not eight, and the number was not the point
+
+The review said *"NowScreen still uses eight Material `AlertDialog`s"*. There were **five**. That is the
+third count in this review to be off, in both directions, and it is worth saying plainly: the finding was
+correct and its instance was real, but a review's numbers are an approximation of a problem, and the problem
+is what has to be measured.
+
+The chrome the five shared is now `SheetFrame`, which `DSheet` also uses — so the app has **one** sheet
+rather than one plus some Material. On top of it sit:
+
+- **`DConfirm`** — a decision, two buttons, for the three two-button dialogs.
+- **`DNote`** — a sentence and one button, for the refusal dialog.
+
+`DConfirm`'s `destructive` flag moves the emphasis **to the way out** rather than colouring the dangerous
+button red. That is a reading of the design canvas rather than a preference: the canvas styles the app's one
+destructive control — Delete on a profile — as a **ghost button in the warning colour**, and never draws a
+solid red button anywhere. A solid red button invites the tap it is warning about, which is the opposite of
+what a confirmation is for.
+
+### And a fourth instance of the id-versus-name bug
+
+Found while migrating, not looked for. The biometric prompt's title read `End ${session.profile}` — the
+**slug from the config** — so a user saw `End deep-work` in the *system* fingerprint dialog, a box this app
+does not draw and cannot restyle. `NowScreen` had four inline copies of the name lookup and **this one site
+that skipped it entirely**; they are one `named(id)` helper now.
+
+This is the Android instance of **F-28**, which the review recorded against Windows only. The Windows fix
+(entry 30) found the same shape — every surface printing `Session.profile`. Four instances across two
+platforms is not four mistakes; it is **one missing abstraction**, which is why the helper is the point and
+the individual call site is not.
+
+### The measurement, which is the part worth keeping
+
+F-40's stated size was eight dialogs in one file. Counting **only the components that actually compete with
+one the app already has** — `AlertDialog`, `Card`, `TextButton`, `Button`, `MaterialTheme.typography`,
+`MaterialTheme.colorScheme` — there were **81 usages across eight files**, NowScreen the worst at 29 even
+after this change.
+
+**Deliberately not counted: `Text`, `Icon`, `OutlinedTextField`, `Surface`, `Shape`,
+`minimumInteractiveComponentSize`.** The app has no typography component of its own to replace `Text` with,
+and `OutlinedTextField` is the only text field in either set. Counting them would inflate the number with
+work that is not the problem, and a metric that mixes real work with noise is one people stop reading.
+
+That 81 is now a **ratchet**, the same shape as the string one: a new competing usage fails, and an allowlist
+entry no longer found fails too, so every migration must delete its line. It is counted as a **multiset**,
+because a file that swaps one `Card` for one `TextButton` has not improved and a total would not notice.
+
+Mutation-tested: a new `Card`, a stale allowlist entry, and a swap that keeps the total constant are all
+caught. The pattern test pins the near-misses that would corrupt the count from the other side — `DCard` and
+`CardDefaults` must not match `Card`, and `TextButton` must not also count as `Button`. That last one is the
+failure that would have made the numbers drift with no code change.
+
+### What was deliberately not done
+
+- **The other 51 usages stay.** Migrating `ScheduleEditor` (13), `ScheduleScreen` (11) and the rest is a
+  component-by-component visual change, and doing it blind would be exactly the guess entry 36's predecessor
+  rightly refused. The ratchet means they can only shrink, and each is now a counted, visible item rather
+  than an unknown.
+- **`F-44` (`Welcome`/`Setup`) stays open.** See entry 36's correction: that one really does need a device.
+
+### Verification
+
+`:app:compileDebugKotlin` clean; **52 Android tests pass across 8 classes**; the string ratchet regenerated
+for the rewrapped dialog copy (329 → 320 plain); the Rust suite untouched at **861 passed**; clippy and fmt
+clean.
+
+**Limits, stated as before:** Compose changes here are **compile-verified only**. Colour and layout are
+verified by reading `Design.kt` against the design canvas, not by seeing them. What this round did *not*
+rely on eyes for is the part that was never visual — one material instead of two drifting copies, no
+Material components where the app has its own, and a name instead of a slug.
