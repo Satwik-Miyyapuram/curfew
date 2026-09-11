@@ -68,6 +68,9 @@ must run.
 | 47 | **18 of the review's 48 findings were missing from this log** | **P0-P3** | **Reconciled** -- table above the commit index, 5 left un-assessed (entry 46) |
 | 48 | The 24-hour release had no confirmation; an unsatisfiable lock was offered (F-7, F-6) | **P1** | **Fixed** (entry 47) |
 | 49 | **F-3 is a false finding** -- the review's "the design says 30" is contradicted by the canvas | **P2** | **Rejected, not fixed** (entry 47) |
+| 50 | Removing a device was unconfirmed, and can take away a lock's only exit (F-14) | **P1** | **Fixed** (entry 48) |
+| 51 | Simple mode was cited by a comment that contradicted itself and a plan that promises it (F-11) | **P1** | **Fixed** as documentation (entry 48) |
+| 52 | Two absences with no explanation: day one on Now, the comparison on Usage (F-12, F-13) | **P2** | **Fixed** (entry 48) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -91,13 +94,13 @@ problem rather than a number in it.
 | F-3 | P2 | **Not a defect — the review is wrong.** It says "the design says 30"; `design/Timer.dc.html:71` shows the accented (selected) pill as **`1h 30m`**, against `PRESETS = listOf(25, 50, 90, 180)`. The code matches the design authority. **Deliberately not changed** — see entry 46 |
 | F-6 | P1 | **Fixed** (entry 47). `Auth.isAvailable` was only consulted *at prove time* (`Auth.kt:55`); the choice is now gated at choice time too |
 | F-7 | P1 | **Fixed** (entry 47). `NowScreen.kt:669` called `onRelease` straight from the button; it goes through `DConfirm` now |
-| F-9 | P1 | **Fixed earlier, unlogged.** `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
-| F-11 | P1 | **Not re-assessed.** Simple mode appears only in one comment; whether the principles and `PLAN-mobile-polish.md:49` were reconciled was not checked |
-| F-12 | P2 | **Open, verified.** `UsageScreen.kt:64` renders the comparison only under `state.screenTime?.let`, so a first-day user sees no line at all |
-| F-13 | P2 | **Open.** The unexplained absence is the same conditional as F-12 |
-| F-14 | P1 | **Open, verified.** `DevicesScreen.kt:302` revokes on a single tap, with no warning that a lock may name that device as its exit |
+| F-9 | P1 | **Fixed** — in an earlier round, and only recorded here. `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
+| F-11 | P1 | **Fixed** (entry 48). There is no Simple mode; three status notes in the plan, and a Settings comment that contradicted itself eight lines later |
+| F-12 | P2 | **Fixed** (entry 48). `NowScreen.kt:461` returned early when all three numbers were zero — which is day one, the moment the decision gets made |
+| F-13 | P2 | **Fixed** (entry 48). `UsageScreen.kt:64` rendered the comparison only when non-null; the two reasons it can be null now have a placeholder that names them |
+| F-14 | P1 | **Fixed** (entry 48). `DevicesScreen.kt:302` revoked on a single tap; now confirmed, naming the locks that would lose their exit |
 | F-15 | P3 | **Fixed** (entry 46) |
-| F-18 | **P0** | **Fixed in substance, unlogged as a number.** The Windows pairing front door does not exist; recorded in `Still open` under entry 28 and never given its finding number |
+| F-18 | **P0** | **Not fixed, and now correctly labelled.** The Windows pairing front door does not exist. It *was* recorded in `Still open` under entry 28 — the defect was that it was never given its finding number, so a P0 read as covered |
 | F-33 | P1 | **Fixed** (entry 46) |
 | F-34 | P2 | **Not re-assessed.** Two rows that promise a path they do not implement |
 | F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
@@ -167,6 +170,8 @@ this table is a reading aid.
 | `5f72985` | One sheet, one glass, and a ratchet on the second visual language (entry 45) |
 | `f3f5bb9` | Four findings the log had never recorded, and the bug class behind them (entry 46) |
 | `83ba4f0` | The 24-hour release confirmed, an unsatisfiable lock withheld, and a finding rejected (entry 47) |
+| `a8d420a` | Removing a device is confirmed, and Simple mode stops being cited (entries 48) |
+| `b171ed4` | An absence with no explanation, in the two places it matters most (entries 48) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -885,19 +890,25 @@ and the correction is recorded in entry 36 rather than quietly dropped.
 The pattern across all three corrections to this section: it kept grouping work by an **assumption about how**
 the work must be verified rather than by what the work **is**. So, plainly:
 
-- **Entry 36 — F-44: `Welcome` and `Setup`.** Designed and unbuilt, with the first-run card sitting for up to
-  40 seconds. **This genuinely needs a device**, and it is the one item where that is true: the screens are
-  drawn, but no device has ever rendered this component set, and a first-run flow is the one place where
-  being wrong is close to unrecoverable — the user meets it before anything else works, and there is no
-  second chance at a first run. *(F-39, F-40 and F-41 from the same set are done — entries 45 and 39.)*
-- **Entry 43 — F-45: the rest of the copy.** **408 strings**, and **not gated on hardware at all** — only on
-  volume. Two patterns are proven: the permission table (Compose `stringResource`) and `CurfewViewModel`
-  (`getString` on the application, plus the app's first `<plurals>`). The remaining files are all Compose
-  text, so they are repeats of the first pattern. **The largest remaining item, and the best candidate for
-  the next round.**
-- **Entry 45 — the other 81 Material usages.** Not blocked by anything either: `ScheduleEditor` (13),
-  `ScheduleScreen` (11) and the rest are component-by-component migrations, each now counted in
-  `material-usage.txt`, so the ratchet can only watch them shrink. Lower value than F-45, but unambiguous.
+**Rewritten at entry 48, and the framing above is the reason.** Three of the four P1/P2 items this section
+listed as needing a device or "eyes" were settled by reading: F-11 was a comment and a doc, F-12 and F-13
+were two conditionals. What is left is genuinely small, and only one item needs hardware.
+
+- **F-44 (`Welcome`/`Setup`) — needs a device, and is now the *only* item that does.** Designed and
+  unbuilt. The screens are drawn, but no device has ever rendered this component set, and a first-run flow
+  is the one place where being wrong is close to unrecoverable: the user meets it before anything else
+  works. *(What surrounded it is done — F-39, F-40, F-41, F-12, F-13 — entries 39, 45, 48, which is why the
+  first-run experience is no longer the hole it was.)*
+- **F-45 — the copy: 328 strings.** Not gated on hardware, only on volume. Two patterns are proven — the
+  permission table (Compose `stringResource`) and `CurfewViewModel` (`getString` on the application, plus
+  the app's first `<plurals>`). **The largest remaining item.**
+- **The 68 remaining Material usages.** Component-by-component migrations, counted in `material-usage.txt`
+  so the ratchet can only watch them shrink.
+- **F-18 (P0) — Windows cannot pair a device.** Genuinely a missing feature rather than a missing page (see
+  entry 28 for the greps), and the one P0 still open. It should have been in the table as a P0 two rounds
+  ago and was not, which is the coverage gap entry 46 exists to close.
+- **F-2, F-34, F-48, F-49 — not re-assessed.** Named in the coverage table with that status rather than a
+  guess. F-49 (the two platforms are not one product) is arguably a product decision rather than a defect.
 
 Also open, and small:
 
@@ -2460,7 +2471,93 @@ interpolated 79 -> **75**, competing Material usages 81 -> **68**. `AuditKindTes
 are new and both mutation-tested in every direction. Rust untouched at **861 passed**; fmt and clippy
 clean.
 
-**Limits:** the Compose changes are compile-verified only. What did not need eyes: a shared failure path,
+**Limits:** the Compose changes are compile-verified only.
+---
+
+## 48. The remaining verified-open P1s and P2s
+
+**Findings:** F-14, F-11, F-12, F-13. All four were verified open in entry 46 and are now fixed.
+
+### F-14 (P1): the only destructive action with no confirmation, and the worst consequence
+
+"Remove this device" was a `Tap` straight to `model.revokeDevice`. Removing a profile asks, spending an
+emergency pass asks, releasing a peer asks, asking for the 24-hour release asks — all with the consequence
+named. This one did not, **and it is the action that can take away a lock's only way out.**
+
+`Lock.PeerRelease` requires a *specific* device — `lock.rs`: *"Only a specific paired device can release"* —
+so removing that device leaves the lock unsatisfiable: no other device, no pass, nothing the user still has.
+The confirmation now says exactly that, with the count, and only when it is true.
+
+The count comes from `locksAwaitingDevice`, a **pure function** in `Format.kt` so it can be tested on this
+host without an `Application`, a database or a composition. Eight tests, built around the shapes that would
+get the number wrong rather than happy paths — because the two failure directions are both real: too low and
+the warning is missing from the removal that needed it; **too high and every removal carries a scare that is
+not true, which teaches people to dismiss the dialog, and then the real one gets dismissed too.**
+Mutation-tested three ways: the wrong device matched, calendar rules ignored, every lock kind counted.
+
+**One detail in the review is stale, and it is recorded rather than silently not fixed.** It says the
+action's confirmation *"Devices never renders"*. That was true when written; entry 19 made `MainActivity`
+render `state.message` app-wide, so *"That device will be ignored from now on."* does appear. The
+unconfirmed tap and the missing consequence were both still real.
+
+**And `PeerRelease` is unreachable from the UI** — no screen offers it. So this scenario needs a
+hand-edited config, which is a supported interface, and the warning is worth having for exactly that.
+
+### F-11 (P1): a comment that contradicted itself, and a plan citing a feature that does not exist
+
+`SettingsScreen`'s doc comment began *"It leads with the Simple/Power switch"* and ended, eight lines later,
+*"There is no beginner/expert switch: an app that hides half of itself behind a mode makes the reader wonder
+what else it is hiding."* **The first half described a mode that was never built; the second half is the
+argument for not building it.** The file argued with itself, and both halves had been true of different
+versions of the plan.
+
+There is no Simple mode. It is designed in `docs/PLAN-mobile-polish.md` §4 and was never implemented — the
+de-cluttering it existed to achieve was done by **shortening the nav bar for everyone** instead, which the
+interaction review calls *"a defensible outcome"*. What it needed, and now has, is the docs saying so:
+three status notes, one above each place the fictional mode is cited as current. Plus the removal of the
+switch paragraph from the Settings comment and a "Simple user" reference in `MainActivity`.
+
+**Caught while verifying:** the plan says the bar has "five tabs" in two places and it has **four**. Fixed in
+the status notes rather than by rewriting the plan, because the number was true when written and a plan is a
+record of intent.
+
+### F-12 and F-13 (P2): the same defect, in the two places it costs most
+
+Both are **an absence with no explanation**.
+
+**F-12:** `GivenBackCard` returned early when every number was zero — which is **day one, precisely when
+somebody is deciding whether to keep the app.** Now showed a dial, a timeline, and nothing about what the
+app had bought. The function's own doc comment claims this number *"is not allowed to live behind a tab"*;
+it was living behind a *condition*, which is worse. The honest zero copy already existed one branch down
+(*"Nothing blocked yet today"*), so the card now stays and says what it counts and what will fill it.
+
+**F-13:** `ComparisonCard` renders only when `state.screenTime` is non-null, which needs Usage access **and**
+a whole day on each side. A reader could not tell *not yet* from *not working* from *nothing worth showing*.
+There is now a placeholder naming the actual prerequisite, and **distinguishing the two cases**, because
+they have different next steps: one is "grant Usage access on Health", the other is "come back tomorrow".
+
+This is the treatment the screen already gives its per-app list — the one the review calls the best empty
+state in the app, because it explains the *scope* of what is not measured. The principle was already in the
+codebase; these were the two places not following it.
+
+### And a doc comment was attached to the wrong function
+
+Removing F-12's early return put *"The banner that admits Curfew was not watching"* directly above
+`GivenBackCard` — **where it had been all along.** `DowntimeBanner`, the function it describes, had no doc
+comment at all. So the one banner whose entire job is to explain itself was the one with no explanation in
+the source, while the card beside it carried a paragraph about something else.
+
+That is the **sixth** comment on this branch describing something the code does not do, and the most
+literal: not a false claim, but a comment filed against the wrong symbol.
+
+### Verification
+
+**65 Android tests pass across 11 classes.** The **string ratchet caught all eight new sentences** from
+these fixes before they could be committed unrecorded. Counts: 328 untranslated, 77 interpolated, 68
+Material. Rust untouched at **861 passed**; fmt and clippy clean.
+
+**Limits:** the Compose changes are compile-verified only. What did not need eyes: a confirmation that was
+missing, a number that was counted wrongly, and two absences that now explain themselves. What did not need eyes: a shared failure path,
 twenty named kinds, a string that leaked a token, and a name instead of a slug.
 ---
 
@@ -2520,3 +2617,89 @@ be committed unrecorded, which is precisely what it is for. Counts: 319 untransl
 Material. Rust untouched at **861 passed**; fmt and clippy clean.
 
 **Limits:** the Compose changes are compile-verified only.
+---
+
+## 48. The remaining verified-open P1s and P2s
+
+**Findings:** F-14, F-11, F-12, F-13. All four were verified open in entry 46 and are now fixed.
+
+### F-14 (P1): the only destructive action with no confirmation, and the worst consequence
+
+"Remove this device" was a `Tap` straight to `model.revokeDevice`. Removing a profile asks, spending an
+emergency pass asks, releasing a peer asks, asking for the 24-hour release asks — all with the consequence
+named. This one did not, **and it is the action that can take away a lock's only way out.**
+
+`Lock.PeerRelease` requires a *specific* device — `lock.rs`: *"Only a specific paired device can release"* —
+so removing that device leaves the lock unsatisfiable: no other device, no pass, nothing the user still has.
+The confirmation now says exactly that, with the count, and only when it is true.
+
+The count comes from `locksAwaitingDevice`, a **pure function** in `Format.kt` so it can be tested on this
+host without an `Application`, a database or a composition. Eight tests, built around the shapes that would
+get the number wrong rather than happy paths — because the two failure directions are both real: too low and
+the warning is missing from the removal that needed it; **too high and every removal carries a scare that is
+not true, which teaches people to dismiss the dialog, and then the real one gets dismissed too.**
+Mutation-tested three ways: the wrong device matched, calendar rules ignored, every lock kind counted.
+
+**One detail in the review is stale, and it is recorded rather than silently not fixed.** It says the
+action's confirmation *"Devices never renders"*. That was true when written; entry 19 made `MainActivity`
+render `state.message` app-wide, so *"That device will be ignored from now on."* does appear. The
+unconfirmed tap and the missing consequence were both still real.
+
+**And `PeerRelease` is unreachable from the UI** — no screen offers it. So this scenario needs a
+hand-edited config, which is a supported interface, and the warning is worth having for exactly that.
+
+### F-11 (P1): a comment that contradicted itself, and a plan citing a feature that does not exist
+
+`SettingsScreen`'s doc comment began *"It leads with the Simple/Power switch"* and ended, eight lines later,
+*"There is no beginner/expert switch: an app that hides half of itself behind a mode makes the reader wonder
+what else it is hiding."* **The first half described a mode that was never built; the second half is the
+argument for not building it.** The file argued with itself, and both halves had been true of different
+versions of the plan.
+
+There is no Simple mode. It is designed in `docs/PLAN-mobile-polish.md` §4 and was never implemented — the
+de-cluttering it existed to achieve was done by **shortening the nav bar for everyone** instead, which the
+interaction review calls *"a defensible outcome"*. What it needed, and now has, is the docs saying so:
+three status notes, one above each place the fictional mode is cited as current. Plus the removal of the
+switch paragraph from the Settings comment and a "Simple user" reference in `MainActivity`.
+
+**Caught while verifying:** the plan says the bar has "five tabs" in two places and it has **four**. Fixed in
+the status notes rather than by rewriting the plan, because the number was true when written and a plan is a
+record of intent.
+
+### F-12 and F-13 (P2): the same defect, in the two places it costs most
+
+Both are **an absence with no explanation**.
+
+**F-12:** `GivenBackCard` returned early when every number was zero — which is **day one, precisely when
+somebody is deciding whether to keep the app.** Now showed a dial, a timeline, and nothing about what the
+app had bought. The function's own doc comment claims this number *"is not allowed to live behind a tab"*;
+it was living behind a *condition*, which is worse. The honest zero copy already existed one branch down
+(*"Nothing blocked yet today"*), so the card now stays and says what it counts and what will fill it.
+
+**F-13:** `ComparisonCard` renders only when `state.screenTime` is non-null, which needs Usage access **and**
+a whole day on each side. A reader could not tell *not yet* from *not working* from *nothing worth showing*.
+There is now a placeholder naming the actual prerequisite, and **distinguishing the two cases**, because
+they have different next steps: one is "grant Usage access on Health", the other is "come back tomorrow".
+
+This is the treatment the screen already gives its per-app list — the one the review calls the best empty
+state in the app, because it explains the *scope* of what is not measured. The principle was already in the
+codebase; these were the two places not following it.
+
+### And a doc comment was attached to the wrong function
+
+Removing F-12's early return put *"The banner that admits Curfew was not watching"* directly above
+`GivenBackCard` — **where it had been all along.** `DowntimeBanner`, the function it describes, had no doc
+comment at all. So the one banner whose entire job is to explain itself was the one with no explanation in
+the source, while the card beside it carried a paragraph about something else.
+
+That is the **sixth** comment on this branch describing something the code does not do, and the most
+literal: not a false claim, but a comment filed against the wrong symbol.
+
+### Verification
+
+**65 Android tests pass across 11 classes.** The **string ratchet caught all eight new sentences** from
+these fixes before they could be committed unrecorded. Counts: 328 untranslated, 77 interpolated, 68
+Material. Rust untouched at **861 passed**; fmt and clippy clean.
+
+**Limits:** the Compose changes are compile-verified only. What did not need eyes: a confirmation that was
+missing, a number that was counted wrongly, and two absences that now explain themselves.
