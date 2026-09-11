@@ -131,6 +131,14 @@ pub fn config_backup_path(state_path: &Path) -> PathBuf {
 /// config-backup are both unreadable still has to start and still has to honour the sessions it is
 /// holding; but it is no longer the *first* answer, and it comes with a warning that says which rules
 /// are not being enforced rather than one that only says the file was unreadable.
+///
+/// **And a config that parses is not automatically safe to adopt — P1-13.** Refusing an *unparseable*
+/// config is not enough, because the interesting edit is a valid document with the rules deleted: it
+/// parses, so the branch above never fires, and the lock runs on with nothing behind it. So the same
+/// `Config::weakening_a_running_session` check the pipe's reload path uses is applied here against the
+/// kept copy, which is the only record of what was in force before this process existed. A weakening
+/// config is not adopted **and does not overwrite the kept copy** — otherwise the bypass would be
+/// deferred one restart rather than refused.
 pub fn build(
     config_path: &Path,
     state_path: &Path,
@@ -154,15 +162,63 @@ pub fn build(
         ),
     };
 
+    // The last config known to be good, if it can be read. Used both as the fallback for an unparseable
+    // config (P1-10) and as the baseline for the weakening check below (P1-13).
+    let keep_backup = |config: &Config| {
+        // Best-effort: a machine that cannot write this still runs, it just has no fallback if the
+        // config later breaks.
+        if let Err(e) =
+            std::fs::write(config_backup_path(state_path), config.to_toml().unwrap_or_default())
+        {
+            crate::warn!("could not keep a copy of the config ({e})");
+        }
+    };
+    let last_good = || -> Option<Config> {
+        std::fs::read_to_string(config_backup_path(state_path))
+            .ok()
+            .and_then(|text| Config::from_toml(&text).ok())
+    };
+
     let config = match config {
-        Ok(config) => {
-            // Remember it while it is good. Best-effort: a machine that cannot write this still runs,
-            // it just has no fallback if the config later breaks.
-            if let Err(e) =
-                std::fs::write(config_backup_path(state_path), config.to_toml().unwrap_or_default())
-            {
-                crate::warn!("could not keep a copy of the config ({e})");
+        // **A config that parses is not automatically safe to adopt — P1-13.** The reload path has
+        // refused a weakening edit since entry 54; this path accepted one, so deleting the rules from
+        // `curfew.toml` and restarting the service (or the machine) left the lock running with nothing
+        // behind it, and overwrote the good copy with the weakened document.
+        Ok(config) if !persisted.sessions.running.is_empty() => match last_good() {
+            Some(baseline) => {
+                let names: std::collections::BTreeMap<String, String> =
+                    baseline.profiles.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+                let lost = baseline.weakening_a_running_session(
+                    &config,
+                    &persisted.sessions.running,
+                    &names,
+                );
+                if lost.is_empty() {
+                    keep_backup(&config);
+                    config
+                } else {
+                    // **The good copy is deliberately not overwritten.** Writing the weakened document
+                    // here would make it the baseline for the next restart, and the bypass would only be
+                    // deferred rather than refused.
+                    crate::warn!(
+                        "curfew.toml would stop enforcing part of a running lock ({}); enforcing the \
+                         last config that did ({}). Nothing was changed on disk, and the lock ends on \
+                         its own.",
+                        lost.join("; "),
+                        config_backup_path(state_path).display()
+                    );
+                    baseline
+                }
             }
+            // Nothing to compare against — first run, or the copy is gone. The directory ACL is the
+            // control here, and a service that refuses to start enforces nothing at all.
+            None => {
+                keep_backup(&config);
+                config
+            }
+        },
+        Ok(config) => {
+            keep_backup(&config);
             config
         }
         Err(detail) if persisted.sessions.running.is_empty() => return Err(detail),
@@ -929,6 +985,17 @@ target = { kind = "domain", domain = "reddit.com" }
 action = { kind = "block" }
 "#;
 
+    /// The same document with the rule deleted: **valid TOML that parses**, which is what makes it
+    /// dangerous. `build` accepts any config that parses, and a config with no rules enforces nothing.
+    const WEAKENED: &str = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+"#;
+
     /// A scratch directory of its own, because these share `std::env::temp_dir()` with every other
     /// test in the binary and a leftover `curfew.toml.good` would make the "no fallback" case pass
     /// for the wrong reason.
@@ -1027,5 +1094,80 @@ action = { kind = "block" }
             .expect("a machine holding a lock must still start");
         assert!(enforcer.config.profiles.is_empty(), "there was nothing usable to enforce");
         assert_eq!(enforcer.sessions.running.len(), 1, "the lock itself was dropped");
+    }
+
+    /// **Exploit 3 — P1-13 does not hold on the startup path.**
+    ///
+    /// A config that *parses* but enforces less was adopted with a lock running, and the good backup was
+    /// overwritten with it — so the weakened file became the baseline and the next restart accepted it
+    /// too. The reload path checks (`curfew-win::tick`); startup did not.
+    #[test]
+    fn a_weakened_config_while_locked_does_not_take_effect() {
+        let dir = scratch("weakened-while-locked");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+
+        // One good start, which is what keeps the copy, then a lock.
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+        write_locked_state(&state_path);
+
+        // The file is still valid TOML — it just no longer blocks anything.
+        std::fs::write(&config_path, WEAKENED).unwrap();
+        let enforcer = build(&config_path, &state_path, dir.join("hosts"))
+            .expect("a machine holding a lock must still start");
+
+        assert_eq!(
+            enforcer.config.profiles[0].rules.len(),
+            1,
+            "the rule was dropped at startup while a lock was running, so the lock enforces nothing"
+        );
+        assert_eq!(enforcer.sessions.running.len(), 1, "the lock itself was dropped");
+    }
+
+    /// **And the good backup survives the attempt.** Without this the first restart would merely defer
+    /// the bypass: the weakened config would be written over `curfew.toml.good` and adopted next time as
+    /// the baseline it is compared against.
+    #[test]
+    fn a_weakened_config_does_not_overwrite_the_good_copy() {
+        let dir = scratch("weakened-keeps-backup");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+        write_locked_state(&state_path);
+
+        std::fs::write(&config_path, WEAKENED).unwrap();
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+
+        let kept =
+            Config::from_toml(&std::fs::read_to_string(config_backup_path(&state_path)).unwrap())
+                .expect("the kept copy still parses");
+        assert_eq!(
+            kept.profiles[0].rules.len(),
+            1,
+            "the weakened config overwrote the last good copy, so the next restart adopts it"
+        );
+    }
+
+    /// **With nothing running the same edit is the user's to make.** Refusing it would make the config
+    /// uneditable, which is the failure in the other direction.
+    #[test]
+    fn a_weakened_config_is_adopted_when_nothing_is_locked() {
+        let dir = scratch("weakened-idle");
+        let config_path = dir.join("curfew.toml");
+        let state_path = dir.join("state.json");
+        std::fs::write(&config_path, CONFIG).unwrap();
+        build(&config_path, &state_path, dir.join("hosts")).unwrap();
+
+        // No lock this time.
+        std::fs::write(&config_path, WEAKENED).unwrap();
+        let enforcer = build(&config_path, &state_path, dir.join("hosts")).unwrap();
+
+        assert_eq!(
+            enforcer.config.profiles[0].rules.len(),
+            0,
+            "an edit made with nothing running was refused"
+        );
     }
 }
