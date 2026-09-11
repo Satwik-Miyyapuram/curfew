@@ -119,6 +119,10 @@ must run.
 | 98 | `restore_releases` parsed an unbounded caller payload; `every_restore_method_is_bounded` checked four of five | **P2** | **Fixed** — capped, plus a source scan so the next method cannot slip through (entry 83) |
 | 99 | A guard passed with the code commented out; `is_open` read `Not fixed` as closed; `check_log` rewrote its subject | **P2** | **Fixed** — comments stripped in one place, vocabulary read off the table, `--print` (entry 84) |
 | 100 | A restored `ClockWitness` could re-baseline trusted time forward, expiring every timer lock | **P0** | **Fixed** — `adoption_moves_forward`, both directions (entry 85) |
+| 101 | A forged `last_uptime` disabled the reboot check and jumped the trusted clock by the whole uptime | **P0** | **Fixed** — the third direction, with the forgery written as JSON (entry 86) |
+| 102 | `harden` cancelled a delayed release and removed an end time, which trapped the user | **P0** | **Fixed** — a restore may lengthen a lock but may not take a bound away (entry 86) |
+| 103 | The status classifier closed any row citing an entry, so `entry 14 — left open` read as done | **P2** | **Fixed** — ordering, vocabulary, and two rows it was hiding (entry 86) |
+| 104 | `check_workspace` did not notice `__pycache__`, which `git add -A` would commit | **P2** | **Fixed** — build caches reported anywhere in the tree (entry 86) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -312,6 +316,7 @@ this table is a reading aid.
 | `c1f814f` | Four more ways to weaken a running lock through the FFI (entry 83) |
 | `c874002` | Two guards that could not fail, and a checker that rewrote its subject (entry 84) |
 | `5c688ea` | A restored witness could expire every timer lock at once (entry 85) |
+| `42a8f7c` | The third clock direction, and two bounds that trapped the user (entry 86) |
 | `a55e172` | One rule for minute 1440, not two (entry 80) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
@@ -4833,3 +4838,91 @@ implementation — and it **cannot be verified on this host**, so it is recorded
 
 **Four mutations caught.** The mutation run also showed that nothing tested the `last_wall` half at all, so
 that test exists because of it. `5c688ea`.
+
+---
+
+## 86. The third clock direction, and two bounds that trapped the user
+
+**Found by:** a second adversarial review of the six commits in entries 81–85. **Three findings, all
+reproduced as failing tests before anything was changed.**
+
+### 1. A forged `last_uptime` jumped the trusted clock
+
+`observe`'s same-boot branch is `elapsed = reading.uptime - self.last_uptime`, and `rebooted` is
+`boot_id != last_boot_id || uptime < last_uptime` — that second clause is exactly what catches an uptime
+counter going backwards. A forged witness with the **same boot id and a `last_uptime` of zero disables that
+check**, so the next reading computes `elapsed` as the whole uptime — ten hours in the test — and credits
+all of it. Trusted time is what every lock is judged against, so every timer lock shorter than that expires
+at once.
+
+**The guard in entry 85 checked `trusted` and `last_wall` and missed this**, which is the third direction and
+the second time a guard on this field pair was incomplete. `ClockWitness` is `Serialize + Deserialize`, so
+the test builds the forgery as JSON with three honest fields and one moved — which is what a forged stored
+blob actually looks like, rather than a wholesale replacement.
+
+### 2. `harden` treated `None` as "stronger", and that trapped the user
+
+`None` is the top of the lattice for both optional times: "until released" and "no automatic release" are
+the longest-lived options, so `harden` adopted an incoming `None` over a running `Some(t)`. Both results are
+locks nobody can open rather than stronger ones:
+
+- an incoming `None` **cancelled** a delayed release — the user's guaranteed way out, which
+  `request_release` documents as cancellable by nothing; and
+- an incoming `None` **removed** an end time, which with `conditions = [Timer]` — not claimable since entry
+  1 — leaves no end and no satisfiable condition, so nothing can open the lock.
+
+`harden` now takes the later of two concrete values and otherwise keeps what is running: **a restore may
+make a lock last longer; it may not take a bound away.** Nothing legitimate is lost, because a new
+until-released session reaches a machine that is not running one through `start()`, not through `harden`.
+
+**A test written earlier in this branch asserted the opposite and was inverted rather than extended.**
+`a_restore_may_strengthen_a_timed_lock_into_an_until_released_one` argued that strengthening is safe because
+weakening is forbidden. The reasoning was too simple: **a bound is not only a limit, it is also the exit**,
+so removing one is not the mirror image of adding a condition. Second time this session that the right move
+was to invert a test rather than add one, and both were tests that encoded an assumption never checked
+against the attack.
+
+### 3. The status classifier closed anything that cited an entry
+
+`classify` checked open words and then `CLOSED_WORDS or ENTRY_REF.match(status)` **together**, so any status
+beginning `entry N —` was closed regardless of what it said. `entry 14 — investigated and left open` read as
+done. The order is now part → negative → positive → bare "open" → entry reference, with "not done" and ten
+other incompleteness words added, **each verified against the table before being added**. `pending` is
+excluded on purpose (P2-18 uses it as a technical term) and so are `to do`/`todo`, which read as "how to do
+X" in prose.
+
+The residual is stated on the function rather than implied: the entry-reference step is a wildcard, so an
+incompleteness phrasing nobody listed still reads as done. No vocabulary over free prose closes that, and
+the mitigation is that every word was checked and that a status matching *nothing* stops the tool.
+
+### And the classifier surfaced two real defects in this log
+
+**P2-8's row contradicted itself.** It said *"**Not done**: the review's fourth point"* and, from the
+entry-80 append, *"**And the fourth point is now done too**"* — the second sentence was added without
+removing the first. `check_log.py` verifies the log matches the generator, so **both agreed on a
+self-contradiction**. That is the fifth time this round that a check confirmed a defect rather than catching
+it, and the third time the defect was in the log rather than in the code.
+
+**P1-8 was marked `fixed` while its own text named a review claim as not done** — the downtime half is done
+for Windows, the adaptive-polling half is not. Both rows are `partly fixed` now, and the open list says
+three rather than one.
+
+### And `check_workspace.py` did not notice `__pycache__`
+
+Found by creating one and watching the checker say "ok": it scans `SOURCE_DIRS`, and `tools/` is
+deliberately not among them. Not a cloud-sync artefact like the others — it is Python build output that
+`git add -A` will commit, which is the same category as the scaffolding guard from entry 70. It appeared
+twice this session and was cleaned by hand both times. Now reported as a directory anywhere in the tree.
+
+### Verification
+
+1058 Rust tests (was 1055). `42a8f7c`.
+
+### A note on this exchange
+
+Three rounds of adversarial review have now found defects in every round — nine in the first, seven in the
+second, three in the third — and **every one was real**. Two were P0s, and two of the third round's three
+were in code written to fix the first round's findings. That is worth recording plainly: the fixes are
+holding, but the rate at which a fresh adversarial pass finds something has not fallen, and the log's own
+claims have been wrong four times. A reader should treat this branch as *improved and still being
+challenged*, which is what the review's own verdict says too.
