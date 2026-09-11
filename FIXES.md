@@ -66,6 +66,8 @@ must run.
 | 45 | One material instead of two drifting copies; Material dialogs on NowScreen (F-39, F-40) | **P2** | **Fixed** for NowScreen; 81 usages remain elsewhere, ratcheted (entry 45) |
 | 46 | Four findings the log had never recorded: F-33, F-36, F-37, F-15 | **P1-P3** | **Fixed** (entry 46) |
 | 47 | **18 of the review's 48 findings were missing from this log** | **P0-P3** | **Reconciled** -- table above the commit index, 5 left un-assessed (entry 46) |
+| 48 | The 24-hour release had no confirmation; an unsatisfiable lock was offered (F-7, F-6) | **P1** | **Fixed** (entry 47) |
+| 49 | **F-3 is a false finding** -- the review's "the design says 30" is contradicted by the canvas | **P2** | **Rejected, not fixed** (entry 47) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -87,8 +89,8 @@ problem rather than a number in it.
 | :--- | :--- | :--- |
 | F-2 | P2 | **Not re-assessed.** First run seeds a starter profile; whether it says so was not checked |
 | F-3 | P2 | **Not a defect — the review is wrong.** It says "the design says 30"; `design/Timer.dc.html:71` shows the accented (selected) pill as **`1h 30m`**, against `PRESETS = listOf(25, 50, 90, 180)`. The code matches the design authority. **Deliberately not changed** — see entry 46 |
-| F-6 | P1 | **Open, verified.** `Auth.isAvailable` exists but is only consulted *at prove time* (`Auth.kt:55`), so the choice is still offered on a phone with no screen lock |
-| F-7 | P1 | **Open, verified.** `NowScreen.kt:669` calls `onRelease` straight from the button; the 24-hour release has no confirmation |
+| F-6 | P1 | **Fixed** (entry 47). `Auth.isAvailable` was only consulted *at prove time* (`Auth.kt:55`); the choice is now gated at choice time too |
+| F-7 | P1 | **Fixed** (entry 47). `NowScreen.kt:669` called `onRelease` straight from the button; it goes through `DConfirm` now |
 | F-9 | P1 | **Fixed earlier, unlogged.** `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
 | F-11 | P1 | **Not re-assessed.** Simple mode appears only in one comment; whether the principles and `PLAN-mobile-polish.md:49` were reconciled was not checked |
 | F-12 | P2 | **Open, verified.** `UsageScreen.kt:64` renders the comparison only under `state.screenTime?.let`, so a first-day user sees no line at all |
@@ -164,6 +166,7 @@ this table is a reading aid.
 | `d69572b` | The copy detector was blind to a third of its subject, and the ViewModel slice (entries 43, 44) |
 | `5f72985` | One sheet, one glass, and a ratchet on the second visual language (entry 45) |
 | `f3f5bb9` | Four findings the log had never recorded, and the bug class behind them (entry 46) |
+| `83ba4f0` | The 24-hour release confirmed, an unsatisfiable lock withheld, and a finding rejected (entry 47) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -2459,3 +2462,61 @@ clean.
 
 **Limits:** the Compose changes are compile-verified only. What did not need eyes: a shared failure path,
 twenty named kinds, a string that leaked a token, and a name instead of a slug.
+---
+
+## 47. Two verified P1s, and one finding the review got wrong
+
+**Findings:** F-7 and F-6 fixed; **F-3 rejected.**
+
+### F-7 (P1): the 24-hour release was the one irreversible act with no confirmation
+
+The code already reasoned about this **twice**. `confirmingPass` carries a comment saying a pass *"takes
+something scarce, shared with every paired device, and impossible to give back"*; `confirmingRelease` says
+the other device *"opens the moment this one says yes"*. Both have a confirmation.
+
+The 24-hour release — the strongest route out of the strongest lock, and withdrawable once asked for — was
+**a single tap on a button sitting directly beside "End now"**, and the two look alike. It goes through
+`DConfirm` now, with the emphasis on the way out.
+
+Why it survived is the interesting part: each of the three was reasoned about **on its own** instead of
+being one rule about irreversible acts. That is the same shape as F-39's glass and F-33's grant page — one
+behaviour written out separately each time, correct in most copies and wrong in one.
+
+### F-6 (P1): a strength the device cannot satisfy was offered anyway
+
+`Lock.DeviceCredential` on a phone with no screen lock is **a lock with no exit**: `Auth.prove` reports
+`false` because there is no keyguard to raise, the core refuses the end for an unmet condition, and the
+session runs to its end with the user unable to do anything about it.
+
+The check existed — `Auth.isAvailable` — and was only consulted **at prove time** (`Auth.kt:55`), never at
+*choice* time. So the app offered a trap and then declined to open it. `Credential` is now omitted when it
+cannot be satisfied, with a line saying why: a silently missing option reads as a bug, and the user's next
+step — set a screen lock — is theirs to take.
+
+### F-3 is a false finding, and acting on it would have been a regression
+
+F-3 says *"The default duration is 90 minutes; the design says 30."*
+
+- The code half is right: `TimerScreen.kt:41` is `DEFAULT_MINUTES = 90`.
+- **The design half is wrong.** `design/Timer.dc.html:71` renders the preset row as
+  `25m · 50m · 1h 30m · 3h` with **`1h 30m` carrying the accent styling that marks the selected preset**,
+  and the button below it reads "Lock it in for 1h 30m". The canvas agrees with the code exactly, preset
+  list included.
+
+So the review read `PRESETS = listOf(25, 50, 90, 180)` correctly and then asserted a mismatch with a design
+it described as saying 30. **There is no such design.** Changing `DEFAULT_MINUTES` to 30 would have moved
+the app *away* from its own design authority on the strength of a claim nobody checked.
+
+**This is a different failure from the wrong counts, and worth separating.** The counts were approximations
+that over- or under-stated real work; acting on them would have cost time. This is a finding that should not
+be actioned **at all**, and acting on it would have been a defect. Both point the same way: a finding is
+evidence, and evidence gets checked before it is used — the same rule this log applies to its own numbers.
+It is recorded as **rejected** rather than left "open", because "open" invites somebody to fix it.
+
+### Verification
+
+57 Android tests pass across 10 classes. The **string ratchet caught both fixes' new copy** before it could
+be committed unrecorded, which is precisely what it is for. Counts: 319 untranslated, 76 interpolated, 68
+Material. Rust untouched at **861 passed**; fmt and clippy clean.
+
+**Limits:** the Compose changes are compile-verified only.
