@@ -203,6 +203,34 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
         )
         Gap(14.dp)
 
+        // A config that could not be read is not a config with nothing in it.
+        //
+        // Both panes below derive from the config, and a failed read produced empty sets — which this
+        // screen drew as every app *allowed* and every site *unblocked*. That is the app telling the
+        // user something false about their own plan, on the one screen whose entire job is to answer
+        // "what does this profile block?". Nothing here was destructive — the write path re-reads the
+        // config from the runtime rather than using this state, so a toggle would have worked or
+        // refused — but a screen that says "you block nothing" when it cannot see is worse than one
+        // that says it cannot see.
+        //
+        // Above the pane split rather than inside each half, because both panes read the same file and
+        // the honest answer is the same for both. Refusing to draw the rows rather than drawing them
+        // disabled: there is no tick state to show, and a column of switches that cannot be trusted is
+        // not a thing to put a finger near.
+        if (state.configError != null) {
+            DCard {
+                Text(
+                    "Your plan could not be read, so Curfew cannot show what this profile blocks. " +
+                        "Nothing has been changed, and this screen will work again once the config " +
+                        "can be read.\n\n" + state.configError,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Palette.Bad,
+                )
+            }
+            return@Screen
+        }
+
         if (pane == Pane.Apps) {
             SearchField(query) { query = it }
             Gap(10.dp)

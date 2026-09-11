@@ -47,7 +47,7 @@ must run.
 | 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | **Fixed** |
 | 27 | A blocked site shows the browser's own error page (F-21) | **P1** | **Fixed as far as the design allows** — the "serve a page" fix is already refused in-code (entry 27) |
 | 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | **Half fixed** — "Where time went" built; "Devices" turned out to be a missing feature, not a missing page (entry 28) |
-| 29 | `AppPickerScreen` shows every app unticked after a failed config read | **P2** | Pending |
+| 29 | `AppPickerScreen` showed every app unticked after a failed config read | **P2** | **Fixed** |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -73,7 +73,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `cd1021f` | A read that failed is not an empty result (entries 20, 21), and a delete asks first (entry 22) |
 | `7f11fbe` | The nav and the toggle get hit areas that can be hit (entry 23) |
 | `8c41f09` | A blocked site's symptom is named where the user will read it (entry 27) |
-| *(this commit)* | The window gets the "Where time went" page the design always had (entry 28) |
+| `23dbd92` | The window gets the "Where time went" page the design always had (entry 28) |
+| *(this commit)* | The app picker stops claiming you block nothing when it cannot see (entry 29) |
 
 ### A note on the Android verification environment
 
@@ -763,12 +764,6 @@ F-17).
 
 **P2 — the remaining interaction set**
 
-- **Entry 29 — `AppPickerScreen` after a failed config read.** It derives its tick state from
-  `state.configToml`, so a failed read shows every app unticked. **Display only**: the write path
-  re-reads the config from the runtime (`Policy.setBlockedApps(runtime.policy.configToml(), …)`) rather
-  than using the possibly-empty state, so a toggle either works on the real config or throws into the
-  banner. It is the one sub-item of entry 20/21 that was not closed, and it is listed rather than left
-  to look complete.
 - **F-22, F-24–F-28 — the rest of the Windows interaction set.** No feedback that a block has started;
   the window asks for the Windows password in its own HTML form where the tray deliberately uses the OS
   credential dialog (`prompt.rs:1-15` argues the case, and the louder surface is the one breaking the
@@ -1479,3 +1474,49 @@ because `Enforcer::handle` and the IPC enums are ordinary Rust:
 clean. **The page's own rendering is not covered by an executing test**: it is DOM building rather than
 Compose, but it needs a browser, and see the Android verification note above entry 1 for why nothing in
 this project runs a UI on this host.
+
+---
+
+## 29. The app picker said "you block nothing" when it could not see
+
+**Findings:** recorded as the one sub-item left by entries 20/21, not a separate finding in either
+review.
+
+**What was wrong.** `AppPickerScreen` derives both of its panes from the config:
+
+```kotlin
+val blocked = remember(current, state.configToml) { current?.let { model.blockedApps(it) }.orEmpty() }
+val sites   = remember(current, state.configToml) { current?.let { model.rulesBeyondApps(it) }.orEmpty() }
+```
+
+and `ViewModel.blockedApps` ends in the same swallow as entry 20:
+
+```kotlin
+Policy.blockedApps(runCatching { runtime.policy.configToml() }.getOrDefault(""), profile)
+```
+
+A failed read therefore produced an **empty set**, which this screen drew as every app *allowed* and
+every site *unblocked*. That is the app asserting something false about the user's own plan, on the one
+screen whose entire job is to answer *"what does this profile block?"* — the same defect as entries 20
+and 21, in the third place it appears.
+
+**Why it was listed separately rather than folded into entry 20.** Because the *consequence* is
+different, and saying so was the point. This one is not destructive: the write path re-reads the config
+from the runtime rather than using the possibly-empty state, so flipping a switch after a failed read
+either works on the real config or throws into the banner (entry 19). I checked that by reading the call
+sites, and it is why this is P2 where F-30 was P1 — but a screen that says "you block nothing" when it
+cannot see is still worse than one that admits it cannot see.
+
+**What was changed.** A guard above the pane split — not inside each half, because both panes read the
+same file and the honest answer is the same for both. When `state.configError` is set the screen says so,
+names the reason, states that nothing has been changed, and returns before drawing any rows.
+
+**Refusing to draw the rows rather than drawing them disabled**, which is deliberate: there is no tick
+state to show, and a column of switches that cannot be trusted is not a thing to put a finger near. A
+disabled list would still have answered the screen's central question wrongly.
+
+**Verification.** `:app:compileDebugKotlin` clean, no warnings in the touched file. **Not covered by an
+executing test** — the Conscrypt limitation in the note above entry 1, and this is composition-level in
+any case. That this log now has a P2 entry whose only evidence is "it compiles" is itself worth stating:
+it is the honest description of what can be checked on this host for Compose code, and the reason the
+Android verification note sits at the front of this document rather than in an appendix.
