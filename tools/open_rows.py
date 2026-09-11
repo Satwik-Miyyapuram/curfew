@@ -11,6 +11,7 @@ So the list between the markers is derived, and `tools/check_log.py` verifies it
 it stays hand-written, because the lessons are the part a generator cannot supply.
 """
 import pathlib
+import sys
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -30,13 +31,56 @@ def rows(text):
     return out
 
 
-def is_open(status):
+# The vocabulary the coverage tables actually use, **read off the table** rather than guessed.
+#
+# `"fixed" not in status` was the first version. It classified **"Not fixed"** as closed — as did "Unfixed"
+# and "Open - not fixed" — while "Deferred, see entry 4" read as closed via "entry". A generator whose
+# entire job is to say what is still open would have printed "Nothing" for a table full of open rows.
+#
+# **Negatives are checked before the entry reference**, which is the actual fix: the old rule had no notion
+# of a negative, so any status mentioning an entry was assumed to be closed. A status that is just
+# `entry 12 — ...` *is* closed, because that is how the UX table records an earlier round's fix.
+OPEN_WORDS = (
+    "not fixed",
+    "unfixed",
+    "deferred",
+    "still open",
+    "verified open",
+    "not re-assessed",
+    "unaddressed",
+    "blocked",
+)
+CLOSED_WORDS = ("fixed", "not a defect", "assessed")
+ENTRY_REF = re.compile(r"^\s*\**(entry|entries)\s+\d+")
+
+
+def classify(status):
+    """`"closed"`, `"partly"` or `"open"` — or raises on a phrase this file does not know.
+
+    **Raises rather than guessing.** An unrecognised status word is the one case where stopping is right:
+    treating it as open inflates the list, treating it as closed hides work, and either way the tool is
+    confidently wrong about the thing it exists to report.
+    """
     low = status.lower()
-    return "fixed" not in low and "entry" not in low
+    if "partly fixed" in low or "partial" in low:
+        return "partly"
+    # Negatives first: `not fixed` must beat `fixed`, and `deferred, see entry 4` must beat `entry`.
+    if any(w in low for w in OPEN_WORDS):
+        return "open"
+    if any(w in low for w in CLOSED_WORDS) or ENTRY_REF.match(status):
+        return "closed"
+    raise SystemExit(
+        f"tools/open_rows.py does not recognise the status {status!r}.\n"
+        f"Add it to OPEN_WORDS or CLOSED_WORDS rather than letting this guess."
+    )
+
+
+def is_open(status):
+    return classify(status) == "open"
 
 
 def is_partly(status):
-    return "partly" in status.lower() or "partial" in status.lower()
+    return classify(status) == "partly"
 
 
 def build(text):
@@ -66,19 +110,47 @@ def build(text):
     return "\n".join(lines)
 
 
-def main():
-    text = LOG.read_text(encoding="utf-8")
+def expected_block(text):
+    """The block this file *would* write. `None` if the markers are missing."""
     if BEGIN not in text or END not in text:
+        return None
+    return f"{BEGIN}\n\n{build(text)}\n\n{END}"
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+
+    # **`--print` exists so a checker can compare against what this *would* write.** The first attempt at
+    # making `check_log.py` read-only had it run `--check` and then read the block back out of `FIXES.md`
+    # — which returns the file's own content, so the comparison could never fail. Printing the expected
+    # block is the only version that can disagree.
+    if "--print" in argv:
+        expected = expected_block(LOG.read_text(encoding="utf-8"))
+        if expected is None:
+            print("the open-list markers are missing from FIXES.md", file=sys.stderr)
+            return 1
+        # No trailing newline: the caller compares this by equality against the text in the file.
+        sys.stdout.write(expected)
+        return 0
+
+    # `--check` reports without writing, for a human.
+    checking = "--check" in argv
+
+    text = LOG.read_text(encoding="utf-8")
+    expected = expected_block(text)
+    if expected is None:
         print("  ERROR the open-list markers are missing from FIXES.md")
         return 1
-    block = build(text)
     before = text[text.index(BEGIN) : text.index(END) + len(END)]
-    after = f"{BEGIN}\n\n{block}\n\n{END}"
-    if before == after:
+    if before == expected:
         print("  ok   the open list already matches the table")
         return 0
-    LOG.write_text(text.replace(before, after, 1), encoding="utf-8")
-    print(f"  rewrote the open list from the table:\n{block}")
+    if checking:
+        # To stderr, so stdout carries only the expected block for a caller that wants to diff it.
+        print("  FAIL the open list does not match the coverage tables", file=sys.stderr)
+        return 1
+    LOG.write_text(text.replace(before, expected, 1), encoding="utf-8")
+    print(f"  rewrote the open list from the table:\n{build(text)}")
     return 0
 
 

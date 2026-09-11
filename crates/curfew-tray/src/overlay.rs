@@ -1019,14 +1019,28 @@ mod shared_slot_tests {
         SOURCE.split("#[cfg(test)]").next().expect("split yields at least one part")
     }
 
-    #[test]
-    fn the_overlay_has_no_shared_text_slot() {
-        let code = production();
-        let offenders: Vec<&str> = code
+    /// **The same, with comment lines removed.** Every assertion in this module is about what the code
+    /// *does*, and a line beginning `//` does nothing — but `str::contains` and a prefix match cannot tell
+    /// the difference. Leaving comments in made the reclaim guard pass with the whole `WM_NCDESTROY` arm
+    /// **commented out**, which is how this was found.
+    ///
+    /// Stripped once here rather than at each assertion, so the whole module is immune rather than the one
+    /// guard somebody happened to notice.
+    fn production_code() -> String {
+        production()
             .lines()
             .filter(|line| !line.trim_start().starts_with("//"))
-            .filter(|line| line.contains("thread_local!"))
-            .collect();
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_overlay_has_no_shared_text_slot() {
+        // `production_code` has already dropped the comments, so a `thread_local!` in prose cannot
+        // satisfy this.
+        let code = production_code();
+        let offenders: Vec<&str> =
+            code.lines().filter(|line| line.contains("thread_local!")).collect();
         assert!(
             offenders.is_empty(),
             "a thread-local came back into the overlay, which is what made two notices share one text              buffer: {offenders:?}"
@@ -1050,7 +1064,7 @@ mod shared_slot_tests {
     /// correctness of a Win32 callback is not something this binary can observe.
     #[test]
     fn the_text_is_stored_on_the_window_and_read_back_from_it() {
-        let code = production();
+        let code = production_code();
 
         // The store, with the pointer being handed over — not the later call that clears it.
         assert!(
@@ -1070,10 +1084,17 @@ mod shared_slot_tests {
         // thing and a reader can check it.
         // **The whole identifier, not a prefix of it.** `starts_with("WM_NCDESTROY")` is true for
         // `WM_NCDESTROY_NEVER`, which is exactly the mutation this check was written to catch — a prefix
-        // check is a substring check wearing a different hat, and this guard has now been loose in that
-        // direction three times. The token is taken as a token and compared.
+        // check is a substring check wearing a different hat.
+        //
+        // **And not a comment, either.** This used to `trim_start_matches("//")`, which meant commenting
+        // the entire arm out left the guard passing — verified by doing it. `production_code` drops
+        // comments now, so the arm must be live code for this to find anything, and the `after` scan below
+        // is looking at live code too.
+        //
+        // Three tightenings in three directions, all one mistake: an assertion that can be satisfied by
+        // something other than the code.
         let arm: Option<usize> = code.lines().position(|line| {
-            let trimmed = line.trim().trim_start_matches("//").trim();
+            let trimmed = line.trim();
             let name = trimmed.split_whitespace().next().unwrap_or("");
             name == "WM_NCDESTROY" && trimmed.ends_with("=> {")
         });

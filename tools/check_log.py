@@ -179,19 +179,20 @@ def main():
 
 
 def generated():
-    """The block `tools/open_rows.py` would write, or `None` if it cannot be produced."""
+    """The block `tools/open_rows.py` would write, or `None` if it cannot be produced.
+
+    **`--print`, not `--check`.** The first version ran `--check` and then read the block back out of
+    `FIXES.md`, which returns whatever is in the file — so the comparison below was `x == x` and could
+    never fail. Verified by corrupting the block: the checker exited 0. This runs the generator and takes
+    what it *would* write, which is the only form that can disagree with the file.
+    """
     out = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "open_rows.py")],
+        [sys.executable, str(ROOT / "tools" / "open_rows.py"), "--print"],
         cwd=str(ROOT), capture_output=True, text=True,
     )
     if out.returncode != 0:
         return None
-    # The generator prints only when it changes something, so ask it for the block rather than the log:
-    # read the log back after running it, which is what a reader would see.
-    text = read(ROOT / "FIXES.md")
-    start = text.index("<!-- open:begin")
-    stop = text.index("<!-- open:end -->") + len("<!-- open:end -->")
-    return text[start:stop]
+    return out.stdout
 
 
 def report():
