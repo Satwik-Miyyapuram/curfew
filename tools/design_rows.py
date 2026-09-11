@@ -70,11 +70,15 @@ STATUS = {
               "`%ProgramData%\\Curfew\\curfew.log` and to stderr, rolling at 2 MB with one previous file "
               "kept; 62 call sites redirected off `eprintln!`. **Not verified by running the service**: the "
               "startup call is guarded textually because that entry point cannot be exercised here"),
-    "P1-13": ("partial",
-             "**fixed on Windows** (entry 54). `Config::rules_weakened_by` is consulted before a reload is "
-             "adopted, so a config that would enforce less than a running session promised is refused. Two "
-             "comments that claimed this already worked were false — `Session` has no rules field — and are "
-             "corrected. **Android not covered**: `commitConfig` takes a weakening edit without the check"),
+    "P1-13": ("fixed",
+              "**fixed** (entries 54 and 79). Windows refused a reload that would enforce less than a "
+              "running session promised; **Android did not**, and `CurfewRuntime.commitConfig` wrote the "
+              "config and reconciled with no check at all. The decision is now "
+              "`Config::weakening_a_running_session`, shared so the two cannot disagree, and the guard sits "
+              "on the three FFI calls that change rules — `remove_rule`, `upsert_rule`, `set_config` — "
+              "because **Windows has a file/adopt split and Android does not**: the FFI *is* the config, so "
+              "a check on the commit alone can never fire. `upsert_rule` was the gap the mutation run "
+              "found: changing a rule's action weakens it while leaving the target listed"),
     "P2-1": ("fixed", "**fixed** (entry 53) — the config is re-read on a ten-second cadence"),
     "P2-2": ("fixed", "**fixed** (entry 53) — an identical redraw no longer rebuilds the body"),
     "P2-3": ("fixed", "**fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one"),

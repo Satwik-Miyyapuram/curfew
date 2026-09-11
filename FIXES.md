@@ -107,6 +107,7 @@ must run.
 | 89 | The service discarded its identity when nothing was paired, so it could not offer an invite (F-18 step 1) | **P0** | **Fixed** — `SyncStart::Unpaired` carries the `Shared`; still binds nothing (entry 77) |
 | 90 | Pairing had no Windows request surface at all (F-18 step 2) | **P0** | **Fixed** — six requests, a `Pairing` trait, and six mutations caught (entry 77) |
 | 91 | Pairing had no Windows front door, though it is the advertised headline (F-18 step 4) | **P0** | **Fixed** — the Devices page, with its own nav item and four mutations caught (entry 78) |
+| 92 | Android took a config edit that stopped enforcing part of a running lock (P1-13) | **P1** | **Fixed** — the check moved into the core and Android now consults it (entry 79) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -297,6 +298,7 @@ this table is a reading aid.
 | `cf1b2a7` | Refuse to remove a schedule a running lock derives from (entry 76) |
 | `ab4e0fd` | A Windows front door for pairing, steps 1-2 (entry 77) |
 | `2215ff8` | The Devices page, so pairing has a front door (entry 78) |
+| `47d5c2c` | One weakening check, and Android actually uses it (entry 79) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -4484,3 +4486,73 @@ The invite is carried as text rather than a code to scan, and that limit is on t
 `docs/index.html` still leads with the pairing claim — which is now **true** rather than advertised-only,
 so no correction is needed there. That is the difference between entry 49's fix (correct the claim) and
 this one (make the claim true).
+
+---
+
+## 79. P1-13: Android took a config edit that stopped enforcing part of a running lock
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-13**. **Fixed** — the Android half, which the row has
+been naming since entry 54.
+
+### What was wrong
+
+Windows refused a config edit that would take a rule away from a session that was running. **Android did
+not.** `CurfewRuntime.commitConfig` wrote the config and reconciled with no check at all, so the profile
+editor could delete the rule that was holding you, save, and the lock would carry on while nothing behind
+it was enforced. The same one-platform-only shape as P1-2.
+
+### The decision moved into the core rather than being copied
+
+The loop that answers *"which profile's rules would be lost for which running session"* was Windows's,
+inline. Both platforms need it, so it is `Config::weakening_a_running_session` beside
+`rules_weakened_by`, and **Windows now calls it too** — a second copy of a security check is how two
+platforms come to disagree, which is the lesson this branch keeps re-learning.
+
+### And my tests found the guard in the wrong place, which is the substantive part
+
+I first put the check on `commit_config`, and two tests failed with the guard refusing `remove_rule`
+instead. That is correct, and the reason is a real platform difference:
+
+**Windows has a file/adopt split and Android does not.** On Windows the file is edited freely and the
+service decides whether to *adopt* it — the review notes that refusing the adoption rather than the edit is
+what protects an administrator editing the file by hand. The FFI **is** the config on Android, so
+`remove_rule` weakens the running session the moment it is called, and a check on the commit can never
+fire: by then the config it compares against has already changed.
+
+So the guard sits on the three calls that change rules — `remove_rule`, `upsert_rule`, `set_config` — and
+`commit_config` keeps its own for a caller replacing a whole document.
+
+### The gap the mutation run found
+
+`upsert_rule` had a guard and **no test exercised it**. Changing a rule's *action* is a weakening —
+`block` becoming `delay` on `reddit.com` leaves the target listed and stops blocking it — and nothing did
+that, so removing the check from `upsert_rule` survived a full run. Closed with a test that softens a rule
+rather than deleting it, which is also the edit a user is more likely to make.
+
+### One deliberate behaviour change, recorded rather than hidden
+
+`replacing_the_config_does_not_release_a_running_session` asserted that a config replacement was *accepted*
+and the lock survived. It is now refused outright — stronger — and the assertion about survival is kept
+for a better reason: nothing about the config changed at all. That is a behaviour change to a documented
+path, so it is called out rather than folded into the diff.
+
+### Three mistakes of mine
+
+**The private check started as a method** in the `#[uniffi::export]` impl. UniFFI exports *everything*
+there, private or not, and wanted `Config` to be liftable across the boundary. It is a free function now,
+which is the right shape for something only Rust calls.
+
+**`Policy.commitConfig(...)` takes no `getOrThrow`** — UniFFI maps `Result<(), E>` to a function that
+throws, so the failure arrives as an exception. The compiler said so.
+
+**My first FFI fixture did string surgery on the config** and left a rule in the *second* profile, so the
+"weakened" config was not a weakening at all. `remove_rule` is what the profile editor calls, and using it
+makes the fixture the real path rather than an approximation — the same lesson as the `days = ["mon"]` and
+`is_date_form` fixtures earlier.
+
+### Verification
+
+1028 Rust tests (was 1019), 72 Android tests, both builds clean. **Five mutations caught**: removing the
+check from `remove_rule`, from `upsert_rule` and from `set_config`, making the refusal never fire, and
+making the shared check report nothing — the last of which proves both platforms depend on the one
+implementation.
