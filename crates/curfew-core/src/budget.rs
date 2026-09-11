@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// When a budget starts over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum Refill {
     /// One allowance, ever. Spend it and it is gone until the rule changes.
     Never,

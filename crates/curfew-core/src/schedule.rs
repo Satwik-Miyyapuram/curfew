@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 /// A recurring weekly window: "weekday mornings, 09:00 to 12:00".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WeeklySchedule {
     pub id: String,
     /// The profile this window runs.
@@ -81,6 +82,7 @@ impl CalendarEvent {
 /// Turns calendar events into sessions: "anything on my Work calendar titled *focus* runs the
 /// deep-work profile, starting five minutes early".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CalendarSource {
     pub id: String,
     /// A path to an `.ics` file on this machine, or an `http(s)`/`webcal` URL to subscribe to.
@@ -101,6 +103,7 @@ fn default_refresh() -> u32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CalendarSchedule {
     pub id: String,
     pub profile: String,

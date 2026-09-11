@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub const CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub schema_version: u32,
     /// IANA name. Budgets reset and schedules fire in *this* zone, not the device's, so a phone
@@ -48,6 +49,7 @@ pub struct Config {
 /// tool that quietly repoints a user's DNS the first time it runs has helped itself to something it
 /// was not given. The hosts file works without it and stays the floor underneath it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Resolver {
     #[serde(default)]
     pub enabled: bool,
@@ -668,6 +670,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Profile {
     pub id: String,
     pub name: String,
@@ -678,6 +681,7 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub target: Target,
     pub action: Action,
@@ -696,7 +700,7 @@ pub enum Platform {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum Action {
     Block,
     /// Everything *not* matched by an allow-only rule in the active profile is blocked.

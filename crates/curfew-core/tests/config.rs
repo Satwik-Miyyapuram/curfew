@@ -793,3 +793,239 @@ fn a_refused_upsert_reports_no_outcome() {
     broken.profile = "no-such-profile".into();
     assert!(cfg.upsert_weekly(broken).is_err());
 }
+
+// --- a typo is not a silent no-op (P2-7) ---------------------------------------------------------
+//
+// Serde ignores keys it does not know, which is the wrong default for a file whose entire job is to
+// state what is forbidden. `[[weekly]] lockss = [...]` — one transposition — loaded successfully with
+// **no locks at all**, so the window ran a session the user believed was locked and could end it with
+// one tap. `curfew-ffi` promised the opposite in a doc comment: *"a config we cannot fully understand
+// is refused so it can never be written back with the user's rules missing."*
+
+/// The review's own example, and the one with teeth: a mistyped field inside a schedule.
+#[test]
+fn a_mistyped_lock_list_in_a_window_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[weekly]]
+id = "evenings"
+profile = "deep-work"
+days = [0, 1]
+start_minute = 1200
+end_minute = 1320
+lockss = [{ kind = "timer" }]
+"#;
+
+    let error = Config::from_toml(config).expect_err("a typo was accepted");
+    let text = error.to_string();
+    assert!(
+        text.contains("lockss"),
+        "the error must name the key the user mistyped, or they cannot find it: {text}"
+    );
+}
+
+/// An unknown key at the top level: a whole section named wrongly used to simply not exist.
+#[test]
+fn an_unknown_top_level_key_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+profiless = []
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown top-level key was accepted");
+    assert!(error.to_string().contains("profiless"), "{error}");
+}
+
+/// Inside a profile.
+#[test]
+fn an_unknown_key_in_a_profile_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+enableed = true
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown profile key was accepted");
+    assert!(error.to_string().contains("enableed"), "{error}");
+}
+
+/// Inside a rule — where a typo is worse than elsewhere, because the rule is the block.
+#[test]
+fn an_unknown_key_in_a_rule_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "block" }
+enableed = true
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown rule key was accepted");
+    assert!(error.to_string().contains("enableed"), "{error}");
+}
+
+/// A misspelled enum tag is refused too. These are internally tagged, so the tag is a field name and
+/// serde would otherwise accept the variant while ignoring everything beside it.
+#[test]
+fn a_mistyped_action_kind_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "blok" }
+"#;
+
+    assert!(Config::from_toml(config).is_err(), "a misspelled action kind was accepted");
+}
+
+/// And the file this project actually ships must still parse, or the guard protects nothing.
+#[test]
+fn the_shipped_example_still_parses_with_unknown_fields_denied() {
+    Config::from_toml(GOLDEN).expect("the golden config must survive deny_unknown_fields");
+    // And the v0 fixture, which is what a forward migration reads — an older file has *fewer* fields,
+    // never unknown ones, so migration is unaffected. Asserted rather than assumed.
+    Config::from_toml(GOLDEN_V0).expect("a v0 config must still migrate");
+}
+
+/// The resolver section: a typo here means the machine silently uses the wrong upstream.
+#[test]
+fn an_unknown_key_in_the_resolver_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[resolver]
+enabled = true
+upstreem = "9.9.9.9:53"
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown resolver key was accepted");
+    assert!(error.to_string().contains("upstreem"), "{error}");
+}
+
+/// A subscription: `refresh_second` instead of `refresh_seconds` used to mean the default interval,
+/// so a user tuning how often their calendar is fetched had no effect and no message.
+#[test]
+fn an_unknown_key_in_a_calendar_source_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[calendar_sources]]
+id = "work"
+location = "https://example.test/work.ics"
+refresh_second = 900
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown source key was accepted");
+    assert!(error.to_string().contains("refresh_second"), "{error}");
+}
+
+/// A calendar schedule. The matcher is the part that decides *which* meetings lock, so a typo in it is
+/// a rule that quietly matches nothing.
+#[test]
+fn an_unknown_key_in_a_calendar_schedule_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[calendars]]
+id = "work-focus"
+profile = "deep-work"
+pad_before_second = 300
+matcher = { title = "*focus*" }
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown calendar key was accepted");
+    assert!(error.to_string().contains("pad_before_second"), "{error}");
+}
+
+/// And the emergency policy, where a typo would leave the release route either missing or wider than
+/// the user asked for.
+#[test]
+fn an_unknown_key_in_the_emergency_policy_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[emergency]
+enabled = true
+cooldown_second = 3600
+"#;
+
+    let error = Config::from_toml(config).expect_err("an unknown emergency key was accepted");
+    assert!(error.to_string().contains("cooldown_second"), "{error}");
+}
+
+/// **Inside an action variant**, which the outer `Rule` guard does not reach.
+///
+/// `action = { kind = "budget", seconds = 600, refil = "daily" }` was accepted and the refill silently
+/// took its default, so somebody who meant "refill daily at 04:00" got the default instead and no
+/// message at all. `Action` and `Refill` are internally tagged enums, so their variant fields sit
+/// inline in the same table and need `deny_unknown_fields` on the enums themselves — the outer `Rule`
+/// guard cannot see them.
+#[test]
+fn a_mistyped_field_inside_an_action_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 600, refil = "daily" }
+"#;
+
+    let error = Config::from_toml(config).expect_err("a mistyped action field was accepted");
+    assert!(error.to_string().contains("refil"), "{error}");
+}
+
+/// And a mistyped field inside a `Refill` variant, one level further in.
+#[test]
+fn a_mistyped_field_inside_a_refill_is_refused() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "domain", domain = "reddit.com" }
+action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minutes = 240 } }
+"#;
+
+    let error = Config::from_toml(config).expect_err("a mistyped refill field was accepted");
+    assert!(error.to_string().contains("at_minutes"), "{error}");
+}

@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 /// The default is no passes at all. Somebody who wants an escape hatch says so in their config,
 /// which means the decision is made while calm rather than at the moment of wanting out.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EmergencyPolicy {
     /// Passes available in any [`window_seconds`](Self::window_seconds)-long stretch. Zero — the
     /// default — disables the hatch entirely.
