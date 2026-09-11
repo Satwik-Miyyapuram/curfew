@@ -123,6 +123,7 @@ must run.
 | 102 | `harden` cancelled a delayed release and removed an end time, which trapped the user | **P0** | **Fixed** — a restore may lengthen a lock but may not take a bound away (entry 86) |
 | 103 | The status classifier closed any row citing an entry, so `entry 14 — left open` read as done | **P2** | **Fixed** — ordering, vocabulary, and two rows it was hiding (entry 86) |
 | 104 | `check_workspace` did not notice `__pycache__`, which `git add -A` would commit | **P2** | **Fixed** — build caches reported anywhere in the tree (entry 86) |
+| 105 | The poller ran at a fixed cadence whatever the state, on both platforms (P1-8) | **P1** | **Fixed** — 1 s active, 15 s idle, with the work gated and §10 corrected (entry 87) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -175,18 +176,18 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 
 | Finding | Sev | Status, as verified |
 | :--- | :--- | :--- |
-| P0-1 | P0 | entry 1 — `Lock::Timer` removed from `claimable` |
-| P0-2 | P0 | entry 2 — the service judges locks against the trusted clock |
-| P0-3 | P0 | entry 3 — `Stop` refused while a lock runs; uninstall fails shut |
-| P1-0 | P1 | entry 25 — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
-| P1-1 | P1 | entry 24 — the read is bounded and `serve` is concurrent |
+| P0-1 | P0 | **Fixed** (entry 1) — `Lock::Timer` removed from `claimable` |
+| P0-2 | P0 | **Fixed** (entry 2) — the service judges locks against the trusted clock |
+| P0-3 | P0 | **Fixed** (entry 3) — `Stop` refused while a lock runs; uninstall fails shut |
+| P1-0 | P1 | **Fixed** (entry 25) — an explicit ACL on `%ProgramData%\Curfew`, and the watchdog image verified by content |
+| P1-1 | P1 | **Fixed** (entry 24) — the read is bounded and `serve` is concurrent |
 | P1-2 | P1 | **fixed** (entry 56). The extension guessed its own identity and fell back to `chrome.exe`, so a Zen, LibreWolf, Waterfox, Arc, Chromium or Opera GX user was never trusted under their real name and had the browser closed outright. The host now reads its own parent process, which *is* the browser, and overrides the message's claim |
 | P1-3 | P1 | **partly fixed** (entries 53, 74 and 85). The bypasses the review names are closed: `restore_sessions` goes through `restore_without_weakening`, so no payload can end a running session or shorten a lock whatever the caller sends; all five restore methods refuse an oversized payload **before parsing it**; and a restored `ClockWitness` can no longer move trusted time **forward**, which is what let one call expire every timer lock. **What is not closed**: the *first* restore is the startup adoption, and the FFI has no clock of its own to check it against — the readings are passed in by the platform because this crate cannot take them — so a forged baseline, or a forged stored blob, is still believed. The witness must survive a restart or *stop the app, set the clock, start the app* is a way out of every timed lock, and authenticating it needs the platform keystore (Android Keystore/StrongBox, DPAPI on Windows), which is a cross-platform piece of work and cannot be verified on this host. `Boots`/`BootCounter` evidence of a caller's choosing is likewise still accepted. The earlier version of this row said none of this was fixable, and the review was right that part of it was |
-| P1-4 | P1 | entry 11 — the ration is enforced by the type |
-| P1-5 | P1 | entry 10 — `[emergency]` validated |
+| P1-4 | P1 | **Fixed** (entry 11) — the ration is enforced by the type |
+| P1-5 | P1 | **Fixed** (entry 10) — `[emergency]` validated |
 | P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
 | P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
-| P1-8 | P1 | **partly fixed** (entry 69). The review makes two claims. **The first is done for Windows**: `Downtime::detect` reads the gap between the last trusted tick and now, `Enforcer::note_start` records it on the first pass — the one place `now` is trusted and the boot counter still holds the previous run's numbering — and both the Now page and the tray report it, cleared by `Request::DismissDowntime` and written to the log; Android already implemented this and is untouched. **The second is not done**: the review says Android's polling is not adaptive, and the Windows tick is 2 s regardless of whether a session is running. This row said `fixed` while its own text named that as not done, which the status classifier surfaced and which is the honest correction |
+| P1-8 | P1 | **fixed** (entries 69 and 87). The review makes two claims. **Downtime**: `Downtime::detect` reads the gap between the last trusted tick and now, `Enforcer::note_start` records it on the first pass, and both the Now page and the tray report it, cleared by `Request::DismissDowntime` (entry 69); Android already implemented this. **Adaptive polling**: the poller ran at a flat 30 s on Android and a flat 2 s on Windows whatever the state. It is now 1 s while a session is active and 15 s idle, with the meter and the foreground sample gated on an active profile and the heartbeat, alarm and notification on their own 15 s cadence (entry 87). **Two things are deliberately not done, and §10 now says so**: the pollers do not stop — the heartbeat they write is what downtime detection measures against and the alarm they arm is what starts the next window, so a stop would make one feature lie and the other never fire — and the *Windows reconcile tick* stays at 2 s because the sync pass runs inside that loop and `curfew-sync` names the five-second cross-device promise it keeps. What backs off on Windows instead is the state write, 43,200 a day at the old cadence |
 | P1-9 | P1 | **fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, which keeps the watchdog alive. Written before the state and removed last, so the worst a crash can do is the safe direction. **Honest limit**: deleting this file too gets the old behaviour, so it raises the cost by one file rather than preventing it |
 | P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
 | P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
@@ -196,7 +197,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-2 | P2 | **fixed** (entry 53) — an identical redraw no longer rebuilds the body |
 | P2-3 | P2 | **fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one |
 | P2-4 | P2 | **fixed under F-24** — the `window.__curfewUser` read is gone |
-| P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
+| P2-5 | P2 | **Fixed** (entry 17) — exit paths chosen by a parsed value, not by comparing display strings |
 | P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
 | P2-7 | P2 | **fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, `Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so `refil = "daily"` was silently defaulting. Only the config: the state file and op-log are read by other versions, where refusing an unknown field would break forward compatibility |
 | P2-8 | P2 | **partly fixed** (entries 75 and 80). Three defects the review lists in the code are done (entry 75): a bare `YYYYMMDD` `DTSTART` is recognised as all-day, so an entry with no `DTEND` is no longer a zero-length event the overlap test drops; `BYMONTHDAY` is parsed as `i32` and negatives resolve against the month they are in; and an unparseable `BYDAY`/`BYMONTHDAY` token **refuses the recurrence** rather than being dropped, which left the constraint list empty and *empty means unconstrained*, so the rule widened. **The fourth point is done too** (entry 80): `budget.rs` now delegates to `schedule.rs`'s `local_instant`, so `1440` means one thing instead of two a minute apart. **Still not done**: `UNTIL` with a DATE value, which the review calls "parsed oddly" without saying what the right answer is. This row previously said *"Not done: the fourth point"* and *"the fourth point is now done too"* in the same cell, because the entry-80 append added the second without removing the first |
@@ -1011,7 +1012,7 @@ source; this is a view of it, and the same discipline that fixed the coverage ta
 
 <!-- open:begin — generated by tools/open_rows.py; do not edit by hand -->
 
-- **Partly fixed** — 3: **P1-3**, **P1-8**, **P2-8**
+- **Partly fixed** — 2: **P1-3**, **P2-8**
 
 <!-- open:end -->
 
@@ -4926,3 +4927,73 @@ were in code written to fix the first round's findings. That is worth recording 
 holding, but the rate at which a fresh adversarial pass finds something has not fallen, and the log's own
 claims have been wrong four times. A reader should treat this branch as *improved and still being
 challenged*, which is what the review's own verdict says too.
+
+---
+
+## 87. The poller ran at a fixed cadence whatever the state
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P1-8**, second claim. `docs/ARCHITECTURE.md` §10 promised
+*"pollers run at 1s while a session is active, 15s idle, and stop entirely when no rule can fire"*; Android
+polled at a flat 30 s with a 5 s meter running forever, and Windows ticked at a flat 2 s. **Implemented, with
+two parts deliberately not, and §10 corrected to say what is built.**
+
+### The changes
+
+**Android.** `POLL_MILLIS = 30_000` was one constant for every state, so an idle phone woke for nothing
+forever and an active one could be half a minute late noticing a blocked app. Now:
+
+- the poll is **1 s while a session is active, 15 s idle**;
+- the **meter and the foreground sample are gated on an active profile**;
+- the **incidental work** — heartbeat, alarm, notification — moved to its own 15 s cadence.
+
+That third change is what makes the first honest. A 1 s poll would otherwise write the heartbeat, call
+`AlarmManager` and update the notification sixty times a minute, which costs more battery than the faster
+poll saves — the opposite of what this is for.
+
+**Windows.** The state write backs off: every tick while a session runs, every 15 s when none does.
+`persist` clones ten collections and rewrites `state.json` — 43,200 writes a day at the old cadence.
+
+### Two things deliberately not done
+
+**The pollers do not stop, and this is the interesting part.** §10 promised *"stop entirely when no rule can
+fire."* That is not safe here, and the reason is in this same loop: it writes the **heartbeat** that
+downtime detection measures against, and on Android it arms the **alarm** for the next scheduled window. A
+loop that stopped would make the first feature report downtime that never happened and leave the second
+window with no alarm — **the silent failure §10 forbids two bullets earlier.** So the loop keeps running and
+the cadence does the work.
+
+Two thresholds bound the idle figure, and neither is a preference: downtime is detected at gaps over five
+minutes, and the heartbeat is what is measured, so any interval approaching that would report downtime on a
+machine that was never down. 15 s is twenty times under it. There is a test for exactly that, on both
+platforms, because it is the constraint that makes the number non-arbitrary.
+
+**The Windows reconcile tick stays at 2 s.** My own row invited backing it off — *"the Windows tick is 2 s
+regardless of whether a session is running"* — and that turns out to be the wrong thing to change.
+`runner.rs` says the sync pass runs inside this loop, *"the very next pass two seconds later, which is what
+keeps the five-second promise"*, and `curfew-sync/src/node.rs` names that promise: *"the phone blocks within
+five seconds of the PC starting a session."* **The machine that has to react may be the idle one**, so
+slowing this loop would break a documented behaviour to save a wakeup. The row and §10 say so.
+
+### The policy is a testable object, not constants on the service
+
+`EnforcementCadence` is a plain Kotlin object, because `EnforcementService` is an Android `Service` and
+nothing about it can be tested without Robolectric — which does not run on this host. Nine plain-JUnit tests
+cover it, including the downtime-threshold bound.
+
+The numbers living in an untestable file is not incidental to this finding; it is plausibly *why* the
+documented strategy and the built one drifted apart. A claim about battery that nothing checks is a claim
+nobody notices changing.
+
+### And a source guard for the wiring
+
+Seven mutations on the policy were caught, but none of them could catch the regression that matters: the
+waits going back to literals while the policy object still exists and its own tests still pass. Nothing in a
+plain-JUnit suite executes a `Service`, so the guard scans the source — following `UntranslatedCopy`'s
+existing precedent for locating source from a unit test — and **strips comments first**, because the
+previous round's lesson was that a check a commented-out line can satisfy is not a check. Verified both ways:
+restoring a literal `delay(30_000L)` and re-adding a `POLL_MILLIS` constant each fail it.
+
+### Verification
+
+1062 Rust tests (was 1058), 81 Android tests (was 72). Seven policy mutations plus two wiring mutations, all
+caught. §10 now describes the built policy and names the two departures with their reasons.

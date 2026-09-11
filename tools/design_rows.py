@@ -17,13 +17,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Verified statuses. `fixed` and `open` were both established by reading the named code this branch;
 # `partial` means part of the finding is closed and the rest is named.
 STATUS = {
-    "P0-1": ("have", "entry 1 — `Lock::Timer` removed from `claimable`"),
-    "P0-2": ("have", "entry 2 — the service judges locks against the trusted clock"),
-    "P0-3": ("have", "entry 3 — `Stop` refused while a lock runs; uninstall fails shut"),
-    "P1-0": ("have", "entry 25 — an explicit ACL on `%ProgramData%\\Curfew`, and the watchdog image verified by content"),
-    "P1-1": ("have", "entry 24 — the read is bounded and `serve` is concurrent"),
-    "P1-4": ("have", "entry 11 — the ration is enforced by the type"),
-    "P1-5": ("have", "entry 10 — `[emergency]` validated"),
+    "P0-1": ("have", "**Fixed** (entry 1) — `Lock::Timer` removed from `claimable`"),
+    "P0-2": ("have", "**Fixed** (entry 2) — the service judges locks against the trusted clock"),
+    "P0-3": ("have", "**Fixed** (entry 3) — `Stop` refused while a lock runs; uninstall fails shut"),
+    "P1-0": ("have", "**Fixed** (entry 25) — an explicit ACL on `%ProgramData%\\Curfew`, and the watchdog image verified by content"),
+    "P1-1": ("have", "**Fixed** (entry 24) — the read is bounded and `serve` is concurrent"),
+    "P1-4": ("have", "**Fixed** (entry 11) — the ration is enforced by the type"),
+    "P1-5": ("have", "**Fixed** (entry 10) — `[emergency]` validated"),
     "P1-3": ("partial",
              "**partly fixed** (entries 53, 74 and 85). The bypasses the review names are closed: "
              "`restore_sessions` goes through `restore_without_weakening`, so no payload can end a running "
@@ -90,7 +90,7 @@ STATUS = {
     "P2-2": ("fixed", "**fixed** (entry 53) — an identical redraw no longer rebuilds the body"),
     "P2-3": ("fixed", "**fixed** (entry 53) — a stale refresh can no longer overwrite a fresh one"),
     "P2-4": ("fixed", "**fixed under F-24** — the `window.__curfewUser` read is gone"),
-    "P2-5": ("have", "entry 17 — exit paths chosen by a parsed value, not by comparing display strings"),
+    "P2-5": ("have", "**Fixed** (entry 17) — exit paths chosen by a parsed value, not by comparing display strings"),
     "P2-6": ("fixed",
              "**fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the "
              "page contains no `type=\"password\"`"),
@@ -130,16 +130,20 @@ STATUS = {
               "**fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front"),
     "P2-17": ("fixed",
               "**fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now"),
-    "P1-8": ("partial",
-             "**partly fixed** (entry 69). The review makes two claims. **The first is done for Windows**: "
-             "`Downtime::detect` reads the gap between the last trusted tick and now, `Enforcer::note_start` "
-             "records it on the first pass — the one place `now` is trusted and the boot counter still holds "
-             "the previous run's numbering — and both the Now page and the tray report it, cleared by "
-             "`Request::DismissDowntime` and written to the log; Android already implemented this and is "
-             "untouched. **The second is not done**: the review says Android's polling is not adaptive, and "
-             "the Windows tick is 2 s regardless of whether a session is running. This row said `fixed` "
-             "while its own text named that as not done, which the status classifier surfaced and which is "
-             "the honest correction"),
+    "P1-8": ("fixed",
+             "**fixed** (entries 69 and 87). The review makes two claims. **Downtime**: `Downtime::detect` "
+             "reads the gap between the last trusted tick and now, `Enforcer::note_start` records it on the "
+             "first pass, and both the Now page and the tray report it, cleared by "
+             "`Request::DismissDowntime` (entry 69); Android already implemented this. **Adaptive polling**: "
+             "the poller ran at a flat 30 s on Android and a flat 2 s on Windows whatever the state. It is "
+             "now 1 s while a session is active and 15 s idle, with the meter and the foreground sample "
+             "gated on an active profile and the heartbeat, alarm and notification on their own 15 s "
+             "cadence (entry 87). **Two things are deliberately not done, and §10 now says so**: the "
+             "pollers do not stop — the heartbeat they write is what downtime detection measures against "
+             "and the alarm they arm is what starts the next window, so a stop would make one feature lie "
+             "and the other never fire — and the *Windows reconcile tick* stays at 2 s because the sync "
+             "pass runs inside that loop and `curfew-sync` names the five-second cross-device promise it "
+             "keeps. What backs off on Windows instead is the state write, 43,200 a day at the old cadence"),
     "P2-8": ("partial",
              "**partly fixed** (entries 75 and 80). Three defects the review lists in the code are done "
              "(entry 75): a bare `YYYYMMDD` `DTSTART` is recognised as all-day, so an entry with no "

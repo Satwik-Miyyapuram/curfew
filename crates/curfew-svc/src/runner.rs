@@ -13,7 +13,7 @@ use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The control channel's name and the client that speaks on it, both owned by `curfew-win` so the
 /// service and everything that talks to it cannot disagree about either.
@@ -25,6 +25,32 @@ pub use curfew_win::ipc::{ask, SOCKET};
 /// for a quarter of a minute has effectively not been blocked, and a pass that runs every 200ms
 /// spends a laptop's battery enumerating processes nobody started.
 pub const TICK: Duration = Duration::from_secs(2);
+
+/// How often the state file is written while **nothing is running** — P1-8's adaptive half.
+///
+/// `TICK` stays at two seconds and is deliberately **not** adaptive, which is worth answering because the
+/// finding's "back the idle poll off" invites it: the sync pass runs inside this loop, and
+/// `curfew_sync::node`'s own comment names the promise it keeps — *"the phone blocks within five seconds
+/// of the PC starting a session."* The machine that has to react may be the idle one, so slowing this loop
+/// down would break a documented behaviour to save a wakeup.
+///
+/// The write is a different matter. `persist` clones ten collections and rewrites `state.json`, which at
+/// [TICK] is 43,200 writes a day; the only thing the file's `last_tick` feeds is downtime detection, whose
+/// threshold is [`curfew_win::downtime::DOWNTIME_SECONDS`] (five minutes). Fifteen seconds is twenty times
+/// under that, so the report stays honest, and nothing accrues while nothing runs — so nothing real is
+/// lost by writing it less often.
+pub const PERSIST_IDLE: Duration = Duration::from_secs(15);
+
+/// Whether the state file is due to be written.
+///
+/// `since_persist` is the time since the last write. Usage accrues only while a session runs, so an active
+/// machine is written every tick and an idle one every [`PERSIST_IDLE`].
+pub fn persist_due(sessions_running: bool, since_persist: Duration) -> bool {
+    if sessions_running {
+        return true;
+    }
+    since_persist >= PERSIST_IDLE
+}
 
 /// How many ticks pass before an unpaired device looks again for a pairing — see [`start_sync`].
 const SYNC_RETRY_TICKS: u32 = 15;
@@ -698,6 +724,9 @@ pub fn run(
     // later, which is the same latency everything else in the mirror has.
     let mut peer_events: Vec<curfew_core::CalendarEvent> = Vec::new();
     let mut previous = last_tick;
+    // When the state file was last written. Carried across iterations so the write can back off while
+    // nothing is running — see `persist_due`.
+    let mut last_persist = std::time::Instant::now();
     while !stop() {
         // Trusted time, and the only time this loop may judge anything against.
         //
@@ -833,7 +862,14 @@ pub fn run(
                 _ => 0,
             };
             guard.sync = sync.state(nearby);
-            persist(&guard, &state_path, now);
+            // **Adaptive, and only here** — P1-8. The tick stays at two seconds because the sync pass in
+            // this same loop is what keeps the five-second cross-device promise; the state *write* is the
+            // expensive part and its only reader is downtime detection, whose threshold is five minutes.
+            let running = !guard.sessions.running.is_empty();
+            if persist_due(running, last_persist.elapsed()) {
+                last_persist = Instant::now();
+                persist(&guard, &state_path, now);
+            }
         }
 
         if !matches!(sync, SyncStart::Up(..)) {
@@ -965,6 +1001,55 @@ mod pipe_acl_tests {
 ///
 /// The fallback is now the last config that parsed, kept beside the state. These tests drive `build`
 /// directly, which is why its three paths are parameters rather than the globals the service uses.
+#[cfg(test)]
+mod cadence_tests {
+    use super::{persist_due, PERSIST_IDLE, TICK};
+    use std::time::Duration;
+
+    /// **The one that matters.** [`curfew_win::downtime`] reports a gap over five minutes as downtime, and
+    /// the file's `last_tick` is what it measures against. An idle write interval at or above that would
+    /// report downtime that never happened, on every quiet machine.
+    #[test]
+    fn the_persist_interval_stays_under_the_downtime_threshold() {
+        let threshold = Duration::from_secs(curfew_win::downtime::DOWNTIME_SECONDS as u64);
+        assert!(
+            PERSIST_IDLE * 10 <= threshold,
+            "idle persist {PERSIST_IDLE:?} is not safely under the {threshold:?} downtime threshold"
+        );
+    }
+
+    /// A running session is written every tick: usage is accruing and losing it is losing something real.
+    #[test]
+    fn a_running_session_is_persisted_every_tick() {
+        assert!(persist_due(true, Duration::ZERO));
+        assert!(persist_due(true, TICK));
+    }
+
+    /// Nothing running is written on the slow cadence instead.
+    #[test]
+    fn an_idle_machine_is_persisted_on_the_slow_cadence() {
+        assert!(!persist_due(false, TICK), "an idle machine wrote every tick");
+        assert!(!persist_due(false, PERSIST_IDLE - Duration::from_millis(1)));
+        assert!(persist_due(false, PERSIST_IDLE));
+        assert!(persist_due(false, PERSIST_IDLE * 2));
+    }
+
+    /// **The tick itself is not adaptive, and this pins why.** The sync pass runs inside that loop and the
+    /// cross-device promise depends on it, so two seconds is a behaviour rather than a cadence.
+    #[test]
+    fn the_reconcile_tick_is_deliberately_not_backed_off() {
+        assert_eq!(
+            TICK,
+            Duration::from_secs(2),
+            "the tick changed, and the sync promise depends on it"
+        );
+        assert!(
+            PERSIST_IDLE > TICK,
+            "an adaptive write interval that is not longer than the tick saves nothing"
+        );
+    }
+}
+
 #[cfg(test)]
 mod config_fallback_tests {
     use super::{build, config_backup_path};

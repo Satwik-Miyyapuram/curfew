@@ -31,97 +31,48 @@ def rows(text):
     return out
 
 
-# The vocabulary the coverage tables actually use, **read off the table** rather than guessed.
+# **The verdict is the leading word of the status cell, and only that.** Scanning the whole cell for
+# negative phrases cannot tell *"this is outstanding"* from *"this is excluded on purpose, here is why"* —
+# P1-8's row says "two things are deliberately not done" and is nevertheless fixed — and every word added to
+# narrow one case widened the other.
 #
-# `"fixed" not in status` was the first version. It classified **"Not fixed"** as closed — as did "Unfixed"
-# and "Open - not fixed" — while "Deferred, see entry 4" read as closed via "entry". A generator whose
-# entire job is to say what is still open would have printed "Nothing" for a table full of open rows.
+# The rows already lead with their verdict, so this reads that and ignores the explanation. The earlier
+# versions of this function were substring tests over the prose, and they were wrong three times: "fixed" not
+# in status classified **"Not fixed"** as closed; treating an entry reference as closed swallowed
+# `entry 14 — investigated and left open`; and then the word list that fixed that swallowed a *fixed* row
+# that mentioned an exclusion.
 #
-# **Negatives are checked before the entry reference**, which is the actual fix: the old rule had no notion
-# of a negative, so any status mentioning an entry was assumed to be closed. A status that is just
-# `entry 12 — ...` *is* closed, because that is how the UX table records an earlier round's fix.
-# **Explicit negatives**, checked before anything positive: "not fixed" contains "fixed".
-OPEN_WORDS = (
-    "not fixed",
-    "unfixed",
-    "deferred",
-    "still open",
-    "verified open",
-    "not re-assessed",
-    "unaddressed",
-    "blocked",
-    "left open",
-    "open pending",
-    # **"not done" earns its place**: it is how these tables say a review claim is still outstanding, and
-    # adding it surfaced two rows marked `fixed` whose own text said otherwise (P1-8, P2-8). Only two rows
-    # in the table contain it and both were genuinely partial, so it cannot mask anything.
-    #
-    # **"pending" is deliberately absent.** P2-18 uses it as a technical term — *"every pending entry"* in
-    # the op-log — so the word says nothing about the row's status. That is the difference between a
-    # vocabulary and a word list, and it is why each entry here is checked against the table first.
-    "not done",
-    "still to do",
-    # Verified safe by scanning all 52 statuses in the table: none of these appears in a closed row. The
-    # exclusion of "pending" (a technical term in P2-18) and of "to do"/"todo" (which read as "how to do X"
-    # in prose) is deliberate — a word list that is too keen turns a check into noise.
-    "working on",
-    "still being",
-    "not yet",
-    "unfinished",
-    "outstanding",
-    "incomplete",
-    "unresolved",
-    "awaiting",
-    "needs work",
-    "revisit",
+# The patterns are anchored, and order matters: "not fixed" before "fixed", "not a defect" before "not".
+LEADING = (
+    (re.compile(r"partly fixed|partial"), "partly"),
+    (re.compile(r"not fixed|unfixed|deferred|blocked|unaddressed|not re-assessed|still open|"
+                r"open\b|left open"), "open"),
+    (re.compile(r"not a defect"), "closed"),
+    (re.compile(r"fixed|assessed|reconciled|rejected"), "closed"),
 )
-CLOSED_WORDS = ("fixed", "not a defect", "assessed")
-ENTRY_REF = re.compile(r"^\s*\**(entry|entries)\s+\d+")
-# A bare "open", as a whole word — `\b` so "opened" does not match. Three statuses in the table contain
-# "opened" and all three are closed, which is why this is not a substring test.
-BARE_OPEN = re.compile(r"\bopen\b", re.IGNORECASE)
+# **No entry-reference pattern, deliberately.** Treating `entry N — ...` as closed is what swallowed
+# `entry 14 — investigated and left open`: the form carries no verdict, so the tool supplied one. Rows that
+# used it now lead with `**Fixed** (entry N)`, and a row that leads with a bare reference stops the tool
+# rather than being assumed closed.
 
 
 def classify(status):
-    """`"closed"`, `"partly"` or `"open"` — or raises on a phrase this file does not know.
+    """`"closed"`, `"partly"` or `"open"` — from the **leading** verdict, or raises if there is none.
 
-    **The order matters, and each step earns its place:**
-
-    1. *partly* — because "partly fixed" contains "fixed".
-    2. *explicit negatives* — because "not fixed" contains "fixed".
-    3. *explicit positives* — because three statuses containing "opened" are closed.
-    4. *a bare "open"* — catches "left open" and "open pending", which is what a row citing an entry
-       often says, and which the entry-reference fallback below used to swallow.
-    5. *an entry reference* — `entry 1 — Lock::Timer removed from claimable` is how the UX table records
-       an earlier round's fix, so this stays, but only as the **last** resort.
-
-    Stepping straight from (2) to (5) — checking `CLOSED_WORDS or ENTRY_REF` together — classified
-    `entry 14 — investigated and left open` as closed, which is the defect this ordering fixes.
-
-    **The residual, stated rather than implied.** Step 5 is a wildcard: an `entry N — ...` status is closed
-    unless one of the words above appears. So an incompleteness phrasing nobody listed reads as done. This
-    narrows that; it does not close it, and no vocabulary over free prose can. The mitigation is that every
-    word here was checked against the table before being added, and that a status matching *nothing* stops
-    the tool instead of guessing.
-
-    **Raises rather than guessing.** An unrecognised status word is the one case where stopping is right:
-    treating it as open inflates the list, treating it as closed hides work, and either way the tool is
-    confidently wrong about the thing it exists to report.
+    Only the beginning of the cell is read, because the rest of it is the explanation and the explanation
+    legitimately contains negative words. A row that does not begin with a verdict this file knows is the one
+    case where stopping is right: guessing would either inflate the open list or hide work, and either way
+    the tool would be confidently wrong about the thing it exists to report.
     """
-    low = status.lower()
-    if "partly fixed" in low or "partial" in low:
-        return "partly"
-    if any(w in low for w in OPEN_WORDS):
-        return "open"
-    if any(w in low for w in CLOSED_WORDS):
-        return "closed"
-    if BARE_OPEN.search(status):
-        return "open"
-    if ENTRY_REF.match(status):
-        return "closed"
+    # Strip the markdown emphasis and whitespace the tables wrap the verdict in.
+    lead = status.lstrip().lstrip("*").lstrip().lower()
+    for pattern, verdict in LEADING:
+        if pattern.match(lead):
+            return verdict
     raise SystemExit(
-        f"tools/open_rows.py does not recognise the status {status!r}.\n"
-        f"Add it to OPEN_WORDS or CLOSED_WORDS rather than letting this guess."
+        f"tools/open_rows.py cannot read a verdict at the start of {status[:60]!r}.\n"
+        f"Lead the cell with a verdict: fixed, partly fixed, not fixed, not a defect, assessed, "
+        f"open, rejected -- with the entry reference after it, as `**Fixed** (entry 12) ...`."
     )
 
 
