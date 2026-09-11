@@ -239,8 +239,30 @@ impl Log {
     /// Refuses anything it cannot attribute to a device it currently listens to, anything that does
     /// not follow that author's chain, and any attempt to replace an entry it already holds. A
     /// transport is not trusted, so this is where trust is established and nowhere later.
+    ///
+    /// This is the **safe** entry point: it verifies. A caller that has already verified — [`receive`],
+    /// which has to, so it does not re-verify the same entry once per retry pass — uses [`Log::apply`].
+    ///
+    /// [`receive`]: crate::wire::receive
     pub fn accept(&mut self, signed: &Signed, peers: &Peers) -> Result<bool, Error> {
         signed.verify(peers)?;
+        self.apply(signed)
+    }
+
+    /// **The same, for an entry whose signature the caller has already checked.**
+    ///
+    /// Everything `accept` does except the verification, and split out because that verification is a
+    /// full Ed25519 check (P2-18). The retry loop in [`receive`] used to call `accept` on every pending
+    /// entry on every pass, so an entry it had already rejected had its signature checked again — and a
+    /// batch delivered in reverse order, which is what a shared folder produces, cost O(n²) verifications
+    /// to accept n entries.
+    ///
+    /// **Caller's obligation, stated because it is the whole safety of this method:** the signature must
+    /// have been verified against `peers` already, in this process, for this entry. An unverified entry
+    /// reaches the log through here.
+    ///
+    /// [`receive`]: crate::wire::receive
+    pub fn apply(&mut self, signed: &Signed) -> Result<bool, Error> {
         let key = (signed.entry.author.clone(), signed.entry.seq);
         if let Some(existing) = self.entries.get(&key) {
             // Same entry twice is ordinary — two transports, or a peer resending. A *different*
