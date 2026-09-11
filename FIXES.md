@@ -70,6 +70,11 @@ it is corrected against `git log` whenever an entry is added.)*
 
 ### Fixed so far, by commit
 
+Every commit on the branch, in order. The log-only ones are grouped at the end rather than listed
+individually, and for a reason worth stating: **the commit that writes this table cannot cite itself**, so
+chasing that would be an infinite regress. `git log --oneline installer-no-reboot..HEAD` is the authority;
+this table is a reading aid.
+
 | Commit | What |
 | :--- | :--- |
 | `763ab9e` | A timer lock is not something a caller may claim (entry 1) |
