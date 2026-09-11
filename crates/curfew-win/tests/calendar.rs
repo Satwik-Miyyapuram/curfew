@@ -468,3 +468,102 @@ fn a_failing_source_keeps_serving_its_last_good_copy() {
         outcomes[0]
     );
 }
+
+// --- a placeholder is not an authoritative calendar (P2-9) ---------------------------------------
+//
+// `events_between` answers "is this a calendar?" from a single `BEGIN:VCALENDAR`. A provider's
+// auth-expiry page and a truncated export both carry that header and hold no events, so treating any
+// successful parse as authoritative let one overwrite the last good copy — and every calendar-driven
+// block ended with it. That is fail-open on exactly the threat this module was written around, and the
+// module docs state the opposite guarantee.
+
+/// A calendar with one event, then a placeholder: the cache must win.
+#[test]
+fn a_placeholder_does_not_replace_the_last_good_copy() {
+    let feeds_dir = dir("placeholder");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let good = Scripted::always(Ok(meeting()));
+    let (events, _) = feeds.events(NOW, &sources, UTC, &good);
+    assert_eq!(events.len(), 1, "the meeting should have been read");
+
+    // What an expired session or a half-finished download looks like: a valid calendar, no events.
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    let placeholder = Scripted::always(Ok(empty));
+    let (events, outcomes) = feeds.events(NOW + 10, &sources, UTC, &placeholder);
+
+    assert_eq!(events.len(), 1, "the block was released by a calendar with nothing in it");
+    match &outcomes[0] {
+        Outcome::Failed { still_serving, detail, .. } => {
+            assert!(*still_serving, "the failure should say the last good copy is serving");
+            assert!(detail.contains("no events"), "the reason should say what it saw: {detail}");
+        }
+        other => panic!("a placeholder was treated as a good calendar: {other:?}"),
+    }
+}
+
+/// And the on-disk copy is not overwritten either, so a restart during a placeholder outage still
+/// blocks — which is the whole reason the cache is written to disk.
+#[test]
+fn a_placeholder_does_not_overwrite_the_cached_file() {
+    let feeds_dir = dir("placeholder-disk");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    feeds.events(NOW, &sources, UTC, &Scripted::always(Ok(meeting())));
+    let cached = feeds_dir.join("work.ics");
+    let before = std::fs::read_to_string(&cached).expect("the good copy should be on disk");
+    assert!(before.contains("Design review"));
+
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    feeds.events(NOW + 10, &sources, UTC, &Scripted::always(Ok(empty)));
+
+    assert_eq!(
+        std::fs::read_to_string(&cached).unwrap(),
+        before,
+        "the placeholder was written over the cached copy, so a restart would lose the block"
+    );
+
+    // And a fresh `Feeds` restored from that directory still serves the meeting.
+    let mut restarted = Feeds::new(&feeds_dir);
+    restarted.restore(&sources);
+    let (events, _) =
+        restarted.events(NOW + 20, &sources, UTC, &Scripted::always(Err("offline".into())));
+    assert_eq!(events.len(), 1, "the block was lost across a restart during the outage");
+}
+
+/// **The deliberate false positive**, kept because the alternative is worse: a genuinely emptied
+/// calendar keeps serving the old copy once one exists. The user finds out from the failure line, and
+/// the honest way to empty a subscription is to remove it.
+#[test]
+fn an_empty_calendar_is_believed_when_there_is_nothing_to_lose() {
+    let feeds_dir = dir("empty-first");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    let (events, outcomes) = feeds.events(NOW, &sources, UTC, &Scripted::always(Ok(empty)));
+
+    assert!(events.is_empty());
+    // No cached copy, so nothing was lost: this is a fresh subscription to an empty calendar, which is
+    // a legitimate thing to have, and reporting a failure for it would be a false alarm on first run.
+    assert!(
+        matches!(outcomes[0], Outcome::Refreshed { .. }),
+        "a first-ever empty calendar was reported as a failure: {:?}",
+        outcomes[0]
+    );
+}
+
+/// Something that is not a calendar at all is still a failure, unchanged.
+#[test]
+fn text_that_is_not_a_calendar_is_still_a_failure() {
+    let feeds_dir = dir("not-a-calendar");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let (_, outcomes) =
+        feeds.events(NOW, &sources, UTC, &Scripted::always(Ok("<html>Sign in</html>".into())));
+
+    assert!(matches!(outcomes[0], Outcome::Failed { .. }), "{:?}", outcomes[0]);
+}

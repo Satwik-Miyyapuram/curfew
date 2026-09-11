@@ -46,6 +46,24 @@ pub enum Error {
 /// trailing `Z`. The spec says those mean "local time wherever the file is read", so the caller
 /// passes the timezone the policy is configured with rather than the machine's, which is what
 /// makes a calendar rule behave the same on a laptop that travels.
+/// How many `VEVENT`s the document contains, or `Err` if it is not a calendar at all.
+///
+/// **P2-9.** [`events_between`] answers "is this a calendar?", which it decides from a single
+/// `BEGIN:VCALENDAR`. That is enough to know the text parses, and not enough to know it is
+/// *authoritative*: a provider's auth-expiry placeholder and a truncated export both carry the header
+/// and hold no events. A caller that caches whatever parses therefore replaces a good copy with a
+/// placeholder and releases every block that copy was driving, which is fail-open on exactly the
+/// threat this module exists to close.
+///
+/// Counted rather than parsed into events on purpose: the question is about the *document*, not about
+/// a window of it, so it must not depend on a date range or a timezone.
+pub fn event_count(text: &str) -> Result<usize, Error> {
+    if !text.contains("BEGIN:VCALENDAR") {
+        return Err(Error::NotCalendar);
+    }
+    Ok(components(text).len())
+}
+
 pub fn events_between(
     text: &str,
     from: Timestamp,

@@ -214,9 +214,31 @@ impl Feeds {
 
             if due {
                 match fetcher.fetch(&as_http(&source.location)) {
-                    Ok(text) => match curfew_ics::events_between(&text, 0, 0, zone) {
-                        // Parsed as a calendar, so it is safe to keep. Whether this particular
-                        // window has any events in it says nothing about the document's validity.
+                    Ok(text) => match curfew_ics::event_count(&text) {
+                        // **An empty document is not an authoritative one** — P2-9.
+                        //
+                        // Parsing successfully only means the text carried `BEGIN:VCALENDAR`. A
+                        // provider's auth-expiry placeholder and a truncated export both carry it and
+                        // hold no events, and caching one replaces the last good copy, which releases
+                        // every block that copy was driving. That is fail-open on precisely the threat
+                        // this module exists to close, and the module docs state the opposite
+                        // guarantee.
+                        //
+                        // So a document with no events is only believed when there is nothing to lose:
+                        // with no cached copy it is accepted, because a genuinely empty calendar is a
+                        // legitimate thing to subscribe to. With one, the cache keeps serving and the
+                        // source is reported as failing.
+                        Ok(0) if self.cache.contains_key(&source.id) => {
+                            self.note_failure(&source.id, now);
+                            outcomes.push(Outcome::Failed {
+                                id: source.id.clone(),
+                                detail: "the calendar came back with no events at all, which is what a \
+                                         placeholder or a truncated download looks like; keeping the \
+                                         last copy that had some"
+                                    .into(),
+                                still_serving: true,
+                            });
+                        }
                         Ok(_) => {
                             let _ = std::fs::create_dir_all(&self.dir);
                             let _ = std::fs::write(self.path(&source.id), &text);
