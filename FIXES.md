@@ -64,10 +64,50 @@ must run.
 | 43 | The string ratchet and the permission table (the first slice of F-45) | **P2** | **Fixed as far as it goes** (entry 43) |
 | 44 | The copy detector was blind to 159 literals; the arity guard was vacuous twice | **P2** | **Fixed** (entry 44) |
 | 45 | One material instead of two drifting copies; Material dialogs on NowScreen (F-39, F-40) | **P2** | **Fixed** for NowScreen; 81 usages remain elsewhere, ratcheted (entry 45) |
+| 46 | Four findings the log had never recorded: F-33, F-36, F-37, F-15 | **P1-P3** | **Fixed** (entry 46) |
+| 47 | **18 of the review's 48 findings were missing from this log** | **P0-P3** | **Reconciled** -- table above the commit index, 5 left un-assessed (entry 46) |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
 it is corrected against `git log` whenever an entry is added.)*
+
+### Coverage against the reviews — 18 findings this log had never recorded
+
+**Added in entry 46, and it is the most important correction in this document.** The table above was
+built entry by entry from the work as it happened, and this round checked it against the reviews for the
+first time by *finding number* rather than by reading. `UX_INTERACTION_REVIEW.md` defines **48** findings.
+**18 of them appeared nowhere in this log** — including **F-18 (P0)** and eight P1s.
+
+Nothing in the table was wrong. The failure was that a table read as coverage when it was only a record
+of what somebody happened to have worked on, and `Still open` was written from the same memory. That is
+the fourth time this document has mis-stated its own completeness, and the first time the method was the
+problem rather than a number in it.
+
+| Finding | Sev | Status, as verified in entry 46 |
+| :--- | :--- | :--- |
+| F-2 | P2 | **Not re-assessed.** First run seeds a starter profile; whether it says so was not checked |
+| F-3 | P2 | **Open, verified.** `TimerScreen.kt:41` `DEFAULT_MINUTES = 90`; the design says 30 |
+| F-6 | P1 | **Open, verified.** `Auth.isAvailable` exists but is only consulted *at prove time* (`Auth.kt:55`), so the choice is still offered on a phone with no screen lock |
+| F-7 | P1 | **Open, verified.** `NowScreen.kt:669` calls `onRelease` straight from the button; the 24-hour release has no confirmation |
+| F-9 | P1 | **Fixed earlier, unlogged.** `CalendarScreen.kt:89-97` sets `editing = Pick(...)` and opens `CalendarDialog` rather than writing on the tap |
+| F-11 | P1 | **Not re-assessed.** Simple mode appears only in one comment; whether the principles and `PLAN-mobile-polish.md:49` were reconciled was not checked |
+| F-12 | P2 | **Open, verified.** `UsageScreen.kt:64` renders the comparison only under `state.screenTime?.let`, so a first-day user sees no line at all |
+| F-13 | P2 | **Open.** The unexplained absence is the same conditional as F-12 |
+| F-14 | P1 | **Open, verified.** `DevicesScreen.kt:302` revokes on a single tap, with no warning that a lock may name that device as its exit |
+| F-15 | P3 | **Fixed** (entry 46) |
+| F-18 | **P0** | **Fixed in substance, unlogged as a number.** The Windows pairing front door does not exist; recorded in `Still open` under entry 28 and never given its finding number |
+| F-33 | P1 | **Fixed** (entry 46) |
+| F-34 | P2 | **Not re-assessed.** Two rows that promise a path they do not implement |
+| F-35 | P2 | **Fixed earlier, unlogged.** `ProfileEditScreen.kt:207-236` handles all three cases |
+| F-36 | P2 | **Fixed** (entry 46) |
+| F-37 | P3 | **Fixed** (entry 46) |
+| F-48 | P1 | **Not re-assessed** |
+| F-49 | P1 | **Not re-assessed.** Windows and Android are still disjoint in interaction model; this is a product decision rather than a defect to patch |
+
+**"Not re-assessed" is a real status and not a soft one.** Five findings were left unexamined this round
+because checking each properly takes the same work as fixing it, and claiming a status for them from
+memory is the exact habit that produced this section. They are named here so they cannot be lost again,
+and `Still open` now points at this table rather than restating it from recall.
 
 ### Fixed so far, by commit
 
@@ -106,6 +146,7 @@ this table is a reading aid.
 | `31bdd1b` | A ratchet on untranslated copy, and the permission table moved out (entry 43) |
 | `d69572b` | The copy detector was blind to a third of its subject, and the ViewModel slice (entries 43, 44) |
 | `5f72985` | One sheet, one glass, and a ratchet on the second visual language (entry 45) |
+| `f3f5bb9` | Four findings the log had never recorded, and the bug class behind them (entry 46) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -786,6 +827,8 @@ into the binary by `include_str!`, so a syntax error would be a compile error.
 ---
 
 ## Still open
+
+**Read the coverage table above the commit index first.** It is the authoritative list of what is left, per finding, with a verified status and a line reference for each — and it exists because this section, rewritten each round from memory, had left 18 of the review's 48 findings unmentioned (entry 46). What follows is the summary; the table is the detail.
 
 Recorded here so the remaining work is a list rather than a memory. Rewritten after every round, and
 the entries it named as open in the previous revision — the whole Windows interaction set (F-22, F-24 to
@@ -2300,4 +2343,102 @@ clean.
 **Limits, stated as before:** Compose changes here are **compile-verified only**. Colour and layout are
 verified by reading `Design.kt` against the design canvas, not by seeing them. What this round did *not*
 rely on eyes for is the part that was never visual — one material instead of two drifting copies, no
-Material components where the app has its own, and a name instead of a slug.
+---
+
+## 46. Four findings the log never recorded, and the reason it had not
+
+**Findings:** F-15, F-33, F-36, F-37 fixed; the coverage audit is the point of the entry.
+
+### How this started
+
+A deliberate search for a **bug class** rather than for a finding. Printing a profile *id* where its *name*
+belongs had turned up four times -- Windows (F-28), the Android biometric prompt, and then nine
+screen-reader descriptions -- and every one was found by accident while doing something else. So instead
+of waiting to trip over it a fifth time, I looked for the pattern on purpose.
+
+That found the nine. It also found `WeeklyCard` and `CalendarRuleCard` were dead, which led to the
+review's F-37, which led to checking whether *any* of the review's numbers were in this log -- and
+**18 of its 48 were not.**
+
+### What was actually fixed
+
+**F-33 (P1) -- the Settings "Fix" button could crash the app.** Health, Settings and the Timer each had
+their own copy of "resolve a grant to a system page and open it":
+
+| Site | On a device whose OEM build lacks the page |
+| :--- | :--- |
+| Health | `runCatching` with an App-info fallback -- correct |
+| Timer | `runCatching`, failing silently -- the tap does nothing and says nothing |
+| Settings | **no `runCatching` at all** -- `ActivityNotFoundException` kills the screen |
+
+Settings is where a user goes *because* something is not working, and the failure mode was for the app to
+close. Health's own comment already said so -- *"an ActivityNotFoundException here would kill the one
+screen whose job is to fix permissions"* -- and the fix had been applied to the copy in front of it rather
+than to the behaviour. One `openGrantPage` now, with the App-info fallback because it resolves on every
+build. Exactly the shape of F-39's glass: one behaviour written out three times, drifting.
+
+**F-36 (P2) -- the audit list printed internal tokens.** The fallback was `"$kind $detail"`, so a list
+whose stated purpose is that the user can *check* it rendered `sync.failed timeout`. The review counted
+"at least ten" unnamed kinds; the real number was **fourteen of twenty**. All twenty are named, and the
+fallback now says the build does not know the kind rather than printing it -- naming twenty does not stop
+a twenty-first.
+
+`AuditKindTest` scrapes the runtime for every kind it writes and requires a sentence for each, and also
+checks the reverse. **Its first version demanded a bare word as `audit`'s first argument and so missed
+`audit(clock.now(), "config.replaced", "")`** -- and the reverse assertion caught it. Two directions
+catching each other's blind spots is the reason to have both, and this is the fifth guard on this branch
+to be wrong on its first attempt.
+
+**F-15 (P3) -- the pairing doc contradicted the screen.** `UX-FLOWS.md` promised "six words";
+`DevicesScreen` renders six *digits*, and `crates/curfew-sync/src/pair.rs:83` settles it -- *"Six digits in
+two groups, because a phrase people compare has to survive being read down a phone line."* The screen was
+right. **I edited that file in an earlier round and missed it**, which is the third time a document in
+this repo has asserted something the code does not do.
+
+**F-37 (P3) -- dead code with good copy in it, and four of the profile-id bugs inside it.**
+`WeeklyCard`, `CalendarRuleCard` and `Step` had no caller anywhere in the repository;
+`block_open_curfew` was defined and never rendered. Deleted, which removed 13 competing Material usages
+and 6 strings as a side effect.
+
+### The bug class, and why the helper is the fix
+
+Thirteen occurrences now, across two platforms:
+
+| Where | What the user saw |
+| :--- | :--- |
+| Windows, every surface (F-28) | `deep-work` as a session title |
+| Android biometric prompt | `End deep-work` in a dialog the app does not draw |
+| Android screen reader, x9 | `End deep-work now`, heard with nothing on screen to check it against |
+| Android deleted-profile fallbacks | *(correct -- a deleted profile has no name to look up)* |
+
+**F-28 was closed as a Windows bug and was never a Windows bug.** It is a missing convention, and the
+convention now has a test: `ProfileIdPrintTest` refuses a bare `${x.profile}` interpolation in any string,
+**with no allowlist**. Where a name may genuinely be missing, the lookup and its fallback go into a local
+first -- `val who = names[id] ?: id` -- so the rule stays checkable by pattern rather than by judgement. A
+rule with an exception list gets an exception added for the next mistake.
+
+### The audit, which matters more than the four fixes
+
+`UX_INTERACTION_REVIEW.md` defines 48 findings. **Eighteen appeared nowhere in this log**, including
+**F-18 (P0)** and eight P1s. The reconciliation table is above the commit index, with a verified status
+for each and explicit line references.
+
+Every claim in it was checked against the code and the line numbers recorded, so a reader can check them in
+seconds. Five findings are marked **"not re-assessed"**, which is a real status: checking each properly
+costs the same as fixing it, and filling those in from memory is precisely the habit that produced the gap.
+
+**Nothing in the status table was wrong.** The failure was that a table read as *coverage* when it was a
+record of what somebody happened to have worked on -- and `Still open` was written from the same memory.
+That is the fourth time this document has mis-stated its own completeness and the first time the *method*
+was at fault rather than a number in it. The fix is the table plus a rule: coverage is checked against the
+reviews by **finding number**, not by reading.
+
+### Verification
+
+57 Android tests pass across 10 classes. Ratchets, all mutation-tested: untranslated 320 -> **314**,
+interpolated 79 -> **75**, competing Material usages 81 -> **68**. `AuditKindTest` and `ProfileIdPrintTest`
+are new and both mutation-tested in every direction. Rust untouched at **861 passed**; fmt and clippy
+clean.
+
+**Limits:** the Compose changes are compile-verified only. What did not need eyes: a shared failure path,
+twenty named kinds, a string that leaked a token, and a name instead of a slug.
