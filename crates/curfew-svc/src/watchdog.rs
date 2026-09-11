@@ -258,6 +258,50 @@ mod tests {
         assert!(!locks_running(&dir.join("nothing.json")));
     }
 
+    /// **A deletion is not a first run** (P1-9), and this is the consequence that mattered.
+    ///
+    /// `Loaded::Fresh` retires the watchdog — that is what `false` here means. `load` reports `Fresh`
+    /// when both state files are missing, which a deliberate deletion produces and a crash does not
+    /// (a crash leaves the backup). So before the out-of-band witness, deleting two files released
+    /// every lock *and* switched off the process whose whole job is to notice that enforcement
+    /// stopped. The witness is what tells `load` the difference, and this asserts the watchdog acts
+    /// on it.
+    #[test]
+    fn a_deleted_state_directory_does_not_retire_the_watchdog() {
+        let dir = scratch("deleted");
+
+        // A locked machine, saved twice so a `.bak` exists to delete.
+        let mut sessions = curfew_core::Sessions::default();
+        sessions.start(curfew_core::Session {
+            id: "s1".into(),
+            profile: "deep-work".into(),
+            source: curfew_core::session::SessionSource::Manual,
+            started_at: 1_788_510_600,
+            lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(1_788_513_600)),
+        });
+        let state = state::Persisted { sessions, ..Default::default() };
+        let path = dir.join("state.json");
+        state::save(&path, &state).unwrap();
+        state::save(&path, &state).unwrap();
+        assert!(locks_running(&path), "a locked machine should be watched");
+
+        // The deletion: both copies, leaving the witness.
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_file(path.with_extension("bak")).unwrap();
+
+        assert!(
+            locks_running(&path),
+            "deleting the state files retired the watchdog, so nothing would restart enforcement"
+        );
+    }
+
+    /// And a machine that has genuinely never run is still left alone.
+    #[test]
+    fn a_machine_that_has_never_run_is_not_watched() {
+        let dir = scratch("never-run");
+        assert!(!locks_running(&dir.join("state.json")));
+    }
+
     /// A scratch directory per test, so parallel tests do not fight over one path.
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("curfew-wd-{}-{name}", std::process::id()));

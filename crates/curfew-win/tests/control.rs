@@ -6,7 +6,7 @@
 use curfew_core::{Config, Lock, Refusal, Session, SessionSource, Sessions};
 use curfew_win::ipc::{encode, parse_request, Request, Response};
 use curfew_win::procs::{Process, Processes};
-use curfew_win::state::{load, save, Loaded, Persisted};
+use curfew_win::state::{load, save, witness_of, Loaded, Persisted};
 use curfew_win::Enforcer;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -1214,4 +1214,62 @@ fn a_reload_that_weakens_is_adopted_when_nothing_is_running() {
 
     assert_eq!(e.handle(NOW, Request::Reload), Response::Ok);
     assert_eq!(e.config.profiles[0].rules.len(), 0, "the edit was not adopted");
+}
+
+// --- deleting the state is not a way out (P1-9) -------------------------------------------------
+//
+// `load` cannot tell a first run from a deliberate deletion, because both leave the same two things
+// missing. A crash mid-write leaves the backup, so the deletion is the case that produces `Fresh` —
+// and `Fresh` is what retires the watchdog (`watchdog::locks_running` is false for it). So deleting
+// two files released every lock *and* switched off the thing that would have restarted enforcement.
+//
+// `state.json.locked` is the out-of-band witness: written whenever a session is running, removed when
+// one is not, and its *existence* is the whole signal.
+
+#[test]
+fn a_first_run_with_no_witness_is_still_a_first_run() {
+    // The ordinary case must not regress: nothing has ever run here.
+    assert_eq!(load(&dir("fresh-no-witness").join("state.json")), Loaded::Fresh);
+}
+
+#[test]
+fn deleting_the_state_files_while_a_lock_ran_is_reported_as_lost_not_fresh() {
+    // A directory of its own: the tests share `std::env::temp_dir()`, and reusing another test's
+    // name leaves its `.bak` behind, so the "both copies gone" case never actually arises.
+    let path = dir("deleted-both").join("state.json");
+    // Twice, because the first `save` has no previous copy to preserve and so writes no `.bak`.
+    save(&path, &locked_state()).unwrap();
+    save(&path, &locked_state()).unwrap();
+
+    // The attack, in two lines: remove the state and its backup.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(path.with_extension("bak")).unwrap();
+
+    match load(&path) {
+        Loaded::Lost { detail } => {
+            assert!(detail.contains("deletion"), "the reason should say what it was: {detail}")
+        }
+        other => panic!("a deletion while a lock ran was reported as {other:?}"),
+    }
+}
+
+// The watchdog's half of this — that `Loaded::Lost` keeps it alive — is tested where the watchdog
+// lives, in `crates/curfew-svc/src/watchdog.rs`: `curfew-win` cannot see `curfew-svc`, and reaching
+// across from here would be a dependency the wrong way round.
+
+/// With the lock ended, the witness goes away and the next load is a first run again — otherwise a
+/// machine that once held a lock could never be treated as clean.
+#[test]
+fn ending_the_last_session_removes_the_witness() {
+    let path = dir("witness-cleared").join("state.json");
+    save(&path, &locked_state()).unwrap();
+    assert!(witness_of(&path).exists(), "a running session left no witness");
+
+    save(&path, &Persisted::default()).unwrap();
+    assert!(!witness_of(&path).exists(), "the witness outlived the lock");
+
+    // And now a deletion of the state looks like the fresh install it is.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(path.with_extension("bak")).unwrap();
+    assert_eq!(load(&path), Loaded::Fresh);
 }

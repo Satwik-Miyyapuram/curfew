@@ -81,6 +81,40 @@ fn backup_of(path: &Path) -> PathBuf {
     path.with_extension("bak")
 }
 
+/// A file whose **existence** means "a lock was running the last time this machine was alive".
+///
+/// **P1-9.** `load` cannot tell a fresh install from a deliberate deletion, because both leave the
+/// same two things missing: the state file and its backup. A crash mid-write leaves the backup, so the
+/// deletion is the case that produces `Fresh` — and `Fresh` is what retires the watchdog
+/// (`watchdog::locks_running` returns false for it), so deleting two files released every lock *and*
+/// switched off the thing that would have restarted enforcement. The comment claiming the two cases
+/// are "answered the same way" was true of the loader and wrong about the consequence.
+///
+/// This is the out-of-band witness. It is written whenever the state holds a running session and
+/// removed when it does not, and it is deliberately a *different shape* from the state: no content is
+/// read, only whether the path exists, so a half-written or zero-length one still answers the only
+/// question asked of it. That is what lets it survive the failure it exists for.
+///
+/// It is not a secret and not a lock. Somebody who deletes this file too gets the old behaviour, so
+/// the honest description is "raises the cost of the deletion by one file", not "prevents it" — the
+/// review asks for a witness, and a witness is what this is.
+pub fn witness_of(path: &Path) -> PathBuf {
+    path.with_extension("locked")
+}
+
+/// Note, out of band, whether a lock was running. Called from [`save`].
+fn write_witness(path: &Path, locks_running: bool) -> io::Result<()> {
+    let witness = witness_of(path);
+    if locks_running {
+        // Written empty on purpose: the answer is the path, not the bytes.
+        std::fs::write(&witness, b"")
+    } else if witness.exists() {
+        std::fs::remove_file(&witness)
+    } else {
+        Ok(())
+    }
+}
+
 pub fn load(path: &Path) -> Loaded {
     match std::fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str(&text) {
@@ -98,6 +132,15 @@ pub fn load(path: &Path) -> Loaded {
                     Err(e) => Loaded::Lost {
                         detail: format!("state file missing, backup unreadable: {e}"),
                     },
+                },
+                // **Both copies gone is not automatically a first run.** P1-9: the witness is what
+                // separates the two cases, and it is checked here rather than by the caller because
+                // *every* caller has to get this right — reporting `Fresh` for a deletion is what
+                // retired the watchdog and released every lock.
+                Err(_) if witness_of(path).exists() => Loaded::Lost {
+                    detail: "the state file and its backup are both gone, but a lock was running: \
+                             this is a deletion, not a first run"
+                        .into(),
                 },
                 Err(_) => Loaded::Fresh,
             }
@@ -120,10 +163,17 @@ fn recover(path: &Path, detail: String) -> Loaded {
 ///
 /// Order matters: the current file is copied to `.bak` first, then the new one is written to a
 /// temporary file and renamed over the top. At every instant at least one complete file exists.
+///
+/// **The witness is written first and removed last** (P1-9), and that order is the whole point of it.
+/// A witness written *after* the state could be missing for a crash in between — the case it must not
+/// miss. Written before, the worst a crash can do is leave a witness for a lock that has just ended,
+/// which reads as "a lock was running" and is the safe direction: it makes `load` report `Lost` rather
+/// than `Fresh`, and `Lost` keeps the watchdog alive.
 pub fn save(path: &Path, state: &Persisted) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    write_witness(path, !state.sessions.running.is_empty())?;
     if path.exists() {
         std::fs::copy(path, backup_of(path))?;
     }
