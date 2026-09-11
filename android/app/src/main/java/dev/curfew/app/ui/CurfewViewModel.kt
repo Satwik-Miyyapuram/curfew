@@ -313,7 +313,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     hub.refreshPeers()
                     pending = null
                     _state.update { it.copy(sync = it.sync.copy(offering = null)) }
-                    say("Paired.")
+                    note("Paired.")
                 }
                 .onFailure { say(it.message ?: "That pairing could not be completed.") }
             refresh()
@@ -340,7 +340,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess {
                     hub.save()
                     hub.refreshPeers()
-                    say("That device will be ignored from now on.")
+                    note("That device will be ignored from now on.")
                 }
                 .onFailure { say(it.message ?: "That device could not be removed.") }
             refresh()
@@ -354,8 +354,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             when {
                 pass == null -> say("Sync is not running on this device.")
                 pass.adopted.isNotEmpty() ->
-                    say("Took up ${pass.adopted.size} block(s) from another device.")
-                else -> say("Up to date.")
+                    note("Took up ${pass.adopted.size} block(s) from another device.")
+                else -> note("Up to date.")
             }
             refresh()
         }
@@ -368,7 +368,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { hub.sync.folderPass(root.trim()) }
                 .onSuccess { pass ->
                     hub.save()
-                    say("Took in ${pass.accepted} update(s), left ${pass.written} behind.")
+                    note("Took in ${pass.accepted} update(s), left ${pass.written} behind.")
                     runtime.syncPass()
                 }
                 .onFailure { say(it.message ?: "That folder could not be used.") }
@@ -394,7 +394,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.endSession(session.id, satisfied)
-                say("${session.profile} ended.")
+                note("${session.profile} ended.")
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -427,7 +427,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.scanToken(session.id, payload)
-                say("${session.profile} ended.")
+                note("${session.profile} ended.")
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -446,7 +446,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun releasePeer(id: String) {
         viewModelScope.launch {
             runtime.releasePeer(id)
-            say("Released. The other device will act on it within a few seconds.")
+            note("Released. The other device will act on it within a few seconds.")
             refresh()
         }
     }
@@ -455,7 +455,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun requestRelease(session: Session) {
         viewModelScope.launch {
             runCatching { runtime.requestRelease(session.id) }
-                .onSuccess { say("Release for ${session.profile} lands ${relative(it, runtime.clock.now())}.") }
+                .onSuccess { note("Release for ${session.profile} lands ${relative(it, runtime.clock.now())}.") }
                 .onFailure { say("That session cannot be released early.") }
             refresh()
         }
@@ -472,7 +472,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.spendPass(session.id)
-                say("${session.profile} ended with an emergency pass.")
+                note("${session.profile} ended with an emergency pass.")
             } catch (e: NoPass) {
                 say(describePassRefusal(e.refusal, runtime.clock.now()))
             } catch (refused: Refused) {
@@ -588,7 +588,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteProfile(id: String) {
         viewModelScope.launch {
             runtime.deleteProfile(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onSuccess { note("Removed. A session it already started keeps running.") }
                 // The core's message names the schedules still pointing at it, which is exactly
                 // what the user needs in order to fix it.
                 .onFailure { say(it.message ?: "That profile could not be removed.") }
@@ -609,7 +609,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // Said plainly, because it is the part people get wrong: deleting the rule that
             // started a session does not end the session.
             runtime.deleteWeekly(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onSuccess { note("Removed. A session it already started keeps running.") }
                 .onFailure { say(it.message ?: "That window could not be removed.") }
             refresh()
         }
@@ -626,7 +626,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteCalendarRule(id: String) {
         viewModelScope.launch {
             runtime.deleteCalendarRule(id)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onSuccess { note("Removed. A session it already started keeps running.") }
                 .onFailure { say(it.message ?: "That rule could not be removed.") }
             refresh()
         }
@@ -649,7 +649,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteRule(profile: String, target: Target) {
         viewModelScope.launch {
             runtime.deleteRule(profile, target)
-                .onSuccess { say("Removed. A session it already started keeps running.") }
+                .onSuccess { note("Removed. A session it already started keeps running.") }
                 .onFailure { say(it.message ?: "That could not be unblocked.") }
             refresh()
         }
@@ -792,7 +792,21 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Put one sentence in front of the user. Public so a screen can report a failed file read. */
-    fun say(message: String) = _state.update { it.copy(message = message) }
+    fun say(message: String) = _state.update { it.copy(message = Notice(message, bad = true)) }
+
+    /**
+     * The same surface, for something that went *right*.
+     *
+     * A separate call rather than a flag at every site, because the overwhelming majority of these
+     * sentences are failures and a default of "bad" is the one that fails safe: a new error path that
+     * forgets to say which it is gets shown as a problem, where the reverse would hide a failure
+     * behind a reassuring tick.
+     *
+     * This exists because `message` was one undifferentiated string when the banner was added, and
+     * painting all of it red would have made "Paired." and "Up to date." look like errors — trading
+     * one bug for a louder one.
+     */
+    fun note(message: String) = _state.update { it.copy(message = Notice(message, bad = false)) }
 
     companion object {
         private const val AUDIT_SHOWN = 200
@@ -817,6 +831,15 @@ internal const val PREVIEW_SECONDS = 36L * 3600
  */
 /** One calendar rule catching one event: the rule's id, and the profile it runs. */
 data class EventRule(val schedule: String, val profile: String)
+
+/**
+ * One sentence for the user, and whether it is bad news.
+ *
+ * `bad` chooses the colour and the glyph, and nothing else. A plain flag rather than a third `Tone`
+ * value, because there are only two things to say about a finished action — it worked, or it did not
+ * — and a "warning" tier no call site uses would be a category waiting to be invented wrongly.
+ */
+data class Notice(val text: String, val bad: Boolean)
 
 data class UiState(
     val now: Long = 0,
@@ -875,7 +898,7 @@ data class UiState(
     val clockTamper: dev.curfew.app.data.ClockTamper? = null,
     /** Sync as the devices screen shows it. Present even when nothing has been paired. */
     val sync: SyncState = SyncState(),
-    val message: String? = null,
+    val message: Notice? = null,
     /**
      * Sessions whose lock names *this* device as the one that must let them out.
      *

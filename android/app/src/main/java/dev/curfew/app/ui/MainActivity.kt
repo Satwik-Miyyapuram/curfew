@@ -131,6 +131,9 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
     }
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
+    // Read once here rather than inside each branch, so the banner below reacts to a message raised
+    // on any screen without the nav graph having to re-read the whole state flow for it.
+    val state by model.state.collectAsStateWithLifecycle()
 
     fun go(route: String) {
         navController.navigate(route) {
@@ -194,6 +197,71 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+
+        // One place for the app to say something, whatever screen raised it.
+        //
+        // This is here because it was nowhere. `UiState.message` was set from eight places — a failed
+        // app toggle, an import that would not parse, a device that could not be revoked, a profile
+        // that could not be deleted — and rendered on two: Now and the profile editor. So a user
+        // tapped a switch on the app picker, watched nothing happen, and was told why on a screen
+        // they were not looking at, sometimes several minutes later when the modal finally surfaced
+        // on Now. The message surface belonged to whoever raised it, which is the bug.
+        state.message?.let { notice ->
+            MessageBanner(
+                notice = notice,
+                onDismiss = model::dismissMessage,
+                // Above the nav bar rather than under it: the bar floats over the content, so a
+                // banner at the very bottom would be behind glass.
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = Dsn.Gutter, vertical = if (onATab) 128.dp else 16.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One sentence about something that just happened, where the user already is.
+ *
+ * Deliberately *not* a dialog. Principle 4 of `UX-FLOWS.md` is that the receipt is the changed thing
+ * and dialogs are for decisions — and an acknowledgement is not a decision. A modal here was also
+ * actively harmful: it was rendered by two screens, so a failure raised anywhere else either vanished
+ * or interrupted whatever the user did next, minutes later.
+ *
+ * Colour follows [Notice.bad] rather than one alarming red, because this surface carries both "That
+ * could not be saved" and "Paired." — showing a success as an error is its own kind of lie.
+ *
+ * Tap to dismiss, and it does not time out on its own. A sentence that disappears before it is read
+ * is worse than one that stays slightly too long, and nothing here is a decision the user can miss by
+ * being slow.
+ */
+@Composable
+private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    val tone = if (notice.bad) Palette.Bad else Palette.Ok
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(tone.copy(alpha = 0.16f))
+            .border(1.dp, tone.copy(alpha = 0.45f), RoundedCornerShape(Dsn.CtlRadius))
+            .clickable(onClick = onDismiss)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .semantics(mergeDescendants = true) {
+                // One sentence, and how to get rid of it. Without this a screen reader reads the text
+                // and gives no clue that the banner is tappable.
+                contentDescription = "${notice.text}. Tap to dismiss."
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            if (notice.bad) "!" else "✓",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = tone,
+        )
+        Text(notice.text, fontSize = 13.sp, lineHeight = 19.sp, color = Palette.Text)
     }
 }
 

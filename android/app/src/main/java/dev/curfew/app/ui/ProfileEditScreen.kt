@@ -362,14 +362,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     }
 
     // Whatever the core said. This screen used to swallow it, which is how "Add a window" could
-    // fail silently and leave a profile with no schedule and no explanation.
-    state.message?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissMessage,
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
-        )
-    }
+    // fail silently and leave a profile with no schedule and no explanation. It is a banner in
+    // `CurfewApp` now rather than a dialog here, so the sentence is shown wherever the user is —
+    // including the screens that used to render nothing at all.
 }
 
 /**

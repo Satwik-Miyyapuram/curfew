@@ -407,13 +407,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     state.refusal?.let { refusal ->
         RefusalDialog(refusal = refusal, now = state.now, onDismiss = model::dismissRefusal)
     }
-    state.message?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissMessage,
-            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
-            text = { Text(message) },
-        )
-    }
+    // `state.message` used to be a dialog here and in the profile editor, which meant a failure
+    // raised anywhere else was shown on a screen the user was not looking at — or arrived minutes
+    // later when this screen next composed. It is a banner in `CurfewApp` now, so it appears wherever
+    // the user is. Nothing to render here.
 }
 
 /**

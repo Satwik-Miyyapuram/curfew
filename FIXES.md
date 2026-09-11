@@ -37,7 +37,7 @@ must run.
 | 16 | A wrong Windows password failed silently in the window (F-20) | **P1** | **Fixed** |
 | 17 | Exit paths chosen by comparing display strings (P2-5) | **P1** | **Fixed** |
 | 18 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
-| 19 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
+| 19 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | **Fixed** |
 | 20 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
 | 21 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
 | 22 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
@@ -67,7 +67,8 @@ it is corrected against `git log` whenever an entry is added.)*
 | `668c6df` | Windows can start a block at last (entries 6, 14, 15, 16, 17) |
 | `44b3c63` | An edit to the config reaches the service that enforces it (entry 26) |
 | `dbdfb07` | The control channel stops reading without a limit, and stops serving one client at a time (entry 24) |
-| *(this commit)* | The data directory is made what it was always claimed to be (entry 25) |
+| `d1bc146` | The data directory is made what it was always claimed to be (entry 25) |
+| *(this commit)* | One place for the app to say something, on whatever screen raised it (entry 19) |
 
 ### A note on the Android verification environment
 
@@ -1072,3 +1073,48 @@ leave the user with nothing.
   ```
 
 `cargo test --workspace`: 837 passed.
+
+---
+
+## 19. The app had eight ways to say something and two places to show it
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-29 (P1). This is the one that also closes several smaller
+findings by construction.
+
+**What was wrong.** `UiState.message` is written from **45 call sites** in `CurfewViewModel` — a failed
+app toggle, an import that would not parse, a device that could not be revoked, a profile that could not
+be deleted, a schedule that could not be saved, a CSV that could not be written — and it was rendered by
+**two**: `NowScreen` and `ProfileEditScreen`, both as an `AlertDialog`.
+
+So the app's only feedback channel for failure belonged to whichever screen happened to be composed.
+Concretely: a user flips a switch on the app picker, the write fails, and **nothing happens on screen**.
+The refusal had been recorded in state the app picker does not read, and would surface as a modal
+minutes later if and when the user returned to Now — worse than silence, because by then the sentence
+has lost its context.
+
+**What was changed.**
+
+- `MessageBanner` in `CurfewApp`, above the nav bar, rendered once for the whole app. It is now
+  structurally impossible to raise a message and not show it: the surface does not belong to a screen
+  any more.
+- The two per-screen `AlertDialog`s are removed. A banner rather than a dialog because `UX-FLOWS.md`
+  principle 4 is that the receipt is the changed thing and dialogs are for decisions; an
+  acknowledgement is not a decision. The modal was also actively harmful, interrupting whatever the
+  user did next.
+- **Severity, added because the first version of this fix was wrong.** `message` was one
+  undifferentiated string, and the banner's first draft painted all of it red. But 14 of those 45 sites
+  are *successes* — "Paired.", "Up to date.", "Removed. A session it already started keeps running."
+  Showing those as errors would have traded one bug for a louder one. So `Notice(text, bad)` was
+  introduced, with `say()` defaulting to bad and a new `note()` for confirmations.
+
+**Why the flag defaults to "bad".** Most of these sentences are failures, and a new error path that
+forgets to classify itself gets shown as a problem — where the opposite default would hide a real
+failure behind a reassuring tick. Failing loudly is the better direction for this default to be wrong in.
+
+**Verification.** `:app:compileDebugKotlin` clean, with no warnings in the touched files. The 14 success
+sites were converted by a scripted replace and then **re-listed to confirm every one landed**: `note(`
+now appears at lines 316–652 and no success string remains on `say(`. One scripting mistake on the way —
+my first pass piped file *contents* to `Select-String -Path` and reported zero matches for all ten
+patterns while the replace itself had worked, so the guard was the re-listing rather than the count.
+**Not covered by an executing test**: the Conscrypt limitation in entry 4 still applies to this host,
+and this is composition-level behaviour in any case.
