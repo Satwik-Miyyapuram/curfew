@@ -92,6 +92,9 @@ must run.
 | 74 | Every service diagnostic was silently discarded (P1-12) | **P1** | **Fixed** — a rolling log sink, 62 call sites redirected (entry 62) |
 | 75 | A typo in the config was silently ignored, including inside an action (P2-7) | **P2** | **Fixed** — `deny_unknown_fields` on ten config types (entry 63) |
 | 76 | The window could not reach the 24-hour release, and its one release button was the irrevocable one (P1-6) | **P1** | **Fixed** — one shared `Offers` predicate in the core, read by the window and the tray (entry 64) |
+| 77 | A calendar with no events released every block it was driving (P2-9) | **P2** | **Fixed** — an empty document is a placeholder when a good copy exists (entry 65) |
+| 78 | One over-long URL killed the native host, and the browser was then closed (P2-13) | **P2** | **Fixed** — the frame is skipped rather than fatal, and the extension caps the URL (entry 66) |
+| 79 | A wedged service grew the window's threads without bound, and the service leaked its slots on a panic (P2-17) | **P2** | **Fixed** — a shared `Capacity` whose permit is released by `Drop` (entry 67) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -158,7 +161,7 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P1-5 | P1 | entry 10 — `[emergency]` validated |
 | P1-6 | P1 | **fixed** (entry 64). `LockSet::offers` in the core is now the only place that decides what a surface may offer, and `Status.offers` carries it per session — the shared verdict the review said belonged where the dead `State.lock` field sat. The window used to render **no release at all** for a `DeviceCredential`, `Token`, `Challenge` or `RestartRequired` lock, and sent the irrevocable peer release on one click with no confirmation. It now offers the 24-hour release through a confirm sheet, asks before the peer release, and names the conditions no page can satisfy. The tray reads the same predicate |
 | P1-7 | P1 | **fixed** (entry 58). `assembleRelease` now signs when given a key via `keystore.properties` or `CURFEW_KEYSTORE_*`, and stays unsigned without one, so CI is unchanged. A key is never generated in CI: Android needs the same key for an in-place update, so a per-build key would mean no release could ever be upgraded |
-| P1-8 | P1 | **Not re-assessed** — nobody has read this one against the code |
+| P1-8 | P1 | **verified open.** `git grep -i downtime -- crates/` finds only clock-credit code and `Status` carries no downtime field, so a service that was killed, refused to start or crashed leaves no record the user can see — while `ARCHITECTURE.md` promises the exact window is reported and Android implements it (`Downtime.kt`). **Not done**: a feature rather than a defect fix, needing a durable last-seen stamp, a `Status` field and a window surface |
 | P1-9 | P1 | **fixed** (entry 59). `state.json.locked` is an out-of-band witness whose *existence* means a lock was running; `load` consults it before answering `Fresh`, so a deletion reports `Lost`, which keeps the watchdog alive. Written before the state and removed last, so the worst a crash can do is the safe direction. **Honest limit**: deleting this file too gets the old behaviour, so it raises the cost by one file rather than preventing it |
 | P1-10 | P1 | **fixed** (entry 60). The last config that parsed is kept beside the state as `curfew.toml.good` and used when the live file is unreadable, so the rules behind a running lock keep being enforced. An empty config remains the last resort, because a machine holding a lock must still start, but it is no longer the first answer |
 | P1-11 | P1 | **fixed** (entry 61). The fetch is hoisted out of the enforcer lock — taken twice, briefly for the two values it needs — so a slow subscription cannot stall `serve()` and with it the 24-hour release. And a failing source backs off (30 s doubling to 10 min) instead of being retried every two seconds against a 20-second timeout. **The mutex half is not covered by a test**: moving the fetch back under the lock would not fail anything |
@@ -171,17 +174,17 @@ checkable. 	ools/check_log.py now loops over both reviews, each against its own 
 | P2-5 | P2 | entry 17 — exit paths chosen by a parsed value, not by comparing display strings |
 | P2-6 | P2 | **fixed under F-24** — the window no longer draws a password box, and `app.rs:346` asserts the page contains no `type="password"` |
 | P2-7 | P2 | **fixed** (entry 63). `deny_unknown_fields` on the ten types a user writes — `Config`, `Resolver`, `Profile`, `Rule`, `Action`, `Refill`, `WeeklySchedule`, `CalendarSource`, `CalendarSchedule`, `EmergencyPolicy`. `Action` and `Refill` are internally tagged, so `refil = "daily"` was silently defaulting. Only the config: the state file and op-log are read by other versions, where refusing an unknown field would break forward compatibility |
-| P2-8 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-9 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-8 | P2 | **verified open.** The ICS parser is the weakest component here and the finding lists distinct gaps: a bare `YYYYMMDD` `DTSTART` is not treated as all-day, so an all-day entry with no `DTEND` fails the overlap test and is dropped entirely; a negative `BYMONTHDAY` is discarded by `filter_map`, after which an empty list means *unconstrained*, which is fail-open; and recurrence is partial generally. **Not done**: each is a separate parser change with its own RFC cases, and doing one badly is worse than leaving all of them named |
+| P2-9 | P2 | **fixed** (entry 65). Parse success only ever meant the text carried `BEGIN:VCALENDAR`, so a provider's auth-expiry placeholder or a truncated export replaced the last good copy and released every block it was driving. `curfew_ics::event_count` now tells the two apart, and a document with no events keeps the cache serving. **The false positive is deliberate and tested**: a genuinely emptied subscription keeps serving the old copy once one exists |
 | P2-10 | P2 | **fixed** (entry 56) for the CLI. `upsert_weekly` returns `Upserted::{Added, Replaced, AlreadyPresent}` and `curfew add-window` reports which, instead of printing `Added` for a window it had discarded. **Android not covered**: the FFI still discards the outcome |
-| P2-11 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-11 | P2 | **verified open.** `curfew remove` deletes a window or calendar rule with no session-state query, while `README.md` and `INSTALL.txt` tell the user nothing short of the 24-hour release shortens a lock. The blast radius is bounded — a running session keeps its own copy — but the expectation the docs set is not met. **Not done**: `curfew-cli` depends only on `curfew-core`, so mirroring the uninstall refusal means giving the CLI an IPC path and a behaviour for *no service installed*, which is a first-class case rather than an error |
 | P2-12 | P2 | **fixed** (entry 56). `ARCHITECTURE.md` advertised in-page element blocking the manifest cannot implement (no `content_scripts`, `scripting` or `declarativeNetRequest`); corrected in both places it appeared. And the functional half: a rule starting while a matching page was already open never took effect, which `tabs.onActivated` and `windows.onFocusChanged` now fix |
-| P2-13 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-14 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-15 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-16 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-17 | P2 | **Not re-assessed** — nobody has read this one against the code |
-| P2-18 | P2 | **Not re-assessed** — nobody has read this one against the code |
+| P2-13 | P2 | **fixed** (entry 66). A frame past 64 KiB was an error, and the host treats a read error as an unresynchronisable stream, so one long URL killed the host and the service then closed the browser for having stopped beating. The length is in the header, so `read_message` now consumes and discards the frame instead, and the extension caps the URL at 8 KiB before sending it — truncation rather than omission, because a URL's host and path are at the front |
+| P2-14 | P2 | **verified open.** Every overlay's text lives in one `thread_local` and `WM_PAINT` reads that slot, so a second `show()` overwrites it before the first window paints and the earlier notice renders the later text. **Not done**: Win32 window code with no test harness here, and the fix — per-window text rather than a shared slot — restructures the paint path rather than patching it |
+| P2-15 | P2 | **verified open.** The overlay is positioned with `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`, the primary display in physical pixels, with no `MonitorFromPoint`/`GetMonitorInfoW` and no `WM_DPICHANGED`, so on a multi-monitor or scaled desk the notice can land on the wrong screen or off a scaled one. **Not done**: the same reason as P2-14 — placement that cannot be verified on this host, and a blind change would be worse than a named gap |
+| P2-16 | P2 | **verified open.** `shell.rs` is the only sender of `Request::Seen` and it runs on a timer inside the tray's window, so choosing Quit destroys the window and both timers, `Enforcer::seen` goes stale permanently, and window-title rules and app budgets stop being enforced while the session still runs. **Not done**: the fix is to move the *watch* into the service, which is its right home but a structural change — the service must then enumerate the foreground window itself rather than being told |
+| P2-17 | P2 | **fixed** (entry 67). `ipc::ask` still has no deadline — the stream type does not support one — so what is bounded is the *count*: the window caps in-flight calls and answers the page at the cap rather than spawning a thread every 500 ms forever. Fixing it also exposed a real leak on the service side, where `serve` released its connection slot with a statement after the handler that a panic skips — under a comment claiming the opposite. Both sides share `capacity` now |
+| P2-18 | P2 | **verified open.** `wire.rs` retries the whole pending list whenever any entry is accepted and `accept` runs a full Ed25519 verification each time, so a batch delivered in reverse order costs O(n²) verifications. **Not done**: a performance defect with no correctness consequence, bounded by `MAX_FRAME`; the fix — verify once and remember — is a caching change to the accept path that deserves its own tests rather than a rushed one |
 | P2-19 | P2 | **fixed** (entry 57). Every read from the shared folder went through `std::fs::read` with no size cap, unlike the LAN path. `read_capped` is now the only reader, sharing `lan::MAX_FRAME` |
 | P2-20 | P2 | **fixed** (entry 56). `total_sessions` was the sum of the per-day session counters, so a session across midnight counted twice in the number the UI prints as blocks kept. A test had enshrined the bug as intent; both corrected |
 
@@ -268,6 +271,9 @@ this table is a reading aid.
 | `f26a157` | A log sink, so the service's diagnostics survive (entry 62) |
 | `2e87f60` | A typo in the config is refused, not silently ignored (entry 63) |
 | `1037b26` | One predicate decides what a lock offers, and the window reads it (entry 64) |
+| `e58292a` | A calendar with no events no longer releases the blocks it was driving (entry 65) |
+| `d5c1b54` | A long URL skips a frame instead of killing the host (entry 66) |
+| `ddfa83e` | Bound what a wedged service can hold, and release the slot on a panic (entry 67) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3653,3 +3659,146 @@ My first two attempts at the window assertions called `draw()` after setting the
 reply* — so every assertion rendered the **previous** status and failed for a reason that was not the
 code's. Going through `refresh()` exercises the real path, which is what the harness is for. Recorded
 because "the test failed" and "the test was asking the wrong question" look identical from the outside.
+
+---
+
+## 65. P2-9: a calendar with no events released every block it was driving
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-9**. **Fixed.**
+
+### What was wrong
+
+`curfew_ics::events_between` answers *"is this a calendar?"* from a single `BEGIN:VCALENDAR`. Parse
+success was treated as authoritative, so any document carrying that header replaced the cached copy — and
+a provider's auth-expiry placeholder and a truncated export both carry it and hold no events. So a
+placeholder overwrote the last good calendar, `still_serving` reported true, and every calendar-driven
+session ended.
+
+That is fail-open on precisely the threat the module was written around, and the module's own doc comment
+states the opposite guarantee.
+
+### The fix
+
+`curfew_ics::event_count` answers the question that actually matters: how many `VEVENT`s, counted
+independently of any window or timezone, because the question is about the *document* rather than about a
+period of it. A document with none is believed only when there is nothing to lose:
+
+- **no cached copy** → accepted. A genuinely empty calendar is a legitimate thing to subscribe to, and
+  reporting a failure on first run would be a false alarm.
+- **a cached copy** → the cache keeps serving, the source is reported as failing with
+  `still_serving: true`, and the P1-11 backoff applies.
+
+### What was deliberately not changed
+
+**The false positive is deliberate, and it is tested.** A subscription that really is emptied keeps
+serving the old copy once one exists. The alternative — believing an empty document — is what lets a
+placeholder through, and the honest way to empty a subscription is to remove it. The failure line says
+what was seen, so the state is not silent.
+
+### Verification
+
+Four tests. **The on-disk copy is asserted not to be overwritten either**, which is the part that matters
+across a restart: the cache exists so an outage spanning a service restart still blocks, and writing a
+placeholder over it would defeat exactly that. Checked by reading the file, and by building a fresh
+`Feeds` from the directory and confirming the meeting is still served.
+
+Two mutations caught: believing an empty calendar when a good copy exists, and treating a zero-event
+document as a successful refresh.
+
+---
+
+## 66. P2-13: one over-long URL killed the native host, and the browser was then closed
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-13**. **Fixed.**
+
+### What was wrong
+
+A native message is capped at 64 KiB. A frame past that was an **error**, and `host::run` treats a read
+error as an unresynchronisable stream — *"the honest move is to stop"*. So one URL longer than 64 KiB
+killed the host process, and a browser whose host has died stops beating, so the service then closed the
+browser outright.
+
+That is a self-inflicted denial — you lose your browser for visiting a long URL — and it has the shape of
+a bypass, because anything that stops the extension reporting looks like a browser that should be closed.
+
+### The fix
+
+**The frame is perfectly resynchronisable.** The length is in the header, so an over-long frame can be
+read, discarded, and the next header is exactly where it should be. `read_message` now returns a `Frame`
+enum — `Message`, `TooLarge { length }`, `Eof` — and the host logs the skip and carries on. The skip copies
+in **8 KiB chunks**, so it cannot allocate the gigabyte it is declining to allocate, which was the whole
+reason for the cap.
+
+**And the extension caps before it sends.** Truncation at 8 KiB rather than omission, and the choice is
+deliberate: a URL's host and path are at the *front*, so every realistic rule — a domain, a path like
+`/shorts/` — still matches a prefix, while dropping the URL entirely would mean the page was never checked
+at all, which is the bypass this is meant to avoid. The harness asserts both halves.
+
+Both halves are needed. The cap protects the ordinary case; the skip protects against an extension that
+has been modified, which is the threat model this module already assumes elsewhere.
+
+### A test that had the old behaviour baked in
+
+`a_length_larger_than_anything_real_is_refused_rather_than_allocated` asserted `is_err()`. That was
+correct about allocation and wrong about what should happen next, which is part of why the fatal path
+looked intentional. Renamed and rewritten to assert both halves: nothing was allocated, **and the
+following message is still read**. A truncated over-long frame is still an error, because there is nothing
+to resynchronise *to*.
+
+### Verification
+
+Two new Rust tests plus the rewritten one. Five mutations caught across the extension harness, two of them
+P2-13's: sending the URL uncapped, and dropping it entirely when it is too long — the second is the "fix"
+that would have closed one bypass by opening another.
+
+---
+
+## 67. P2-17: a wedged service, and a slot leaked by its own cap
+
+**Finding:** `DESIGN_AND_CODE_REVIEW_FULL.md` **P2-17**. **Fixed.**
+
+### What was wrong
+
+`ipc::ask` performs a blocking connect, write and `read_line` with **no deadline**, and it cannot have
+one: `interprocess`'s Windows named-pipe stream returns `Unsupported` for `set_read_timeout`, which
+`runner::serve` already records. So a service that is *connected but wedged* blocks every call for ever.
+The consequences differ on each side, and both are real.
+
+**The window** spawned a thread per message, and the page issues two calls a second, so a wedged service
+grew blocked threads without bound for as long as the page was open.
+
+**The service** already capped connections — and its release was wrong. It read
+`held.fetch_sub(1, ...)` *after* `answer_one(...)`, under a comment saying *"released whatever happened,
+so a panic in the handler cannot leak a slot for ever"*. A panic unwinds straight past that line, so the
+slot **was** leaked, and `answer_one` takes a `Mutex` with `.expect("enforcer")` — which panics on a
+poisoned lock — and then runs a large `handle`. After `MAX_CONNECTIONS` such panics the service accepted
+no connections at all: the total wedge the slot was introduced to prevent, arrived at through the slot
+itself.
+
+### The fix
+
+Calls from the window are capped at `MAX_IN_FLIGHT`, and at the cap the page is **answered** rather than
+left waiting — *"the service is not answering, nothing has been changed, this window will keep trying."*
+Bounding the count is the one answer that works without a deadline.
+
+The release is now `curfew_win::capacity::Capacity`, a counted limit whose permit is given back by `Drop`,
+so it is returned on the unwind path too. **The fix is the construct that cannot be got wrong rather than
+a claim that it was not** — which is the distinction that matters here, because the claim was already
+there and was false.
+
+**Both sides now use it.** They had two hand-written counters; two places for a release to be written is
+one place too many, and this branch keeps re-learning that.
+
+### The recurring defect class
+
+The false comment is the ninth or tenth instance on this branch of *a comment asserting a guarantee the
+code does not provide*. They are worth counting because each one costs a reader the same thing: the
+confidence to trust the next comment. The response has been consistent — make the code match the claim —
+and here that meant a `Drop` guard.
+
+### Verification
+
+Three tests on the permit, and **the panic case is the one that matters**: it takes a permit, panics, and
+asserts both that the count came back to zero and that a fresh permit can still be taken. That test fails
+against the old statement-based release, which is how the leak was confirmed rather than argued. Two
+mutations caught: emptying the `Drop` body, and not enforcing the limit.
