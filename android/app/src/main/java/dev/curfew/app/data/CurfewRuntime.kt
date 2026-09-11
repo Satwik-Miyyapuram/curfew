@@ -6,6 +6,7 @@ import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.ScreenTime
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
+import dev.curfew.policy.ClockVerdict
 import dev.curfew.policy.Consumption
 import dev.curfew.policy.Decision
 import dev.curfew.policy.Launches
@@ -609,13 +610,33 @@ class CurfewRuntime internal constructor(
      * is a code path like any other, and invariant 2 says no code path may shorten a lock.
      */
     suspend fun trustedNow(): Long {
+        val verdict = observeClocks()
+        // Written down here rather than in `observeClocks`, because this is the cadence that
+        // matters: the enforcement service calls this on every tick and after every boot broadcast,
+        // and a witness that was never persisted would reset its baseline on the next launch — which
+        // is exactly what someone moving the clock is hoping for.
+        policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
+        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
+        return verdict.now
+    }
+
+    /**
+     * The same decision, without writing it down.
+     *
+     * For the UI's one-second beat, which needs the trusted instant constantly and must not put two
+     * rows through the database every second to get it. The tamper flag is still raised, because a
+     * screen is the one place a person can be told the clock moved; only the two state writes are
+     * skipped, and the service's own tick persists them within a couple of seconds either way.
+     */
+    suspend fun trustedNowLight(): Long = observeClocks().now
+
+    /** Read both device clocks and decide what the reading is worth. */
+    private suspend fun observeClocks(): ClockVerdict {
         val verdict = policy.observeClock(clock.now(), clock.uptime(), clock.bootId())
         // Taken from the same reading, and from uptime rather than the wall clock: uptime can only
         // go backwards by rebooting, so a clock moved forward in Settings cannot be dressed up as
         // the restart a lock asked for.
         policy.observeBoot(clock.uptime())
-        policy.clockWitness()?.let { db.state().put(StateRow(KEY_CLOCK, it)) }
-        db.state().put(StateRow(KEY_BOOTS, policy.boots()))
         if (verdict.tampered) {
             _clockTamper.value = ClockTamper(
                 at = verdict.now,
@@ -627,7 +648,7 @@ class CurfewRuntime internal constructor(
                 else "back ${verdict.refusedBackward}s"
             audit(verdict.now, "enforcement.clock", "refused $direction")
         }
-        return verdict.now
+        return verdict
     }
 
     // --- downtime ----------------------------------------------------------------------------------

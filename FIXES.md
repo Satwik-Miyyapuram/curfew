@@ -52,7 +52,25 @@ it is corrected against `git log` whenever an entry is added.)*
 | `763ab9e` | A timer lock is not something a caller may claim (entry 1) |
 | `843bc52` | The Windows service judges locks against a trusted clock (entry 2) |
 | `e095b4f` | A stop is refused while a lock is held, and uninstall fails shut (entry 3) |
-| *(next)* | A watchdog image is verified by content, not by size and timestamp (entry 19) |
+| `d7e1f40` | A watchdog image is verified by content, not by size and timestamp (entry 19) |
+| *(next)* | The Android UI reconciles against the trusted clock (entry 4) |
+
+### A note on the Android verification environment
+
+The Android module **does** build and test on this machine, contrary to what the review assumed.
+`./gradlew :app:compileDebugKotlin` and `:app:testDebugUnitTest` both run green.
+
+It needed one thing that is not in the repository and not in CI: **a JDK the Gradle version
+supports.** This machine has only JDK 25 (`JAVA_HOME=C:\Program Files\Java\jdk-25.0.2`, and Android
+Studio's bundled JBR is 25.0.3 too), and Gradle 8.14.3 refuses it — it fails with a bare `What went
+wrong: 25.0.2`, which reads like a config error rather than a version ceiling. CI pins
+`java-version: '21'`, which is why CI has never seen this. Temurin 21 (aarch64, matching this
+machine) was fetched to `C:\jdk21` and every Android command below was run with
+`JAVA_HOME=C:\jdk21\jdk-21.0.12.1+1`.
+
+**Worth fixing in the repo:** nothing enforces the JDK version locally. A `.java-version` file, or a
+toolchain declaration in `android/build.gradle.kts`, would turn "Gradle refused Java 25 with a
+one-line error" into an instruction.
 
 ---
 
@@ -284,3 +302,81 @@ entry 20, and it needs a `curfew install` change rather than a library one.
 different content, newer timestamp — and asserts the planted bytes are replaced. The other three
 cover the identical image (left alone), a missing image (created), and an unreadable build (never
 vouched for). `cargo test -p curfew-svc`: 19 passed.
+
+---
+
+## 4. The Android UI judged sessions against the raw wall clock
+
+**Findings:** `UX_INTERACTION_REVIEW.md` A-1 (P0) — the Android twin of entry 2.
+
+**What was wrong.** The enforcement *service* does the right thing — `EnforcementService.kt:168`
+calls `runtime.trustedNow()`. The **UI** did not. Four paths read `runtime.clock.now()`, which is
+`System.currentTimeMillis()` and therefore settable:
+
+| Path | What the raw clock decided |
+| :--- | :--- |
+| `refreshFast()` (`:107`) | whether any session's `endsAt <= now` — and therefore whether to call `reconcileNow()` |
+| `reconcileNow()` (`:770`) | the instant handed to `runtime.reconcile`, which **reaps sessions** |
+| `startTimer()` (`:533`) | `endsAt = clock.now() + seconds` — so a clock moved *back* stretches a lock |
+| `refresh()` (`:141`) | the instant behind `activations`, `stats`, and every countdown on screen |
+
+The bypass: start a 90-minute timer, set the clock forward two hours, **open Curfew**. Within a
+second `refreshFast` sees `endsAt <= rawNow`, `reconcileNow()` reaps the session against the same
+forged instant, and it is written to the audit trail as having ended normally. `trustedNow()` is
+never consulted on that path — it is only reached from the service tick, by which point the session
+is gone. This is the T6 bypass `ARCHITECTURE.md:165-166` lists as in scope, executed from the app's
+own UI.
+
+**What was changed.**
+
+- `CurfewRuntime.trustedNow()` is split. The reading-and-deciding part moves into a private
+  `observeClocks()`; `trustedNow()` keeps its behaviour (including the two `db.state().put` calls)
+  for the service, and a new **`trustedNowLight()`** does the same decision without persisting.
+- Rationale for the split rather than reusing `trustedNow` everywhere: the UI beat runs **every
+  second**, and `trustedNow` puts two rows through the database per call. The decision is identical;
+  only the durability differs, and the service persists it within a couple of seconds anyway.
+- All four UI paths now use `trustedNowLight()`.
+- `refreshFast()` became `suspend` (it had exactly one caller, inside a coroutine).
+
+**Why the tamper flag is still raised on the light path.** A screen is the one place a person can be
+told their clock moved, so `observeClocks()` sets `_clockTamper` in both cases. Only the persistence
+is skipped.
+
+**Not changed, deliberately.** `clock.now()` remains in five places that are *not* enforcement:
+`sync.invite`/`accept`/`revoke` (pairing windows, which are wall-clock concepts and expire on their
+own), and two display formatters (`relative`, `describePassRefusal`). Changing those would make a
+message about "in 24 hours" disagree with the user's own clock for no security benefit.
+
+**Verification — and an honest limit.**
+
+`./gradlew :app:compileDebugKotlin` — **clean**, no errors or warnings in the touched files. The
+change is type-checked, and the coroutine changes are correct as far as the compiler can tell.
+
+`./gradlew :app:testDebugUnitTest` — **does not pass on this machine, and did not before this
+change.** 121 of 164 tests fail, all with the same root cause:
+
+```
+java.lang.UnsatisfiedLinkError: no conscrypt_openjdk_jni-windows-aarch_64
+    in java.library.path: ...
+```
+
+That is **Conscrypt**, pulled in transitively for the desktop JVM by `sqlcipher-android`, and it
+**ships no Windows-ARM64 native build**. No amount of `jna.library.path` tuning reaches it; it is a
+missing binary inside a third-party artifact. (JNA itself is fine — 5.15.0 does contain
+`win32-aarch64/jnidispatch.dll` — and `curfew_ffi.dll` builds correctly at
+`~/.cache/curfew-target/aarch64-pc-windows-msvc/release/`.)
+
+**I confirmed this is pre-existing** by stashing both changed files and re-running the suite on the
+untouched tree: the same tests fail the same way. This change neither caused nor worsened it.
+
+Three things worth recording rather than leaving implicit:
+
+- **CI cannot see this**, because it runs `ubuntu-latest`, where Conscrypt does ship
+  `linux-x86_64`. So the Android suite really is exercised in CI; this is a local-host limitation on
+  an ARM64 Windows machine, not evidence that the suite is broken.
+- **This change is therefore not covered by an executing test.** Its reasoning is a direct
+  translation of entry 2, which *is* covered by six Rust tests, and the Kotlin edit is four call
+  sites swapping one accessor for another — but that is an argument, not evidence, and it is said
+  plainly here rather than dressed up as a green suite.
+- **What would close it properly** is a Windows-ARM64 or Linux-x86_64 host to run the suite on. A
+  JVM test for `trustedNowLight` would need the FFI loaded and would hit the same wall.

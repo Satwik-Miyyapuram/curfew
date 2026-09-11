@@ -104,8 +104,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         if (visible) viewModelScope.launch { refresh() }
     }
 
-    private fun refreshFast() {
-        val now = runtime.clock.now()
+    private suspend fun refreshFast() {
+        // The trusted clock, not the wall clock. `runtime.clock.now()` is `System.currentTimeMillis`
+        // and the user can set it, so reading it here put a settable value in front of the reaper:
+        // move the clock forward two hours, open Curfew, and `endsAt <= now` holds, `reconcileNow`
+        // reaps the session against the same forged instant, and the lock is gone before any screen
+        // has had a chance to show the tamper banner. That is the exact bypass `curfew_core::clock`
+        // exists to refuse.
+        val now = runtime.trustedNowLight()
         // A timer that reaches zero has to end the session itself. It used to sit at zero until
         // the enforcement service's next poll noticed — up to half a minute, and longer if the
         // service was dozing — which read as "I have to press End now or it never ends". The
@@ -138,7 +144,11 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() {
         withContext(Dispatchers.Default) {
             // Sessions come first: a write that has just landed is the reason this was called.
-            val now = runtime.clock.now()
+            //
+            // Trusted: this instant reaches `activations`, `stats` and every screen showing a
+            // countdown, and it is the same instant the enforcement tick uses — so a moved clock
+            // cannot make the UI agree with a session the enforcer has refused to end.
+            val now = runtime.trustedNowLight()
             // The browsing window, not the enforcement one: this list is also what the Events
             // screen shows, and a calendar that stopped at tomorrow looked to the user like a
             // calendar that had lost most of their year.
@@ -532,7 +542,10 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startTimer(profile: String, seconds: Int, locks: List<Lock> = emptyList()) {
         viewModelScope.launch {
-            val now = runtime.clock.now()
+            // Trusted, for the same reason the tick uses it: `endsAt` is minted from here, so a
+            // clock moved *back* before starting would stretch a ninety-minute lock by however long
+            // the lie lasted.
+            val now = runtime.trustedNowLight()
             val session = Session(
                 // Distinct from a reconciled session's id, which is minted from the activation, so
                 // a timer and a schedule for the same profile can never collide.
@@ -769,7 +782,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     /** Bring sessions into line with the schedules right now, rather than at the next alarm. */
     fun reconcileNow() {
         viewModelScope.launch {
-            val now = runtime.clock.now()
+            // This is the path `refreshFast` reaches for the moment a countdown hits zero, and it
+            // ends sessions — so it is the one place in the UI where a wall clock would matter most.
+            val now = runtime.trustedNowLight()
             val events = runCatching { runtime.calendarEvents(now) }.getOrDefault(emptyList())
             runCatching { runtime.reconcile(now, events) }
             refresh()
