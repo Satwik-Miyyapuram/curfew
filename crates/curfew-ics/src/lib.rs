@@ -133,6 +133,19 @@ fn occurrence_id(uid: &str, start: Timestamp) -> String {
     format!("{uid}:{start}")
 }
 
+/// Whether a `DATE`-typed value is the eight-digit form, `YYYYMMDD`.
+///
+/// Shared by [`Component::is_all_day`], so the parameter and the value form are decided in one place —
+/// `DTEND` needs the same answer and would otherwise be a second copy of this test.
+///
+/// Deliberately not "is it eight characters": `parse_time` requires all eight to be digits as well, and a
+/// predicate that disagreed with the parser about which strings are dates would reintroduce the mismatch
+/// this fixes.
+fn is_date_form(value: &str) -> bool {
+    let value = value.trim();
+    value.len() == 8 && value.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn calendar_name(text: &str) -> String {
     for line in unfolded(text) {
         let Some((name, value)) = split_property(&line) else { continue };
@@ -163,9 +176,19 @@ impl Component {
         self.text("STATUS").is_some_and(|s| s.eq_ignore_ascii_case("CANCELLED"))
     }
 
+    /// Whether `DTSTART` names a whole day rather than an instant.
+    ///
+    /// **Two spellings, and only one was recognised** — P2-8. RFC 5545 permits an all-day start either
+    /// as `DTSTART;VALUE=DATE:20260904` or as the bare value form `DTSTART:20260904`, and providers write
+    /// both. Checking only the parameter meant the value form was treated as a *timed* event with no
+    /// `DTEND`, so `span` produced a zero-length interval, the overlap test rejected it, and an ordinary
+    /// all-day "Holiday" or "Leave" entry was **dropped entirely** — a calendar rule silently stopping on
+    /// exactly the days it was set up to cover.
+    ///
+    /// `parse_time` already accepted both forms; this is the half that decides how long the event is.
     fn is_all_day(&self) -> bool {
-        self.property("DTSTART")
-            .is_some_and(|(_, params, _)| params.get("VALUE").is_some_and(|v| v == "DATE"))
+        let Some((_, params, value)) = self.property("DTSTART") else { return false };
+        params.get("VALUE").is_some_and(|v| v == "DATE") || is_date_form(value)
     }
 
     /// Busy unless the calendar says otherwise. `TRANSP:TRANSPARENT` is how a provider marks the
@@ -497,6 +520,54 @@ fn parse_duration(text: &str) -> Option<Timestamp> {
     Some(sign * seconds)
 }
 
+/// Every comma-separated token, or `None` if any of them cannot be understood.
+///
+/// `None` means "refuse the rule", and it is deliberately not an empty `Vec`: an empty *constraint* list
+/// means "unconstrained" to the caller, which is the widening this exists to prevent. Two distinct
+/// meanings, so two distinct return shapes.
+fn collect<T>(raw: Option<&String>, parse: fn(&str) -> Option<T>) -> Option<Vec<T>> {
+    let Some(raw) = raw else { return Some(Vec::new()) };
+    raw.split(',').map(parse).collect()
+}
+
+/// The same for a list of integers, which is `BYMONTHDAY` and `BYMONTH`.
+///
+/// **Signed, because `BYMONTHDAY` is** — P2-8. `-1` is the last day of the month and is ordinary in real
+/// calendars. Parsing as `u32` meant it failed, was dropped, and left the rule unconstrained.
+fn collect_ints(raw: Option<&String>) -> Option<Vec<i32>> {
+    collect(raw, |token| token.trim().parse().ok())
+}
+
+/// Whether `day` satisfies a `BYMONTHDAY` list, resolving negatives against the month it is in.
+///
+/// RFC 5545 counts `-1` from the end of the month, so the answer depends on the month — which is why this
+/// cannot be a `contains` on a precomputed list set. February is also why it cannot be "31 minus the
+/// ordinal".
+fn month_day_matches(tokens: &[i32], cursor: chrono::DateTime<Tz>) -> bool {
+    if tokens.is_empty() {
+        return true;
+    }
+    let length = days_in_month(cursor.year(), cursor.month());
+    tokens.iter().any(|token| {
+        let day = if *token > 0 { *token } else { length + 1 + *token };
+        day == cursor.day() as i32
+    })
+}
+
+/// The number of days in a month, so a negative `BYMONTHDAY` can be resolved against it.
+fn days_in_month(year: i32, month: u32) -> i32 {
+    let (next_year, next_month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1);
+    let next = chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1);
+    match (first, next) {
+        // `signed_duration_since` rather than a table, so leap years need no special case.
+        (Some(first), Some(next)) => (next - first).num_days() as i32,
+        // Unreachable for a month that came from a real date, and a wrong answer here would widen a
+        // constraint — so it refuses instead, by matching nothing.
+        _ => 0,
+    }
+}
+
 /// Expand an `RRULE` into start instants, up to `until`.
 ///
 /// Recurrence is counted in local time and converted back, so a weekly 09:00 meeting stays at
@@ -523,18 +594,16 @@ fn expand(rule: &str, first: Timestamp, until: Timestamp, zone: Tz) -> Vec<Times
     }) {
         return Vec::new();
     }
-    let by_day: Vec<chrono::Weekday> = parts
-        .get("BYDAY")
-        .map(|days| days.split(',').filter_map(weekday).collect())
-        .unwrap_or_default();
-    let by_month_day: Vec<u32> = parts
-        .get("BYMONTHDAY")
-        .map(|days| days.split(',').filter_map(|d| d.parse().ok()).collect())
-        .unwrap_or_default();
-    let by_month: Vec<u32> = parts
-        .get("BYMONTH")
-        .map(|months| months.split(',').filter_map(|m| m.parse().ok()).collect())
-        .unwrap_or_default();
+    // **A token that cannot be understood refuses the whole rule** — P2-8. `filter_map` used to drop it
+    // and leave the list empty, and an empty list means *no constraint*, so the rule widened: `BYDAY=2FR`
+    // fired every week instead of on the second Friday, and `BYMONTHDAY=-1` fired every day instead of on
+    // the last. Widening is the fail-open direction, and this parser feeds a lock.
+    //
+    // The module doc already states the rule — "unsupported recurrence should make an event
+    // non-recurring". This is the code being made to match it.
+    let Some(by_day) = collect(parts.get("BYDAY"), weekday) else { return Vec::new() };
+    let Some(by_month_day) = collect_ints(parts.get("BYMONTHDAY")) else { return Vec::new() };
+    let Some(by_month) = collect_ints(parts.get("BYMONTH")) else { return Vec::new() };
 
     let start: DateTime<Tz> = match zone.timestamp_opt(first, 0) {
         chrono::LocalResult::Single(at) => at,
@@ -553,8 +622,8 @@ fn expand(rule: &str, first: Timestamp, until: Timestamp, zone: Tz) -> Vec<Times
         if count.is_some_and(|c| produced >= c) {
             break;
         }
-        let keep = (by_month.is_empty() || by_month.contains(&cursor.month()))
-            && (by_month_day.is_empty() || by_month_day.contains(&cursor.day()))
+        let keep = (by_month.is_empty() || by_month.contains(&(cursor.month() as i32)))
+            && month_day_matches(&by_month_day, cursor)
             && (by_day.is_empty() || by_day.contains(&cursor.weekday()));
         if keep {
             out.push(cursor.timestamp());
@@ -632,8 +701,11 @@ fn add_months(naive: NaiveDateTime, months: i64) -> Option<NaiveDateTime> {
 }
 
 fn weekday(code: &str) -> Option<chrono::Weekday> {
-    // An ordinal prefix ("2FR" — the second Friday) is not supported; the rule is refused above by
-    // the day never matching rather than by silently becoming "every Friday".
+    // An ordinal prefix ("2FR" — the second Friday) is not supported, and **the rule is now refused**
+    // rather than dropped. It used to be dropped, which left the day list empty — and an empty list means
+    // "every day", so the rule became "every Friday" and then, through the weekly branch, every week. The
+    // comment here claimed refusal at the time; it was describing behaviour the code did not have, which
+    // is the same false-guarantee defect this branch has now corrected fourteen times.
     match code.trim() {
         "MO" => Some(chrono::Weekday::Mon),
         "TU" => Some(chrono::Weekday::Tue),
@@ -643,5 +715,70 @@ fn weekday(code: &str) -> Option<chrono::Weekday> {
         "SA" => Some(chrono::Weekday::Sat),
         "SU" => Some(chrono::Weekday::Sun),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod date_form_tests {
+    use super::*;
+
+    /// **`is_date_form` and `parse_time` must agree about which strings are dates.**
+    ///
+    /// They are two halves of one decision: `parse_time` says what instant a `DTSTART` names, and
+    /// `is_all_day` says how long the event is. When they disagreed — `parse_time` accepting the bare
+    /// eight-digit form while `is_all_day` only recognised the `VALUE=DATE` parameter — an all-day entry
+    /// with no `DTEND` became a zero-length event and was dropped entirely (P2-8).
+    ///
+    /// **Why this is a unit test rather than a behaviour test.** The digit check in `is_date_form` cannot
+    /// be reached through the public API: eight non-digit characters fail `parse_time` first, so no event
+    /// is produced either way and no mutation of the check can fail a behaviour test. That does not make it
+    /// dead code — it makes it a guard against the two functions drifting apart, which is exactly what this
+    /// asserts.
+    #[test]
+    fn the_two_date_parsers_agree() {
+        let params = BTreeMap::new();
+        for value in [
+            // The value form, which is the case the whole finding is about.
+            "20260904",
+            // **Exactly eight characters, and not a date.** These are the cases that exercise the digit
+            // check, and the first version of this list got them wrong: `"20260904T0"` is ten characters
+            // and `"2026-09-0"` is nine, so neither reached the check at all and relaxing it to
+            // `len() == 8` survived the mutation run.
+            "abcdefgh",
+            "2026-090",
+            "2026090a",
+            // Length boundaries, which the check also decides.
+            "2026090",
+            "202609040",
+            // Timed forms: not dates, whatever they land on.
+            "20260904T090000Z",
+            "20260904T090000",
+            "not a date at all",
+            "",
+        ] {
+            let parses_as_date = parse_time(value, &params, chrono_tz::UTC)
+                // `parse_time` returns a timestamp for both forms, so "is it a date" is asked by
+                // comparing what it produced against that day's midnight — which is what a DATE value
+                // means. A bare equality on the instant would be true for a timed event at 00:00:00Z too.
+                .is_some_and(|at| at % 86_400 == 0);
+            let looks_like_a_date = is_date_form(value);
+
+            // The property is one-directional and that is deliberate: anything `is_date_form` accepts must
+            // be a date `parse_time` can read. The converse is not required — a *timed* value that happens
+            // to land on midnight is not a date, and treating it as one would make a 00:00 meeting last a
+            // whole day.
+            if looks_like_a_date {
+                assert!(
+                    parses_as_date,
+                    "`is_date_form` called {value:?} a date and `parse_time` did not read it as one, \
+                     which is the mismatch that drops all-day events"
+                );
+            }
+        }
+
+        // And the two forms RFC 5545 permits are both recognised, since that is the substance.
+        assert!(is_date_form("20260904"));
+        assert!(!is_date_form("20260904T090000Z"));
+        assert!(!is_date_form("2026-09-04"));
     }
 }

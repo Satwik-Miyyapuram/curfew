@@ -454,3 +454,194 @@ fn an_event_with_no_end_before_its_start_never_lasts_negative_time() {
 
     assert!(events.iter().all(|e| e.end >= e.start));
 }
+
+// --- a dropped token must not widen the rule (P2-8) ----------------------------------------------
+//
+// The module doc says unsupported recurrence should make an event *non-recurring*. The code's actual
+// behaviour after `filter_map` dropped a token was to **widen** it, which is the fail-open direction — and
+// this parser feeds a lock, so a rule that fires on the wrong days is worse than one that never fires.
+
+/// **The all-day value form**, which RFC 5545 permits as an alternative to the `VALUE=DATE` parameter.
+///
+/// Only the parameter was recognised, so a bare `DTSTART:20260904` was treated as a *timed* event with no
+/// `DTEND`; `span` gave a zero-length interval, the overlap test rejected it, and the entry vanished. This
+/// is the ordinary "Holiday" or "Leave" entry — the exact thing a calendar rule is set up to cover.
+#[test]
+fn an_all_day_event_in_the_value_form_is_not_dropped() {
+    let text = event("UID:leave\r\nSUMMARY:Leave\r\nDTSTART:20260904\r\n");
+
+    let events = events_between(&text, at(2026, 9, 4, 0, 0), at(2026, 9, 5, 0, 0), LONDON).unwrap();
+
+    assert_eq!(events.len(), 1, "the all-day entry was dropped: {events:?}");
+    assert!(events[0].all_day, "an eight-digit DTSTART is a whole day");
+    // And it lasts the day, not an instant.
+    assert_eq!(events[0].end - events[0].start, 24 * 60 * 60);
+}
+
+/// The parameter form still works, which is the case that must not regress.
+#[test]
+fn an_all_day_event_in_the_parameter_form_still_works() {
+    let text = event("UID:leave\r\nSUMMARY:Leave\r\nDTSTART;VALUE=DATE:20260904\r\n");
+
+    let events = events_between(&text, at(2026, 9, 4, 0, 0), at(2026, 9, 5, 0, 0), LONDON).unwrap();
+
+    assert_eq!(events.len(), 1);
+    assert!(events[0].all_day);
+    assert_eq!(events[0].end - events[0].start, 24 * 60 * 60);
+}
+
+/// **`BYMONTHDAY=-1` is the last day of the month, not "every day".**
+///
+/// `u32::parse` failed on the minus sign, `filter_map` dropped the token, and an empty list means *no
+/// constraint* — so a rule written for month-end fired daily.
+#[test]
+fn a_negative_bymonthday_means_the_end_of_the_month() {
+    // Weekly recurrence keeps the cursor moving a day at a time, so a month-end rule has something to
+    // match against; `BYMONTHDAY` narrows it to the last day of each month.
+    let text = event(
+        "UID:eom\r\nSUMMARY:Month end\r\nDTSTART:20260131T090000Z\r\nRRULE:FREQ=DAILY;BYMONTHDAY=-1\r\n",
+    );
+
+    // February 2026 has 28 days: the 28th matches, the 27th does not.
+    let events = events_between(&text, at(2026, 2, 1, 0, 0), at(2026, 3, 2, 0, 0), LONDON).unwrap();
+
+    let days: Vec<String> = events
+        .iter()
+        .map(|e| chrono::DateTime::from_timestamp(e.start, 0).unwrap().to_string())
+        .collect();
+    assert!(
+        days.iter().any(|d| d.starts_with("2026-02-28")),
+        "the last day of February is missing: {days:?}"
+    );
+    assert!(
+        !days.iter().any(|d| d.starts_with("2026-02-27")),
+        "the rule fired on a day it did not name, so the negative was dropped: {days:?}"
+    );
+}
+
+/// And in a 31-day month the same rule lands on the 31st, which is why it cannot be "31 minus the
+/// ordinal" or a precomputed `contains`.
+#[test]
+fn a_negative_bymonthday_resolves_against_each_month() {
+    let text = event(
+        "UID:eom\r\nSUMMARY:Month end\r\nDTSTART:20260331T090000Z\r\nRRULE:FREQ=DAILY;BYMONTHDAY=-1\r\n",
+    );
+
+    let events = events_between(&text, at(2026, 3, 1, 0, 0), at(2026, 4, 2, 0, 0), LONDON).unwrap();
+
+    let days: Vec<String> = events
+        .iter()
+        .map(|e| chrono::DateTime::from_timestamp(e.start, 0).unwrap().to_string())
+        .collect();
+    assert!(days.iter().any(|d| d.starts_with("2026-03-31")), "{days:?}");
+    assert!(!days.iter().any(|d| d.starts_with("2026-03-30")), "{days:?}");
+}
+
+/// **`BYDAY=2FR` does not become "every Friday".**
+///
+/// The ordinal prefix cannot be expanded here, and the module's own rule is that unsupported recurrence
+/// makes an event *non-recurring* — so the event appears once, at its `DTSTART`, and never again. The
+/// defect was that the unparseable token was dropped, which left the day list empty; the `WEEKLY` branch
+/// reads an empty day list as "no day filter", so a rule written for one Friday a month fired every week.
+///
+/// **Asserted against the widened count rather than against a bare `is_empty`.** The first version of this
+/// test expected nothing at all, which was my expectation being wrong: `starts()` inserts the first
+/// occurrence unconditionally. Comparing the two counts is what makes the test about widening — a
+/// regression that produced one occurrence for the wrong reason would still have to explain the four.
+#[test]
+fn an_ordinal_byday_is_refused_rather_than_widened() {
+    let rule = |rrule: &str| {
+        event(&format!(
+            "UID:second-friday\r\nSUMMARY:Second Friday\r\nDTSTART:20260109T090000Z\r\nRRULE:{rrule}\r\n"
+        ))
+    };
+    // January 2026 has five Fridays; a widened weekly rule would produce all of them.
+    let window = (at(2026, 1, 1, 0, 0), at(2026, 2, 1, 0, 0));
+
+    let refused =
+        events_between(&rule("FREQ=WEEKLY;BYDAY=2FR"), window.0, window.1, LONDON).unwrap();
+    let plain = events_between(&rule("FREQ=WEEKLY;BYDAY=FR"), window.0, window.1, LONDON).unwrap();
+
+    assert!(
+        plain.len() > 1,
+        "the fixture is wrong: a plain weekly rule should produce several occurrences, got {}",
+        plain.len()
+    );
+    assert_eq!(
+        refused.len(),
+        1,
+        "an unexpandable rule was widened: {:?}",
+        refused.iter().map(|e| e.start).collect::<Vec<_>>()
+    );
+    // And the one it keeps is the event's own first occurrence, not a guess.
+    assert_eq!(refused[0].start, at(2026, 1, 9, 9, 0));
+}
+
+/// A plain weekday still works, and still narrows. This is the case the refusal must not break.
+#[test]
+fn a_plain_byday_still_narrows_the_rule() {
+    let text = event(
+        "UID:fridays\r\nSUMMARY:Fridays\r\nDTSTART:20260109T090000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=FR\r\n",
+    );
+
+    let events = events_between(&text, at(2026, 1, 1, 0, 0), at(2026, 2, 1, 0, 0), LONDON).unwrap();
+
+    let days: Vec<String> = events
+        .iter()
+        .map(|e| chrono::DateTime::from_timestamp(e.start, 0).unwrap().format("%a").to_string())
+        .collect();
+    assert!(!days.is_empty(), "the plain weekday rule produced nothing");
+    assert!(days.iter().all(|d| d == "Fri"), "a non-Friday was matched: {days:?}");
+    // Four or five Fridays in January 2026, and certainly not one per day.
+    assert!(days.len() <= 5, "the rule widened: {} occurrences", days.len());
+}
+
+/// A token that is not a weekday at all is refused the same way.
+#[test]
+fn a_nonsense_byday_is_refused() {
+    let text = event(
+        "UID:junk\r\nSUMMARY:Junk\r\nDTSTART:20260109T090000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MONDAY\r\n",
+    );
+
+    let events = events_between(&text, at(2026, 1, 1, 0, 0), at(2026, 2, 1, 0, 0), LONDON).unwrap();
+
+    // Once, at its own start: non-recurring rather than absent.
+    assert_eq!(events.len(), 1, "a nonsense BYDAY widened the rule: {} occurrences", events.len());
+    assert_eq!(events[0].start, at(2026, 1, 9, 9, 0));
+}
+
+/// The same for a `BYMONTHDAY` token that is not a number, which the old code dropped the same way.
+#[test]
+fn a_nonsense_bymonthday_is_refused() {
+    let text = event(
+        "UID:junk\r\nSUMMARY:Junk\r\nDTSTART:20260109T090000Z\r\nRRULE:FREQ=DAILY;BYMONTHDAY=last\r\n",
+    );
+
+    let events = events_between(&text, at(2026, 1, 1, 0, 0), at(2026, 2, 1, 0, 0), LONDON).unwrap();
+
+    assert_eq!(
+        events.len(),
+        1,
+        "a nonsense BYMONTHDAY widened the rule to every day: {} occurrences",
+        events.len()
+    );
+}
+
+/// **The event survives the refusal**, with its title and span intact.
+///
+/// The boundary of the refusal matters: what is refused is the *recurrence*, and the event itself is real —
+/// its `DTSTART` and `SUMMARY` are known, and dropping the whole thing would lose a meeting from a
+/// schedule for no reason the user could act on. Non-recurring is the module doc's own instruction.
+#[test]
+fn an_unexpandable_rule_still_reports_the_event_itself() {
+    let text = event(
+        "UID:second-friday\r\nSUMMARY:Second Friday\r\nDTSTART:20260109T090000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=2FR\r\n",
+    );
+
+    let events =
+        events_between(&text, at(2026, 1, 9, 0, 0), at(2026, 1, 10, 0, 0), LONDON).unwrap();
+
+    assert_eq!(events.len(), 1, "the event itself should still appear once");
+    assert_eq!(events[0].title, "Second Friday", "the refusal lost the event's own details");
+    assert_eq!(events[0].start, at(2026, 1, 9, 9, 0));
+}
