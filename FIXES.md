@@ -22,14 +22,14 @@ must run.
 | 1 | `Lock::Timer` was claimable — one pipe line ended any timer lock | **P0** | **Fixed** |
 | 2 | Windows service never used the trusted clock | **P0** | **Fixed** |
 | 3 | Service `Stop` obeyed, not refused; uninstall failed open | **P0** | **Fixed** |
-| 4 | Android UI reconciled with the raw wall clock | **P0** | **Fixed** |
-| 5 | First block lost after the accessibility detour (F-1) | **P0** | **Fixed** |
-| 6 | Windows had no way to start a block (F-16) | **P0** | **Fixed** |
-| 7 | README documented a config the service never reads (F-17) | **P0** | **Fixed** |
-| 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | **Fixed** |
-| 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | **Fixed** |
-| 10 | `[emergency]` never validated | **P1** | **Fixed** |
-| 11 | `end_with_pass` took the caller's word | **P1** | **Fixed** |
+| 4 | Android UI reconciled with the raw wall clock (A-1) | **P0** | Pending |
+| 5 | First block lost after the accessibility detour (F-1) | **P0** | Pending |
+| 6 | Windows had no way to start a block (F-16) | **P0** | Pending |
+| 7 | README documented a config the service never reads (F-17) | **P0** | Pending |
+| 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | Pending |
+| 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | Pending |
+| 10 | `[emergency]` never validated | **P1** | Pending |
+| 11 | `end_with_pass` took the caller's word | **P1** | Pending |
 | 12 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
 | 13 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
 | 14 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
@@ -37,11 +37,22 @@ must run.
 | 16 | Three false product claims, incl. "no internet permission" (F-46) | **P1** | Pending |
 | 17 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
 | 18 | Control channel unbounded read / no timeout / serial accept (P1-1) | **P1** | Pending |
-| 19 | `%ProgramData%\Curfew` ACL + unverified watchdog image (P1-0) | **P1** | Pending |
-| 20 | Windows: no feedback, silent wrong password, config edits inert | **P1** | Pending |
+| 19 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
+| 20 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
+| 21 | Windows: no feedback, silent wrong password, config edits inert | **P1** | Pending |
 
-*(The table is updated as work lands. A "Pending" row means it is on the list, not that it was
-forgotten.)*
+*(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
+claim. This table is the one place in the document where it would be easy to overstate progress, so
+it is corrected against `git log` whenever an entry is added.)*
+
+### Fixed so far, by commit
+
+| Commit | What |
+| :--- | :--- |
+| `763ab9e` | A timer lock is not something a caller may claim (entry 1) |
+| `843bc52` | The Windows service judges locks against a trusted clock (entry 2) |
+| `e095b4f` | A stop is refused while a lock is held, and uninstall fails shut (entry 3) |
+| *(next)* | A watchdog image is verified by content, not by size and timestamp (entry 19) |
 
 ---
 
@@ -221,3 +232,55 @@ service refuses rather than permits". `cargo test -p curfew-svc`: 15 passed. Cli
 thread, which is file I/O inside a service callback. It is a single bounded read and `windows-service`
 only requires the handler not to block indefinitely, so this is acceptable — but it is the reason the
 handler cannot ask the service directly, and worth knowing if the state file ever grows.
+
+---
+
+## 19. The watchdog image was verified by size and timestamp, then run as SYSTEM
+
+**Findings:** `DESIGN_AND_CODE_REVIEW_FULL.md` P1-0, **first half** only. The second half — the
+missing ACL on `%ProgramData%\Curfew` — is entry 20 and is still open.
+
+**What was wrong.** The watchdog deliberately copies itself out of `Program Files` so the installer
+has one file to replace rather than two, and spawns that copy as SYSTEM. It decided whether to
+re-copy by comparing **length and modification time**:
+
+```rust
+let same = existing.len() == current.len()
+    && match (existing.modified(), current.modified()) {
+        (Ok(there), Ok(here)) => there >= here,
+        _ => false,
+    };
+if same { return Ok(()); }
+```
+
+The module's own comment asserts that `%ProgramData%\Curfew` "is administrator-owned". **No code in
+the repository sets that ACL**, and `C:\ProgramData` grants `BUILTIN\Users` container-inherited
+`Write` (`FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY`). And `curfew-watchdog.exe` **does not exist until
+the service first runs** — so an unprivileged user can create it first, padded to the length of
+`curfew.exe` with a newer timestamp. Both halves of the comparison are attacker-controlled, the copy
+is skipped, and the service spawns their binary as SYSTEM.
+
+**What was changed.**
+
+- `refresh` now **reads both files and compares contents**. A difference is a difference, whatever
+  the metadata says. Reading is the same cost as the `std::fs::copy` it replaces, and an identical
+  image is left untouched, so a running watchdog holding the file open still costs nothing.
+- It returns `bool` — "is this path safe to run from" — rather than `io::Result<()>`. **`spawn` only
+  uses the image when that is `true`**, falling back to `std::env::current_exe()`, the one file whose
+  contents are not in question.
+- Failure is now reported and *not* fatal in the right way: the old code printed "not refreshed" and
+  spawned the stale image anyway.
+
+**The trade, stated.** Falling back to `curfew.exe` can make the installer want a reboot — which is
+the exact reason this separate image exists (see the function's doc comment). A reboot request is a
+far better outcome than executing an unverified binary as SYSTEM, and it only happens on the path
+where the image could not be verified.
+
+**Not fixed here.** The ACL itself. Fixing the comparison closes the *spawn* path; anyone who can
+write the directory can still pre-create `calendars/`, `dns-before.json` and the state file. That is
+entry 20, and it needs a `curfew install` change rather than a library one.
+
+**Verification.** 4 new tests, including one that reproduces the exploit exactly: same length,
+different content, newer timestamp — and asserts the planted bytes are replaced. The other three
+cover the identical image (left alone), a missing image (created), and an unreadable build (never
+vouched for). `cargo test -p curfew-svc`: 19 passed.
