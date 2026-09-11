@@ -79,6 +79,7 @@ must run.
 | 61 | `restore_sessions` could end every running lock, with no proof (P1-3) | **P1** | **Partly fixed** — the lock-removing case is closed; `observe_releases` needs the op-log signature checked (entry 53) |
 | 62 | **29 of the design review's 37 findings were missing from this log**, including eight P1s | **P1-P2** | **Reconciled** — a second coverage table, 15 left un-assessed (entry 53) |
 | 63 | A config reload could stop enforcing a rule while the session and its lock carried on (P1-13) | **P1** | **Fixed on Windows**; Android still takes a weakening edit (entry 54) |
+| 64 | A cloud-sync client was breaking the Android build and corrupting `.git` refs | **build** | **Fixed** — 329 strays removed, `git fsck` clean, a checker added (entry 55) |
 | 54 | Every finding left as "not re-assessed" is now assessed: F-2, F-34, F-48 fixed, F-49 scoped | **P1-P2** | **Done** — no unassessed rows remain (entry 50) |
 | 55 | The first run wrote a policy and never said so; the privacy claim was false on one of two screens (F-2, F-48) | **P1-P2** | **Fixed** (entry 50) |
 | 56 | Two rows promised a path they did not implement; the canvas brief taught a mode that does not exist (F-34) | **P2** | **Fixed** (entry 50) |
@@ -244,6 +245,7 @@ this table is a reading aid.
 | `4220904` | The window stops rebuilding itself every second (entry 53) |
 | `af30446` | A restore cannot end a lock any more (entry 53) |
 | `92c6ff0` | A reload may not weaken a running session (entry 54) |
+| `7494f5e` | A cloud-sync client was breaking the Android build and corrupting git (entry 55) |
 | `cd37505`, `2efd7e0`, `f8e184b`, `c6b341b`, `cdc71f6`, `05300be`, `ef8e36e`, `33f32b6` | Documentation only — the log itself: entries written up, a stale placeholder hash resolved, cross-references repointed after renumbering, a severity list corrected, and a count that had been reported 65% too low |
 | *(the newest few)* | **Not listed above, by rule rather than by omission.** Every commit that edits this table adds a row, so the row for the commit writing it can never exist — enumerating them exactly is an infinite regress. The eight hashes above are the ones that existed when this row was last touched; anything newer is docs-only and `git log --oneline installer-no-reboot..HEAD` is the authority. |
 
@@ -3182,3 +3184,73 @@ between sessions.
 finding is half closed. The core helper is platform-neutral and already lives in `curfew-core`, so the
 Android side is a call site rather than a design question — but it is a real gap and it is recorded in both
 this table and the `GAPS.md` correction rather than implied by the Windows fix.
+---
+
+## 55. The workspace itself: a cloud-sync client breaking the build and git
+
+**Not a review finding.** Recorded because it is a real defect, it stopped every Android task mid-round,
+and `.gitignore` made it invisible.
+
+### What happened
+
+This repository lives under `Documents`, which **Google Drive Desktop** syncs, and Drive writes a
+`desktop.ini` into every folder it manages. Fifty-three of them landed under `android/**/res/`, and
+Gradle's resource merger scans the **filesystem** rather than git:
+
+```
+ERROR: .../res/values/desktop.ini: Resource and asset merger: The file name must end with .xml
+```
+
+So `:app:mergeDebugResources` failed, and every Android task with it. `.gitignore` lists the name, so none
+of this ever appeared in `git status` — which is exactly the trap: **git ignores them and Gradle does not.**
+
+### Two AGP mechanisms, both tried, neither works
+
+Recorded so nobody spends a third attempt on it:
+
+| Attempt | Why it fails |
+| :--- | :--- |
+| `androidResources.ignoreAssetsPatterns += "desktop.ini"` | applied by **aapt2**, which the merge task runs *before* |
+| `sourceSets["main"].res.exclude("**/desktop.ini")` | does not reach the resource merger |
+
+Verified by recreating a `desktop.ini`, applying each, and watching the merge still fail. **The only fix
+is deletion**, which is why the defence has to be noticing rather than configuration.
+
+### It went much further than the build
+
+Drive had written **276** of these inside `.git` itself — `refs/`, `logs/`, `objects/` and more. Git reads
+every file under `refs/` as a ref, so `git fsck` reported ten errors and every command warned:
+
+```
+error: refs/desktop.ini: badRefContent: [.ShellClassInfo]
+error: refs/desktop.ini: invalid sha1 pointer 0000000000000000000000000000000000000000
+```
+
+**Healthy when checked, and that was checked before anything was deleted**: all four refs (`HEAD`, `main`,
+`review-fixes`, `installer-no-reboot`) resolved, the object store reported no missing or corrupt objects,
+and 213 commits were readable. Then the 276 files were removed: `git fsck` now reports **zero** errors,
+with the same four refs and the same 213 commits. Nothing git owned was touched — every stray was a file
+Drive wrote, and git's own files under `refs/` and `objects/` are hex-named or standard.
+
+### `tools/check_workspace.py`
+
+Three severities, kept apart on purpose:
+
+1. a stray under `.git/refs`, `.git/logs` or `.git/objects` — the worst, because **git reads it as its own
+   data**;
+2. a stray, or an unacceptable file type, under `android/**/res` — a build-breaker;
+3. a stray anywhere else in the source tree — clutter, reported because one sync pass writes all three.
+
+**Its first version was wrong, and it matters how.** It applied the resource-extension rule to `crates/`
+and immediately reported `crates/curfew-app/ui/app.html` — a legitimate source file — as a build-breaker.
+**A checker that cries wolf on a source file is worse than no checker**, because the next real report gets
+ignored. The rule sets are separate now, and `app.html` is verified not to be flagged.
+
+`.gitignore`'s comment on that line said `# OneDrive litter` and named the wrong program — the file content
+names `GoogleDriveFS.exe`. Corrected, with the Gradle trap and both failed AGP mechanisms recorded where
+somebody hitting this will look.
+
+### Verification
+
+Android is green again: `:app:compileDebugKotlin` clean and **72 tests across 12 classes**. 882 Rust tests;
+all three tools pass; `git fsck` reports zero errors.
