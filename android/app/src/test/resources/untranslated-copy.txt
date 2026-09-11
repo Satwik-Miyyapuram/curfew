@@ -163,6 +163,8 @@ NowScreen.kt|Tag
 NowScreen.kt|The clock jumped backwards
 NowScreen.kt|The clock jumped forward
 NowScreen.kt|The clock moved backwards
+NowScreen.kt|The hours a block buys are counted here, so you can see what the no was for. 
+NowScreen.kt|This fills in once a block has run.
 NowScreen.kt|This is the way out of a lock nothing here can end. It cannot be taken back, and 
 NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
 NowScreen.kt|Ticks on time
@@ -319,9 +321,15 @@ UsageScreen.kt|Nothing counted yet. Time is only measured for targets a budget o
 UsageScreen.kt|Now
 UsageScreen.kt|One day in a row.
 UsageScreen.kt|Screen time, a day
+UsageScreen.kt|The before-and-after goes here, and needs a full day of use to be worth 
+UsageScreen.kt|The before-and-after goes here. It needs Usage access, because both halves 
 UsageScreen.kt|Today
 UsageScreen.kt|Today has not finished, so it does not count against you yet.
 UsageScreen.kt|What Curfew did
 UsageScreen.kt|Where your time went
+UsageScreen.kt|are Android's own screen-time figures rather than anything Curfew 
+UsageScreen.kt|counts. Grant it on Health and this fills in.
 UsageScreen.kt|limit actually covers — Curfew does not keep a record of everything you 
+UsageScreen.kt|now, so it cannot say anything on day one.
+UsageScreen.kt|showing — it compares an average day before Curfew with an average day 
 UsageScreen.kt|you started.

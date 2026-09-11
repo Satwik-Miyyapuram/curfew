@@ -61,9 +61,39 @@ fun UsageScreen(model: CurfewViewModel) {
             Title("Where your time went", size = 26)
             Gap(16.dp)
         }
-        state.screenTime?.let { comparison ->
+        // The comparison is the best thing on this screen, and it is absent for two different
+        // reasons — F-13. It needs **Usage access**, and it needs a whole day on each side of the
+        // install (`screenTimeComparison` returns null if either is missing). Nothing said so: the
+        // card simply was not there, and a reader cannot tell "not yet" from "not working" from
+        // "nothing worth showing". The screen's own empty state lower down already explains its
+        // scope; this is the same treatment for the same kind of absence.
+        val comparison = state.screenTime
+        if (comparison != null) {
             item {
                 ComparisonCard(comparison)
+                Gap(10.dp)
+            }
+        } else {
+            item {
+                val usageAccess =
+                    state.grants.firstOrNull { it.grant == Grant.UsageAccess }?.granted == true
+                Text(
+                    if (usageAccess) {
+                        // The baseline is taken once and never rewritten, and the average needs a
+                        // completed day it can exclude today from. Both are deliberate; only this
+                        // sentence is new.
+                        "The before-and-after goes here, and needs a full day of use to be worth " +
+                            "showing — it compares an average day before Curfew with an average day " +
+                            "now, so it cannot say anything on day one."
+                    } else {
+                        "The before-and-after goes here. It needs Usage access, because both halves " +
+                            "are Android's own screen-time figures rather than anything Curfew " +
+                            "counts. Grant it on Health and this fills in."
+                    },
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = Palette.Muted,
+                )
                 Gap(10.dp)
             }
         }

@@ -439,13 +439,6 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
 }
 
 /**
- * The banner that admits Curfew was not watching.
- *
- * Android lets an OEM battery manager kill a foreground service, and no app can stop it. What an
- * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
- * leave it on screen until the person has read it.
- */
-/**
  * What the blocking has actually bought, on the home screen.
  *
  * The point of a blocker is not that it says no; it is the hours on the other side of the no. Those
@@ -453,12 +446,20 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
  * says "this is working" was the one number nobody saw. It is stated as time the phone stayed shut
  * rather than "time saved", because that is the part Curfew can actually vouch for — the phone was
  * locked for this long, on purpose, because you asked it to be.
+ *
+ * **And it used to return early when every number was zero — F-12.** So on the first day, which is
+ * precisely when somebody is deciding whether to keep the app, the card was not there, and the only
+ * thing on Now was a dial and a timeline. The doc's own claim is that this number *"is not allowed to
+ * live behind a tab"*; it is worse than that to have it live behind a *condition*. The honest zero
+ * copy was already written one branch down — *"Nothing blocked yet today"* — so the fix is to stop
+ * leaving and say what the card is for and what will fill it.
  */
 @Composable
 private fun GivenBackCard(stats: Stats, detailed: Boolean) {
     val today = stats.days.lastOrNull()?.blockedSeconds ?: 0
     val week = stats.days.takeLast(7).sumOf { it.blockedSeconds.toLong() }
-    if (today == 0 && week == 0L && stats.currentStreak == 0) return
+    val nothingYet = today == 0 && week == 0L && stats.currentStreak == 0
+
     DCard(padding = 20.dp) {
         Text(
             if (today > 0) "${duration(today)} away from the phone today"
@@ -469,19 +470,29 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
         )
         Gap(6.dp)
         Text(
-            buildString {
-                append(duration(week.toInt()))
-                append(" this week")
-                if (stats.currentStreak > 1) {
-                    append(" · ")
-                    append(stats.currentStreak)
-                    append(" days in a row")
+            if (nothingYet) {
+                // The same shape as the Usage screen's best empty state: say what is being measured
+                // and what starts the measurement, rather than showing a zero and leaving the reader
+                // to guess whether it is broken, unconfigured, or simply early.
+                "The hours a block buys are counted here, so you can see what the no was for. " +
+                    "This fills in once a block has run."
+            } else {
+                buildString {
+                    append(duration(week.toInt()))
+                    append(" this week")
+                    if (stats.currentStreak > 1) {
+                        append(" · ")
+                        append(stats.currentStreak)
+                        append(" days in a row")
+                    }
                 }
             },
             fontSize = 14.sp,
-            color = Palette.Ok,
+            color = if (nothingYet) Palette.Muted else Palette.Ok,
         )
-        if (detailed) {
+        // Not shown while everything is zero: "0 blocks kept, longest run 0 days." is a worse way to
+        // say nothing than the sentence above it.
+        if (detailed && !nothingYet) {
             Gap(4.dp)
             Text(
                 "${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.",
@@ -492,6 +503,18 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
     }
 }
 
+/**
+ * The banner that admits Curfew was not watching.
+ *
+ * Android lets an OEM battery manager kill a foreground service, and no app can stop it. What an
+ * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
+ * leave it on screen until the person has read it.
+ *
+ * **This comment was attached to `GivenBackCard`, above it** - a function about hours saved, with
+ * nothing to do with enforcement gaps. So the one banner whose whole job is to explain itself was
+ * the one with no explanation in the source, while the card beside it carried a paragraph
+ * describing something else. Moved here, where it belongs.
+ */
 @Composable
 private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
     Card(
