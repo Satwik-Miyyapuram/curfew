@@ -58,6 +58,26 @@ ALLOWED_RESOURCE_SUFFIXES = {".xml", ".png", ".webp", ".jpg", ".jpeg"}
 # damage is to git itself rather than to the build.
 GIT_DIRS = [".git/refs", ".git/logs", ".git/objects", ".git/info", ".git/hooks", ".git/worktrees"]
 
+# Scaffolding that must not be committed. `git add -A` has swept throwaway helpers into a commit twice
+# on this branch — a patch script that had already failed on an assertion, and a temporary message file.
+# Both are one-shot: their content is the change they produced, and the tree keeps only the checkers and
+# generators that are meant to be run again.
+#
+# Named by prefix rather than by an explicit list, because the next one will not be on the list either.
+# `tools/` otherwise holds six scripts, all of which are useful to a reader, so anything matching these
+# patterns is by construction something somebody wrote to get one commit out.
+SCAFFOLDING = ("add_", "fix_", "patch_", "mutate_", "log_", "_", "tmp_")
+
+# The scripts that are supposed to be here. Everything else in `tools/` is reported.
+TOOLS_TO_KEEP = {
+    "check_extension.py",
+    "check_log.py",
+    "check_window.py",
+    "check_workspace.py",
+    "design_rows.py",
+    "publish_rows.py",
+}
+
 
 def main():
     found: dict[str, str] = {}
@@ -101,6 +121,27 @@ def main():
                 found.setdefault(
                     path.relative_to(ROOT).as_posix(),
                     f"{path.suffix or path.name} is not a resource type the merger accepts",
+                )
+
+    # Scaffolding left in `tools/`. Only something already tracked matters — an untracked file shows up
+    # in `git status` anyway, and the two that caused this lived in a commit because `git add -A` ran
+    # while they were on disk.
+    tools = ROOT / "tools"
+    if tools.is_dir():
+        for path in sorted(tools.iterdir()):
+            if not path.is_file() or path.name in TOOLS_TO_KEEP:
+                continue
+            if path.suffix == ".py" and path.name.startswith(SCAFFOLDING):
+                found.setdefault(
+                    path.relative_to(ROOT).as_posix(),
+                    "throwaway scaffolding in `tools/`, which `git add -A` has swept into a commit twice",
+                )
+            elif path.suffix == ".py":
+                # A new checker is fine; it just has to be a decision rather than an accident, so it is
+                # named in `TOOLS_TO_KEEP` if it belongs here.
+                found.setdefault(
+                    path.relative_to(ROOT).as_posix(),
+                    "a script in `tools/` that is not in TOOLS_TO_KEEP — add it there if it belongs",
                 )
 
     if not found:
