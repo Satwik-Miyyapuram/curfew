@@ -88,7 +88,6 @@
     <string name="device_remove_failed">That device could not be removed.</string>
     <string name="up_to_date">Up to date.</string>
     <string name="folder_failed">That folder could not be used.</string>
-    <string name="session_ended">%1$s ended.</string>
     <string name="ended_with_pass">%1$s ended with an emergency pass.</string>
     <string name="released">Released. The other device will act on it within a few seconds.</string>
     <string name="release_lands">Release for %1$s lands %2$s.</string>

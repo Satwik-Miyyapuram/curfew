@@ -27,7 +27,7 @@ class StringFormatArgsTest {
         // The **whole element**, body included — and that is the second bug this test had. It first
         // used the match itself (`it.value`), which for `<(?:string|plurals)\s+name="…"` stops at the
         // closing quote of the name attribute. Every resource was therefore recorded as
-        // `<string name="session_ended"` with no body, so every one appeared to need zero arguments
+        // `<string name="paired"` with no body, so every one appeared to need zero arguments
         // and the guard passed everything. Both halves of the pattern are anchored for that reason.
         Regex("""<(string|plurals)\s+name="([^"]+)"[^>]*>(.*?)</\1>""", RegexOption.DOT_MATCHES_ALL)
             .findAll(xml)
@@ -180,7 +180,7 @@ class StringFormatArgsTest {
     @Test
     fun `the resource file is read with its bodies`() {
         assertEquals("Paired.", values["paired"])
-        assertEquals("%1${'$'}s ended.", values["session_ended"])
+        assertEquals("Without it: %1${'$'}s", values["health_without_it"])
         // A plural keeps **all** its forms — the whole element, inner tags included.
         val apps = values.getValue("apps_blocked")
         assertTrue("a plural lost a form: $apps", apps.contains("quantity=\"one\""))

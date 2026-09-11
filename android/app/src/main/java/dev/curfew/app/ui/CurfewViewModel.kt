@@ -422,7 +422,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.endSession(session.id, satisfied)
-                note(str(R.string.session_ended, runtime.profileName(session.profile)))
+                // **No acknowledgement.** F-8: the receipt is the card disappearing. Principle 4 of
+                // `UX-FLOWS.md` is "dialogs are for decisions, never for acknowledgements", and the
+                // same applies to this banner — the user tapped End, the session ended, and the card
+                // they were looking at is gone. A sentence saying so is one more thing to read and tap
+                // away, for an action whose whole result they just watched happen.
+                //
+                // It was a modal when the review was written; entry 19 made it a banner, which fixed
+                // the mechanism and left the substance.
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -455,7 +462,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 runtime.scanToken(session.id, payload)
-                note(str(R.string.session_ended, runtime.profileName(session.profile)))
+                // No acknowledgement here either, for the same reason as `endSession`: the sheet
+                // closes and the card vanishes, which is the receipt.
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
