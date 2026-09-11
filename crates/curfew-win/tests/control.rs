@@ -202,6 +202,53 @@ fn requests_and_responses_round_trip_as_one_line_each() {
     assert_eq!(encoded.matches('\n').count(), 1);
 }
 
+/// The exact bytes the Curfew window sends when someone presses "Start a block".
+///
+/// A contract test rather than a round trip: the test above proves the *enum* is symmetric with
+/// itself, which stays true if `seconds` is renamed to `duration`. This pins the literal JSON the
+/// page builds — the same shapes readable in `crates/curfew-app/ui/app.html` — against the enum that
+/// has to accept it. Renaming a field in Rust is a compile error; renaming it only in the page is a
+/// button that silently does nothing, and this is what catches that.
+#[test]
+fn the_windows_page_can_start_a_block_over_the_wire() {
+    // One case per strength the page offers, including the no-lock one — the case a first-run user is
+    // most likely to send, and the one where an empty `locks` array has to be accepted rather than
+    // rejected for being empty.
+    let cases = [
+        (r#"{"request":"start","profile":"deep-work","seconds":5400,"locks":[]}"#, None),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":5400,"locks":[{"kind":"confirm"}]}"#,
+            Some(Lock::Confirm),
+        ),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":1500,"locks":[{"kind":"device_credential"}]}"#,
+            Some(Lock::DeviceCredential),
+        ),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":10800,"locks":[{"kind":"timer"}]}"#,
+            Some(Lock::Timer),
+        ),
+    ];
+
+    for (line, expected_lock) in cases {
+        match parse_request(line)
+            .unwrap_or_else(|e| panic!("the page's own request was refused: {e}"))
+        {
+            Request::Start { profile, seconds, locks } => {
+                assert_eq!(profile, "deep-work");
+                assert!(seconds > 0, "a block with no length in {line}");
+                match expected_lock {
+                    Some(lock) => assert_eq!(locks, vec![lock], "wrong lock from {line}"),
+                    None => {
+                        assert!(locks.is_empty(), "an unlocked block carried a condition: {line}")
+                    }
+                }
+            }
+            other => panic!("the start request parsed as {other:?}"),
+        }
+    }
+}
+
 // --- the state file -----------------------------------------------------------------------------
 
 fn locked_state() -> Persisted {

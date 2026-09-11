@@ -24,23 +24,29 @@ must run.
 | 3 | Service `Stop` obeyed, not refused; uninstall failed open | **P0** | **Fixed** |
 | 4 | Android UI reconciled with the raw wall clock (A-1) | **P0** | **Fixed** |
 | 5 | First block lost after the accessibility detour (F-1) | **P0** | **Fixed** |
-| 6 | Windows had no way to start a block (F-16) | **P0** | Pending |
+| 6 | Windows had no way to start a block (F-16) | **P0** | **Fixed** |
 | 7 | README documented a config the service never reads (F-17) | **P0** | **Fixed** |
 | 8 | `Lock.Confirm` could never be satisfied (F-4) | **P1** | **Fixed** |
 | 9 | Emergency pass unreachable; block screen claimed it was spent (F-5) | **P1** | **Fixed** |
 | 10 | `[emergency]` never validated | **P1** | **Fixed** |
 | 11 | `end_with_pass` took the caller's word | **P1** | **Fixed** |
-| 12 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
-| 13 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
-| 14 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
-| 15 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
-| 16 | Three false product claims, incl. "no internet permission" (F-46) | **P1** | **Fixed** |
-| 17 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
-| 18 | Control channel unbounded read / no timeout / serial accept (P1-1) | **P1** | Pending |
-| 19 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
-| 20 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
-| 21 | Windows: no feedback, silent wrong password, config edits inert | **P1** | Pending |
-| 22 | "Start without it" skipped the long-timer confirmation | **P1** | **Fixed** |
+| 12 | Three false product claims, incl. "no internet permission" (F-46) | **P1** | **Fixed** |
+| 13 | "Start without it" skipped the long-timer confirmation | **P1** | **Fixed** |
+| 14 | The tray could never end a `Confirm`-locked session | **P1** | **Fixed** |
+| 15 | The tray had no route to the window | **P1** | **Fixed** |
+| 16 | A wrong Windows password failed silently in the window (F-20) | **P1** | **Fixed** |
+| 17 | Exit paths chosen by comparing display strings (P2-5) | **P1** | **Fixed** |
+| 18 | Unverified watchdog image executed as SYSTEM (P1-0, first half) | **P1** | **Fixed** |
+| 19 | `UiState.message` set from 8 places, rendered on 2 (F-29) | **P1** | Pending |
+| 20 | Unparseable config looked empty; Save destroyed it (F-30) | **P1** | Pending |
+| 21 | Failed calendar read looked like an empty diary (F-31) | **P1** | Pending |
+| 22 | Delete-profile: no confirm, refusal never read (F-32) | **P1** | Pending |
+| 23 | Nav/Switch touch targets under 48dp (F-38) | **P1** | Pending |
+| 24 | Control channel unbounded read / no timeout / serial accept (P1-1) | **P1** | Pending |
+| 25 | `%ProgramData%\Curfew` has no explicit ACL (P1-0, second half) | **P1** | Pending |
+| 26 | Config edits do not take effect and nothing says so (F-23) | **P1** | Pending |
+| 27 | A blocked site shows the browser's own error page (F-21) | **P1** | Pending |
+| 28 | Missing Windows nav pages: usage and devices (F-19) | **P1** | Pending |
 
 *(The table is updated as work lands. **"Pending" means exactly that** — the row is a plan, not a
 claim. This table is the one place in the document where it would be easy to overstate progress, so
@@ -53,12 +59,12 @@ it is corrected against `git log` whenever an entry is added.)*
 | `763ab9e` | A timer lock is not something a caller may claim (entry 1) |
 | `843bc52` | The Windows service judges locks against a trusted clock (entry 2) |
 | `e095b4f` | A stop is refused while a lock is held, and uninstall fails shut (entry 3) |
-| `d7e1f40` | A watchdog image is verified by content, not by size and timestamp (entry 19) |
+| `d7e1f40` | A watchdog image is verified by content, not by size and timestamp (entry 18) |
 | `5dd09d9` | The Android UI judges sessions against the trusted clock (entry 4) |
-| `f2f0956` | The block the user configured is the block that starts (entries 5, 22) |
-| `fde2973` | Locks that promised an exit now have one (entries 8, 9, 16) |
-| *(next)* | The emergency ration is enforced by the type, not by convention (entries 10, 11) |
-| *(next)* | The documented config path is the one the service reads (entry 7) |
+| `f2f0956` | The block the user configured is the block that starts (entries 5, 13) |
+| `fde2973` | Locks that promised an exit now have one (entries 8, 9, 12) |
+| `1a63581` | The emergency ration is enforced by the type, and the docs name the real config (entries 7, 10, 11) |
+| *(this commit)* | Windows can start a block at last (entries 6, 14, 15, 16, 17) |
 
 ### A note on the Android verification environment
 
@@ -724,3 +730,171 @@ Recorded here so the remaining work is a list rather than a memory. Severity fro
 2. **Nothing pins the JDK locally.** Gradle 8.14.3 rejects Java 25 with a bare `What went wrong:
    25.0.2`. CI pins 21 and never sees it. A `.java-version` or a Gradle toolchain declaration would
    turn that into an instruction.
+
+---
+
+## 6. Windows had no way to start a block
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-16 (the last P0).
+
+**What was wrong.** `Request::Start` has always existed, and has always been handled and tested. It
+had exactly one non-test sender in the entire repository: the command line.
+
+```
+$ git grep -rn "Request::Start" -- crates/
+crates/curfew-svc/src/main.rs:630   ← the only producer
+crates/curfew-win/src/tick.rs:517   ← the handler
+```
+
+The Curfew window sent `status`, `end`, `unlock`, `release` and `emergency`, and nothing else. The
+tray's `Item` enum had no variant for it. So on Windows every block was schedule-driven or started
+from a terminal, and `UX-FLOWS.md` Flow 1 — *"Now opens … one filled button: **Start a block now**"* —
+was reachable on the phone and nowhere else. The intended answer, `design/win/Setup.dc.html`, was never
+built.
+
+**What was changed.**
+
+- **The window's Now page** gains a filled **Start a block** button. It shows whether or not something
+  is running, which is deliberate rather than an oversight: `Request::Start` merges into the running
+  session by lattice join, so starting the same profile again is how a block is *extended* and starting
+  a different one is how a second profile joins it.
+- **The sheet** carries the three decisions the Android Timer screen carries, in the same words: which
+  profile, how long, and what it takes to end it. Four durations (25m / 50m / 1h 30m / 3h, default
+  1h 30m) and four strengths — *I can stop it* · *Ask me first* · *Your Windows password* · *Until it
+  ends* — defaulting to the middle one.
+- **It says what it will do** before it does it: `whatItBlocks()` reads the chosen profile's rules and
+  writes *"Deep work closes 11 apps and 4 sites while it runs"*, or says plainly that the profile has no
+  rules yet and would block nothing.
+- **It handles the freeze path.** A profile that takes the whole machine is *announced*, never started
+  on the spot (GAPS B4). That arrives as `Response::Announced`, and the sheet says so with the time it
+  fires, rather than leaving a countdown the user never saw.
+- **The tray gains "Open Curfew…"** (entry 15), because the window is now the only place a block can be
+  started by hand and the tray previously had no route to it at all.
+
+**Why a sheet and not a wizard, and why the default is the middle strength.** The Android screen's own
+comment is the argument: *"a person about to be distracted has a few seconds of resolve to spend."* A
+wizard would eat them. And a form that opens on "no way out" trains people to change it without
+reading, which is how a strict lock gets chosen by accident — the failure `LONG_MINUTES` exists to catch
+on the phone.
+
+**Verification.** Three new tests, because a UI change with no executable guard is a UI change that gets
+deleted:
+
+- `curfew-win` `the_windows_page_can_start_a_block_over_the_wire` — parses the **literal JSON the page
+  builds** (one case per strength, including the empty-`locks` case a first-run user sends) into the
+  real `Request` enum. The round-trip test beside it proves the enum is symmetric with *itself*, which
+  stays true if `seconds` is renamed; this one fails.
+- `curfew-app` `the_page_still_offers_to_start_a_block` — the affordance and the call are both still in
+  the compiled-in page.
+- `curfew-app` `every_strength_the_page_offers_is_a_real_lock` — scrapes the page's `lock: { kind: … }`
+  entries and pins them to the set `Lock` actually deserializes, so a fifth strength invented in the
+  page cannot become a button that fails with "unknown variant".
+
+`node --check` on the page's extracted script confirms the JavaScript parses — `include_str!` only
+checks that the file is UTF-8, so a syntax error would otherwise reach a user as a blank window.
+
+---
+
+## 14. The tray could never end a `Confirm`-locked session
+
+**Found while building entry 6**, not in either review.
+
+**What was wrong.** `menu.rs` sorted lock conditions into "the credential, which this menu can satisfy"
+and "everything else, which lives somewhere else":
+
+```rust
+let credential = conditions.iter().any(|lock| matches!(lock, Lock::DeviceCredential));
+let others = conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential));
+```
+
+`Lock::Confirm` fell into `others`, so a session locked *"ask me first"* got the sentence **"this
+session is locked elsewhere"** and **no action at all** — from the one surface most Windows users ever
+open. `Item::End` also sent `satisfied: Default::default()`, so it could not have claimed the
+confirmation even if it had been offered.
+
+The window *could* end such a session (its `confirmEnd` sheet), so the two surfaces disagreed about
+whether the same lock had an exit. That is worse than either failing alone: it makes the product
+contradict itself about the user's own escape hatch. This is the Windows twin of the Android
+`Lock.Confirm` bug fixed in entry 8.
+
+**What was changed.**
+
+- `others` excludes `Confirm`, and a confirm-only lock offers `Item::End { confirm: true }` labelled
+  *"End X — it asks to be confirmed"*, so the dialog it opens is not a surprise.
+- `act()` sends `satisfied: {Confirm}` **only** when `confirm` is true. That claim is the record of a
+  dialog the shell showed; everything machine-checkable still comes from the service's own `proven`,
+  which is why an empty set remains right for every other lock.
+- The shell shows a **Yes/No** before sending it (`Item::End { confirm: true, .. }` has its own arm),
+  because sending the claim without asking would turn "ask me first" into "end it without asking" — the
+  same defect the window had.
+
+**Verification.** Three menu tests —
+`a_confirmation_lock_offers_a_way_to_end_it`, `a_lock_with_nothing_to_confirm_does_not_ask_to_be_confirmed`,
+`a_running_timer_is_reported_rather_than_offered` (the negative case, which caught a wrong premise in my
+own first draft) — plus `confirming_from_the_tray_claims_the_confirmation_and_nothing_else`, which pins
+the claim to exactly one element. `cargo test -p curfew-tray`: 54 passed.
+
+---
+
+## 15. The tray had no route to the window
+
+**Findings:** the UI audit's "the menu has no way to open the window", promoted to a blocker by entry 6.
+
+**What was wrong.** The window was reachable only from the Start menu. The tray — the surface actually
+on screen — could end a session, cancel a freeze and explain SmartScreen, but had no item that opened
+the window. Once the only way to start a block by hand lives in the window, a tray with no route to it
+is a dead end: the icon in front of the user cannot reach the product's central verb.
+
+`design/win/Tray.dc.html` had the same shape, so this was a shipped omission rather than a deviation
+from the design — worth noting, because it means the canvas would not have caught it either.
+
+**What was changed.** `Item::OpenWindow`, placed above the two "explain something" items (it is the only
+one that *does* something), labelled **"Open Curfew…"**. `open_window()` resolves `curfew-app.exe`
+against `current_exe()` rather than `PATH` — the same install that put this icon in the startup folder
+put the window beside it, and a `PATH` lookup could find a different build. It spawns without waiting,
+so the menu never blocks on the window's lifetime. A missing window is *reported* with the fix
+(`curfew install`) rather than being a click that appears to do nothing, and the copy says enforcement
+is unaffected either way.
+
+---
+
+## 16 and 17. The window's exit paths were chosen by comparing sentences
+
+**Findings:** `UX_INTERACTION_REVIEW.md` F-20 (silent wrong password) and P2-5 (display strings as
+control flow).
+
+**What was wrong — two things in one function.**
+
+```js
+if (missing.some((l) => describeLock(l) === "asks before ending")) return confirmEnd(id, missing);
+if (missing.some((l) => describeLock(l) === "your Windows password")) return password(id);
+```
+
+`describeLock` is a *presentation* function. The window decided which exit to offer by comparing its
+output against literal sentences, so a copy edit — or a translated build — would silently turn "End it
+early" into a button that can never end anything. The tray routes structurally, on
+`Lock::DeviceCredential`, and always did.
+
+Separately, the `unlock` handler checked only `response === "refused"`. A rejected password comes back
+as `Response::Error` — `LogonUser` said no, rather than the core declining a policy — so the sheet
+closed and **nothing appeared at all**. A user who mistyped their password watched the dialog vanish and
+concluded the button was broken. The tray has always handled this case correctly; the window did not.
+
+**What was changed.**
+
+- `lockKind(lock)` is extracted, and every decision uses it. `describeLock` keeps the wording, and its
+  fallback now says *"a condition this version of Curfew does not know about"* rather than printing a raw
+  discriminant into a sentence, with the raw value going to the console for diagnosis.
+- The wrong password is handled as its own case, showing `answer.detail`.
+- **An ordering fix that makes multi-condition locks endable at all.** A lock can want a password *and*
+  a confirmation. `Unlock` writes the password proof down for a couple of minutes and `End` folds fresh
+  proofs back in — so asking for the **password first** leaves the confirmation riding on a proof that is
+  still valid, and one more round trip through `end()` finishes it. The old order would have needed
+  three, and would fail outright if the user took longer than the proof lives.
+- `confirm-end`, and a refused `unlock`, now re-enter `end(id)` rather than declaring the rest
+  unreachable — so the next unmet condition is offered instead of a dead end.
+
+**Verification.** `node --check` clean on the extracted script, and `cargo build` of the binary that
+`include_str!`s it. **Not covered by an executing test** — these are DOM handlers, and the honest
+statement is that the reasoning is checked and the behaviour is not. What *is* pinned is the wire shape
+(entry 6's contract test) and the strength vocabulary.

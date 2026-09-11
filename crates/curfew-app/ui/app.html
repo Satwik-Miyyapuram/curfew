@@ -120,10 +120,19 @@ function describeDays(days) {
   if (sorted === "5,6") return "Weekends";
   return [...days].sort((a, b) => a - b).map((d) => DAYS[d] || "?").join(", ");
 }
+// A lock's *kind*, which is what decisions are made on.
+//
+// Separate from `describeLock` on purpose. Deciding which exit to offer used to mean comparing
+// `describeLock(l)` against a sentence — `=== "asks before ending"` — so the control flow depended
+// on the wording of a label. A copy edit, or a translated build, would have silently removed the
+// confirm and password paths and left "End it early" as a button that can never end anything.
+function lockKind(lock) {
+  return typeof lock === "string" ? lock : lock.kind;
+}
+
 // The lock names are the promise, said the way the user chose it rather than the way it is stored.
 function describeLock(lock) {
-  const kind = typeof lock === "string" ? lock : lock.kind;
-  switch (kind) {
+  switch (lockKind(lock)) {
     case "timer": return "runs to the end";
     case "confirm": return "asks before ending";
     case "device_credential": return "your Windows password";
@@ -131,7 +140,11 @@ function describeLock(lock) {
     case "challenge": return "a challenge";
     case "peer_release": return "another device";
     case "token": return "a tag";
-    default: return String(kind);
+    // A kind this build has never heard of is a newer service, and saying so is more use than a raw
+    // token in a sentence. The raw value still reaches the console for diagnosis.
+    default:
+      console.warn("unknown lock kind", lock);
+      return "a condition this version of Curfew does not know about";
   }
 }
 function describeTarget(target) {
@@ -171,7 +184,10 @@ function describeRefusal(refusal) {
 }
 
 // ---- state ------------------------------------------------------------------------------------
-const state = { page: "now", status: null, trouble: null, config: null, configPath: null, configError: null, tab: "apps", profile: null };
+const state = { page: "now", status: null, trouble: null, config: null, configPath: null, configError: null, tab: "apps", profile: null,
+  // What the Start-a-block sheet is set to. `null` until it is opened, so the sheet's own defaults
+  // apply the first time and a choice the user made survives the refresh that follows it.
+  startProfile: null, startMinutes: null, startStrength: null };
 
 async function refresh() {
   const answer = await askService({ request: "status" });
@@ -224,15 +240,31 @@ function pageNow() {
   }
   const s = state.status;
   const running = s.running || [];
+  // The one action the whole product exists for, and this window did not have it.
+  //
+  // Every other route to a block on Windows is a schedule or a calendar; starting one by hand meant
+  // `curfew start <profile> <minutes>` in a terminal, knowing the profile id and the flag syntax.
+  // `UX-FLOWS.md` Flow 1 — "Now opens … one filled button: Start a block now" — describes this
+  // button, and until now the flow was reachable on the phone and nowhere else. The service has
+  // always accepted `Request::Start`; nothing could send it but the command line.
+  //
+  // Shown while something is running too, and that is deliberate rather than an oversight:
+  // `Request::Start` merges into the running session, so starting the same profile again is how a
+  // block is *extended*, and starting a different one is how a second profile joins it.
+  const start = `<button class="btn" data-act="start-open">Start a block</button>`;
   if (running.length === 0) {
     const next = nextWindows(1)[0];
     return `<h1>Nothing is running</h1>
       <div class="sub">${next
         ? `Next is ${esc(next.name)}, at ${esc(hhmm(next.start_minute))}.`
         : "No window is scheduled. The Plan page is where windows are made."}</div>
+      <div style="height:18px"></div>
+      <div class="strip">${start}</div>
       <div style="height:18px"></div>${blockedSummary()}`;
   }
   return running.map(sessionCard).join('<div style="height:14px"></div>') +
+    '<div style="height:14px"></div>' +
+    `<div class="strip">${start}</div>` +
     '<div style="height:14px"></div>' + blockedSummary() +
     `<div style="height:14px"></div><div class="note">A lock is a promise: ending a session early goes through the same check you set up, even here.</div>`;
 }
@@ -464,23 +496,147 @@ function say(title, text) {
     <button class="btn ghost" data-act="close">Close</button></div>`);
 }
 
+// ---- starting a block -------------------------------------------------------------------------
+// The lengths that cover almost every ask, and the vocabulary the phone uses. Both platforms are
+// meant to be one product, so the words and the numbers are the same on purpose: a strength called
+// "Ask me first" here and something else there is two products wearing one name.
+const START_MINUTES = [25, 50, 90, 180];
+const START_DEFAULT_MINUTES = 90;
+
+// What it takes to end the block early. `lock` is the wire form from `curfew_core::Lock` — `null`
+// means no condition at all, which is a block you can stop whenever you like.
+const START_STRENGTHS = [
+  { id: "open", label: "I can stop it", note: "Ends the moment you press stop.", lock: null },
+  { id: "confirm", label: "Ask me first", note: "One confirmation, so it is never an accident.", lock: { kind: "confirm" } },
+  { id: "credential", label: "Your Windows password", note: "Proves it is you, not a pocket.", lock: { kind: "device_credential" } },
+  { id: "locked", label: "Until it ends", note: "Nothing ends this early. The 24-hour release is the way out.", lock: { kind: "timer" } },
+];
+
+/**
+ * The sheet, in its two states: nothing to block yet, and something worth committing to.
+ *
+ * A sheet rather than a page because starting a block is a decision with three parts and one
+ * button, and every part is chosen *before* the thing that cannot be taken back. The default is the
+ * middle strength rather than the strongest: the honest answer changes between a study hour and an
+ * evening off, and a form that opens on "no way out" trains people to change it without reading.
+ */
+function startSheet() {
+  const profiles = state.config?.profiles || [];
+  if (profiles.length === 0) {
+    sheet(`<div style="font-size:17px;font-weight:650">Start a block</div>
+      <div style="height:10px"></div>
+      <div class="wrap" style="color:var(--mut);line-height:1.6">There is nothing to block yet. A block
+        is a profile — a named set of apps and sites — so the Plan page is where to make one.</div>
+      <div style="height:16px"></div><div style="display:flex;justify-content:flex-end">
+      <button class="btn ghost" data-act="close">Close</button></div>`);
+    return;
+  }
+  if (!profiles.some((p) => p.id === state.startProfile)) state.startProfile = profiles[0].id;
+  if (state.startMinutes == null) state.startMinutes = START_DEFAULT_MINUTES;
+  if (state.startStrength == null) state.startStrength = "confirm";
+
+  const profile = profiles.find((p) => p.id === state.startProfile);
+  const pill = (on) => (on ? "tab on" : "tab");
+  sheet(`<div style="font-size:17px;font-weight:650">Start a block</div>
+    <div style="height:12px"></div>
+    <div class="lbl">Which profile</div>
+    <div style="height:8px"></div>
+    <div class="strip">${profiles.map((p) =>
+      `<span class="${pill(p.id === state.startProfile)}" data-act="start-profile" data-id="${esc(p.id)}">${esc(p.name)}</span>`).join("")}</div>
+    <div style="height:14px"></div>
+    <div class="lbl">For how long</div>
+    <div style="height:8px"></div>
+    <div class="strip">${START_MINUTES.map((m) =>
+      `<span class="${pill(m === state.startMinutes)}" data-act="start-minutes" data-minutes="${m}">${esc(spellMinutes(m))}</span>`).join("")}</div>
+    <div style="height:14px"></div>
+    <div class="lbl">What it takes to end it</div>
+    <div style="height:8px"></div>
+    <div class="flush">${START_STRENGTHS.map((s) =>
+      `<div class="row" data-act="start-strength" data-id="${esc(s.id)}" style="cursor:default">
+        <span class="dot" style="background:${s.id === state.startStrength ? "var(--acc)" : "var(--line)"}"></span>
+        <div class="grow"><div class="name">${esc(s.label)}</div><div class="meta">${esc(s.note)}</div></div></div>`).join("")}</div>
+    <div style="height:12px"></div>
+    <div class="note wrap">${esc(whatItBlocks(profile))}</div>
+    <div style="height:16px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn ghost" data-act="close">Cancel</button>
+      <button class="btn" data-act="start-go">Start for ${esc(spellMinutes(state.startMinutes))}</button>
+    </div>`);
+}
+
+/** "25m", "1h 30m" — the spellings the phone uses too. */
+function spellMinutes(m) {
+  return m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${m / 60}h ${m % 60}m`;
+}
+
+/** What the chosen profile actually closes, so the button is a promise rather than a guess. */
+function whatItBlocks(profile) {
+  if (!profile) return "";
+  const rules = profile.rules || [];
+  const apps = rules.filter((r) => ["windows_exe", "app_package", "file_path"].includes(r.target?.kind)).length;
+  const sites = rules.filter((r) => ["domain", "url", "keyword"].includes(r.target?.kind)).length;
+  if (apps === 0 && sites === 0) {
+    return `${profile.name} has no rules yet, so this would block nothing. Add apps or sites on the Plan page first.`;
+  }
+  const parts = [];
+  if (apps) parts.push(`${apps} app${apps === 1 ? "" : "s"}`);
+  if (sites) parts.push(`${sites} site${sites === 1 ? "" : "s"}`);
+  return `${profile.name} closes ${parts.join(" and ")} while it runs.`;
+}
+
+/** Ask the service to start it, and say what happened. */
+async function startBlock() {
+  const profile = state.startProfile;
+  const minutes = state.startMinutes;
+  const strength = START_STRENGTHS.find((s) => s.id === state.startStrength);
+  if (!profile || !strength) return;
+  const locks = strength.lock ? [strength.lock] : [];
+  const answer = await askService({ request: "start", profile, seconds: minutes * 60, locks });
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  const value = answer.value;
+  // A profile that takes the whole machine away is announced and never started on the spot, because
+  // the one thing Curfew cannot give back is unsaved work. Saying so is the difference between a
+  // countdown a person can act on and a block that looks like it failed.
+  if (value.response === "announced") {
+    const at = value.countdown?.fires_at;
+    return say(
+      "This one is announced first",
+      `${profileName(profile)} takes the whole machine, so it counts down before it starts` +
+        (at ? `. Save your work — it freezes at ${atTime(at)}.` : ". Save your work."),
+    );
+  }
+  if (value.response === "error") return say("That could not start", value.detail);
+  await refresh();
+  sheet("");
+}
+
 // Ending a session is the one place the promise is kept or broken, so it is done in two steps: ask
 // the service plainly, and only if it names a condition do we offer the way to satisfy it.
+//
+// The service is always the judge. Every branch here re-asks rather than deciding that something
+// would be refused, so a cancel, a wrong password or a lock this build does not understand all end
+// up as the core's own words instead of this window's guess.
 async function end(id) {
   const answer = await askService({ request: "end", id, satisfied: [] });
   if (!answer.ok) return say("The service did not answer", answer.detail);
   const value = answer.value;
   if (value.response === "ok") { await refresh(); return sheet(""); }
+  if (value.response === "error") return say("That could not be done", value.detail);
   if (value.response === "refused") {
     const missing = value.refusal.refusal === "locked" ? value.refusal.missing || [] : [];
-    if (missing.some((l) => describeLock(l) === "asks before ending")) return confirmEnd(id, missing);
-    if (missing.some((l) => describeLock(l) === "your Windows password")) return password(id);
+    // Password first, confirmation second, and the order is load-bearing rather than cosmetic.
+    // A lock can want both. `Unlock` writes the password proof down for a couple of minutes, and
+    // `End` folds fresh proofs back in — so asking for the password *first* leaves the confirmation
+    // to ride on a proof that is still valid. The other order would need two round trips through
+    // this function and would fail outright if the user took longer than the proof lives.
+    if (missing.some((l) => lockKind(l) === "device_credential")) return password(id);
+    if (missing.some((l) => lockKind(l) === "confirm")) return confirmEnd(id);
     return say("Still locked", describeRefusal(value.refusal));
   }
   return say("The service said", JSON.stringify(value));
 }
 
-function confirmEnd(id, missing) {
+function confirmEnd(id) {
   sheet(`<div style="font-size:17px;font-weight:650">End this session?</div>
     <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You asked to be asked. Nothing else is standing in the way.</div>
     <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
@@ -509,16 +665,36 @@ document.addEventListener("click", async (event) => {
   if (tab) { state.tab = tab.dataset.tab; return draw(); }
   const profile = event.target.closest("[data-profile]");
   if (profile) { state.profile = profile.dataset.profile; return draw(); }
+  // The Start-a-block sheet. Every control redraws the sheet rather than the page, so a choice is
+  // visible where it was made and nothing else on screen moves under the pointer.
+  const byAct = event.target.closest("[data-act]");
+  if (byAct) {
+    switch (byAct.dataset.act) {
+      case "start-open": return startSheet();
+      case "start-profile": state.startProfile = byAct.dataset.id; return startSheet();
+      case "start-minutes": state.startMinutes = Number(byAct.dataset.minutes); return startSheet();
+      case "start-strength": state.startStrength = byAct.dataset.id; return startSheet();
+      default: break;
+    }
+  }
   const button = event.target.closest("[data-act]");
   if (!button) return;
   const id = button.dataset.id;
   switch (button.dataset.act) {
     case "close": return sheet("");
+    case "start-go": return startBlock();
     case "end": return end(id);
     case "confirm-end": {
       const answer = await askService({ request: "end", id, satisfied: [{ kind: "confirm" }] });
+      // "Still locked" is the wrong thing to say when the service said something else entirely.
+      if (answer.ok && answer.value.response === "refused") {
+        // The lock may also want the password, and a confirmation is not a reason to give up on it.
+        // Re-entering `end` asks the core again rather than assuming the rest is unreachable.
+        sheet("");
+        return end(id);
+      }
       sheet("");
-      if (answer.ok && answer.value.response === "refused") say("Still locked", describeRefusal(answer.value.refusal));
+      if (answer.ok && answer.value.response === "error") return say("That could not be done", answer.value.detail);
       return refresh();
     }
     case "unlock": {
@@ -526,7 +702,17 @@ document.addEventListener("click", async (event) => {
       const pw = document.getElementById("pw").value;
       const answer = await askService({ request: "unlock", id, username, domain: "", password: pw });
       sheet("");
-      if (answer.ok && answer.value.response === "refused") say("Not unlocked", describeRefusal(answer.value.refusal));
+      if (!answer.ok) return say("The service did not answer", answer.detail);
+      // A rejected password comes back as `error`, not as a refusal — `LogonUser` said no rather than
+      // the core declining a policy. Handling only `refused` here meant the sheet closed and nothing
+      // appeared at all: a user who mistyped their password saw the dialog vanish and concluded the
+      // button was broken. The tray has always handled this correctly; the window did not.
+      if (answer.value.response === "error") return say("Not unlocked", answer.value.detail);
+      if (answer.value.response === "refused") {
+        // The password satisfied one condition. The lock may want a confirmation as well, and that
+        // is still reachable — so ask again rather than reporting defeat.
+        return end(id);
+      }
       return refresh();
     }
     case "release": {

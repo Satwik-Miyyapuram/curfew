@@ -13,6 +13,28 @@ use wry::WebViewBuilder;
 /// is allowed to send `End` and `Unlock` to the service.
 const PAGE: &str = include_str!("../ui/app.html");
 
+/// The `{"kind": "…"}` lock names the page's strength list offers.
+///
+/// Scraped from the page rather than duplicated here, so the two cannot drift: a strength is added
+/// in one place — the JavaScript a person can read — and this reads back what was written. Used only
+/// by the tests; the window itself never needs it.
+#[cfg(test)]
+fn lock_kinds_referenced() -> Vec<String> {
+    let mut found = Vec::new();
+    let mut rest = PAGE;
+    // `lock: { kind: "…" }` appears nowhere but the strength list.
+    const NEEDLE: &str = "lock: { kind:";
+    while let Some(at) = rest.find(NEEDLE) {
+        rest = &rest[at + NEEDLE.len()..];
+        let Some(open) = rest.find('"') else { break };
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('"') else { break };
+        found.push(after[..close].to_string());
+        rest = &after[close..];
+    }
+    found
+}
+
 /// One message from the page.
 ///
 /// Two kinds, and no third: everything that can change the world goes through [`Request`], which is
@@ -191,4 +213,52 @@ pub fn run() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::{lock_kinds_referenced, PAGE};
+
+    /// The window is the only way to start a block on Windows, so the affordance is the fix for a
+    /// P0 rather than a decoration. This test exists because that was a whole-product bug — the
+    /// service had always accepted `Request::Start` and nothing but the command line could send it —
+    /// and a bug that is one absent `<button>` is exactly the kind a refactor deletes by accident.
+    ///
+    /// It checks the page still carries the two things that make the journey work: a control that
+    /// opens the sheet, and a call that sends the request. It cannot check that they are *wired to
+    /// each other* — that is what `the_windows_page_can_start_a_block_over_the_wire` in `curfew-win`
+    /// does, from the other end of the same contract.
+    #[test]
+    fn the_page_still_offers_to_start_a_block() {
+        assert!(
+            PAGE.contains(r#"data-act="start-open""#),
+            "the window has no way to start a block, which is the product's whole verb"
+        );
+        assert!(
+            PAGE.contains(r#"request: "start""#),
+            "the Start sheet no longer asks the service to start anything"
+        );
+    }
+
+    /// A strength the page offers must be one the core can actually be asked for.
+    ///
+    /// `lock_kinds_referenced` reads the wire forms out of the page; this pins them to the set the
+    /// protocol understands. A fifth strength invented in the page and not in `Lock` would be a
+    /// button the service refuses with "unknown variant", which reads to a user as a bug in Curfew
+    /// rather than as a typo in a form.
+    #[test]
+    fn every_strength_the_page_offers_is_a_real_lock() {
+        let kinds = lock_kinds_referenced();
+        assert!(!kinds.is_empty(), "no lock kinds found in the page at all");
+        for kind in &kinds {
+            assert!(
+                ["confirm", "device_credential", "timer"].contains(&kind.as_str()),
+                "the page offers a lock kind the protocol does not know: {kind}"
+            );
+        }
+        // The three the strength list is built from, so a silent removal fails here too.
+        for expected in ["confirm", "device_credential", "timer"] {
+            assert!(kinds.contains(&expected.to_string()), "the page lost the {expected} strength");
+        }
+    }
 }

@@ -19,9 +19,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW,
     PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu,
-    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONWARNING, MB_YESNO, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY,
-    WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONQUESTION, MB_ICONWARNING, MB_YESNO,
+    MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND,
+    WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 /// The message the shell sends us when someone clicks the icon.
@@ -131,6 +131,40 @@ fn refresh_tooltip(window: HWND) {
     show_tip(window, &text);
 }
 
+/// Bring up the Curfew window, which is where a block is started by hand.
+///
+/// The window sits beside this executable in the install directory, so it is found by resolving
+/// against `current_exe()` rather than by looking on `PATH` — the same install that put this icon in
+/// the startup folder put the window next to it, and a `PATH` lookup could find a different build.
+///
+/// A missing window is reported rather than ignored: the only alternative is a click that appears to
+/// do nothing, and the fix (reinstall, or run `curfew install`) is one sentence. Not fatal, either —
+/// enforcement is the service's, and it is unaffected by whether a window can be opened.
+fn open_window(parent: HWND) {
+    let window = match std::env::current_exe() {
+        Ok(exe) => exe.with_file_name("curfew-app.exe"),
+        Err(e) => {
+            say(parent, &format!("Curfew could not work out where its own window is ({e})."));
+            return;
+        }
+    };
+    if !window.exists() {
+        say(
+            parent,
+            "The Curfew window is not installed beside the tray icon.\n\n\
+             Running `curfew install` from an administrator terminal replaces both, and blocks are \
+             being enforced either way — this is only the window.",
+        );
+        return;
+    }
+    match std::process::Command::new(&window).spawn() {
+        // Deliberately not waited on. The window is a separate program with its own lifetime, and a
+        // tray that blocked until it closed would freeze its own menu for as long as it was open.
+        Ok(_) => {}
+        Err(e) => say(parent, &format!("The Curfew window did not open.\n\n{e}")),
+    }
+}
+
 /// Tell the service which window the user is looking at.
 ///
 /// The service cannot see: it runs in session 0, where there is no desktop and
@@ -235,6 +269,9 @@ fn show_menu(window: HWND) {
             | Item::ConfirmFreeze { label } => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide(label).as_ptr());
             },
+            Item::OpenWindow => unsafe {
+                AppendMenuW(handle, MF_STRING, id, wide("Open Curfew…").as_ptr());
+            },
             Item::Details => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide("What is blocked…").as_ptr());
             },
@@ -282,6 +319,7 @@ fn chosen(window: HWND, id: usize) {
             say(window, &text);
         }
         Item::About => say(window, crate::welcome::WELCOME),
+        Item::OpenWindow => open_window(window),
         Item::Quit => {
             say(window, menu::QUIT_NOTE);
             unsafe { DestroyWindow(window) };
@@ -339,6 +377,29 @@ fn chosen(window: HWND, id: usize) {
                     .as_ptr(),
                     wide("Curfew").as_ptr(),
                     MB_YESNO | MB_ICONWARNING,
+                ) == IDYES
+            };
+            if !confirmed {
+                return;
+            }
+            let Some((request, _)) = act(&item, None) else { return };
+            match ask(&request) {
+                Ok(response) => say(window, &describe(&response)),
+                Err(detail) => say(window, &detail),
+            }
+            refresh_tooltip(window);
+        }
+        // A confirmation lock, asked about here because that is what the lock asked for. The menu
+        // item carries `confirm: true` precisely so this dialog is not skipped: sending the claim
+        // without asking would turn "ask me first" into "end it without asking", which is the same
+        // defect the window had — a lock whose stated friction does not exist.
+        Item::End { confirm: true, .. } => {
+            let confirmed = unsafe {
+                MessageBoxW(
+                    window,
+                    wide("End this session? You asked to be asked before it ends early.").as_ptr(),
+                    wide("Curfew").as_ptr(),
+                    MB_YESNO | MB_ICONQUESTION,
                 ) == IDYES
             };
             if !confirmed {

@@ -14,6 +14,15 @@ pub enum Item {
     /// End a session that has no unmet conditions.
     End {
         id: String,
+        /// Whether the session also asks to be confirmed first.
+        ///
+        /// `Lock::Confirm` is the one condition this menu *can* satisfy, and it could not until now.
+        /// It was classified with the conditions that live elsewhere — a tag, a peer, a restart — so
+        /// a session locked "ask me first" got the sentence "this session is locked elsewhere" and no
+        /// action at all, from the one surface most Windows users ever open. The window could end it
+        /// and the tray could not, which is a worse bug than either being unable to: the product
+        /// disagreed with itself about whether the lock had an exit.
+        confirm: bool,
         label: String,
     },
     /// End one that needs the machine's password, via the operating system's own prompt.
@@ -54,6 +63,13 @@ pub enum Item {
     /// every login and wrong for the only place those two facts are written down: a user who
     /// dismissed it, or who inherited the machine, had no way back to it.
     About,
+    /// Open the Curfew window.
+    ///
+    /// The window is where a block is started by hand, and the tray is the surface almost every
+    /// Windows user actually sees. Until this item existed the two had no route between them: the
+    /// icon could end a session but not begin one, and the window was reachable only from the Start
+    /// menu — which is the wrong way round, because the icon is the thing in front of them.
+    OpenWindow,
     /// Hide the tray icon. It never stops enforcement, and says so.
     Quit,
 }
@@ -117,12 +133,17 @@ pub fn menu(status: &Status) -> Vec<Item> {
         let conditions: Vec<&Lock> =
             session.lock.conditions.iter().filter(|lock| !matches!(lock, Lock::Timer)).collect();
 
-        // Only the credential can be satisfied from here by pressing something. A tag is scanned,
-        // a challenge is answered in the app, a restart is a restart — an item that opened a prompt
-        // leading nowhere would be worse than no item at all. What *is* actionable here is a peer
-        // release this machine is the named device for, which is a click and nothing more.
+        // Which conditions this menu can actually satisfy by being clicked.
+        //
+        // The credential is proved by the operating system's own prompt. A confirmation is proved by
+        // asking — the menu shows a Yes/No before it sends anything, so the item *is* the dialog.
+        // Everything else (a tag scanned, a challenge answered in the app, a restart, a peer) lives
+        // somewhere this menu cannot reach, and an item that opened a prompt leading nowhere would be
+        // worse than no item at all.
         let credential = conditions.iter().any(|lock| matches!(lock, Lock::DeviceCredential));
-        let others = conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential));
+        let confirm = conditions.iter().any(|lock| matches!(lock, Lock::Confirm));
+        let others =
+            conditions.iter().any(|lock| !matches!(lock, Lock::DeviceCredential | Lock::Confirm));
         let releasable = status.releasable.contains(&session.id);
 
         // Said before the actions, because it is the answer to "why can I not end this?" and it is
@@ -153,6 +174,15 @@ pub fn menu(status: &Status) -> Vec<Item> {
                 id: session.id.clone(),
                 label: format!("End {} with your Windows password", session.profile),
             });
+        } else if confirm {
+            // Offered with a Yes/No in front of it, which is what "ask me first" asked for. The
+            // label says so, because an item that then opens a dialog should not be a surprise, and
+            // it is also the honest description: the menu is asking on the lock's behalf.
+            items.push(Item::End {
+                id: session.id.clone(),
+                confirm: true,
+                label: format!("End {} — it asks to be confirmed", session.profile),
+            });
         } else if session.lock.ends_at.is_some_and(|ends| ends > status.now) {
             // A timer that has not run out is a lock; the service will refuse, and it is honest to
             // say so on the item rather than to offer it and fail.
@@ -160,6 +190,7 @@ pub fn menu(status: &Status) -> Vec<Item> {
         } else {
             items.push(Item::End {
                 id: session.id.clone(),
+                confirm: false,
                 label: format!("End {}", session.profile),
             });
         }
@@ -224,6 +255,9 @@ pub fn menu(status: &Status) -> Vec<Item> {
     }
 
     items.push(Item::Separator);
+    // Above the two "explain something" items, because it is the only one that *does* something:
+    // starting a block is the product's whole verb, and this icon is the surface most people see.
+    items.push(Item::OpenWindow);
     items.push(Item::Details);
     items.push(Item::About);
     items.push(Item::Quit);
@@ -356,6 +390,59 @@ mod tests {
         let items = menu(&status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]));
         assert!(items.iter().any(|i| matches!(i, Item::Unlock { .. })));
         assert!(items.iter().any(|i| matches!(i, Item::Release { .. })));
+    }
+
+    /// The regression guard for a gap in this menu, not in the service.
+    ///
+    /// `Lock::Confirm` used to be classified with the conditions that live elsewhere, so a session
+    /// locked "ask me first" was described as *"this session is locked elsewhere"* and given no
+    /// action — from the one surface most Windows users ever open. The window could end it and the
+    /// tray could not, which is worse than either failing: the product disagreed with itself about
+    /// whether the lock had an exit.
+    #[test]
+    fn a_confirmation_lock_offers_a_way_to_end_it() {
+        let items = menu(&status(vec![session([Lock::Confirm], Some(NOW + 3600))]));
+
+        assert!(
+            items.iter().any(|i| matches!(i, Item::End { confirm: true, .. })),
+            "a lock that only asks to be confirmed offered no way to confirm it: {items:?}"
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|i| matches!(i, Item::Note(text) if text.contains("locked elsewhere"))),
+            "a confirmation is satisfiable here and was described as unreachable: {items:?}"
+        );
+    }
+
+    /// …and the claim travels with the item rather than being assumed by the sender, because the
+    /// Yes/No the shell shows is what makes the claim true.
+    ///
+    /// A session with no conditions and no end time can simply be ended, so it must not ask to be
+    /// confirmed — otherwise every ordinary block would open a dialog nobody requested.
+    #[test]
+    fn a_lock_with_nothing_to_confirm_does_not_ask_to_be_confirmed() {
+        let items = menu(&status(vec![session([], None)]));
+        assert!(
+            items.iter().any(|i| matches!(i, Item::End { confirm: false, .. })),
+            "an unlocked session was not offered as endable: {items:?}"
+        );
+        assert!(
+            !items.iter().any(|i| matches!(i, Item::End { confirm: true, .. })),
+            "a session with nothing to confirm offered a confirmation: {items:?}"
+        );
+    }
+
+    /// A timer that has not run out is a lock, so there is nothing to click — `ends_at` in the future
+    /// is the condition, and offering an End item would offer something the service refuses.
+    #[test]
+    fn a_running_timer_is_reported_rather_than_offered() {
+        let items = menu(&status(vec![session([], Some(NOW + 3600))]));
+        assert!(
+            !items.iter().any(|i| matches!(i, Item::End { .. })),
+            "a timer with time left was offered as endable: {items:?}"
+        );
+        assert!(items.iter().any(|i| matches!(i, Item::Note(text) if text.contains("runs out"))));
     }
 
     #[test]

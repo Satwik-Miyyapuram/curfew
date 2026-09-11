@@ -77,11 +77,18 @@ pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
 /// item can quietly acquire a second meaning.
 pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<(Request, String)> {
     match item {
-        menu::Item::End { id, .. } => Some((
-            // No claim of a satisfied condition, ever, from a process running as the user.
-            Request::End { id: id.clone(), satisfied: Default::default() },
-            String::new(),
-        )),
+        menu::Item::End { id, confirm, .. } => {
+            // A confirmation is the one condition a caller may claim, and the shell has already
+            // shown the Yes/No by the time this runs — the claim is the record of that dialog, not
+            // an assertion about the machine. Everything machine-checkable still comes from the
+            // service's own `proven`, which is why an empty set is the right answer for every other
+            // lock: a process running as the user must never be able to say "I did the reboot".
+            let satisfied = match confirm {
+                true => std::collections::BTreeSet::from([curfew_core::Lock::Confirm]),
+                false => Default::default(),
+            };
+            Some((Request::End { id: id.clone(), satisfied }, String::new()))
+        }
         menu::Item::Unlock { id, .. } => {
             let credential = credential?;
             Some((
@@ -200,12 +207,33 @@ mod tests {
 
     #[test]
     fn ending_from_the_tray_claims_nothing() {
-        let item = menu::Item::End { id: "s1".into(), label: "End".into() };
+        let item = menu::Item::End { id: "s1".into(), confirm: false, label: "End".into() };
         let (request, _) = act(&item, None).unwrap();
         match request {
             // The service re-checks everything anyway, but a tray that sent a claim would mean the
             // check depended on a process running as the user.
             Request::End { satisfied, .. } => assert!(satisfied.is_empty()),
+            other => panic!("ending sent {other:?}"),
+        }
+    }
+
+    /// The one exception, and it is narrow on purpose.
+    ///
+    /// `Lock::Confirm` is a condition no machine can check — the whole point of it is that a dialog
+    /// was shown — so the process that showed the dialog is the only possible witness. The shell
+    /// shows a Yes/No before reaching here, so this records a dialog rather than asserting a fact.
+    /// It must stay the *only* claim: a `Timer` or a `RestartRequired` in this set would be a way out
+    /// of every lock on the machine.
+    #[test]
+    fn confirming_from_the_tray_claims_the_confirmation_and_nothing_else() {
+        let item = menu::Item::End { id: "s1".into(), confirm: true, label: "End".into() };
+        let (request, _) = act(&item, None).unwrap();
+        match request {
+            Request::End { satisfied, .. } => assert_eq!(
+                satisfied,
+                std::collections::BTreeSet::from([curfew_core::Lock::Confirm]),
+                "a confirmation lock sent the wrong claim"
+            ),
             other => panic!("ending sent {other:?}"),
         }
     }
