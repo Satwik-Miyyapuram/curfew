@@ -1029,3 +1029,112 @@ action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minutes
     let error = Config::from_toml(config).expect_err("a mistyped refill field was accepted");
     assert!(error.to_string().contains("at_minutes"), "{error}");
 }
+
+// --- which rules need the foreground window (P2-16) ----------------------------------------------
+//
+// The predicate behind the Windows answer to "what stopped being enforced when the tray went". It has
+// to be right in both directions: too narrow and a rule that really did stop goes unreported, too wide
+// and the warning fires on machines where nothing is wrong, which teaches people to ignore it.
+
+/// A rule decided by what is in front: a window title.
+#[test]
+fn a_window_title_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "window_title", pattern = "*Steam*" }
+action = { kind = "block" }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A keyword, which is matched against a window title as well as a URL.
+#[test]
+fn a_keyword_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "keyword", text = "shorts" }
+action = { kind = "block" }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A budget, because it is charged to whatever is in front and to nothing else.
+#[test]
+fn a_budget_rule_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "news.exe" }
+action = { kind = "budget", seconds = 600, refill = { kind = "daily", at_minute = 240 } }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// A launch limit too: it is counted when the foreground changes, so it needs the same report.
+#[test]
+fn a_launch_limit_needs_the_foreground() {
+    let config = r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "news.exe" }
+action = { kind = "launch_limit", count = 3, refill = { kind = "daily", at_minute = 240 } }
+"#;
+    let cfg = Config::from_toml(config).unwrap();
+    assert!(cfg.profile("deep-work").unwrap().rules[0].needs_foreground());
+}
+
+/// **And the other direction**, which is what stops the warning crying wolf. An exe block is decided
+/// from the process list, a domain from the resolver, a path from the filesystem — none of them needs
+/// anybody's attention.
+#[test]
+fn a_rule_decided_without_a_window_does_not_need_the_foreground() {
+    // The path glob is deliberately backslash-free. A Windows pattern needs `\\` in TOML, and the
+    // first version of this fixture wrote `\G` — which TOML rejects, so the test failed on *parsing*
+    // rather than on the predicate. This case is about which rules need the foreground, and the
+    // predicate does not look at the pattern, so a simple glob tests exactly as much.
+    for (target, action) in [
+        (r#"{ kind = "windows_exe", exe = "steam.exe" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "domain", domain = "reddit.com" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "file_path", pattern = "*Games*" }"#, r#"{ kind = "block" }"#),
+        (r#"{ kind = "windows_exe", exe = "steam.exe" }"#, r#"{ kind = "delay", seconds = 30 }"#),
+    ] {
+        let config = format!(
+            "schema_version = 1\ntimezone = \"Europe/London\"\n\n[[profiles]]\nid = \"deep-work\"\n\
+             name = \"Deep work\"\n\n[[profiles.rules]]\ntarget = {target}\naction = {action}\n"
+        );
+        let cfg = Config::from_toml(&config).unwrap();
+        assert!(
+            !cfg.profile("deep-work").unwrap().rules[0].needs_foreground(),
+            "{target} with {action} was said to need the foreground window"
+        );
+    }
+}

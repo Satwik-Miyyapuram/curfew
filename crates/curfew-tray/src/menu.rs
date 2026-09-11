@@ -266,12 +266,25 @@ pub fn menu(status: &Status) -> Vec<Item> {
     if status.hosts_error.is_some()
         || !status.failing.is_empty()
         || status.state_warning.is_some()
+        || status.foreground_warning.is_some()
         || !status.unwatched.is_empty()
     {
         items.push(Item::Note("Something is not being enforced — see details".to_string()));
     }
 
-    items.extend(static_tail());
+    // **What the gap actually costs, and how to close it** — P2-16. Said here rather than only on the
+    // window's "Is it working" page, because the person who needs it is the one who just hid the icon
+    // and is now looking at this menu wondering why nothing is being charged.
+    if let Some(warning) = &status.foreground_warning {
+        items.push(Item::Note("    window-title and budget rules have stopped".to_string()));
+        items.push(Item::Note(format!("    {warning}")));
+    }
+
+    items.extend(if status.needs_foreground {
+        tail_with_foreground_warning()
+    } else {
+        static_tail()
+    });
     items
 }
 
@@ -287,6 +300,32 @@ fn static_tail() -> Vec<Item> {
         Item::OpenWindow,
         Item::Details,
         Item::About,
+        Item::Quit,
+    ]
+}
+
+/// The tail, plus a warning when hiding this icon would cost enforcement — P2-16.
+///
+/// The menu calls this instead of `static_tail` when a running session has a rule that needs the
+/// foreground window. Hiding the icon stops the twice-a-second `Request::Seen` that tells the service
+/// what is in front, and the service is in session 0, so nothing else can take over: window-title and
+/// keyword rules stop matching and budgets stop being charged, while the session keeps running.
+///
+/// **Said before the item, not after.** The action is one click, and a warning delivered on the next
+/// menu opening is a warning nobody needed. The label itself also changes, because that is the line the
+/// user actually reads.
+fn tail_with_foreground_warning() -> Vec<Item> {
+    vec![
+        Item::Separator,
+        // Above the two "explain something" items, because it is the only one that *does* something:
+        // starting a block is the product's whole verb, and this icon is the surface most people see.
+        Item::OpenWindow,
+        Item::Details,
+        Item::About,
+        Item::Note(
+            "Hiding this icon stops window-title and budget rules until it is started again"
+                .to_string(),
+        ),
         Item::Quit,
     ]
 }
@@ -308,13 +347,24 @@ pub fn unreachable(detail: &str) -> Vec<Item> {
         Item::Note("    blocks may not be enforced right now".to_string()),
         Item::Note(format!("    {detail}")),
     ];
+    // `static_tail`, not the warning variant: the service is unreachable so there is no status to ask,
+    // and the two lines above already say the honest thing — blocks may not be enforced at all.
     items.extend(static_tail());
     items
 }
 
 /// What the tray says when it is closed, so nobody closes it expecting the blocks to lift.
-pub const QUIT_NOTE: &str = "Hiding this icon does not stop Curfew. The service keeps enforcing \
-                             everything you asked for, and `curfew status` still answers.";
+///
+/// **Corrected for P2-16.** This read *"The service keeps enforcing everything you asked for"*, which was
+/// false: window-title and keyword rules and app budgets need to know what is in front, the only process
+/// that can say is this one, and the service is in session 0 where there is no interactive desktop. So
+/// hiding the icon stopped those rules while this sentence said nothing had changed.
+///
+/// The second sentence is kept because it is true and it is the reassurance people actually want: the
+/// locks do not lift, blocks on apps and sites keep working, and `curfew status` still answers.
+pub const QUIT_NOTE: &str = "Hiding this icon does not stop Curfew: your locks stay, and app and site \
+                             blocks keep working. It does stop window-title and budget rules, because \
+                             only this icon can see which window is in front. Start it again to resume.";
 
 /// The details text: everything the service reported that is not an offer to do something.
 pub fn details(status: &Status) -> String {
@@ -948,5 +998,83 @@ mod tests {
         // Asserted outright as well as against each other: two menus could agree on being wrong.
         assert_eq!(live_tail, vec!["quit", "about", "details", "window", "separator"]);
         assert_eq!(live_tail, tail(&dead), "the two menus no longer end alike");
+    }
+    /// **The tray has to say what hiding it costs, before the user hides it** — P2-16.
+    ///
+    /// The item is labelled "Hide this icon", which reads as harmless, and the quit note used to claim the
+    /// service "keeps enforcing everything you asked for" — which was false for exactly the rules this
+    /// finding is about.
+    #[test]
+    fn hiding_the_icon_warns_when_it_would_stop_enforcement() {
+        // A credential lock with a budget rule in the profile: the session needs the foreground report.
+        let mut exposed = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        exposed.needs_foreground = true;
+        let items = menu(&exposed);
+
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("window-title and budget rules"))),
+            "hiding the icon would stop enforcement and the menu said nothing: {items:?}"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("until it is started again"))),
+            "the menu did not say the cost is reversible: {items:?}"
+        );
+        // And the item is still there to press — this is a warning, not a refusal.
+        assert!(items.iter().any(|i| matches!(i, Item::Quit)));
+    }
+
+    /// And says nothing when it would cost nothing.
+    #[test]
+    fn hiding_the_icon_is_quiet_when_nothing_depends_on_it() {
+        let mut quiet = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        quiet.needs_foreground = false;
+        let items = menu(&quiet);
+
+        assert!(
+            !items
+                .iter()
+                .any(|i| matches!(i, Item::Note(n) if n.contains("window-title and budget rules"))),
+            "a warning was raised about enforcement that would have kept working: {items:?}"
+        );
+    }
+
+    /// The quit note itself, which is the sentence the user reads after pressing the item.
+    #[test]
+    fn the_quit_note_does_not_claim_more_than_is_true() {
+        // The reassurance that is true is kept.
+        assert!(QUIT_NOTE.contains("your locks stay"), "{QUIT_NOTE}");
+        assert!(QUIT_NOTE.contains("app and site"), "{QUIT_NOTE}");
+        // And the false part is gone: this read "keeps enforcing everything you asked for".
+        assert!(
+            !QUIT_NOTE.contains("everything you asked for"),
+            "the quit note is claiming more than the service does: {QUIT_NOTE}"
+        );
+        assert!(
+            QUIT_NOTE.contains("window-title"),
+            "the quit note does not say what it costs: {QUIT_NOTE}"
+        );
+    }
+
+    /// The gap, once it has opened, is reported on the menu rather than only on the window's page.
+    #[test]
+    fn an_open_gap_is_reported_in_the_menu() {
+        let mut broken = named_status(vec![session([Lock::DeviceCredential], Some(NOW + 3600))]);
+        broken.needs_foreground = true;
+        broken.foreground_warning =
+            Some("Nothing is telling Curfew which window is in front.".into());
+        let items = menu(&broken);
+
+        assert!(
+        items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("Something is not being enforced"))),
+        "the menu did not count the foreground gap among the things not being enforced: {items:?}"
+    );
+        assert!(
+            items.iter().any(|i| matches!(i, Item::Note(n) if n.contains("have stopped"))),
+            "the menu did not say which rules stopped: {items:?}"
+        );
     }
 }

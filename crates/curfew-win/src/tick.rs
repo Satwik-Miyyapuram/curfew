@@ -153,6 +153,11 @@ pub struct Enforcer {
     /// The foreground window as the tray last reported it, and when. Not persisted: a window
     /// remembered across a restart is a window nobody is looking at.
     pub seen: Option<(Process, Timestamp)>,
+    /// **What has stopped being enforced because nothing can say what is in front** — P2-16.
+    ///
+    /// Recomputed every pass, and carried on [`crate::ipc::Status`] so a surface can say it.
+    /// See [`Enforcer::foreground_warning`] for why the gap exists and cannot be closed here.
+    pub foreground_warning: Option<String>,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
@@ -225,6 +230,7 @@ impl Enforcer {
             gates: Default::default(),
             watch: Default::default(),
             seen: None,
+            foreground_warning: None,
             counter: 0,
         }
     }
@@ -441,11 +447,95 @@ impl Enforcer {
     /// session 0, where `GetForegroundWindow` returns nothing — and a service that never charged an
     /// app budget would enforce every limit except the ones about time. Asking the machine is the
     /// fallback for `curfew run` on a desktop, where there is no tray in between.
-    fn foreground(&self, now: Timestamp, processes: &impl Processes) -> Option<Process> {
+    ///
+    /// Returns whether the answer **came from the tray**, because the caller has to tell "nothing is in
+    /// front" from "nobody can tell us what is in front" — see [`Enforcer::foreground_warning`].
+    ///
+    /// **This used to return that as a second value, and the caller's check on it was dead code.** A
+    /// fresh report always carries a window, so `reported` was true only when the foreground was already
+    /// `Some`, and `foreground.is_some() || reported` could never differ from `foreground.is_some()`.
+    /// Mutation testing is what showed it: no mutation of that clause could fail a test, because no
+    /// input reaches it. Removed rather than kept, since a guard that cannot fire reads like one that
+    /// can — and this branch has already paid for four of those.
+    ///
+    /// The distinction it was reaching for does not exist here: in session 0 `processes.foreground()`
+    /// cannot answer at all, so a missing foreground *there* always means the report is missing.
+    pub fn foreground_now(&self, now: Timestamp, processes: &impl Processes) -> Option<Process> {
         match &self.seen {
             Some((process, at)) if (now - *at).abs() <= SEEN_SECONDS => Some(process.clone()),
             _ => processes.foreground(),
         }
+    }
+
+    /// Whether any **running** session has a rule that needs the foreground window.
+    ///
+    /// The one predicate behind both halves of the P2-16 answer: [`Enforcer::foreground_warning`] uses
+    /// it to decide whether a broken foreground report is worth mentioning, and `Status` carries it so a
+    /// surface can warn *before* the report is lost. Written once for the same reason as everything else
+    /// on this branch — two copies of a predicate are two chances to disagree.
+    pub fn needs_foreground(&self) -> bool {
+        self.sessions.running.iter().any(|session| {
+            self.config
+                .profile(&session.profile)
+                .is_some_and(|p| p.rules.iter().any(|r| r.needs_foreground()))
+        })
+    }
+
+    /// **A sentence when a rule in force can no longer be decided** — P2-16.
+    ///
+    /// Hiding or quitting the tray takes the foreground report with it, because this process is in
+    /// session 0 and `GetForegroundWindow` there returns nothing. `Request::Seen` then goes stale,
+    /// `foreground()` falls back to a call that can only answer on a desktop, and every
+    /// foreground-dependent rule quietly stops being enforced while the session still runs: window-title
+    /// and keyword rules stop matching, and budgets stop being charged, so the app the user is
+    /// avoiding stops costing them anything.
+    ///
+    /// **The review's suggested fix — "move the watch into the service" — cannot be done**, and it is
+    /// worth stating why rather than leaving it as an unimplemented to-do. A service runs in session 0;
+    /// session 0 has its own window station and no interactive desktop, so the foreground window of the
+    /// user's session is not merely hard to read from there, it is not addressable at all. The only
+    /// process that can answer is one in the user's own session, which is the tray, and the tray is the
+    /// thing that is gone.
+    ///
+    /// So the gap is **closed as far as it can be and then reported**, which is this project's own rule:
+    /// *"a blocker that quietly fails to block is worse than one that admits it."* What can be fixed is
+    /// the silence. This returns the sentence when
+    ///
+    ///  - no foreground window is available, **and**
+    ///  - it did not come from the tray (so nothing is in front is not the same as nobody can say), and
+    ///  - a running session actually has a rule that needs it.
+    ///
+    /// The third clause matters: a machine running only exe and domain rules loses nothing when the tray
+    /// goes, and warning about enforcement that is still working would be crying wolf.
+    fn foreground_warning(&self, foreground: Option<&Process>) -> Option<String> {
+        if foreground.is_some() || !self.needs_foreground() {
+            return None;
+        }
+        let blind: Vec<String> = self
+            .sessions
+            .running
+            .iter()
+            .filter(|session| {
+                self.config
+                    .profile(&session.profile)
+                    .is_some_and(|p| p.rules.iter().any(|r| r.needs_foreground()))
+            })
+            .map(|session| {
+                // The name the user gave the profile, falling back to the id when a rule names a
+                // profile that is no longer in the config — the sentence is still worth printing.
+                self.config
+                    .profile(&session.profile)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| session.profile.clone())
+            })
+            .collect();
+        Some(format!(
+            "Nothing is telling Curfew which window is in front, so window-title and keyword rules and \
+             app budgets are not being enforced for {}. That report comes from the tray, and quitting or \
+             hiding it is what stopped it — the service runs as a background account with no desktop, so \
+             it cannot see the screen for itself. Start the tray again to resume.",
+            blind.join(", ")
+        ))
     }
 
     /// Run one pass.
@@ -460,7 +550,8 @@ impl Enforcer {
         events: &[CalendarEvent],
         processes: &impl Processes,
     ) -> Tick {
-        let foreground = self.foreground(now, processes);
+        let foreground = self.foreground_now(now, processes);
+        self.foreground_warning = self.foreground_warning(foreground.as_ref());
         self.accrue(now, elapsed, foreground);
 
         let mut tick = Tick { froze: self.settle_freeze(now), ..Default::default() };
@@ -548,6 +639,8 @@ impl Enforcer {
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
                 clock_warning: self.clock_warning(),
+                foreground_warning: self.foreground_warning.clone(),
+                needs_foreground: self.needs_foreground(),
                 passes_left: self.passes.remaining(now, &self.config.emergency),
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),

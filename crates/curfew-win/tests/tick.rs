@@ -520,3 +520,186 @@ fn omitting_the_window_gives_the_same_fortnight_as_asking_for_it() {
         other => panic!("the two answers differed in shape: {other:?}"),
     }
 }
+
+// --- what stops being enforced when the tray goes (P2-16) -----------------------------------------
+//
+// Hiding or quitting the tray takes the foreground report with it. The service is in session 0, where
+// there is no interactive desktop, so nothing else can take over: window-title and keyword rules stop
+// matching and budgets stop being charged, while the session keeps running.
+//
+// **The review's fix — "move the watch into the service" — cannot be done**, and the comment on
+// `Enforcer::foreground_warning` says why. What can be fixed is the silence, which is what these pin.
+
+/// The gap, reported.
+#[test]
+fn a_stale_foreground_report_is_reported_when_a_rule_needs_it() {
+    let (mut enforcer, _) = enforcer("fw-warn");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+
+    // Start the window, so a session is running. `deep-work` has a budget rule on `news.exe`, which is
+    // a rule that can only be decided from the foreground.
+    enforcer.tick(NOW, 0, &[], &table);
+    assert!(
+        enforcer.needs_foreground(),
+        "the fixture no longer has a foreground-dependent rule, so this test proves nothing"
+    );
+    assert!(
+        enforcer.foreground_warning.is_none(),
+        "nothing is wrong yet, and the service should not be complaining"
+    );
+
+    // A tray that has quit: nothing reported for twenty minutes.
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    let warning =
+        enforcer.foreground_warning.as_ref().expect("the gap was not reported, so it is silent");
+    assert!(
+        warning.contains("Deep work"),
+        "the sentence should name the profile whose rules stopped: {warning}"
+    );
+    assert!(
+        warning.contains("tray"),
+        "the sentence should say what the user can do about it: {warning}"
+    );
+}
+
+/// And the second half of the promise: it does **not** cry wolf.
+///
+/// A machine running only exe and domain rules loses nothing when the tray goes, and a warning about
+/// enforcement that is still working would train people to ignore the one that matters.
+#[test]
+fn a_stale_foreground_report_is_not_reported_when_no_rule_needs_it() {
+    // A config whose rules are all decided from the process list.
+    let (mut enforcer, _) = enforcer_with(
+        "fw-quiet",
+        r#"
+schema_version = 1
+timezone = "Europe/London"
+
+[[profiles]]
+id = "deep-work"
+name = "Deep work"
+
+[[profiles.rules]]
+target = { kind = "windows_exe", exe = "steam.exe" }
+action = { kind = "block" }
+
+[[weekly]]
+id = "mornings"
+profile = "deep-work"
+days = [0, 1, 2, 3, 4]
+start_minute = 540
+end_minute = 720
+locks = [{ kind = "timer" }]
+"#,
+    );
+    let table = Fake::new(vec![proc(1, "steam.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    assert!(!enforcer.needs_foreground(), "an exe-only rule should not need the foreground window");
+    assert!(
+        enforcer.foreground_warning.is_none(),
+        "a warning was raised about enforcement that is still working: {:?}",
+        enforcer.foreground_warning
+    );
+}
+
+/// A tray that is reporting raises nothing, which is the ordinary case and must stay silent.
+///
+/// **The first version of this test could not fail.** It reported a window and asserted no warning —
+/// but a fresh report always supplies a window, so the guard short-circuited on `foreground.is_some()`
+/// and the clause the test claimed to exercise was never reached. Deleting that clause left the test
+/// passing, which is how it was found: it was written to check a distinction that does not exist here,
+/// because in session 0 a missing foreground always means the report is missing.
+///
+/// So this asserts what is true and load-bearing instead: while the tray is alive, no warning, however
+/// quiet the machine is.
+#[test]
+fn a_live_tray_never_raises_the_warning() {
+    let (mut enforcer, _) = enforcer("fw-live");
+    // Nothing at all is running in the process table and the service can see no desktop — a quiet
+    // machine with a tray beating against it.
+    let table = Fake::new(vec![]);
+    enforcer.tick(NOW, 0, &[], &table);
+
+    for i in 1..=5 {
+        let at = NOW + i * 60;
+        enforcer.handle(at, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+        enforcer.tick(at, 60, &[], &table);
+        assert!(
+            enforcer.foreground_warning.is_none(),
+            "a live tray report was treated as a gap at {at}"
+        );
+    }
+
+    // And the moment it stops, the warning appears — the same test, one report's difference.
+    for i in 6..=25 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+    assert!(
+        enforcer.foreground_warning.is_some(),
+        "the tray stopped reporting and the gap was not raised"
+    );
+}
+
+/// The property that made the old `reported` flag dead, stated so nobody reintroduces it.
+///
+/// A fresh report always carries a window, so "the tray reported, but we have no window" is not a state
+/// this program can be in. If that ever changes, this fails and the distinction becomes worth making
+/// again.
+#[test]
+fn a_fresh_report_always_supplies_a_window() {
+    let (mut enforcer, _) = enforcer("fw-always");
+    let table = Fake::new(vec![]);
+    enforcer.handle(NOW, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+
+    assert!(
+        enforcer.foreground_now(NOW, &table).is_some(),
+        "a fresh report did not supply a window, so the warning needs a distinction it does not have"
+    );
+}
+
+/// The gap is also carried on `Status`, because that is how a surface learns about it.
+#[test]
+fn the_status_carries_the_gap() {
+    let (mut enforcer, _) = enforcer("fw-status");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+    for i in 1..=20 {
+        enforcer.tick(NOW + i * 60, 60, &[], &table);
+    }
+
+    let Response::Status(status) = enforcer.handle(NOW + 21 * 60, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    assert!(status.foreground_warning.is_some(), "the gap did not reach the surface");
+    assert!(
+        status.needs_foreground,
+        "the status must say the exposure exists, so a surface can warn before it is caused"
+    );
+}
+
+/// **The exposure is reported while the tray is still running**, which is the half that lets a surface
+/// warn somebody *before* they hide the icon. `foreground_warning` is None here on purpose.
+#[test]
+fn the_status_says_the_exposure_exists_before_the_gap_opens() {
+    let (mut enforcer, _) = enforcer("fw-exposure");
+    let table = Fake::new(vec![proc(1, "news.exe")]);
+    enforcer.tick(NOW, 0, &[], &table);
+    enforcer.handle(NOW, Request::Seen { exe: "news.exe".into(), title: "News".into() });
+
+    let Response::Status(status) = enforcer.handle(NOW, Request::Status) else {
+        panic!("Status did not answer with a status")
+    };
+    assert!(
+        status.needs_foreground,
+        "hiding the tray would cost enforcement and the status did not say so"
+    );
+    assert!(status.foreground_warning.is_none(), "nothing has broken yet");
+}

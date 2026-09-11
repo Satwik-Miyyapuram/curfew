@@ -690,6 +690,23 @@ pub struct Rule {
     pub platforms: Vec<Platform>,
 }
 
+impl Rule {
+    /// **Whether this rule can only be decided by knowing the foreground window** — P2-16.
+    ///
+    /// Two things need it. A [`Target::WindowTitle`] or [`Target::Keyword`] rule matches against the
+    /// title of whatever is in front, and a [`Action::Budget`] or [`Action::LaunchLimit`] is charged to
+    /// whatever is in front. Every other target — an exe, a domain, a path, the whole device — is
+    /// decided from the process list or the resolver, which works without anybody's attention.
+    ///
+    /// This exists so a surface can say *which* rules have stopped being enforced when nothing can
+    /// supply the foreground window, rather than the gap being silent. See
+    /// `curfew_win::Enforcer::foreground_warning`.
+    pub fn needs_foreground(&self) -> bool {
+        matches!(self.target, Target::WindowTitle { .. } | Target::Keyword { .. })
+            || matches!(self.action, Action::Budget { .. } | Action::LaunchLimit { .. })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {

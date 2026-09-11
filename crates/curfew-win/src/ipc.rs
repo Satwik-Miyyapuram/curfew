@@ -218,6 +218,24 @@ pub struct Status {
     /// ordinary downtime — and a UI cannot tell them apart from a boolean.
     #[serde(default)]
     pub clock_warning: Option<String>,
+    /// **Set when a rule in force can no longer be decided** — P2-16.
+    ///
+    /// Window-title and keyword rules and app budgets need to know what is in front. That report comes
+    /// from the tray, because the service runs in session 0 where there is no interactive desktop at
+    /// all — so quitting or hiding the tray silently stops those rules being enforced while the session
+    /// keeps running. This is the sentence that says so.
+    ///
+    /// A sentence rather than a flag for the same reason as `clock_warning`: which rules, and what to do
+    /// about it, is the whole content, and a boolean cannot carry either.
+    #[serde(default)]
+    pub foreground_warning: Option<String>,
+    /// **Whether any running session has a rule that needs the foreground window** — P2-16.
+    ///
+    /// `foreground_warning` says the gap has already opened. This says it *would*, which is what a
+    /// surface needs in order to warn somebody before they cause it: the tray's "hide this icon" is the
+    /// action that causes it, and a warning delivered afterwards is no use to the person deciding.
+    #[serde(default)]
+    pub needs_foreground: bool,
     /// Emergency passes that could be spent right now, and why not when the answer is none. Both
     /// on every status, so a UI never has to ask a second question to know whether to offer the
     /// hatch or to explain its absence.

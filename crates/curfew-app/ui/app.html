@@ -643,6 +643,10 @@ function pageHealth() {
   // because a lock that is judged against a clock the user has just changed is exactly the thing
   // this page exists to make visible.
   if (s.clock_warning) lines.push(["mut", "The clock", s.clock_warning]);
+  // **Red, not amber** — P2-16. This is not a lock judged against a strange clock; it is rules that
+  // have stopped being enforced while the promise behind them still stands. The user can fix it, which
+  // is why the sentence names the tray rather than just reporting a fault.
+  if (s.foreground_warning) lines.push(["bad", "Some rules are not being enforced", s.foreground_warning]);
   const failing = [...(s.failing || [])];
   if (failing.length) lines.push(["bad", `${failing.length} could not be closed`, failing.join(", ")]);
   const unwatched = [...(s.unwatched || [])];
