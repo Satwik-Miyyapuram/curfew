@@ -83,7 +83,31 @@ fn main() {
     // never installed, and on Linux, where there is no service to talk to at all.
     if curfew_cli::handles(command) {
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        std::process::exit(curfew_cli::run(&refs));
+        let code = curfew_cli::run(&refs);
+        // A write the running service has not been told about is the worst failure this product has:
+        // the file says the plan changed, the window reads the same file and shows the change, and
+        // the service is still enforcing the old one. Nothing used to send `Reload` except a user
+        // typing the verb by hand, so `curfew add-window …` printed "Added" and changed nothing that
+        // was actually enforced.
+        //
+        // Best effort, and quiet about it: a machine with no service (a config being prepared to copy
+        // elsewhere, or `curfew check` on a Linux box) is not an error case, and the edit stands
+        // either way. The one case worth a sentence is a write to the file the service reads when
+        // nothing answered — there the user is entitled to think it is already live.
+        if code == 0 && curfew_cli::writes_config(command) {
+            // Resolved before the attempt, because the sentence is only for a write to the file the
+            // service actually reads — and comparing paths is the same work either way.
+            let live = runner::config_path();
+            let is_live =
+                args.get(curfew_cli::CONFIG_ARG).is_some_and(|path| same_file(path, &live));
+            if curfew_win::ipc::ask(&Request::Reload).is_err() && is_live {
+                println!(
+                    "Saved. Curfew is not running, so this applies when it next starts — \
+                     `curfew install` starts it, and `curfew run` enforces it in this terminal."
+                );
+            }
+        }
+        std::process::exit(code);
     }
 
     let code = match command {
@@ -568,6 +592,27 @@ fn name_of(lock: &curfew_core::Lock) -> String {
     }
 }
 
+/// Whether two paths name the same file.
+///
+/// `canonicalize` first, because `curfew add-window curfew.toml …` run from `%ProgramData%\Curfew`,
+/// or a path with `..` in it, or a differently-cased spelling on Windows, all name the same file as
+/// the service's own config and none of them compare equal as strings. Falling back to a literal
+/// comparison matters too: the file may not exist yet, and canonicalize fails on a path that is not
+/// there.
+fn same_file(a: &str, b: &std::path::Path) -> bool {
+    let a = std::path::Path::new(a);
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // Neither could be resolved, and they were not literally equal, so there is nothing left to
+        // compare. Saying "not the same" is the safe answer: the only consequence is a missing
+        // sentence, where the other direction prints a warning about a file the service never reads.
+        _ => false,
+    }
+}
+
 fn status() -> i32 {
     let Ok(response) = ask(Request::Status) else { return 1 };
     let Response::Status(status) = response else { return report(response) };
@@ -922,5 +967,49 @@ mod uninstall_guard_tests {
     #[test]
     fn both_witnesses_agreeing_on_nothing_running_is_the_only_way_through() {
         assert!(!refused_uninstall(false, false), "an ordinary uninstall was refused");
+    }
+}
+
+#[cfg(test)]
+mod same_file_tests {
+    use super::same_file;
+    use std::path::PathBuf;
+
+    /// The case the check exists for: a config written by the same path the service reads.
+    #[test]
+    fn the_same_path_is_the_same_file() {
+        assert!(same_file("/tmp/curfew.toml", &PathBuf::from("/tmp/curfew.toml")));
+    }
+
+    /// A different path is a different file, and this is the direction that decides whether a
+    /// confusing sentence is printed. Saying "not the same" costs a missing line; saying "the same"
+    /// wrongly would tell someone their edits are live when they are not.
+    #[test]
+    fn a_different_path_is_not() {
+        assert!(!same_file("/tmp/other.toml", &PathBuf::from("/tmp/curfew.toml")));
+    }
+
+    /// A path reached by a different spelling is the same file, and this is the case that matters in
+    /// practice: `curfew add-window curfew.toml …` run from `%ProgramData%\Curfew`, or a path with a
+    /// `..` in it, both name the service's own config and neither compares equal as a string.
+    #[test]
+    fn a_path_reached_by_another_spelling_is_the_same_file() {
+        let dir = std::env::temp_dir().join(format!("curfew-same-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        let real = dir.join("curfew.toml");
+        std::fs::write(&real, "schema_version = 1\n").unwrap();
+
+        let via_parent = dir.join("nested").join("..").join("curfew.toml");
+        assert!(
+            same_file(via_parent.to_str().unwrap(), &real),
+            "a path with `..` in it was treated as a different file"
+        );
+
+        // And a file that does not exist yet still compares by its literal spelling, because
+        // canonicalize fails on a missing path and the fallback is the only thing left.
+        let missing = dir.join("not-written-yet.toml");
+        assert!(same_file(missing.to_str().unwrap(), &missing));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

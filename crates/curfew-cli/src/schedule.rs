@@ -56,6 +56,32 @@ pub fn handles(command: &str) -> bool {
     )
 }
 
+/// Whether `command` changes the config file rather than only reading it.
+///
+/// The two reading commands need nothing afterwards. Every other verb writes, and a write the running
+/// service has not been told about is the worst kind of failure this product can have: the file says
+/// the plan changed, the window reads the same file and shows the change, and the service is still
+/// enforcing the old one. The caller uses this to decide whether a reload is owed.
+pub fn writes_config(command: &str) -> bool {
+    matches!(
+        command,
+        "add-profile"
+            | "add-window"
+            | "add-calendar"
+            | "add-source"
+            | "block"
+            | "unblock"
+            | "remove"
+    )
+}
+
+/// Where the config path sits in a writing command's argument list.
+///
+/// Every one of them is `<verb> <config> [flags…]`, so it is always index 1 — but saying so here
+/// rather than indexing at the call site means a verb that ever stops following the shape fails a
+/// test instead of silently reloading nothing.
+pub const CONFIG_ARG: usize = 1;
+
 /// Run one schedule subcommand, and return the process exit code.
 ///
 /// Two failures with different exit codes, because they have different fixes: 2 is a command that
@@ -720,10 +746,7 @@ fn add_source(path: &str, args: &[&str]) -> Result<(), String> {
     let (id, location) = (source.id.clone(), source.location.clone());
     cfg.upsert_source(source).map_err(|e| e.to_string())?;
     save(path, &cfg)?;
-    println!(
-        "{}: {id} reads {location}. The service picks it up on its next reload.",
-        if replacing { "Replaced" } else { "Subscribed" }
-    );
+    println!("{}: {id} reads {location}.", if replacing { "Replaced" } else { "Subscribed" });
     Ok(())
 }
 
@@ -777,6 +800,85 @@ fn remove(path: &str, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The distinction this module exists to make available to its caller.
+    ///
+    /// Getting it wrong in either direction is a real bug: a reading command that owed a reload would
+    /// make `curfew schedules` restart enforcement's view of the world for no reason, and a writing
+    /// command that was not listed would print "Added" while the service kept enforcing the old plan.
+    #[test]
+    fn only_the_commands_that_write_owe_a_reload() {
+        for reading in ["schedules", "blocks"] {
+            assert!(handles(reading), "{reading} is not handled at all");
+            assert!(!writes_config(reading), "{reading} only reads and asked for a reload");
+        }
+        for writing in [
+            "add-profile",
+            "add-window",
+            "add-calendar",
+            "add-source",
+            "block",
+            "unblock",
+            "remove",
+        ] {
+            assert!(handles(writing), "{writing} is not handled at all");
+            assert!(writes_config(writing), "{writing} writes and did not ask for a reload");
+        }
+        // Everything handled is one or the other, so a verb added later cannot be neither.
+        for command in [
+            "schedules",
+            "add-profile",
+            "add-window",
+            "add-calendar",
+            "add-source",
+            "blocks",
+            "block",
+            "unblock",
+            "remove",
+        ] {
+            assert!(writes_config(command) || matches!(command, "schedules" | "blocks"));
+        }
+    }
+
+    /// The config path is the one argument every writing verb agrees on.
+    ///
+    /// `writes_config` and `CONFIG_ARG` are used together to decide whether a failed reload is worth a
+    /// sentence, so a verb that took its path somewhere else would silently compare the wrong argument
+    /// against the service's own config. No file is needed: the assertion is about argument positions,
+    /// which is the half a refactor would break.
+    #[test]
+    fn every_writing_command_takes_its_config_at_the_same_position() {
+        const P: &str = "/tmp/curfew.toml";
+        let invocations: [&[&str]; 7] = [
+            &["add-profile", P, "--id", "x"],
+            &[
+                "add-window",
+                P,
+                "--id",
+                "w",
+                "--profile",
+                "deep-work",
+                "--from",
+                "09:00",
+                "--to",
+                "10:00",
+            ],
+            &["add-calendar", P, "--id", "c", "--profile", "deep-work"],
+            &["add-source", P, "--id", "s", "--location", "/tmp/x.ics"],
+            &["block", P, "--profile", "deep-work", "--site", "reddit.com"],
+            &["unblock", P, "--profile", "deep-work", "--site", "reddit.com"],
+            &["remove", P, "w"],
+        ];
+        for args in invocations {
+            assert!(writes_config(args[0]), "{} does not ask for a reload", args[0]);
+            assert_eq!(
+                args.get(CONFIG_ARG).copied(),
+                Some(P),
+                "{} does not take its config at index {CONFIG_ARG}",
+                args[0]
+            );
+        }
+    }
 
     #[test]
     fn a_time_is_read_the_way_it_is_written() {
