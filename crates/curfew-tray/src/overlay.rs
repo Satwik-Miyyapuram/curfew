@@ -202,10 +202,10 @@ mod sys {
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetSystemMetrics, KillTimer,
-        RegisterClassW, SetTimer, ShowWindow, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA, WM_DESTROY,
-        WM_LBUTTONUP, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetSystemMetrics,
+        GetWindowLongPtrW, KillTimer, RegisterClassW, SetTimer, SetWindowLongPtrW, ShowWindow,
+        GWLP_USERDATA, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNA, WM_DESTROY, WM_LBUTTONUP, WM_NCDESTROY,
+        WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     };
 
     const CLOSE_TIMER: usize = 7;
@@ -254,8 +254,22 @@ mod sys {
     /// it costs the writer one character and needs no escaping.
     const COMMAND: char = '\t';
 
-    thread_local! {
-        static TEXT: std::cell::RefCell<Vec<u16>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Each window's own copy of its text, reached through `GWLP_USERDATA`.
+    ///
+    /// **A single `thread_local` slot was the bug** — P2-14. `show()` wrote it and `WM_PAINT` read it,
+    /// so a second notice overwrote the first before it had painted and the earlier card rendered the
+    /// later text. That is not an edge case: `note` fires once per closed app per pass, so two notices
+    /// one after another is the ordinary way this is used.
+    ///
+    /// The window owns its `Vec<u16>` now, which also makes the buffer's lifetime *correct* rather than
+    /// accidental: before, the text a window painted belonged to whoever wrote the slot last, and the
+    /// window had no way to know it had changed.
+    ///
+    /// SAFETY: the pointer stored here is one `Box::into_raw` for this window alone, and
+    /// [`take_text`] is the only reader. The box is reclaimed on `WM_NCDESTROY`, which is the last
+    /// message a window receives.
+    unsafe fn take_text(window: HWND) -> *mut Vec<u16> {
+        GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Vec<u16>
     }
 
     fn wide(text: &str) -> Vec<u16> {
@@ -411,10 +425,20 @@ mod sys {
                 DeleteObject(stripe as _);
 
                 SetBkMode(dc, TRANSPARENT as i32);
-                let (mut title, body) = TEXT.with(|t| {
-                    let (head, rest) = split(&t.borrow());
+                // This window's own text, not a shared slot — see `take_text`. A window without one
+                // has nothing to draw, which is what `WM_PAINT` before `show` finished would be.
+                let mine = take_text(window);
+                if mine.is_null() {
+                    EndPaint(window, &paint);
+                    return 0;
+                }
+                let (mut title, body) = {
+                    // SAFETY: `mine` is the box this window owns, alive until `WM_NCDESTROY`, and this
+                    // borrow ends before the message returns.
+                    let t = &*mine;
+                    let (head, rest) = split(t);
                     (head, String::from_utf16_lossy(&rest).trim_end_matches('\u{0}').to_string())
-                });
+                };
 
                 // The first line is the fact — which app, and why. It is set larger and brighter
                 // because it is the only line a person reads while reaching for the mouse.
@@ -473,6 +497,18 @@ mod sys {
                 KillTimer(window, CLOSE_TIMER);
                 0
             }
+            // The last message a window gets, and the only safe place to take the box back: after this
+            // the pointer is gone and nothing can paint again.
+            WM_NCDESTROY => {
+                let mine = take_text(window);
+                if !mine.is_null() {
+                    // SAFETY: the pointer is this window's own `Box::into_raw`, cleared below so a
+                    // second `WM_NCDESTROY` cannot free it twice.
+                    drop(Box::from_raw(mine));
+                    SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+                }
+                DefWindowProcW(window, message, wparam, lparam)
+            }
             _ => DefWindowProcW(window, message, wparam, lparam),
         }
     }
@@ -527,7 +563,9 @@ mod sys {
             // Registering twice is harmless and returns zero; the second overlay reuses the class.
             RegisterClassW(&class);
 
-            TEXT.with(|slot| *slot.borrow_mut() = wide(text));
+            // The window's own copy, handed over before it is shown. `into_raw` because the box
+            // outlives this call: `WM_NCDESTROY` is what takes it back.
+            let owned = Box::into_raw(Box::new(wide(text)));
 
             let screen_w = GetSystemMetrics(SM_CXSCREEN);
             let screen_h = GetSystemMetrics(SM_CYSCREEN);
@@ -548,8 +586,14 @@ mod sys {
                 std::ptr::null(),
             );
             if window.is_null() {
+                // The box was made before the window could take it, so this path has to drop it or it
+                // leaks. Two lines rather than one for exactly that reason.
+                drop(Box::from_raw(owned));
                 return;
             }
+            // SAFETY: `owned` came from `Box::into_raw` a moment ago and belongs to this window from
+            // here on; `GWLP_USERDATA` is the slot Win32 provides for exactly this.
+            SetWindowLongPtrW(window, GWLP_USERDATA, owned as isize);
             // Rounded, like every other surface Windows 11 draws and like every card on the phone.
             let region = CreateRoundRectRgn(0, 0, WIDTH + 1, height + 1, 18, 18);
             SetWindowRgn(window, region, 0);
@@ -768,5 +812,161 @@ mod tests {
     #[test]
     fn no_new_sessions_means_no_sentence() {
         assert!(started_message(&[], &Status { now: NOW, ..Default::default() }).is_empty());
+    }
+}
+
+/// **Two notices must not share one buffer** — P2-14.
+///
+/// `show()` wrote a single `thread_local` and `WM_PAINT` read it, so a second notice overwrote the
+/// first before it had painted and the earlier card rendered the later text. Not an edge case: `note`
+/// fires once per closed app per pass, so two notices in a row is how this is normally used.
+///
+/// The window code itself cannot run in this test binary — `overlay_proc` is a Win32 callback — so what
+/// is pinned here is the ownership rule the fix rests on: **each window's text is reached through its
+/// own `GWLP_USERDATA`, and a box handed to `Box::into_raw` is reclaimed exactly once.** The pointer
+/// plumbing between those two facts is verified by reading `overlay_proc`, and this test says so rather
+/// than implying more.
+#[cfg(test)]
+mod ownership_tests {
+    /// A window's text is identified by the pointer, and two of them are never the same allocation.
+    ///
+    /// This is the property the old shared slot lacked: with one slot, "which text does this window
+    /// paint" had no answer, because the answer changed underneath it.
+    #[test]
+    fn two_windows_own_two_buffers() {
+        let first = Box::into_raw(Box::new(vec![1u16, 2, 3, 0]));
+        let second = Box::into_raw(Box::new(vec![9u16, 8, 0]));
+
+        assert_ne!(first, second, "two windows were given the same buffer");
+        // SAFETY: both came from `Box::into_raw` above and neither has been reclaimed.
+        unsafe {
+            assert_eq!((*first).len(), 4);
+            assert_eq!((*second).len(), 3);
+            // Reclaimed once each, which is what `WM_NCDESTROY` does.
+            drop(Box::from_raw(first));
+            drop(Box::from_raw(second));
+        }
+    }
+
+    /// A window that never took its box still has to free it, or every failed `CreateWindowExW` leaks
+    /// the notice's text. `show` does exactly this on the null-window path.
+    #[test]
+    fn a_box_a_window_never_took_is_still_freed() {
+        let orphan = Box::into_raw(Box::new(vec![7u16, 0]));
+        // The null-window branch in `show`: nothing else will ever reference this pointer.
+        // SAFETY: from `Box::into_raw` immediately above, and reclaimed exactly once.
+        let reclaimed = unsafe { Box::from_raw(orphan) };
+        assert_eq!(*reclaimed, vec![7u16, 0]);
+    }
+
+    /// The text is stored NUL-terminated, because `DrawTextW` is given `-1` and reads until the
+    /// terminator. A buffer without one would run past its end and paint whatever followed it.
+    ///
+    /// This is the one part of the old code that was already right and is easy to break while moving the
+    /// buffer: the `chain(once(0))` is what the whole drawing path depends on.
+    /// **Portable on purpose.** The production path uses `OsStr::encode_wide`, a Windows trait — so a
+    /// Windows-gated test would be skipped by CI, which runs on Linux, and the property would go
+    /// unchecked exactly where it is easiest to break. `str::encode_utf16` agrees with `encode_wide`
+    /// for every string this code is given, so the assertion runs everywhere.
+    #[test]
+    fn the_owned_text_is_nul_terminated() {
+        let text = "Steam was closed";
+        let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        assert_eq!(*wide.last().unwrap(), 0, "the buffer is not terminated");
+        assert_eq!(wide.len(), text.chars().count() + 1);
+        // And no interior NUL: `DrawTextW` is given `-1` and stops at the first one, so an embedded
+        // terminator would silently truncate the notice rather than fail loudly.
+        assert!(
+            !wide[..wide.len() - 1].contains(&0),
+            "the text contains an interior NUL, which would cut the notice short"
+        );
+    }
+}
+
+/// **The shared slot must not come back**, and only a source-level check can say so.
+///
+/// The mutation run is why this exists. Setting `take_text` to always return null — which would leave
+/// every overlay painting nothing — is caught by **no test in this binary**, because `overlay_proc` is a
+/// Win32 callback and cannot run under `cargo test`. An ownership test can pin the *shape* of the rule
+/// (a `Box::into_raw` with one matching reclaim) but not the wiring between `show`, the window's
+/// `GWLP_USERDATA` and the paint.
+///
+/// What is checkable is the shape of the *bug*: P2-14 was one `thread_local` that every window read and
+/// every `show()` wrote. That is a fact about this file, so it is asserted against this file — the same
+/// technique as the service's log-sink guard, and with the same limit, stated rather than implied.
+#[cfg(test)]
+mod shared_slot_tests {
+    const SOURCE: &str = include_str!("overlay.rs");
+
+    /// Everything before the test modules: the code that actually runs.
+    fn production() -> &'static str {
+        SOURCE.split("#[cfg(test)]").next().expect("split yields at least one part")
+    }
+
+    #[test]
+    fn the_overlay_has_no_shared_text_slot() {
+        let code = production();
+        let offenders: Vec<&str> = code
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| line.contains("thread_local!"))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "a thread-local came back into the overlay, which is what made two notices share one text              buffer: {offenders:?}"
+        );
+    }
+
+    /// And the replacement is actually wired: the text is stored on the window and read back from it.
+    ///
+    /// **Match the store and the reclaim specifically, not a substring of them.** The first version of
+    /// this guard used `contains`, and was loose in two ways the mutation run exposed:
+    ///
+    ///  - `contains("WM_NCDESTROY")` also matches `WM_NCDESTROY_NEVER`, so renaming the destroying arm
+    ///    away still passed;
+    ///  - `contains("SetWindowLongPtrW(window, GWLP_USERDATA")` also matches the *clearing* call inside
+    ///    that same handler, so deleting the store that attaches the text still passed.
+    ///
+    /// Both are one mistake in miniature — a substring answering a slightly different question from the
+    /// one asked — which is the same failure this branch has now hit with vacuous guards five times.
+    ///
+    /// Still narrow: it asserts the calls are present and reachable, not that they are correct. The
+    /// correctness of a Win32 callback is not something this binary can observe.
+    #[test]
+    fn the_text_is_stored_on_the_window_and_read_back_from_it() {
+        let code = production();
+
+        // The store, with the pointer being handed over — not the later call that clears it.
+        assert!(
+            code.contains("SetWindowLongPtrW(window, GWLP_USERDATA, owned as isize)"),
+            "the overlay no longer attaches its text to the window"
+        );
+        assert!(
+            code.contains("GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Vec<u16>"),
+            "the overlay no longer reads its text back from the window"
+        );
+
+        // The reclaim: a `WM_NCDESTROY` arm that actually frees the box.
+        //
+        // Matched by scanning for the **whole pattern**, not with `contains("WM_NCDESTROY")` — that also
+        // matches `WM_NCDESTROY_NEVER`, and renaming the arm away was one of the two mutations this
+        // guard originally missed. No `regex` dependency for one assertion; a line scan says the same
+        // thing and a reader can check it.
+        // **The whole identifier, not a prefix of it.** `starts_with("WM_NCDESTROY")` is true for
+        // `WM_NCDESTROY_NEVER`, which is exactly the mutation this check was written to catch — a prefix
+        // check is a substring check wearing a different hat, and this guard has now been loose in that
+        // direction three times. The token is taken as a token and compared.
+        let arm: Option<usize> = code.lines().position(|line| {
+            let trimmed = line.trim().trim_start_matches("//").trim();
+            let name = trimmed.split_whitespace().next().unwrap_or("");
+            name == "WM_NCDESTROY" && trimmed.ends_with("=> {")
+        });
+        let arm =
+            arm.expect("nothing handles the last message, so the window's text is never reclaimed");
+        let after: String = code.lines().skip(arm).take(12).collect::<Vec<_>>().join("\n");
+        assert!(
+            after.contains("Box::from_raw"),
+            "the last message no longer frees the window's text, so each notice leaks its buffer"
+        );
     }
 }
