@@ -18,8 +18,6 @@ AppPickerScreen.kt|Blocked (${blocked.size})
 AppPickerScreen.kt|Changes apply the next time ${nameOf(state, current)} starts — never to a block 
 AppPickerScreen.kt|Copy ${donor.name}'s apps?
 AppPickerScreen.kt|Copy ${donor.name}'s list?
-AppPickerScreen.kt|No app matches “$query”.
-AppPickerScreen.kt|No app matches “$query”.
 AppPickerScreen.kt|Nothing already blocked in $profileName will be removed.
 AppPickerScreen.kt|Stop blocking ${rule.target.label()}
 BlockActivity.kt|$name is blocked

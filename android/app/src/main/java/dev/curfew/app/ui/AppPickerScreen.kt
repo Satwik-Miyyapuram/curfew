@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -49,6 +50,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.R
+import dev.curfew.app.enforce.SensitiveApps
 import dev.curfew.policy.Rule
 import dev.curfew.policy.Target
 import dev.curfew.policy.label
@@ -75,9 +78,27 @@ private enum class Pane { Apps, Sites }
  * offered a Save button, which meant the screen could show one thing while the config said
  * another, and switching profiles mid-edit needed a dialog to ask about work the user did not know
  * they had. A block that a user can see is on, is on.
+ *
+ * **Payment, banking, wallet and password apps are not offered here at all.** See [SensitiveApps]:
+ * blocking one breaks it in a way the user did not ask for, because the core also mutes a blocked
+ * app's notifications and a one-time password that never arrives is a payment that never completes.
+ * An app that is on that list is also excluded from a hand-edited config, so this is not only the
+ * picker being tidy — the picker is just where it is visible.
  */
 @Composable
-fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
+fun AppPickerScreen(
+    model: CurfewViewModel,
+    pinned: String? = null,
+    /**
+     * Where to go for the full list of apps Curfew will not block.
+     *
+     * A parameter with a default because this screen is currently unused — the profile editor opens
+     * [AppPickerSheet] instead — and it is kept because the two share their shape and the sheet's copy
+     * is easier to keep honest beside a second caller. Defaulted to nothing rather than to a hard
+     * route so a caller that does not want the link does not have to know the route exists.
+     */
+    onOpenSensitiveApps: () -> Unit = {},
+) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // Read off the main thread: the launcher query walks every installed package, which on a full
@@ -86,6 +107,22 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
         if (value.isEmpty()) {
             value = withContext(Dispatchers.IO) { installedApps(context) }
         }
+    }
+    // Resolved once per composition of this screen rather than per row: it is a `PackageManager`
+    // walk, and the answer cannot change while the user is looking at it.
+    val readProtected = remember { SensitiveApps.resolve(context) }
+
+    /**
+     * How many of the apps here Curfew will not read.
+     *
+     * **Not a filter.** These apps are offered for blocking like anything else — the reading
+     * restriction belongs to the accessibility service and is not a limit on what a user may block.
+     * This count exists only so a note can say which apps Curfew is blind to; using it to hide rows is
+     * what made a user search for their bank, find nothing, and reasonably conclude the app was
+     * broken.
+     */
+    val readProtectedCount = remember(apps, readProtected) {
+        apps.count { it.packageName in readProtected }
     }
 
     var profile by remember { mutableStateOf(pinned) }
@@ -119,7 +156,7 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
     // Blocked apps first, then the rest, each half alphabetical. What a profile blocks is the
     // answer this screen exists to give, and it should not be somewhere down a list of two hundred.
     val visible = apps
-        .filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
+                .filter { query.isBlank() || it.label.contains(query, ignoreCase = true) }
         .sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
 
     if (state.profiles.isEmpty() && !state.loading) {
@@ -241,6 +278,27 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
         if (pane == Pane.Apps) {
             SearchField(query) { query = it }
             Gap(10.dp)
+            // Which apps Curfew will not *read*, said once and nowhere near the switches. It is not a
+            // filter — every app here is blockable — so this is a footnote, not a warning.
+            if (readProtectedCount > 0) {
+                DCard(padding = 14.dp) {
+                    Text(
+                        stringResource(R.string.picker_sensitive_note),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = Palette.Muted,
+                    )
+                    Gap(6.dp)
+                    Text(
+                        stringResource(R.string.picker_sensitive_note_action),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                        modifier = Modifier.clickable { onOpenSensitiveApps() },
+                    )
+                }
+                Gap(10.dp)
+            }
             DCardFlush {
                 visible.forEachIndexed { index, app ->
                     if (index > 0) Rule()
@@ -276,7 +334,14 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
                 }
                 if (visible.isEmpty()) {
                     Text(
-                        if (query.isBlank()) "Reading your apps…" else "No app matches “$query”.",
+                        if (query.isBlank()) {
+                            stringResource(R.string.picker_reading_apps)
+                        } else {
+                            // The same resource the sheet uses. There were two copies of this sentence
+                            // and only one was externalised, which the copy guard caught by reporting a
+                            // string it no longer recognised.
+                            stringResource(R.string.picker_no_blockable_match, query)
+                        },
                         fontSize = 13.sp,
                         color = Palette.Muted,
                         modifier = Modifier.padding(16.dp),
@@ -595,6 +660,7 @@ fun AppPickerSheet(
             value = withContext(Dispatchers.IO) { installedApps(context) }
         }
     }
+    val readProtected = remember { SensitiveApps.resolve(context) }
 
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.All) }
@@ -604,21 +670,30 @@ fun AppPickerSheet(
         model.blockedApps(profileId).toSet()
     }
 
+    /**
+     * How many of the apps here Curfew will not read. A footnote, not a filter — see the screen above.
+     */
+    val readProtectedCount = remember(apps, readProtected) {
+        apps.count { it.packageName in readProtected }
+    }
+
     val donors = remember(state.profiles, profileId) {
         state.profiles.filter { it.id != profileId && model.blockedApps(it.id).isNotEmpty() }
     }
 
     val filteredApps = remember(apps, query, filter, blocked) {
-        apps.filter { app ->
-            val matchesQuery = query.isBlank() || app.label.contains(query, ignoreCase = true)
-            val isBlocked = app.packageName in blocked
-            val matchesFilter = when (filter) {
-                AppFilter.All -> true
-                AppFilter.Blocked -> isBlocked
-                AppFilter.Allowed -> !isBlocked
+        apps
+            .filter { app ->
+                val matchesQuery = query.isBlank() || app.label.contains(query, ignoreCase = true)
+                val isBlocked = app.packageName in blocked
+                val matchesFilter = when (filter) {
+                    AppFilter.All -> true
+                    AppFilter.Blocked -> isBlocked
+                    AppFilter.Allowed -> !isBlocked
+                }
+                matchesQuery && matchesFilter
             }
-            matchesQuery && matchesFilter
-        }.sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
+            .sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
     }
 
     Dialog(
@@ -696,6 +771,10 @@ fun AppPickerSheet(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // **The count excludes what is not offered, and that is the point of it.** It used
+                    // to say `apps.size`, the raw enumeration, so the pill promised 242 and the list
+                    // under it could show 222 with nothing explaining the difference. A count that
+                    // disagrees with the list beneath it is worse than no count.
                     Pill(
                         text = "All (${apps.size})",
                         selected = filter == AppFilter.All,
@@ -713,6 +792,19 @@ fun AppPickerSheet(
                     )
                 }
 
+                // Which apps Curfew will not *read*, as a footnote. They are all still in the list
+                // below and all still blockable — hiding them is what made a user conclude the app
+                // was broken.
+                if (readProtectedCount > 0) {
+                    Gap(10.dp)
+                    Text(
+                        stringResource(R.string.picker_sensitive_note),
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        color = Palette.Muted,
+                    )
+                }
+
                 Gap(12.dp)
                 Box(
                     modifier = Modifier
@@ -727,7 +819,14 @@ fun AppPickerSheet(
                         if (filteredApps.isEmpty()) {
                             item {
                                 Text(
-                                    if (query.isBlank()) "No apps found" else "No app matches “$query”.",
+                                    // Both sides externalised, because both are read by a person and a
+                                    // search that finds nothing is exactly when they need to understand
+                                    // the sentence.
+                                    if (query.isNotBlank()) {
+                                        stringResource(R.string.picker_no_blockable_match, query)
+                                    } else {
+                                        stringResource(R.string.picker_no_apps_found)
+                                    },
                                     fontSize = 13.sp,
                                     color = Palette.Muted,
                                     modifier = Modifier.padding(16.dp),
