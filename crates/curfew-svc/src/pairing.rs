@@ -49,16 +49,16 @@ impl curfew_win::pairing::Pairing for Pairing {
     }
 
     fn invite_json(&self, now: Timestamp) -> Result<String, String> {
-        serde_json::to_string(&Invite::offer(&self.shared.identity, now)).map_err(|e| e.to_string())
+        Ok(Invite::offer(&self.shared.identity, now).to_compact())
     }
 
     fn phrase_for(&self, invite_json: &str) -> Result<String, String> {
-        let invite: Invite = serde_json::from_str(invite_json).map_err(|e| e.to_string())?;
+        let invite = Invite::from_str_lenient(invite_json).map_err(|e| e.to_string())?;
         Ok(pair::phrase(&self.shared.identity.public(), &invite.from, &invite.nonce))
     }
 
     fn reply_to(&self, invite_json: &str) -> Result<String, String> {
-        let invite: Invite = serde_json::from_str(invite_json).map_err(|e| e.to_string())?;
+        let invite = Invite::from_str_lenient(invite_json).map_err(|e| e.to_string())?;
         // The same nonce, this device's keys: that is what lets the offering side derive the same phrase
         // once it has read this reply. Built field by field rather than with a constructor, because there
         // is no `answer` — the FFI does exactly this, and `Invite::new` would mint a fresh nonce and
@@ -69,11 +69,11 @@ impl curfew_win::pairing::Pairing for Pairing {
             issued_at: invite.issued_at,
             expires_at: invite.expires_at,
         };
-        serde_json::to_string(&reply).map_err(|e| e.to_string())
+        Ok(reply.to_compact())
     }
 
     fn accept_invite(&self, invite_json: &str, now: Timestamp) -> Result<String, String> {
-        let invite: Invite = serde_json::from_str(invite_json).map_err(|e| e.to_string())?;
+        let invite = Invite::from_str_lenient(invite_json).map_err(|e| e.to_string())?;
         let id = {
             let mut peers = self.shared.peers.lock().expect("the peers lock is never poisoned");
             peers.accept(&self.shared.identity, &invite, now).map_err(|e| e.to_string())?
@@ -172,8 +172,8 @@ mod tests {
         let offer = pc.invite_json(NOW).expect("an offer");
         let reply = phone.reply_to(&offer).expect("a reply");
 
-        let parsed_offer: Invite = serde_json::from_str(&offer).unwrap();
-        let parsed_reply: Invite = serde_json::from_str(&reply).unwrap();
+        let parsed_offer = Invite::from_str_lenient(&offer).unwrap();
+        let parsed_reply = Invite::from_str_lenient(&reply).unwrap();
         assert_eq!(
             parsed_reply.nonce, parsed_offer.nonce,
             "the reply minted its own nonce, so the two phrases can never match"

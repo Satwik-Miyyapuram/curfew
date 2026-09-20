@@ -13,6 +13,8 @@
 
     <string name="block_title">Blocked by Curfew</string>
     <string name="block_close">Close</string>
+    <string name="block_open_new_tab">Open new tab</string>
+    <string name="block_back_to_home">Back to my home screen</string>
 
     <string name="widget_description">Shows whether Curfew is blocking anything, and how many days in a row you have kept.</string>
     <string name="tile_idle">Standing by</string>
@@ -106,6 +108,7 @@
     <string name="change_save_failed">That change could not be saved.</string>
     <string name="stats_failed">Those figures could not be prepared.</string>
     <string name="file_write_failed">That file could not be written.</string>
+    <string name="file_read_failed">That file could not be read.</string>
 
     <!-- The one-line summary on a profile card, and the counts inside it. -->
     <string name="nothing_blocked_yet">Nothing yet</string>

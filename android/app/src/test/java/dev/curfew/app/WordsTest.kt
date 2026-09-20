@@ -146,6 +146,7 @@ class WordsTest {
         val shown = listOf(
             "app:com.instagram.android",
             "domain:reddit.com",
+            "web:reddit.com",
             "keyword:crypto",
             "notif:com.whatsapp",
             "device",

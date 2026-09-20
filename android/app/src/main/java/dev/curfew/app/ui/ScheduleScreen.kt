@@ -5,10 +5,10 @@
 
 package dev.curfew.app.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +16,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,9 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,28 +40,10 @@ import dev.curfew.policy.ProfileName
 import dev.curfew.policy.WeeklySchedule
 
 /**
- * The plan: one card per profile, and under it every reason that profile turns on.
+ * The plan: one focused card per profile, and under it every reason that profile turns on.
  *
- * This screen has been two wrong shapes already. First four stacked sections — a timeline,
- * profiles, weekly windows, calendar rules — which asked the user to hold the app's data model
- * in their head before they could answer "what is going to happen to me?". Then one flat list of
- * everything that could start a block, which answered that question but lost the one people asked
- * next: a profile can be started by a schedule *and* by four meetings, and a flat list scattered
- * those five rows down the page with the profile's name repeated on every one of them.
- *
- * So the profile is the card, and the things that start it are rows inside it. The card names what
- * the profile takes away ("2 apps · 1 site · 1h a day"), each calendar rule shows the real
- * events it has caught in the next week, and the sub-line counts both numbers — how many
- * profiles, and how many things can start one.
- *
- * The switches stay, at both levels. Pausing is not deleting — "not this week" is a thing people
- * mean constantly, and an app with nowhere to put it teaches them to delete the window and rebuild
- * it later from memory, usually wrong. The card's switch is the profile's whole plan; a row's is
- * that one reason for it.
- *
- * Tapping a card opens the profile; holding one offers to remove it. The config text itself stays,
- * last and below everything else, because the file is the thing a user backs up and carries between
- * devices and hiding it would make their own document a mystery to them.
+ * Clean, uncluttered layout showing active weekly schedules and calendar event triggers.
+ * Power-user config backup & restore is moved to Settings to keep the daily schedule clean.
  */
 @Composable
 fun ScheduleScreen(
@@ -75,57 +53,20 @@ fun ScheduleScreen(
     onPickFromCalendar: () -> Unit = {},
 ) {
     val state by model.state.collectAsStateWithLifecycle()
-    var draft by remember { mutableStateOf(state.configToml) }
-    var editing by remember { mutableStateOf(false) }
-    // Folded away by default. The file matters, but a page of monospace TOML under the plan is a
-    // wall the reader has to scroll past every time to reach anything below it.
-    var showConfig by remember { mutableStateOf(false) }
 
-    // Which form is open, if any. `Editing(null)` is a new schedule; a value is an edit of that
-    // one. Held here rather than in the rows so only one form can be open at a time.
     var weeklyForm by remember { mutableStateOf<Editing<WeeklySchedule>?>(null) }
     var calendarForm by remember { mutableStateOf<Editing<CalendarSchedule>?>(null) }
     var removing by remember { mutableStateOf<Removal?>(null) }
     var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
 
-    // Which profile is picking meetings, if any. The picker is the same sheet the profile screen
-    // opens, so an event chosen from either place is the same rule written the same way.
+    // Which profile is picking meetings, if any.
     var picking by remember { mutableStateOf<ProfileName?>(null) }
 
-    // Adopt the saved config whenever it changes underneath an untouched editor, so the text does
-    // not silently go stale — but never overwrite an edit in progress.
-    LaunchedEffect(state.configToml) {
-        if (!editing) draft = state.configToml
-    }
-
-    val context = LocalContext.current
-    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val text = runCatching {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
-            }.getOrNull()
-            // An unreadable or invalid file changes nothing: the core validates before the working
-            // config is touched, and says why in the user's own words when it refuses.
-            if (text == null) model.say("That file could not be read.") else model.importConfig(text)
+    var expandedProfileIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(state.profiles) {
+        if (expandedProfileIds.isEmpty() && state.profiles.isNotEmpty()) {
+            expandedProfileIds = setOf(state.profiles.first().id)
         }
-    }
-    val exportFile = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain"),
-    ) { uri ->
-        // Guarded on `configError`, not just on the write succeeding. `state.configToml` is "" when the
-        // read failed, and "" is a valid file to write — so exporting after a failed read would have
-        // saved an empty backup over a good one, silently, from a button whose whole purpose is to
-        // keep a copy.
-        if (uri == null) return@rememberLauncherForActivityResult
-        if (state.configError != null) {
-            model.say("Your config could not be read, so there is nothing to export. Nothing was written.")
-            return@rememberLauncherForActivityResult
-        }
-        runCatching {
-            context.contentResolver.openOutputStream(uri)?.use {
-                it.write(state.configToml.toByteArray())
-            }
-        }.onFailure { model.say("That file could not be written.") }
     }
 
     val running = state.weekly.count { it.enabled } + state.calendarRules.count { it.enabled }
@@ -133,8 +74,6 @@ fun ScheduleScreen(
 
     Screen(spacing = 0.dp) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            // The gap is the column's, not the button's: the summary is the one line on this page
-            // long enough to reach the button, and set against it the two read as one smudge.
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Title("Plan")
                 Sub(
@@ -146,263 +85,195 @@ fun ScheduleScreen(
                     ),
                 )
             }
-            // The one accent-filled control on the screen, because adding a profile is the one
-            // thing a user with nothing set up has to do next.
             Box(
                 modifier = Modifier
                     .padding(top = 4.dp)
                     .size(42.dp)
                     .clip(RoundedCornerShape(Dsn.CtlRadius))
                     .background(Palette.Accent)
-                    .combinedClickable(onClickLabel = "Add a profile", onClick = onNewProfile),
+                    .clickable(onClickLabel = "Add a profile", onClick = onNewProfile),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
             }
         }
 
-        Gap(22.dp)
+        Gap(20.dp)
 
         if (state.profiles.isEmpty()) {
             DCard {
-                Text(
-                    "Nothing can start a block yet. Make a profile first \u2014 a profile is the " +
-                        "set of things to switch off \u2014 then say when it should run.",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Palette.Muted,
-                )
-            }
-        }
-
-        // One card per profile, with everything that can switch it on inside it.
-        //
-        // The flat list this replaced gave every rule a card of its own, headed by the profile it
-        // ran \u2014 so a profile started by three meetings read as three separate blocks all called
-        // "Distractions", and the events themselves were only ever described as a matcher. A plan
-        // is a small number of profiles, each with a handful of reasons to run; this says that.
-        state.profiles.forEachIndexed { index, profile ->
-            val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
-            val windows = state.weekly.filter { it.profile == profile.id }
-            val calendar = state.calendarRules.filter { it.profile == profile.id }
-
-            DCardFlush {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .combinedClickable(
-                            onClick = { onEditProfile(profile.id) },
-                            onLongClick = { removingProfile = profile },
-                            onClickLabel = "Edit ${profile.name}",
-                            onLongClickLabel = "Remove ${profile.name}",
-                        )
-                        .padding(Dsn.CardPad),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(13.dp),
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Glyph(tint, size = 38.dp) {
+                    Text("No profiles yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+                    Gap(6.dp)
+                    Text(
+                        "A profile is the set of apps and sites to block. Create your first profile to start scheduling focus time.",
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = Palette.Muted,
+                        textAlign = TextAlign.Center,
+                    )
+                    Gap(16.dp)
+                    PrimaryButton("Create a profile", onClick = onNewProfile)
+                }
+            }
+        } else {
+            state.profiles.forEachIndexed { index, profile ->
+                val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
+                val isExpanded = profile.id in expandedProfileIds
+                val windows = state.weekly.filter { it.profile == profile.id }
+                val calendar = state.calendarRules.filter { it.profile == profile.id }
+                val live = windows.any { it.enabled } || calendar.any { it.enabled }
+
+                DCardFlush {
+                    // Header row of the profile card (clickable to toggle expanded)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expandedProfileIds = if (isExpanded) {
+                                    expandedProfileIds - profile.id
+                                } else {
+                                    expandedProfileIds + profile.id
+                                }
+                            }
+                            .padding(Dsn.CardPad),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                    ) {
+                        Glyph(tint, size = 42.dp) {
+                            Text(
+                                profile.name.take(1).uppercase(),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = tint,
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                profile.name,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                model.describeBlocks(profile.id),
+                                fontSize = 12.sp,
+                                color = Palette.Muted,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+
+                        // Master Switch for all triggers in this profile
+                        if (windows.isNotEmpty() || calendar.isNotEmpty()) {
+                            Switch(live) { on ->
+                                windows.forEach { model.saveWeekly(it.copy(enabled = on)) }
+                                calendar.forEach { model.saveCalendarRule(it.copy(enabled = on)) }
+                            }
+                        }
+
+                        // Caret indicator
                         Text(
-                            profile.name.take(1).uppercase(),
-                            fontSize = 15.sp,
+                            if (isExpanded) "▾" else "▸",
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = tint,
+                            color = Palette.Dim,
+                            modifier = Modifier.padding(start = 4.dp),
                         )
                     }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            profile.name,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
-                        )
-                        Text(
-                            model.describeBlocks(profile.id),
-                            fontSize = 12.sp,
-                            color = Palette.Muted,
-                        )
-                    }
-                    // The master switch: what "not this week" means for a whole profile, rather
-                    // than for one of the three rules that happen to start it.
-                    val live = windows.any { it.enabled } || calendar.any { it.enabled }
-                    if (windows.isNotEmpty() || calendar.isNotEmpty()) {
-                        Switch(live) { on ->
-                            windows.forEach { model.saveWeekly(it.copy(enabled = on)) }
-                            calendar.forEach { model.saveCalendarRule(it.copy(enabled = on)) }
+
+                    if (isExpanded) {
+                        // Weekly schedules
+                        windows.forEach { window ->
+                            Rule()
+                            TriggerRow(
+                                title = describeDays(window.days),
+                                note = describeWindow(window).substringAfter(" · "),
+                                tint = Palette.Accent,
+                                enabled = window.enabled,
+                                onToggle = { model.saveWeekly(window.copy(enabled = it)) },
+                                onOpen = { weeklyForm = Editing(window, profile.id) },
+                                onRemove = {
+                                    removing = Removal(window.id, describeWindow(window), weekly = true)
+                                },
+                            )
+                        }
+
+                        // Calendar schedules
+                        calendar.forEach { rule ->
+                            Rule()
+                            val caught = state.calendarEvents.filter { matches(rule, it) }
+                            TriggerRow(
+                                title = "From your calendar",
+                                note = describeMatcher(rule.matcher),
+                                tint = Palette.Accent,
+                                enabled = rule.enabled,
+                                onToggle = { model.saveCalendarRule(rule.copy(enabled = it)) },
+                                onOpen = { calendarForm = Editing(rule, profile.id) },
+                                onRemove = {
+                                    removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
+                                },
+                                bottomPad = if (caught.isEmpty()) Dsn.CardPad else 8.dp,
+                            )
+                            caught.take(3).forEach { event ->
+                                CaughtEvent(event.title, "${dayLabel(event.start, state.now)} " + clockTime(event.start))
+                            }
+                            if (caught.size > 3) {
+                                CaughtEvent("and ${caught.size - 3} more", "")
+                            }
+                        }
+
+                        // Empty state inside profile card
+                        if (windows.isEmpty() && calendar.isEmpty()) {
+                            Rule()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = Dsn.CardPad, vertical = 14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    "No automated schedules yet",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Palette.Text,
+                                )
+                                Gap(4.dp)
+                                Text(
+                                    "Add a recurring window or sync with your calendar.",
+                                    fontSize = 12.sp,
+                                    color = Palette.Muted,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+
+                        // Clean Action Buttons: Edit Profile and Add Window (no Apps & Sites button)
+                        Rule()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Dsn.CardPad, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            GhostButton("✏️ Edit Profile", Modifier.weight(1f)) {
+                                onEditProfile(profile.id)
+                            }
+                            GhostButton("+ Window", Modifier.weight(1f)) {
+                                weeklyForm = Editing(null, profile.id)
+                            }
                         }
                     }
                 }
-
-                windows.forEach { window ->
-                    Rule()
-                    TriggerRow(
-                        title = describeDays(window.days),
-                        note = describeWindow(window).substringAfter(" \u00B7 "),
-                        // Accent, matching the calendar rule below it. This was amber, so a weekly
-                        // window wore the "a block is running now" colour while it was merely a row
-                        // on a list — and amber was the only thing distinguishing it from the
-                        // calendar row, a difference the title already carries ("Mon\u2013Fri"
-                        // against "From your calendar").
-                        tint = Palette.Accent,
-                        enabled = window.enabled,
-                        onToggle = { model.saveWeekly(window.copy(enabled = it)) },
-                        onOpen = { weeklyForm = Editing(window) },
-                        onRemove = {
-                            removing = Removal(window.id, describeWindow(window), weekly = true)
-                        },
-                    )
-                }
-
-                calendar.forEach { rule ->
-                    Rule()
-                    val caught = state.calendarEvents.filter { matches(rule, it) }
-                    TriggerRow(
-                        title = "From your calendar",
-                        note = describeMatcher(rule.matcher),
-                        tint = Palette.Accent,
-                        enabled = rule.enabled,
-                        onToggle = { model.saveCalendarRule(rule.copy(enabled = it)) },
-                        onOpen = { calendarForm = Editing(rule) },
-                        onRemove = {
-                            removing = Removal(rule.id, describeMatcher(rule.matcher), weekly = false)
-                        },
-                        bottomPad = if (caught.isEmpty()) Dsn.CardPad else 8.dp,
-                    )
-                    // The meetings themselves, named. A rule the user made by tapping an event is
-                    // stored as a title match, and printing the match back at them ("Events titled
-                    // Tapri Lab Meeting") is the config talking; these are the actual dates it has.
-                    caught.take(4).forEach { event ->
-                        CaughtEvent(event.title, "${dayLabel(event.start, state.now)} " + clockTime(event.start))
-                    }
-                    if (caught.size > 4) {
-                        CaughtEvent("and ${caught.size - 4} more", "")
-                    }
-                }
-
-                if (windows.isEmpty() && calendar.isEmpty()) {
-                    Rule()
-                    // F-34: the note used to read "Pick a meeting, or set a schedule", but this row's
-                    // own tap opens the calendar picker and nothing else — the weekly path is the
-                    // "Add a window" button further down the page. The page kept the promise; the row
-                    // did not, and a row that names an action it does not perform is indistinguishable
-                    // from a broken button. It now names both and says where the second one is.
-                    TriggerRow(
-                        title = "Nothing starts it yet",
-                        note = "Pick a meeting, or add a window below",
-                        tint = Palette.Muted,
-                        enabled = false,
-                        onToggle = {},
-                        onOpen = { picking = profile },
-                        onRemove = {},
-                        showSwitch = false,
-                    )
-                }
-
-                // Adding a meeting to a profile that already follows some, without going through
-                // the profile screen: this is the page those meetings are listed on.
-                if (state.calendarGranted && (windows.isNotEmpty() || calendar.isNotEmpty())) {
-                    AddEvent { picking = profile }
-                }
+                Gap(14.dp)
             }
-            Gap(14.dp)
-        }
 
-        Gap(4.dp)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GhostButton("Add a window", Modifier.weight(1f), enabled = state.profiles.isNotEmpty()) {
-                weeklyForm = Editing(null)
+            GhostButton("+ Create another profile") {
+                onNewProfile()
             }
-            // Straight to the calendar, not to an empty matcher form. Someone who says "from
-            // calendar" has an event in mind, and asking them to describe it in a title pattern
-            // before they have seen the list is asking them to guess at their own diary.
-            GhostButton(
-                "From calendar",
-                Modifier.weight(1f),
-                enabled = state.profiles.isNotEmpty(),
-                onClick = onPickFromCalendar,
-            )
-        }
-
-        Gap(14.dp)
-        // The status line the canvas ends on: whether the calendar half of the plan can actually
-        // happen. It is the one dependency on this screen that lives outside the app.
-        DCard(padding = 16.dp) {
-            Text(
-                if (state.calendarGranted) {
-                    "Your calendar is connected. New events matching a rule block automatically."
-                } else {
-                    "Your calendar is not connected, so calendar rules will not start anything. " +
-                        "Connect it under Settings."
-                },
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
-                color = if (state.calendarGranted) Palette.Muted else Palette.Bad,
-            )
-        }
-
-        // Last, below everything else, and folded: the file is for the person who wants the file,
-        // and it is also the only way a config leaves this device before sync exists.
-        Gap(22.dp)
-        GhostButton(
-            if (showConfig) "Hide the config file" else "Show the config file",
-            colour = Palette.Muted,
-            onClick = { showConfig = !showConfig },
-        )
-        if (showConfig) {
-            Gap(14.dp)
-            SectionLabel("curfew.toml")
-            Gap(10.dp)
-            // A failed read is said out loud and the editor is not offered at all.
-            //
-            // The box used to open on whatever `configToml` held, and a failed read left it empty —
-            // which is a perfectly valid config, so nothing looked wrong. `saveConfig` validates what
-            // it is given but has no way to know it is replacing a config it never managed to read,
-            // so saving the blank page would have replaced everything the user had with whatever they
-            // typed. Refusing to open the editor is the only honest answer: there is nothing to edit
-            // *from*.
-            if (state.configError != null) {
-                Text(
-                    "Your config could not be read, so it cannot be edited here yet.\n\n" +
-                        state.configError +
-                        "\n\nNothing has been changed. Reopening this screen tries again.",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Palette.Bad,
-                )
-            } else {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it; editing = true },
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                ),
-                minLines = 8,
-            )
-            Gap(8.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = { model.saveConfig(draft); editing = false },
-                    enabled = editing && draft != state.configToml,
-                ) { Text("Save") }
-                TextButton(
-                    onClick = { draft = state.configToml; editing = false },
-                    enabled = editing,
-                ) { Text("Discard") }
-                // Import and export are how a config moves between devices before sync exists —
-                // and how it stays the user's own document afterwards. Both go through the system
-                // file picker, so Curfew needs no storage permission to do it.
-                TextButton(onClick = { importFile.launch(arrayOf("*/*")) }) { Text("Import") }
-                TextButton(onClick = { exportFile.launch("curfew.toml") }) { Text("Export") }
-            }
-            Gap(6.dp)
-            Text(
-                "Saving does not end a session that is already running. A lock you asked for is " +
-                    "not something a settings edit can undo.",
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = Palette.Muted,
-            )
-            }
+            Gap(16.dp)
         }
     }
 
@@ -416,24 +287,18 @@ fun ScheduleScreen(
     }
 
     removingProfile?.let { profile ->
-        AlertDialog(
-            onDismissRequest = { removingProfile = null },
-            title = { Text("Remove ${profile.name}?") },
-            text = {
-                Text(
-                    "Everything it blocks goes with it. A schedule still pointing at it has to " +
-                        "be removed first, and a session it already started keeps running.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = profile
-                    removingProfile = null
-                    model.deleteProfile(chosen.id)
-                }) { Text("Remove") }
-            },
-            dismissButton = {
-                TextButton(onClick = { removingProfile = null }) { Text("Keep it") }
+        DConfirm(
+            title = "Remove ${profile.name}?",
+            sub = "Everything it blocks goes with it, including any schedules starting it.",
+            body = "A session it has already started keeps running until its own lock lets it go.",
+            dismiss = "Keep it",
+            confirm = "Remove",
+            destructive = true,
+            onDismiss = { removingProfile = null },
+            onConfirm = {
+                val chosen = profile
+                removingProfile = null
+                model.deleteProfile(chosen.id)
             },
         )
     }
@@ -443,6 +308,7 @@ fun ScheduleScreen(
             existing = form.value,
             profiles = state.profiles,
             now = state.now,
+            defaultProfile = form.targetProfileId ?: form.value?.profile,
             onDismiss = { weeklyForm = null },
             onSave = { window ->
                 weeklyForm = null
@@ -451,11 +317,17 @@ fun ScheduleScreen(
         )
     }
 
+    val availableCalendars = remember(state.calendarEvents) {
+        state.calendarEvents.map { it.calendar.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+    }
+
     calendarForm?.let { form ->
         CalendarDialog(
             existing = form.value,
             profiles = state.profiles,
             now = state.now,
+            defaultProfile = form.targetProfileId ?: form.value?.profile,
+            availableCalendars = availableCalendars,
             onDismiss = { calendarForm = null },
             onSave = { rule ->
                 calendarForm = null
@@ -464,31 +336,21 @@ fun ScheduleScreen(
         )
     }
 
-    // Removal is confirmed because it is the one edit here that cannot be undone by pressing the
-    // same control again, and because what it does *not* do — end a session already running — is
-    // the thing people expect it to.
     removing?.let { target ->
-        AlertDialog(
-            onDismissRequest = { removing = null },
-            title = { Text("Remove this schedule?") },
-            text = {
-                Text(
-                    target.description + "\n\nIt will stop starting sessions. A session it has " +
-                        "already started keeps running until its own lock lets it go. If you only " +
-                        "want it off for a while, use the switch instead.",
-                )
+        DConfirm(
+            title = "Remove this schedule?",
+            sub = target.description,
+            body = "It will stop starting sessions. A session it has already started keeps running until its own lock lets it go. If you only want it off for a while, use the switch instead.",
+            dismiss = "Keep it",
+            confirm = "Remove",
+            destructive = true,
+            onDismiss = { removing = null },
+            onConfirm = {
+                val chosen = target
+                removing = null
+                if (chosen.weekly) model.deleteWeekly(chosen.id)
+                else model.deleteCalendarRule(chosen.id)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = removing
-                    removing = null
-                    if (chosen != null) {
-                        if (chosen.weekly) model.deleteWeekly(chosen.id)
-                        else model.deleteCalendarRule(chosen.id)
-                    }
-                }) { Text("Remove") }
-            },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep it") } },
         )
     }
 }
@@ -585,21 +447,6 @@ private fun CaughtEvent(title: String, whenIt: String) {
     }
 }
 
-/** The way to add another meeting to a profile without leaving the page that lists them. */
-@Composable
-private fun AddEvent(onClick: () -> Unit) {
-    Text(
-        "+  Add an event",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Palette.Accent,
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onClickLabel = "Add an event")
-            .padding(start = 69.dp, end = Dsn.CardPad, top = 2.dp, bottom = 16.dp),
-    )
-}
-
 /**
  * Whether a rule would catch an event, for listing purposes only.
  *
@@ -659,7 +506,7 @@ private fun summarise(profiles: Int, triggers: Int, fromCalendar: Int, loading: 
  * A wrapper rather than a bare nullable because null already means "no form open", and the two
  * cases have to be told apart: a new window and an edit of an existing one are different saves.
  */
-internal data class Editing<T>(val value: T?)
+internal data class Editing<T>(val value: T?, val targetProfileId: String? = null)
 
 /** A schedule the user has asked to remove, waiting on the confirmation. */
 internal data class Removal(val id: String, val description: String, val weekly: Boolean)

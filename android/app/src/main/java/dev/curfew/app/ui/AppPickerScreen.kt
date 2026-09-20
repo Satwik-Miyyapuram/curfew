@@ -22,6 +22,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,8 +82,10 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
     val context = LocalContext.current
     // Read off the main thread: the launcher query walks every installed package, which on a full
     // phone is long enough to drop frames if it happens while composing.
-    val apps by produceState(initialValue = emptyList<InstalledApp>()) {
-        value = withContext(Dispatchers.IO) { installedApps(context) }
+    val apps by produceState(initialValue = InstalledAppsCache.cached.orEmpty()) {
+        if (value.isEmpty()) {
+            value = withContext(Dispatchers.IO) { installedApps(context) }
+        }
     }
 
     var profile by remember { mutableStateOf(pinned) }
@@ -235,7 +242,7 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
             SearchField(query) { query = it }
             Gap(10.dp)
             DCardFlush {
-                visible.take(APP_LIMIT).forEachIndexed { index, app ->
+                visible.forEachIndexed { index, app ->
                     if (index > 0) Rule()
                     val on = app.packageName in blocked
                     Row(
@@ -275,14 +282,6 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
                         modifier = Modifier.padding(16.dp),
                     )
                 }
-            }
-            if (visible.size > APP_LIMIT) {
-                Gap(10.dp)
-                Text(
-                    "${visible.size - APP_LIMIT} more. Search to narrow the list.",
-                    fontSize = 12.sp,
-                    color = Palette.Dim,
-                )
             }
         } else {
             DCardFlush {
@@ -382,9 +381,6 @@ fun AppPickerScreen(model: CurfewViewModel, pinned: String? = null) {
         )
     }
 }
-
-/** How many rows the app list draws before it asks the user to search instead. */
-private const val APP_LIMIT = 60
 
 /**
  * The Apps / Websites switch.
@@ -578,11 +574,12 @@ private fun BlockDialog(onDismiss: () -> Unit, onSave: (Target) -> Unit) {
 }
 
 
+/** Filter choices for the app picker list. */
+enum class AppFilter { All, Blocked, Allowed }
+
 /**
- * The app and website lists, opened from inside a profile.
- *
- * Same screen, same writes; it simply arrives already knowing which profile it is editing, because
- * the only way to reach it is from that profile's own card.
+ * The app selection popup bottom sheet, opened from inside a profile.
+ * Features live search, All/Blocked/Allowed filter pills, copy from donors, and tactile switches.
  */
 @Composable
 fun AppPickerSheet(
@@ -591,21 +588,225 @@ fun AppPickerSheet(
     profileName: String,
     onDone: () -> Unit,
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDone,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Palette.Ink),
-        ) {
-            Box(Modifier.padding(horizontal = Dsn.Gutter)) {
-                BackRow("What $profileName blocks", onDone)
+    val state by model.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val apps by produceState(initialValue = InstalledAppsCache.cached.orEmpty()) {
+        if (value.isEmpty()) {
+            value = withContext(Dispatchers.IO) { installedApps(context) }
+        }
+    }
+
+    var query by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(AppFilter.All) }
+    var copyingFromProfile by remember { mutableStateOf<dev.curfew.policy.ProfileName?>(null) }
+
+    val blocked = remember(profileId, state.configToml) {
+        model.blockedApps(profileId).toSet()
+    }
+
+    val donors = remember(state.profiles, profileId) {
+        state.profiles.filter { it.id != profileId && model.blockedApps(it.id).isNotEmpty() }
+    }
+
+    val filteredApps = remember(apps, query, filter, blocked) {
+        apps.filter { app ->
+            val matchesQuery = query.isBlank() || app.label.contains(query, ignoreCase = true)
+            val isBlocked = app.packageName in blocked
+            val matchesFilter = when (filter) {
+                AppFilter.All -> true
+                AppFilter.Blocked -> isBlocked
+                AppFilter.Allowed -> !isBlocked
             }
-            Box(Modifier.weight(1f)) {
-                AppPickerScreen(model, pinned = profileId)
+            matchesQuery && matchesFilter
+        }.sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
+    }
+
+    Dialog(
+        onDismissRequest = onDone,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
+                    .glass(
+                        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                        ground = Palette.Raised,
+                    )
+                    .padding(horizontal = Dsn.Gutter)
+                    .padding(top = 8.dp, bottom = 18.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 6.dp)
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Palette.Line)
+                        .size(width = 38.dp, height = 4.dp),
+                )
+                Gap(8.dp)
+                Text(
+                    "Select Apps to Block",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.4).sp,
+                    color = Palette.Text,
+                )
+                Text(
+                    "${blocked.size} apps blocked for $profileName",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Palette.Muted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+
+                if (donors.isNotEmpty()) {
+                    Gap(10.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Copy from:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.Dim,
+                        )
+                        donors.forEach { donor ->
+                            val count = model.blockedApps(donor.id).size
+                            Pill(
+                                text = "${donor.name} ($count)",
+                                selected = false,
+                                onClick = { copyingFromProfile = donor },
+                            )
+                        }
+                    }
+                }
+
+                Gap(12.dp)
+                SearchField(value = query, onChange = { query = it })
+
+                Gap(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Pill(
+                        text = "All (${apps.size})",
+                        selected = filter == AppFilter.All,
+                        onClick = { filter = AppFilter.All },
+                    )
+                    Pill(
+                        text = "Blocked (${blocked.size})",
+                        selected = filter == AppFilter.Blocked,
+                        onClick = { filter = AppFilter.Blocked },
+                    )
+                    Pill(
+                        text = "Allowed (${(apps.size - blocked.size).coerceAtLeast(0)})",
+                        selected = filter == AppFilter.Allowed,
+                        onClick = { filter = AppFilter.Allowed },
+                    )
+                }
+
+                Gap(12.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(Dsn.CardRadius))
+                        .background(Palette.Surface),
+                ) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        if (filteredApps.isEmpty()) {
+                            item {
+                                Text(
+                                    if (query.isBlank()) "No apps found" else "No app matches “$query”.",
+                                    fontSize = 13.sp,
+                                    color = Palette.Muted,
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            }
+                        } else {
+                            itemsIndexed(
+                                items = filteredApps,
+                                key = { _, app -> app.packageName },
+                            ) { index, app ->
+                                if (index > 0) Rule()
+                                val on = app.packageName in blocked
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val next = if (on) blocked - app.packageName else blocked + app.packageName
+                                            model.setBlockedApps(profileId, next.toList())
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .semantics(mergeDescendants = true) {
+                                            contentDescription = if (on) "${app.label}, blocked" else "${app.label}, allowed"
+                                        },
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    AppIcon(app.packageName, modifier = Modifier.size(36.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            app.label,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Palette.Text,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            if (on) "Blocked" else "Allowed",
+                                            fontSize = 11.5.sp,
+                                            color = if (on) Palette.Accent else Palette.Dim,
+                                        )
+                                    }
+                                    Switch(
+                                        on = on,
+                                        onChange = { wanted ->
+                                            val next = if (wanted) blocked + app.packageName else blocked - app.packageName
+                                            model.setBlockedApps(profileId, next.toList())
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Gap(16.dp)
+                PrimaryButton(
+                    text = "Done",
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onDone,
+                )
             }
         }
+    }
+
+    copyingFromProfile?.let { donor ->
+        val donorCount = model.blockedApps(donor.id).size
+        DConfirm(
+            title = "Copy ${donor.name}'s apps?",
+            sub = "Adds $donorCount apps to $profileName.",
+            body = "Nothing already blocked in $profileName will be removed.",
+            dismiss = "Cancel",
+            confirm = "Copy them",
+            onDismiss = { copyingFromProfile = null },
+            onConfirm = {
+                val d = donor
+                copyingFromProfile = null
+                model.copyBlocksFrom(d.id, profileId)
+            },
+        )
     }
 }

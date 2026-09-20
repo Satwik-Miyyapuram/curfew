@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,16 +70,55 @@ import dev.curfew.app.enforce.EnforcementService
  */
 class MainActivity : FragmentActivity() {
 
+    private val pendingPairingCode = androidx.compose.runtime.mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Opening the app is also the moment to make sure enforcement is up: a user who force-stops
         // Curfew and then opens it has re-armed it by doing so.
         EnforcementService.start(applicationContext)
+        handlePairingIntent(intent)
 
         setContent {
             CurfewTheme {
-                CurfewApp()
+                CurfewApp(
+                    pendingPairingCode = pendingPairingCode.value,
+                    onPairingConsumed = { pendingPairingCode.value = null },
+                )
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairingIntent(intent)
+    }
+
+    private fun handlePairingIntent(intent: android.content.Intent?) {
+        val uri = intent?.data ?: return
+        val code = uri.getQueryParameter("code") ?: uri.toString()
+        if (code.isNotBlank()) {
+            pendingPairingCode.value = code
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun startActivityForResult(intent: android.content.Intent, requestCode: Int, options: Bundle?) {
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (e: IllegalArgumentException) {
+            if (e.message?.contains("lower 16 bits") == true) {
+                val superMethod = androidx.activity.ComponentActivity::class.java.getMethod(
+                    "startActivityForResult",
+                    android.content.Intent::class.java,
+                    Int::class.javaPrimitiveType,
+                    Bundle::class.java,
+                )
+                superMethod.invoke(this, intent, requestCode, options)
+            } else {
+                throw e
             }
         }
     }
@@ -124,7 +165,11 @@ object Routes {
 }
 
 @Composable
-fun CurfewApp(model: CurfewViewModel = viewModel()) {
+fun CurfewApp(
+    model: CurfewViewModel = viewModel(),
+    pendingPairingCode: String? = null,
+    onPairingConsumed: () -> Unit = {},
+) {
     // A second between ticks while someone is watching a countdown, five while nobody is.
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
         model.onForeground(true)
@@ -141,6 +186,14 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
             restoreState = true
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(pendingPairingCode) {
+        pendingPairingCode?.let { code ->
+            go(Routes.DEVICES)
+            model.answerPairing(code)
+            onPairingConsumed()
         }
     }
 
@@ -239,6 +292,10 @@ fun CurfewApp(model: CurfewViewModel = viewModel()) {
  */
 @Composable
 private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.runtime.LaunchedEffect(notice) {
+        kotlinx.coroutines.delay(2500)
+        onDismiss()
+    }
     val tone = if (notice.bad) Palette.Bad else Palette.Ok
     Row(
         modifier = modifier
@@ -298,6 +355,10 @@ private fun GlassBar(
                 // sheen so the slab has a lit edge rather than one flat tone — were written out here
                 // and again on the block screen, and had already drifted apart.
                 .glass(RoundedCornerShape(26.dp), elevation = 22.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {}
                 .padding(horizontal = 6.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,

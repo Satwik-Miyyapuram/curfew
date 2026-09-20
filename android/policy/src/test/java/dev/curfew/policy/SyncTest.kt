@@ -136,7 +136,7 @@ class SyncTest {
             [emergency]
             passes = 1
             window_seconds = 604800
-            cooldown_seconds = 0
+            cooldown_seconds = 1
 
             [[profiles]]
             id = "deep-work"

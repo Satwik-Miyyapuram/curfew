@@ -192,6 +192,17 @@ fun DevicesScreen(model: CurfewViewModel) {
                 } else {
                     Qr(offer.json)
                     Gap(10.dp)
+                    Text(
+                        offer.json,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Palette.Raised, RoundedCornerShape(Dsn.CtlRadius))
+                            .padding(8.dp),
+                    )
+                    Gap(8.dp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Tap("Copy code", Palette.Accent) { clipboard.copy(offer.json) }
                         Tap("Cancel", Palette.Muted, model::cancelPairing)
@@ -239,6 +250,9 @@ fun DevicesScreen(model: CurfewViewModel) {
                 Field("Code from the other device", typed) { typed = it }
                 Gap(10.dp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Tap("Paste", Palette.Accent) {
+                        clipboard.getText()?.text?.let { typed = it.trim() }
+                    }
                     Tap(
                         "It is showing a code",
                         if (typed.isBlank()) Palette.Dim else Palette.Accent,

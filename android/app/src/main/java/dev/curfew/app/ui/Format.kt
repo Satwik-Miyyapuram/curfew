@@ -140,6 +140,7 @@ fun describeTarget(key: String): String {
         "title" -> "windows titled “$value”"
         "domain" -> value
         "url" -> value
+        "web" -> value
         "keyword" -> "anything mentioning “$value”"
         "path" -> value
         "notif" -> "$value notifications"

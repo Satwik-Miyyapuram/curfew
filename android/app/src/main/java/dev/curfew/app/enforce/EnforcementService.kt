@@ -191,7 +191,8 @@ class EnforcementService : Service() {
             // alarm is an `AlarmManager` call and the notification is an IPC — none of it needs the fast
             // poll, and doing all three once a second would cost more than the faster poll saves. The
             // heartbeat is still twenty times more frequent than the five-minute threshold it feeds.
-            if (EnforcementCadence.incidentalDue(lastIncidental)) {
+            val sinceIncidental = if (lastIncidental == 0L) 0L else (woke - lastIncidental)
+            if (EnforcementCadence.incidentalDue(sinceIncidental)) {
                 lastIncidental = woke
                 // Written after reconciling, so the recorded time is one Curfew was demonstrably
                 // enforcing at, rather than one it merely woke up at.
@@ -295,13 +296,27 @@ class EnforcementService : Service() {
 /** The enforcer's hands: what actually happens on the device when a decision comes back. */
 class AndroidActions(private val context: Context) : Enforcer.Actions {
 
+    private var lastBlockedTarget: String? = null
+    private var lastBlockedAt: Long = 0L
+
     override fun block(target: String, reason: BlockReason) {
-        // A background activity start is refused on modern Android unless the app is allowed to
-        // draw over other apps, and the refusal is silent from in here. Caught and logged so that
-        // a block that never appears leaves a trace pointing at the permission, rather than
-        // looking like a scheduling bug.
-        runCatching { context.startActivity(BlockActivity.intent(context, target, reason, context.curfew.profileName(reason.profile))) }
-            .onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (target == lastBlockedTarget && now - lastBlockedAt < 1200L) {
+            return
+        }
+        lastBlockedTarget = target
+        lastBlockedAt = now
+
+        runCatching {
+            val intent = BlockActivity.intent(
+                context,
+                target,
+                reason,
+                context.curfew.profileName(reason.profile),
+            )
+            val launcher = CurfewAccessibilityService.instance ?: context
+            launcher.startActivity(intent)
+        }.onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
     }
 
     override fun delay(target: String, seconds: Int) {

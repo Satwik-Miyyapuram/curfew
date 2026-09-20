@@ -56,6 +56,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            installedApps(app)
+        }
         viewModelScope.launch {
             runtime.restore()
             refresh()
@@ -281,6 +284,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    private fun ensureSyncHub(): dev.curfew.app.data.SyncHub? {
+        runtime.sync?.let { return it }
+        val app = getApplication<Application>()
+        return dev.curfew.app.data.SyncHub.create(app, android.os.Build.MODEL ?: "Android")?.also {
+            runtime.attachSync(it)
+            it.start()
+        }
+    }
+
     /**
      * Start pairing from this device: show an invite for the other one to read.
      *
@@ -289,7 +301,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * two screens.
      */
     fun offerPairing() {
-        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
+        val hub = ensureSyncHub() ?: return say(str(R.string.sync_not_running))
         runCatching { hub.sync.invite(runtime.clock.now()) }
             .onSuccess { json ->
                 pending = null
@@ -306,7 +318,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * phrase exists, so [confirmPairing] is deliberately a separate press.
      */
     fun answerPairing(inviteJson: String) {
-        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
+        val hub = ensureSyncHub() ?: return say(str(R.string.sync_not_running))
         val invite = inviteJson.trim()
         runCatching { Offer(hub.sync.replyTo(invite), hub.sync.phrase(invite), isReply = true) }
             .onSuccess { offer ->
@@ -318,7 +330,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Read back the reply from the invited device, so this side can show its phrase too. */
     fun readReply(replyJson: String) {
-        val hub = runtime.sync ?: return say(str(R.string.sync_not_running))
+        val hub = ensureSyncHub() ?: return say(str(R.string.sync_not_running))
         val reply = replyJson.trim()
         runCatching { hub.sync.phrase(reply) }
             .onSuccess { phrase ->
@@ -853,7 +865,14 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * core's own message, and the working config is left untouched. Importing does not end a
      * running session, for the same reason editing does not.
      */
-    fun importConfig(toml: String) = saveConfig(toml)
+    fun importConfig(toml: String) {
+        viewModelScope.launch {
+            runtime.setConfig(toml)
+                .onSuccess { note("Configuration imported.") }
+                .onFailure { say(it.message ?: str(R.string.config_load_failed)) }
+            refresh()
+        }
+    }
 
     /** Bring sessions into line with the schedules right now, rather than at the next alarm. */
     fun reconcileNow() {

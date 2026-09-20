@@ -22,52 +22,119 @@ import kotlinx.coroutines.withContext
 /** An installed app as a picker shows it. */
 data class InstalledApp(val packageName: String, val label: String)
 
+/** In-memory cache for installed apps list and loaded icons to ensure instant UI rendering. */
+object InstalledAppsCache {
+    @Volatile
+    var cached: List<InstalledApp>? = null
+
+    private val iconCache = android.util.LruCache<String, ImageBitmap>(300)
+    private val labelCache = android.util.LruCache<String, String>(500)
+
+    fun getIcon(packageName: String): ImageBitmap? = iconCache.get(packageName)
+
+    fun putIcon(packageName: String, bitmap: ImageBitmap) {
+        iconCache.put(packageName, bitmap)
+    }
+
+    fun getLabel(packageName: String): String? = labelCache.get(packageName)
+
+    fun putLabel(packageName: String, label: String) {
+        labelCache.put(packageName, label)
+    }
+
+    fun clear() {
+        cached = null
+        iconCache.evictAll()
+        labelCache.evictAll()
+    }
+}
+
 /**
  * The apps a person could plausibly want to block.
  *
- * Only apps with a launcher entry are listed. The full package list would include a hundred system
- * components a user has never heard of, and a picker they have to scroll past is a picker they do
- * not use — which ends with rules going unwritten.
- *
- * Curfew's own package is excluded: blocking the blocker is a way to lock yourself out of the only
- * screen that can end a session.
+ * Fast, cached retrieval. Queries launchable activities in a single batch, and only supplements with
+ * user-installed non-launcher apps via in-memory flag checks (avoiding slow per-package binder calls).
  */
-fun installedApps(context: Context): List<InstalledApp> {
+fun installedApps(context: Context, forceRefresh: Boolean = false): List<InstalledApp> {
+    if (!forceRefresh) {
+        InstalledAppsCache.cached?.let { return it }
+    }
+
     val pm = context.packageManager
-    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-    return pm.queryIntentActivities(intent, 0)
+    val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    val launcherApps = pm.queryIntentActivities(launcherIntent, 0)
         .mapNotNull { resolved ->
             val activity = resolved.activityInfo ?: return@mapNotNull null
+            val label = resolved.loadLabel(pm).toString()
+            InstalledAppsCache.putLabel(activity.packageName, label)
             InstalledApp(
                 packageName = activity.packageName,
-                label = resolved.loadLabel(pm).toString(),
+                label = label,
             )
         }
+
+    val launcherPkgs = launcherApps.map { it.packageName }.toSet()
+
+    val installedPackages = runCatching {
+        pm.getInstalledApplications(0)
+    }.getOrDefault(emptyList())
+
+    // Only include user-installed or updated non-system apps not already in the launcher set.
+    val additionalApps = installedPackages.mapNotNull { appInfo ->
+        if (appInfo.packageName in launcherPkgs) return@mapNotNull null
+        val isUserApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0 ||
+            (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        if (isUserApp) {
+            val label = runCatching { appInfo.loadLabel(pm).toString() }.getOrDefault(appInfo.packageName)
+            InstalledAppsCache.putLabel(appInfo.packageName, label)
+            InstalledApp(
+                packageName = appInfo.packageName,
+                label = label,
+            )
+        } else {
+            null
+        }
+    }
+
+    val result = (launcherApps + additionalApps)
         .filter { it.packageName != context.packageName }
         .distinctBy { it.packageName }
         .sortedBy { it.label.lowercase() }
+
+    InstalledAppsCache.cached = result
+    return result
 }
 
-/** The label for a package, falling back to the package name when it is not installed. */
-fun appLabel(context: Context, packageName: String): String = runCatching {
-    val pm = context.packageManager
-    pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
-}.getOrDefault(packageName)
+/** The label for a package, served instantly from memory cache when available. */
+fun appLabel(context: Context, packageName: String): String {
+    InstalledAppsCache.getLabel(packageName)?.let { return it }
+    InstalledAppsCache.cached?.firstOrNull { it.packageName == packageName }?.let {
+        InstalledAppsCache.putLabel(packageName, it.label)
+        return it.label
+    }
+    val resolved = runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+    }.getOrDefault(packageName)
+    InstalledAppsCache.putLabel(packageName, resolved)
+    return resolved
+}
 
 /**
- * An app's launcher icon, loaded off the main thread.
- *
- * A list of a hundred and fifty apps is a list of a hundred and fifty drawables, each one read from
- * that app's resources, and doing that while composing freezes the picker on exactly the phones
- * that have the most apps to show. So each row asks for its own icon and draws a gap until it
- * arrives, which is invisible in practice and never blocks a scroll.
+ * An app's launcher icon, served instantly from memory cache when available.
  */
 @Composable
 fun AppIcon(packageName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var image by remember(packageName) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(packageName) {
-        image = withContext(Dispatchers.IO) { loadIcon(context, packageName) }
+    var image by remember(packageName) { mutableStateOf(InstalledAppsCache.getIcon(packageName)) }
+    if (image == null) {
+        LaunchedEffect(packageName) {
+            val loaded = withContext(Dispatchers.IO) { loadIcon(context, packageName) }
+            if (loaded != null) {
+                InstalledAppsCache.putIcon(packageName, loaded)
+                image = loaded
+            }
+        }
     }
     val bitmap = image
     if (bitmap == null) {

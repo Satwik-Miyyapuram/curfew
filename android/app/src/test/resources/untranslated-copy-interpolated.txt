@@ -5,11 +5,22 @@
 # of this file is the number the project quotes, so a stale line is a lie.
 #
 # Regenerate: ./gradlew :app:testDebugUnitTest -Dcurfew.updateCopyAllowlist=true
+AppPickerScreen.kt|${blocked.size} apps blocked for $profileName
 AppPickerScreen.kt|${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites 
-AppPickerScreen.kt|${visible.size - APP_LIMIT} more. Search to narrow the list.
+AppPickerScreen.kt|${donor.name} ($count)
+AppPickerScreen.kt|${donor.name} ($count)
+AppPickerScreen.kt|All (${apps.size})
+AppPickerScreen.kt|All (${apps.size})
+AppPickerScreen.kt|Allowed (${(apps.size - blocked.size).coerceAtLeast(0)})
+AppPickerScreen.kt|Allowed (${(apps.size - blocked.size).coerceAtLeast(0)})
+AppPickerScreen.kt|Blocked (${blocked.size})
+AppPickerScreen.kt|Blocked (${blocked.size})
 AppPickerScreen.kt|Changes apply the next time ${nameOf(state, current)} starts — never to a block 
+AppPickerScreen.kt|Copy ${donor.name}'s apps?
 AppPickerScreen.kt|Copy ${donor.name}'s list?
 AppPickerScreen.kt|No app matches “$query”.
+AppPickerScreen.kt|No app matches “$query”.
+AppPickerScreen.kt|Nothing already blocked in $profileName will be removed.
 AppPickerScreen.kt|Stop blocking ${rule.target.label()}
 BlockActivity.kt|$name is blocked
 BlockActivity.kt|$remaining seconds
@@ -17,11 +28,17 @@ BlockActivity.kt|Emergency pass · ${if (passes == 1)
 BlockActivity.kt|Open $target
 BlockActivity.kt|The wait is over. You can open $target.
 BlockActivity.kt|Waiting $remaining seconds before $target opens.
+CalendarScreen.kt|$cal ($count)
+CalendarScreen.kt|$cal ($count)
 CalendarScreen.kt|$kept of $total
-CalendarScreen.kt|Block during ${event.title}
-CalendarScreen.kt|Block during ${event.title}
+CalendarScreen.kt|All (${state.calendarEvents.size})
+CalendarScreen.kt|All (${state.calendarEvents.size})
+CalendarScreen.kt|All “$cal” events
 CalendarScreen.kt|Blocks $profile
+CalendarScreen.kt|Manage (${blockedBy.size}) ›
 CalendarScreen.kt|No event matches “$query”.
+CalendarScreen.kt|No events on “$selectedCalendar” match “$query”.
+CalendarScreen.kt|✓ Blocks $targetProfileName
 ChallengeDialog.kt|${challenge.question} = ?
 ChallengeDialog.kt|What is ${challenge.question.replace(
 ChallengeDialog.kt|What is ${challenge.question.replace(
@@ -55,12 +72,13 @@ NowScreen.kt|This ends ${named(session.profile)} now. It counts against your rat
 NowScreen.kt|Use an emergency pass on $name, $passesLeft left
 NowScreen.kt|left · ends ${clockOf(it)}
 ProfileEditScreen.kt|$emoji $value
-ProfileEditScreen.kt|${apps.size} app${if (apps.size == 1) 
-ProfileEditScreen.kt|${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the 
+ProfileEditScreen.kt|${spellDuration(budgetSeconds!! / 60)} a day, then apps lock
+ProfileEditScreen.kt|${windows.size} active window${if (windows.size == 1) 
+ProfileEditScreen.kt|Blocked Apps ($appCount)
+ProfileEditScreen.kt|Blocked Websites ($siteCount)
 ProfileEditScreen.kt|Delete ${existing.name}?
+ScheduleEditor.kt|±${mins}m
 ScheduleScreen.kt|$note · paused
-ScheduleScreen.kt|Edit ${profile.name}
-ScheduleScreen.kt|Remove ${profile.name}
 ScheduleScreen.kt|Remove ${profile.name}?
 SettingsScreen.kt|${state.sync.active.size} device(s) paired. None in earshot right now.
 SettingsScreen.kt|${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in 

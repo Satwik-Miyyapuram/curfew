@@ -64,6 +64,7 @@ private enum class Strength(val label: String, val note: String, val lock: Lock?
     Open("I can stop it", "Ends the moment you tap stop.", null),
     Confirm("Ask me first", "One confirmation, so it is never an accident.", Lock.Confirm),
     Credential("Fingerprint or PIN", "Proves it is you, not a pocket.", Lock.DeviceCredential),
+    Math("Solve math", "A quick puzzle before it opens.", Lock.Challenge(ChallengeKind.MATH)),
     Typing("Type it out", "A sentence to copy before it opens.", Lock.Challenge(ChallengeKind.TYPING)),
     Locked("Until it ends", "Nothing ends this early. The 24-hour release is the way out.", Lock.Timer),
 }

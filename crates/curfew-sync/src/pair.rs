@@ -37,8 +37,56 @@ pub enum Error {
     Revoked { at: Timestamp },
     #[error("that device is not paired with this one")]
     Unknown,
+    #[error("that was not a valid Curfew pairing code")]
+    Malformed,
     #[error(transparent)]
     Device(#[from] DeviceError),
+}
+
+const COMPACT_VERSION: u8 = 1;
+const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn b64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+        out.push(B64_CHARS[(b0 >> 2) as usize] as char);
+        out.push(B64_CHARS[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(B64_CHARS[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(B64_CHARS[(b2 & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity((s.len() * 3) / 4);
+    let mut buf = 0u32;
+    let mut bits = 0;
+    for &b in s.as_bytes() {
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            b'=' | b' ' | b'\r' | b'\n' | b'\t' => continue,
+            _ => return None,
+        };
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// What one device shows the other: its public keys and a one-time nonce.
@@ -65,6 +113,80 @@ impl Invite {
         let mut nonce = [0u8; 16];
         rand_core::OsRng.fill_bytes(&mut nonce);
         Self::new(identity, now, nonce)
+    }
+
+    /// A compact representation of this invite.
+    ///
+    /// Encodes the keys, nonce, and validity window into a ~130-character URL-safe string
+    /// prefixed with `CRFW:`. Much smaller and faster to copy or scan than a 500-character JSON blob.
+    pub fn to_compact(&self) -> String {
+        let name_bytes = self.from.name.as_bytes();
+        let name_len = name_bytes.len().min(32);
+        let mut buf = Vec::with_capacity(90 + name_len);
+        buf.push(COMPACT_VERSION);
+        buf.extend_from_slice(&self.from.signing);
+        buf.extend_from_slice(&self.from.exchange);
+        buf.extend_from_slice(&self.nonce);
+        buf.extend_from_slice(&(self.issued_at as u32).to_be_bytes());
+        buf.extend_from_slice(&(self.expires_at as u32).to_be_bytes());
+        buf.push(name_len as u8);
+        buf.extend_from_slice(&name_bytes[..name_len]);
+        format!("CRFW:{}", b64_encode(&buf))
+    }
+
+    /// Parse an invite from either the compact format or legacy JSON.
+    pub fn from_str_lenient(text: &str) -> Result<Self, Error> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Err(Error::Malformed);
+        }
+
+        // If it starts with a JSON object, parse as legacy JSON first.
+        if trimmed.starts_with('{') {
+            return serde_json::from_str(trimmed).map_err(|_| Error::Malformed);
+        }
+
+        // If it is a deep link URL (e.g. https://curfew.dev/pair?code=CRFW:... or curfew://pair?code=...),
+        // extract the code query parameter.
+        let raw_code = if let Some(pos) = trimmed.find("code=") {
+            let after = &trimmed[pos + 5..];
+            let end = after.find('&').unwrap_or(after.len());
+            &after[..end]
+        } else {
+            trimmed
+        };
+
+        // Strip prefix if present (case-insensitive "crfw:").
+        let body = if raw_code.len() >= 5 && raw_code[..5].eq_ignore_ascii_case("crfw:") {
+            &raw_code[5..]
+        } else {
+            raw_code
+        };
+
+        if let Some(bytes) = b64_decode(body) {
+            if bytes.len() >= 90 && bytes[0] == COMPACT_VERSION {
+                let signing: [u8; 32] = bytes[1..33].try_into().unwrap();
+                let exchange: [u8; 32] = bytes[33..65].try_into().unwrap();
+                let nonce: [u8; 16] = bytes[65..81].try_into().unwrap();
+                let issued_at = u32::from_be_bytes(bytes[81..85].try_into().unwrap()) as i64;
+                let expires_at = u32::from_be_bytes(bytes[85..89].try_into().unwrap()) as i64;
+                let name_len = bytes[89] as usize;
+                let name = if bytes.len() >= 90 + name_len && name_len > 0 {
+                    String::from_utf8_lossy(&bytes[90..90 + name_len]).into_owned()
+                } else {
+                    "device".to_string()
+                };
+                return Ok(Self {
+                    from: PublicIdentity { name, signing, exchange },
+                    nonce,
+                    issued_at,
+                    expires_at,
+                });
+            }
+        }
+
+        // Fallback to JSON in case it was JSON with whitespace or without leading {
+        serde_json::from_str(trimmed).map_err(|_| Error::Malformed)
     }
 
     fn check(&self, now: Timestamp) -> Result<(), Error> {
@@ -414,5 +536,63 @@ mod tests {
     fn two_invites_are_never_the_same() {
         let phone = Identity::generate("phone");
         assert_ne!(Invite::offer(&phone, NOW).nonce, Invite::offer(&phone, NOW).nonce);
+    }
+
+    #[test]
+    fn compact_invite_roundtrips_and_derives_identical_phrase() {
+        let (phone, pc) = (Identity::generate("phone"), Identity::generate("pc"));
+        let original = Invite::offer(&phone, NOW);
+
+        let compact = original.to_compact();
+        assert!(compact.starts_with("CRFW:"), "compact code must have prefix: {compact}");
+        assert!(
+            compact.len() < 145,
+            "compact invite is {len} chars, expected < 145",
+            len = compact.len()
+        );
+
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(
+            json.len() > 300,
+            "json format was unexpectedly small: {len} chars",
+            len = json.len()
+        );
+
+        // Parsing from compact gives exact same fields:
+        let parsed = Invite::from_str_lenient(&compact).expect("valid compact invite");
+        assert_eq!(parsed.from.signing, original.from.signing);
+        assert_eq!(parsed.from.exchange, original.from.exchange);
+        assert_eq!(parsed.nonce, original.nonce);
+        assert_eq!(parsed.issued_at, original.issued_at);
+        assert_eq!(parsed.expires_at, original.expires_at);
+        assert_eq!(parsed.from.name, original.from.name);
+
+        // Derives identical phrase:
+        assert_eq!(
+            phrase(&pc.public(), &parsed.from, &parsed.nonce),
+            phrase(&pc.public(), &original.from, &original.nonce),
+        );
+
+        // Lenient parsing handles legacy JSON too:
+        let from_json = Invite::from_str_lenient(&json).expect("parses legacy JSON");
+        assert_eq!(from_json, original);
+
+        // Lenient parsing handles lowercase prefix and surrounding whitespace:
+        let with_spaces = format!("  crfw:{}  ", &compact[5..]);
+        let from_spaces = Invite::from_str_lenient(&with_spaces).expect("parses lowercase prefix with whitespace");
+        assert_eq!(from_spaces.from.signing, original.from.signing);
+
+        // Lenient parsing handles deep link URLs:
+        let url = format!("https://curfew.dev/pair?code={}&source=camera", compact);
+        let from_url = Invite::from_str_lenient(&url).expect("parses deep link URL");
+        assert_eq!(from_url.from.signing, original.from.signing);
+    }
+
+    #[test]
+    fn compact_invite_rejects_malformed_input() {
+        assert_eq!(Invite::from_str_lenient(""), Err(Error::Malformed));
+        assert_eq!(Invite::from_str_lenient("   "), Err(Error::Malformed));
+        assert_eq!(Invite::from_str_lenient("not a code"), Err(Error::Malformed));
+        assert_eq!(Invite::from_str_lenient("CRFW:AQIDBA=="), Err(Error::Malformed));
     }
 }

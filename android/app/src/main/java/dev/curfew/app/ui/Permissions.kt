@@ -138,52 +138,62 @@ enum class Grant(
      * Where to send the user to grant it, or null when it is an ordinary runtime permission the
      * caller should request through the permission launcher instead.
      */
-    fun settingsIntent(context: Context): Intent? = when (this) {
-        // The details page for Curfew's own service where Android has one (12+), so the user lands
-        // on the switch rather than on a list of every accessibility service they have ever
-        // installed. The list is the fallback, not the destination.
-        Accessibility ->
+    fun settingsIntents(context: Context): List<Intent> = when (this) {
+        Accessibility -> listOfNotNull(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Spelled out rather than taken from `Settings`: the constants for this page are
-                // not in the SDK this app compiles against, and the strings are the platform's
-                // public, stable names for it.
                 Intent(ACTION_ACCESSIBILITY_DETAILS).putExtra(
                     EXTRA_ACCESSIBILITY_COMPONENT,
                     ComponentName(context, CurfewAccessibilityService::class.java).flattenToString(),
                 )
-            } else {
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            }
-        UsageAccess -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-        Overlay -> Intent(
-            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.fromParts("package", context.packageName, null),
+            } else null,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
         )
-        ExactAlarms ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-            } else {
-                null
-            }
-        // Asking to be exempted from battery optimisation with ACTION_REQUEST_IGNORE_... is a
-        // policy violation on Play, and Curfew is distributed outside it — but the settings screen
-        // is the honest route either way: the user should see the list they are changing.
-        NotificationAccess ->
+        UsageAccess -> listOf(
+            Intent(
+                Settings.ACTION_USAGE_ACCESS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null),
+            ),
+            Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),
+        )
+        Overlay -> listOf(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.fromParts("package", context.packageName, null),
+            ),
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION),
+        )
+        ExactAlarms -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(
+                Intent(
+                    Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.fromParts("package", context.packageName, null),
+                ),
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM),
+            )
+        } else {
+            emptyList()
+        }
+        NotificationAccess -> listOfNotNull(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
                     Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
-                    ComponentName(context, CurfewNotificationListener::class.java)
-                        .flattenToString(),
+                    ComponentName(context, CurfewNotificationListener::class.java).flattenToString(),
                 )
-            } else {
-                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            }
-        BatteryUnrestricted -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        // Android's own add-admin dialog, not a Settings screen: it is the only place the
-        // explanation is shown at the moment the user decides.
-        UninstallProtection -> CurfewDeviceAdmin.requestIntent(context)
-        Notifications, Calendar -> null
+            } else null,
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+        )
+        BatteryUnrestricted -> listOf(
+            Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:${context.packageName}"),
+            ),
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        )
+        UninstallProtection -> listOfNotNull(CurfewDeviceAdmin.requestIntent(context))
+        Notifications, Calendar -> emptyList()
     }
+
+    fun settingsIntent(context: Context): Intent? = settingsIntents(context).firstOrNull()
 
     /** The runtime permission to request, for the two that are ordinary runtime permissions. */
     fun runtimePermission(): String? = when (this) {
@@ -331,10 +341,14 @@ fun openGrantPage(context: Context, grant: Grant) {
         requestRuntimePermission(context, permission)
         return
     }
-    val settings = grant.settingsIntent(context)
-    val opened = settings != null && runCatching {
-        context.startActivity(settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }.isSuccess
+    val intents = grant.settingsIntents(context)
+    var opened = false
+    for (intent in intents) {
+        opened = runCatching {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+        if (opened) break
+    }
     // Nothing to open, or the page this OEM calls it by does not exist. App info always does.
     if (!opened) {
         runCatching {

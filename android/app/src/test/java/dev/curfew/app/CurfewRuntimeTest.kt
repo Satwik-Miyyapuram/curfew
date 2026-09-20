@@ -92,7 +92,9 @@ class CurfewRuntimeTest {
         runtime.startSession(session(listOf(Lock.Timer), endsAt = now + 3600))
 
         // The most obvious way out: delete the profile that is running.
-        runtime.setConfig("schema_version = 1\ntimezone = \"Europe/London\"\n").getOrThrow()
+        // Weakening a running session is refused by the core (P1-13).
+        val result = runtime.setConfig("schema_version = 1\ntimezone = \"Europe/London\"\n")
+        assertTrue(result.isFailure)
 
         assertEquals(1, runtime.policy.sessions().running.size)
         try {

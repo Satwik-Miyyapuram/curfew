@@ -2,9 +2,12 @@ package dev.curfew.app.block
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Browser
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +41,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -47,7 +51,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.R
 import dev.curfew.app.curfew
+import dev.curfew.app.enforce.CurfewAccessibilityService
 import dev.curfew.app.ui.CurfewTheme
 import dev.curfew.app.ui.glass
 import dev.curfew.app.ui.Palette
@@ -69,6 +75,11 @@ class BlockActivity : ComponentActivity() {
         val profile = intent.getStringExtra(EXTRA_PROFILE).orEmpty()
         val explanation = intent.getStringExtra(EXTRA_EXPLANATION).orEmpty()
         val delaySeconds = intent.getIntExtra(EXTRA_DELAY, 0)
+        val isWeb = target.startsWith("web:")
+
+        onBackPressedDispatcher.addCallback(this) {
+            if (isWeb) openNewTab() else goHome()
+        }
 
         setContent {
             CurfewTheme {
@@ -78,13 +89,15 @@ class BlockActivity : ComponentActivity() {
                             target = target,
                             seconds = delaySeconds,
                             onProceed = { finish() },
-                            onGiveUp = { goHome() },
+                            onGiveUp = { if (isWeb) openNewTab() else goHome() },
                         )
                     } else {
                         BlockScreen(
                             target = target,
+                            isWeb = isWeb,
                             profile = profile,
                             explanation = explanation,
+                            onOpenNewTab = { openNewTab() },
                             onClose = { goHome() },
                             // The block that put this screen here is over. Closing returns the
                             // user to whatever they were doing rather than leaving a screen up
@@ -110,6 +123,33 @@ class BlockActivity : ComponentActivity() {
         finish()
     }
 
+    /**
+     * Opens a fresh tab in the active browser, leaving the blocked URL behind.
+     */
+    private fun openNewTab() {
+        val browserPackage = CurfewAccessibilityService.activeBrowserPackage
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(Browser.EXTRA_CREATE_NEW_TAB, true)
+            putExtra("create_new_tab", true)
+            if (!browserPackage.isNullOrBlank()) {
+                `package` = browserPackage
+                putExtra(Browser.EXTRA_APPLICATION_ID, browserPackage)
+            }
+        }
+        runCatching {
+            startActivity(intent)
+        }.onFailure {
+            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Browser.EXTRA_CREATE_NEW_TAB, true)
+                putExtra("create_new_tab", true)
+            }
+            runCatching { startActivity(fallback) }
+        }
+        finish()
+    }
+
     companion object {
         private const val EXTRA_TARGET = "target"
         private const val EXTRA_PROFILE = "profile"
@@ -123,14 +163,14 @@ class BlockActivity : ComponentActivity() {
             profileName: String = reason.profile,
         ): Intent =
             Intent(context, BlockActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(EXTRA_TARGET, target)
                 .putExtra(EXTRA_PROFILE, profileName)
                 .putExtra(EXTRA_EXPLANATION, explain(reason, profileName))
 
         fun delayIntent(context: Context, target: String, seconds: Int): Intent =
             Intent(context, BlockActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .putExtra(EXTRA_TARGET, target)
                 .putExtra(EXTRA_DELAY, seconds)
 
@@ -166,8 +206,10 @@ class BlockActivity : ComponentActivity() {
 @Composable
 private fun BlockScreen(
     target: String,
+    isWeb: Boolean,
     profile: String,
     explanation: String,
+    onOpenNewTab: () -> Unit,
     onClose: () -> Unit,
     onEnded: () -> Unit,
 ) {
@@ -269,24 +311,53 @@ private fun BlockScreen(
         }
 
         Spacer(Modifier.height(34.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                // The app's one pane of glass, from `Design.kt`. This said "the same pane of glass as
-                // the nav bar" and was not: Raised at 0.88 with a 0.07 sheen and a 0.10 edge, against
-                // the nav bar's Surface at 0.86/0.06/0.09. The comment asserted a consistency the code
-                // did not have, which is the failure mode this codebase keeps producing.
-                .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
-                .clickable(onClick = onClose),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                "Back to my home screen",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Palette.Text,
-            )
+        if (isWeb) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
+                    .clickable(onClick = onOpenNewTab),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.block_open_new_tab),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Text,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.block_back_to_home),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = Palette.Muted,
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
+                    .clickable(onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.block_back_to_home),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Text,
+                )
+            }
         }
 
         Spacer(Modifier.height(12.dp))

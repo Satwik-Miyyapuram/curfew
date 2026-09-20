@@ -1,6 +1,8 @@
 package dev.curfew.app.ui
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,13 +17,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import dev.curfew.app.R
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +52,34 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var showConfig by remember { mutableStateOf(false) }
+
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+            }.getOrNull()
+            if (text == null) model.say("That file could not be read.") else model.importConfig(text)
+        }
+    }
+    val exportFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (state.configError != null) {
+            model.say("Your config could not be read, so there is nothing to export. Nothing was written.")
+            return@rememberLauncherForActivityResult
+        }
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(state.configToml.toByteArray())
+            }
+        }.onSuccess {
+            model.note("Config exported to file.")
+        }.onFailure { model.say("That file could not be written.") }
+    }
+
     // Two counts, because the card above lists every permission and this line summarises that
     // same list: counting only the required ones said "one permission is missing" under a card
     // showing three red marks, and the reader believed the card.
@@ -204,6 +239,11 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     "${state.sync.active.size} paired. Blocks follow you between them."
                 },
             ) { onOpen(Routes.DEVICES) }
+            Rule()
+            Entry(
+                title = "Config file & backup",
+                note = "Export or import your curfew.toml configuration file.",
+            ) { showConfig = true }
         }
 
         Gap(18.dp)
@@ -224,6 +264,64 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }
         Gap(8.dp)
+    }
+
+    if (showConfig) {
+        DSheet(
+            title = "curfew.toml",
+            sub = "Your complete configuration file. Export it to back it up or copy it to another device.",
+            onDismiss = { showConfig = false },
+            confirm = "Done",
+            confirmEnabled = true,
+            onConfirm = { showConfig = false },
+        ) {
+            SheetSection("Backup & Restore") {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PrimaryButton("Export config", Modifier.weight(1f)) {
+                        runCatching {
+                            exportFile.launch("curfew.toml")
+                        }.onFailure { model.say(context.getString(R.string.file_write_failed)) }
+                    }
+                    GhostButton("Import file", Modifier.weight(1f)) {
+                        runCatching {
+                            importFile.launch(arrayOf("*/*", "text/plain", "text/x-toml", "application/octet-stream"))
+                        }.onFailure { model.say(context.getString(R.string.file_read_failed)) }
+                    }
+                }
+                Gap(8.dp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GhostButton("Copy to clipboard", Modifier.weight(1f)) {
+                        if (state.configToml.isNotBlank()) {
+                            clipboard.setText(AnnotatedString(state.configToml))
+                            model.note("Config copied to clipboard.")
+                        }
+                    }
+                }
+                Gap(10.dp)
+                SheetNote(
+                    "Importing validates the config before applying. A session already running keeps running until its own lock expires.",
+                )
+            }
+            if (state.configToml.isNotBlank()) {
+                SheetSection("Current configuration") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Palette.Raised)
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            state.configToml,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = Palette.Text,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

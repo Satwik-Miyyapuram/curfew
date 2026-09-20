@@ -72,6 +72,19 @@ class Enforcer(
             stop(now)
             return
         }
+        val decision = runtime.decide(observation, now)
+        if (decision is Decision.Block) {
+            if (target != current) {
+                flush(now)
+                current = target
+                this.observation = observation
+                since = now
+                charging = emptyList()
+            }
+            actions.block(target, decision.reason)
+            return
+        }
+
         if (target != current) {
             flush(now)
             current = target
@@ -118,8 +131,6 @@ class Enforcer(
             is Decision.Block -> {
                 // A blocked app must not also accrue time against its own budget: the seconds it
                 // spends on screen are seconds of the block screen, not of the app.
-                current = null
-                this.observation = null
                 charging = emptyList()
                 actions.block(target, decision.reason)
             }

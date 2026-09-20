@@ -231,8 +231,20 @@ impl Mirror {
 
         for session in &believed.sessions.running {
             let before = sessions.for_profile(&session.profile).map(|s| s.lock.clone());
-            sessions.start(session.clone());
             if before.is_none() {
+                // If this occurrence was already ended by hand on this device, leave it ended.
+                // Starting it again would turn every subsequent sync pass into an unprompted
+                // resurrection of a session the user had just satisfied the lock for.
+                if sessions
+                    .dismissed
+                    .get(&session.profile)
+                    .is_some_and(|at| {
+                        *at >= session.started_at
+                            && session.lock.ends_at.map_or(true, |end| *at < end)
+                    })
+                {
+                    continue;
+                }
                 adopted.push(session.id.clone());
                 // Adopted, so already in the log: republishing it would be this device claiming
                 // authorship of another device's decision.
@@ -244,6 +256,7 @@ impl Mirror {
                     },
                 );
             }
+            sessions.start(session.clone());
         }
 
         // A session the log says is over, and that the local lock agrees is over, ends here too.
@@ -291,7 +304,11 @@ impl Mirror {
         Pass {
             published: 0,
             adopted,
-            still_locked: believed.still_locked,
+            still_locked: believed
+                .still_locked
+                .into_iter()
+                .filter(|id| sessions.running.iter().any(|s| &s.id == id))
+                .collect(),
             calendar,
             passes: believed.passes,
             released: believed
@@ -872,5 +889,45 @@ mod tests {
 
         let pass = phone.pass(NOW + HOUR * 24 * 7);
         assert!(pass.released.contains_key("s1"));
+    }
+
+    #[test]
+    fn ending_a_locked_session_here_does_not_resurrect_on_next_pass() {
+        let (mut phone, _pc) = two();
+        phone.sessions.start(session(
+            "p1",
+            "deep-work",
+            LockSet::new([Lock::Confirm], Some(NOW + HOUR)),
+        ));
+        let pass1 = phone.pass(NOW);
+        assert_eq!(phone.sessions.running.len(), 1);
+        assert_eq!(pass1.published, 1);
+
+        // Phone user satisfies the condition and ends the session
+        let mut satisfied = BTreeSet::new();
+        satisfied.insert(Lock::Confirm);
+        phone.sessions.end("p1", NOW + 10, &satisfied).unwrap();
+        assert!(phone.sessions.running.is_empty());
+
+        // First pass after ending: publishes Op::End, and does not resurrect
+        let pass2 = phone.pass(NOW + 10);
+        assert_eq!(pass2.published, 1);
+        assert!(
+            phone.sessions.running.is_empty(),
+            "session resurrected on the pass that published Op::End"
+        );
+        assert!(
+            pass2.still_locked.is_empty(),
+            "phone reported still_locked for a session it ended itself"
+        );
+
+        // Subsequent pass (e.g. 60 seconds later, EnforcementCadence::SYNC_MILLIS):
+        let pass3 = phone.pass(NOW + 70);
+        assert_eq!(pass3.published, 0);
+        assert!(
+            phone.sessions.running.is_empty(),
+            "session resurrected on subsequent sync pass"
+        );
+        assert!(pass3.still_locked.is_empty());
     }
 }

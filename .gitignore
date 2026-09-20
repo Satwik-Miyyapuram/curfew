@@ -73,3 +73,11 @@ desktop.ini
 keystore.properties
 *.jks
 *.keystore
+
+# Packaging outputs & local scratch
+*.msi
+*.wixpdb
+*_mockup.html
+*_preview.html
+Update_Curfew.cmd
+update_curfew.ps1

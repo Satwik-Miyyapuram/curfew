@@ -165,15 +165,16 @@ class CurfewRuntime internal constructor(
      * End a session. Throws [dev.curfew.policy.Refused] — carrying exactly what the lock still
      * wants — rather than returning a boolean, so no caller can end a session by ignoring a result.
      */
-    suspend fun endSession(id: String, satisfied: List<Lock> = emptyList(), now: Long = clock.now()) =
+    suspend fun endSession(id: String, satisfied: List<Lock> = emptyList(), now: Long? = null) =
         gate.withLock {
-            policy.endSession(id, now, satisfied)
-            audit(now, "session.ended", id)
+            val at = now ?: trustedNowLight()
+            policy.endSession(id, at, satisfied)
+            audit(at, "session.ended", id)
             // No reconcile here, deliberately. It would see the schedule still matching and start
             // the session straight back up — spending an emergency pass to be blocked again one
             // millisecond later. What the device enforces is read from `activeProfiles`, which
             // `persist` refreshes below, so ending takes effect at once without restarting.
-            persist(now)
+            persist(at)
         }
 
     /**
@@ -259,8 +260,9 @@ class CurfewRuntime internal constructor(
 
     /** Replace the config. Running sessions are untouched — a settings edit is not a way out. */
     suspend fun setConfig(toml: String): Result<Unit> = gate.withLock {
-        config.write(toml).onSuccess {
+        runCatching {
             policy.setConfig(toml)
+            config.write(toml).getOrThrow()
             audit(clock.now(), "config.replaced", "")
             refresh(clock.now())
         }
