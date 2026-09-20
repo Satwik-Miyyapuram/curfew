@@ -56,6 +56,42 @@ pub fn is_browser(exe: &str) -> bool {
     BROWSERS.iter().any(|b| b.eq_ignore_ascii_case(exe))
 }
 
+/// The browser that launched **this** process, from the process tree rather than from a guess.
+///
+/// `curfew extension-host` is spawned by the browser as its native-messaging host, so this process's
+/// parent **is** the browser. Reading that is exact; the extension can only guess, and its guess is
+/// wrong for every browser not in its own list.
+///
+/// That guess was P1-2, and the harm is not cosmetic. The extension recognises six browsers
+/// (`msedge.exe`, `firefox.exe`, `opera.exe`, `vivaldi.exe`, `brave.exe`, and `chrome.exe` as the
+/// fallback) while the service knows twelve. A **Zen**, **LibreWolf**, **Waterfox**, **Arc**,
+/// **Chromium** or **Opera GX** user therefore reports their heartbeat as `chrome.exe` — so
+/// `chrome.exe` is trusted and the browser they are actually running is never trusted at all.
+/// `unwatched` then names it, and the service closes it outright, repeatedly, for as long as any
+/// path-level rule is in force. The extension's own comment says a wrong guess "fails safe"; it does
+/// not, because the fallback is a *different browser's* name.
+///
+/// Returns `None` when the parent cannot be read, which is the honest answer and leaves the caller
+/// with whatever the message said. It is not a fallback to `chrome.exe`: inventing a name is what
+/// caused this.
+pub fn browser_that_launched_us() -> Option<String> {
+    let me = sysinfo::get_current_pid().ok()?;
+    let mut system = sysinfo::System::new();
+    // `true` for tasks as well as processes: the browser may be a child of a launcher, and this is a
+    // one-off call at host startup rather than something on a tick.
+    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let parent = system.process(me)?.parent()?;
+    let name = system.process(parent)?.name().to_string_lossy().to_string();
+    // Only a name this layer knows how to hold to account. A launcher in between — a browser's own
+    // updater, a taskbar shim — would otherwise be reported as the browser and trusted under a name
+    // that is not on the list, which is the same failure in the other direction.
+    if is_browser(&name) {
+        Some(name.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
 /// Whether anything currently in force needs to see inside a browser.
 ///
 /// Only URL and keyword rules do. A profile that merely blocks whole domains is enforced perfectly
@@ -183,23 +219,53 @@ pub fn frame(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Read one framed message, or `Ok(None)` at a clean end of stream.
-pub fn read_message(reader: &mut impl std::io::Read) -> std::io::Result<Option<Vec<u8>>> {
+/// What one read of the stream produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Frame {
+    /// A message to answer.
+    Message(Vec<u8>),
+    /// **A frame past [`MAX_MESSAGE`], consumed and discarded** — P2-13.
+    ///
+    /// The length is in the header, so an over-long frame is *perfectly* resynchronisable: read the
+    /// announced number of bytes, throw them away, and the next header is exactly where it should be.
+    /// The old code returned an error instead, and `host::run` treats a read error as "the stream
+    /// cannot be resynchronized, so the honest move is to stop" — so one long URL killed the host, and
+    /// a browser whose host has died stops beating and is then closed outright by the service.
+    ///
+    /// Losing a browser because somebody visited a long URL is a self-inflicted denial, and it is also
+    /// the shape of a bypass: anything that stops the extension reporting looks like a browser that
+    /// should be closed. The frame is skipped, the host stays alive, and the reason is logged.
+    TooLarge { length: usize },
+    /// The other end closed cleanly.
+    Eof,
+}
+
+/// Read one frame.
+pub fn read_message(reader: &mut impl std::io::Read) -> std::io::Result<Frame> {
     let mut header = [0u8; 4];
     match reader.read_exact(&mut header) {
         Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(Frame::Eof),
         Err(e) => return Err(e),
     }
     let length = u32::from_ne_bytes(header) as usize;
     if length > MAX_MESSAGE {
-        // Refused rather than allocated: the length is attacker-controlled, and a host that
-        // reserves whatever it is told to is a way to take the machine down from a tab.
-        return Err(std::io::Error::other(format!("message of {length} bytes is too large")));
+        // Refused rather than *allocated*: the length is attacker-controlled, and a host that reserves
+        // whatever it is told to is a way to take the machine down from a tab. Discarded, though, not
+        // fatal — see [`Frame::TooLarge`]. Copied in bounded chunks so the skip itself cannot allocate
+        // the gigabyte it is declining to allocate.
+        let mut left = length as u64;
+        let mut scratch = [0u8; 8192];
+        while left > 0 {
+            let want = left.min(scratch.len() as u64) as usize;
+            reader.read_exact(&mut scratch[..want])?;
+            left -= want as u64;
+        }
+        return Ok(Frame::TooLarge { length });
     }
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
-    Ok(Some(body))
+    Ok(Frame::Message(body))
 }
 
 /// The manifest that tells a browser this host exists and which extensions may talk to it.
@@ -222,19 +288,39 @@ pub fn manifest(family: Family, exe: &std::path::Path, id: &str) -> String {
 ///
 /// Written here rather than in the extension so that a page shown by a tampered extension cannot
 /// claim a reason the engine did not give, and so the wording stays the same as the tray's.
+///
+/// `names` resolves a profile id to the name its owner gave it. It is a parameter rather than a
+/// lookup because this module has no config and should not grow one — the service holds the names on
+/// the status it already sends, and the caller passes them in. The block page is shown *inside a
+/// browser*, where a slug like `deep-work` looks like a leak from somebody's config file rather than
+/// the name the user chose.
 pub fn explain(reason: &curfew_core::BlockReason) -> String {
+    explain_named(reason, &|id| id.to_string())
+}
+
+/// [`explain`], with profile ids resolved to names.
+pub fn explain_named(reason: &curfew_core::BlockReason, names: &dyn Fn(&str) -> String) -> String {
     use curfew_core::BlockReason::*;
+    // The id is passed through `names` at every site, so a new `BlockReason` that carries a profile
+    // cannot be added without deciding what to call it.
+    let p = |id: &str| names(id);
     match reason {
-        Blocked { profile } => format!("Blocked by your {profile} profile."),
+        Blocked { profile } => format!("Blocked by your {} profile.", p(profile)),
         NotAllowlisted { profile } => {
-            format!("Your {profile} profile allows only a few sites, and this is not one of them.")
+            format!(
+                "Your {} profile allows only a few sites, and this is not one of them.",
+                p(profile)
+            )
         }
         BudgetExhausted { profile, seconds } => {
             let minutes = seconds / 60;
-            format!("You have used the {minutes} minutes this site gets under {profile}.")
+            format!("You have used the {minutes} minutes this site gets under {}.", p(profile))
         }
         LaunchLimitReached { profile, count } => {
-            format!("You have opened this {count} times today, which is what {profile} allows.")
+            format!(
+                "You have opened this {count} times today, which is what {} allows.",
+                p(profile)
+            )
         }
     }
 }
@@ -490,10 +576,10 @@ mod tests {
         let framed = frame(&payload);
 
         let mut reader = std::io::Cursor::new(framed);
-        let read = read_message(&mut reader).unwrap().expect("nothing came back");
+        let read = read_message(&mut reader).unwrap();
 
-        assert_eq!(read, payload);
-        assert!(read_message(&mut reader).unwrap().is_none(), "the stream should end cleanly");
+        assert_eq!(read, Frame::Message(payload));
+        assert_eq!(read_message(&mut reader).unwrap(), Frame::Eof, "the stream should end cleanly");
     }
 
     #[test]
@@ -502,17 +588,70 @@ mod tests {
         stream.extend(frame(b"{\"type\":\"beat\",\"browser\":\"firefox.exe\"}"));
 
         let mut reader = std::io::Cursor::new(stream);
-        let first = read_message(&mut reader).unwrap().unwrap();
-        let second = read_message(&mut reader).unwrap().unwrap();
+        let Frame::Message(first) = read_message(&mut reader).unwrap() else {
+            panic!("the first message was not a message")
+        };
+        let Frame::Message(second) = read_message(&mut reader).unwrap() else {
+            panic!("the second message was not a message")
+        };
 
         assert!(String::from_utf8_lossy(&first).contains("chrome"));
         assert!(String::from_utf8_lossy(&second).contains("firefox"));
     }
 
+    /// **A length larger than anything real is refused rather than allocated** — still true, and now
+    /// the read does not stop there.
+    ///
+    /// The old version asserted `is_err()`, which is what made the host die on an over-long frame: the
+    /// caller treats a read error as an unresynchronisable stream and exits, so one long URL killed the
+    /// host and the service then closed the browser for having stopped beating (P2-13). The length is
+    /// in the header, so the frame can be consumed and discarded instead — and this asserts both
+    /// halves: nothing was allocated, and the stream is still in step afterwards.
     #[test]
-    fn a_length_larger_than_anything_real_is_refused_rather_than_allocated() {
-        let mut stream = (u32::MAX).to_ne_bytes().to_vec();
-        stream.extend_from_slice(b"nothing like that much follows");
+    fn a_length_larger_than_anything_real_is_skipped_rather_than_allocated() {
+        // A real message after the huge one: if the skip works, this is read next.
+        // A real message after the huge one: if the skip works, this is read next.
+        //
+        // The huge frame's body has to actually be there to be skipped, so the announced length must
+        // match what follows. `u32::MAX` cannot be materialised, so announce a length past the cap
+        // that is short enough to write.
+        let announced = (MAX_MESSAGE + 64) as u32;
+        let mut stream = announced.to_ne_bytes().to_vec();
+        stream.extend(vec![b'x'; MAX_MESSAGE + 64]);
+        stream.extend(frame(b"{\"type\":\"beat\",\"browser\":\"chrome.exe\"}"));
+
+        let mut reader = std::io::Cursor::new(stream);
+        assert_eq!(
+            read_message(&mut reader).unwrap(),
+            Frame::TooLarge { length: MAX_MESSAGE + 64 },
+            "an over-long frame was not reported as skipped"
+        );
+        let Frame::Message(next) = read_message(&mut reader).unwrap() else {
+            panic!("the stream was not resynchronized after an over-long frame")
+        };
+        assert!(String::from_utf8_lossy(&next).contains("chrome"));
+    }
+
+    /// The skip is bounded: it does not allocate the size it is declining to allocate.
+    #[test]
+    fn an_over_long_frame_is_skipped_in_bounded_chunks() {
+        let announced = (MAX_MESSAGE * 4) as u32;
+        let mut stream = announced.to_ne_bytes().to_vec();
+        stream.extend(vec![b'x'; MAX_MESSAGE * 4]);
+        stream.extend(frame(b"{}"));
+
+        let mut reader = std::io::Cursor::new(stream);
+        assert_eq!(read_message(&mut reader).unwrap(), Frame::TooLarge { length: MAX_MESSAGE * 4 });
+        assert!(matches!(read_message(&mut reader).unwrap(), Frame::Message(_)));
+    }
+
+    /// And a frame whose announced length runs past the end of the stream is still an error: there is
+    /// nothing to resynchronize *to*.
+    #[test]
+    fn an_over_long_frame_that_is_truncated_is_still_an_error() {
+        let announced = (MAX_MESSAGE + 1024) as u32;
+        let mut stream = announced.to_ne_bytes().to_vec();
+        stream.extend(vec![b'x'; 16]);
 
         assert!(read_message(&mut std::io::Cursor::new(stream)).is_err());
     }

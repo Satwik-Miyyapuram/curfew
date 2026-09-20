@@ -19,9 +19,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, KillTimer, LoadIconW, MessageBoxW,
     PostQuitMessage, RegisterClassW, SetForegroundWindow, SetTimer, TrackPopupMenu,
-    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONWARNING, MB_YESNO, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY,
-    WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    TranslateMessage, HMENU, IDI_INFORMATION, IDYES, MB_ICONQUESTION, MB_ICONWARNING, MB_YESNO,
+    MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_RIGHTALIGN, WM_APP, WM_COMMAND,
+    WM_DESTROY, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
 };
 
 /// The message the shell sends us when someone clicks the icon.
@@ -45,6 +45,10 @@ thread_local! {
         const { std::cell::Cell::new(None) };
     /// Apps already announced as waiting, so one wait is one notice.
     static WAITING: RefCell<std::collections::BTreeSet<String>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
+    /// Profiles running as of the previous poll, so a session that has just begun is announced once
+    /// and a session that was already running when the tray started is not announced at all.
+    static STARTED: RefCell<std::collections::BTreeSet<String>> =
         const { RefCell::new(std::collections::BTreeSet::new()) };
     /// When the last notice went up, for the rate limit.
     static LAST_SHOWN: std::cell::Cell<Option<curfew_core::Timestamp>> =
@@ -87,7 +91,7 @@ fn tooltip(status: &Status) -> String {
     }
     match status.running.len() {
         0 => "Curfew — nothing running".to_string(),
-        1 => format!("Curfew — {} running", status.running[0].profile),
+        1 => format!("Curfew — {} running", status.name_of(&status.running[0].profile)),
         n => format!("Curfew — {n} sessions running"),
     }
 }
@@ -129,6 +133,40 @@ fn refresh_tooltip(window: HWND) {
         _ => "Curfew — not running".to_string(),
     };
     show_tip(window, &text);
+}
+
+/// Bring up the Curfew window, which is where a block is started by hand.
+///
+/// The window sits beside this executable in the install directory, so it is found by resolving
+/// against `current_exe()` rather than by looking on `PATH` — the same install that put this icon in
+/// the startup folder put the window next to it, and a `PATH` lookup could find a different build.
+///
+/// A missing window is reported rather than ignored: the only alternative is a click that appears to
+/// do nothing, and the fix (reinstall, or run `curfew install`) is one sentence. Not fatal, either —
+/// enforcement is the service's, and it is unaffected by whether a window can be opened.
+fn open_window(parent: HWND) {
+    let window = match std::env::current_exe() {
+        Ok(exe) => exe.with_file_name("curfew-app.exe"),
+        Err(e) => {
+            say(parent, &format!("Curfew could not work out where its own window is ({e})."));
+            return;
+        }
+    };
+    if !window.exists() {
+        say(
+            parent,
+            "The Curfew window is not installed beside the tray icon.\n\n\
+             Running `curfew install` from an administrator terminal replaces both, and blocks are \
+             being enforced either way — this is only the window.",
+        );
+        return;
+    }
+    match std::process::Command::new(&window).spawn() {
+        // Deliberately not waited on. The window is a separate program with its own lifetime, and a
+        // tray that blocked until it closed would freeze its own menu for as long as it was open.
+        Ok(_) => {}
+        Err(e) => say(parent, &format!("The Curfew window did not open.\n\n{e}")),
+    }
 }
 
 /// Tell the service which window the user is looking at.
@@ -188,7 +226,41 @@ fn watch_closures(window: HWND) {
     let newly = CLOSED.with(|slot| crate::overlay::newly_closed(&slot.borrow(), &status.closed));
     CLOSED.with(|slot| *slot.borrow_mut() = status.closed.clone());
 
+    // A session that has just begun, announced separately from the closes it causes.
+    //
+    // The order matters: a schedule coming round both starts a session and closes the apps it covers,
+    // and the close card ("Steam was closed…") explains the *what* while this explains the *why*. So a
+    // close takes precedence — it is the more immediate thing and it already names the profile — and a
+    // start notice is shown only when nothing was just closed. Sharing the `LAST_SHOWN` rate limit
+    // means a start cannot preempt a close either.
+    //
+    // The first poll seeds and says nothing. `STARTED` begins empty, so without this every launch of
+    // the tray would announce whatever happened to be running as if it had just started — a session
+    // that may be hours old, presented as news. Seeding costs the notice for a session that starts in
+    // the half-second before the tray launches, which is the right way round.
+    let first = STARTED.with(|slot| slot.borrow().is_empty()) && !status.running.is_empty();
+    let started = if first {
+        Vec::new()
+    } else {
+        STARTED.with(|slot| crate::overlay::newly_started(&slot.borrow(), &status.running))
+    };
+    STARTED.with(|slot| {
+        *slot.borrow_mut() = status.running.iter().map(|s| s.profile.clone()).collect()
+    });
+
     let last = LAST_SHOWN.with(|slot| slot.get());
+    if newly.is_empty()
+        && !started.is_empty()
+        && crate::overlay::should_show(&started, last, status.now)
+    {
+        let text = crate::overlay::started_message(&started, &status);
+        if !text.is_empty() {
+            LAST_SHOWN.with(|slot| slot.set(Some(status.now)));
+            crate::overlay::show(&text, crate::overlay::dwell_for(&text));
+            return;
+        }
+    }
+
     if !crate::overlay::should_show(&newly, last, status.now) {
         return;
     }
@@ -197,19 +269,17 @@ fn watch_closures(window: HWND) {
 }
 
 fn show_menu(window: HWND) {
-    let status = match ask(&Request::Status) {
-        Ok(curfew_win::ipc::Response::Status(status)) => status,
-        Ok(other) => {
-            say(window, &describe(&other));
-            return;
-        }
-        Err(detail) => {
-            say(window, &detail);
-            return;
-        }
+    // A menu is opened even when the service does not answer.
+    //
+    // It used to `say(...)` and return, so the whole menu — including "Why Windows warned about
+    // this…" and "Hide this icon", neither of which needs the service — was unreachable exactly when
+    // someone was trying to work out what was wrong. The explanation is now the first thing *in* the
+    // menu, and the static items are still there to press.
+    let items = match ask(&Request::Status) {
+        Ok(curfew_win::ipc::Response::Status(status)) => menu::menu(&status),
+        Ok(other) => menu::unreachable(&describe(&other)),
+        Err(detail) => menu::unreachable(&detail),
     };
-
-    let items = menu::menu(&status);
     let handle: HMENU = unsafe { CreatePopupMenu() };
     if handle.is_null() {
         return;
@@ -234,6 +304,9 @@ fn show_menu(window: HWND) {
             | Item::CancelFreeze { label }
             | Item::ConfirmFreeze { label } => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide(label).as_ptr());
+            },
+            Item::OpenWindow => unsafe {
+                AppendMenuW(handle, MF_STRING, id, wide("Open Curfew…").as_ptr());
             },
             Item::Details => unsafe {
                 AppendMenuW(handle, MF_STRING, id, wide("What is blocked…").as_ptr());
@@ -282,6 +355,7 @@ fn chosen(window: HWND, id: usize) {
             say(window, &text);
         }
         Item::About => say(window, crate::welcome::WELCOME),
+        Item::OpenWindow => open_window(window),
         Item::Quit => {
             say(window, menu::QUIT_NOTE);
             unsafe { DestroyWindow(window) };
@@ -339,6 +413,29 @@ fn chosen(window: HWND, id: usize) {
                     .as_ptr(),
                     wide("Curfew").as_ptr(),
                     MB_YESNO | MB_ICONWARNING,
+                ) == IDYES
+            };
+            if !confirmed {
+                return;
+            }
+            let Some((request, _)) = act(&item, None) else { return };
+            match ask(&request) {
+                Ok(response) => say(window, &describe(&response)),
+                Err(detail) => say(window, &detail),
+            }
+            refresh_tooltip(window);
+        }
+        // A confirmation lock, asked about here because that is what the lock asked for. The menu
+        // item carries `confirm: true` precisely so this dialog is not skipped: sending the claim
+        // without asking would turn "ask me first" into "end it without asking", which is the same
+        // defect the window had — a lock whose stated friction does not exist.
+        Item::End { confirm: true, .. } => {
+            let confirmed = unsafe {
+                MessageBoxW(
+                    window,
+                    wide("End this session? You asked to be asked before it ends early.").as_ptr(),
+                    wide("Curfew").as_ptr(),
+                    MB_YESNO | MB_ICONQUESTION,
                 ) == IDYES
             };
             if !confirmed {

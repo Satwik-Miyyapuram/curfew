@@ -42,6 +42,19 @@ pub fn handles(command: &str) -> bool {
     matches!(command, "check" | "migrate" | "decide") || schedule::handles(command)
 }
 
+/// Whether `command` rewrites the config file, and so owes the running service a reload.
+pub fn writes_config(command: &str) -> bool {
+    schedule::writes_config(command)
+}
+
+/// The argument position of the config path in a writing command. See [`schedule::CONFIG_ARG`].
+pub const CONFIG_ARG: usize = schedule::CONFIG_ARG;
+
+/// The id a `remove` would delete, when the command is a removal. See [`schedule::removal_target`].
+pub fn removal_target<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    schedule::removal_target(args)
+}
+
 /// Run one config subcommand. `args` starts at the subcommand itself.
 /// Returns the process exit code: 0 for success, 1 for a bad config, 2 for a misuse.
 pub fn run(args: &[&str]) -> i32 {

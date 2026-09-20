@@ -13,6 +13,18 @@
 html,body{height:100%}
 body{background:var(--bg);color:var(--tx);font-family:var(--f);-webkit-font-smoothing:antialiased;
  overflow:hidden;font-size:13px;user-select:none}
+/* Text the user may need to copy is selectable again.
+   `user-select:none` on the body is right for a window whose controls are divs — it stops a click
+   dragging a blue smear across the chrome — but it also stopped anyone copying the one thing this
+   window prints *in order to be copied*: the path of the config the service actually reads, and the
+   command that edits it. Telling a user to run a command they cannot select is not an instruction. */
+.body,.sheet,.mono,.flush,.card{user-select:text}
+/* A focus ring, because the window is now usable from the keyboard and an invisible caret is the
+   same as no keyboard support at all. `:focus-visible` so a mouse click does not leave a ring behind
+   on whatever was pressed last. */
+[data-act]:focus-visible,.nav:focus-visible,[data-tab]:focus-visible,[data-profile]:focus-visible,
+.btn:focus-visible,input:focus-visible,textarea:focus-visible{
+ outline:2px solid var(--acc);outline-offset:2px}
 .main{height:100%;display:flex;overflow:hidden}
 .side{width:212px;flex:none;border-right:1px solid var(--line);padding:14px 10px;display:flex;
  flex-direction:column;gap:2px;background:rgba(22,27,35,.4)}
@@ -63,6 +75,8 @@ input{height:34px;width:100%;background:var(--sur2);border:1px solid var(--line)
     <div class="nav on" data-page="now"><span class="ic">&#9679;</span>Now</div>
     <div class="nav" data-page="plan"><span class="ic">&#9783;</span>Plan</div>
     <div class="nav" data-page="apps"><span class="ic">&#9635;</span>Apps &amp; sites</div>
+    <div class="nav" data-page="time"><span class="ic">&#9684;</span>Where time went</div>
+    <div class="nav" data-page="devices"><span class="ic">&#9787;</span>Devices</div>
     <div class="nav" data-page="health"><span class="ic">&#10003;</span>Is it working</div>
     <div class="sp"></div>
     <div id="livepill"></div>
@@ -95,6 +109,9 @@ window.__curfewReply = function (id, json) {
 };
 const askService = (payload) => call({ kind: "ipc", payload });
 const readConfig = () => call({ kind: "config" });
+// Ends a session by proving ownership of the machine. No password crosses this bridge — the host
+// shows the system prompt and talks to the service itself. See `password()`.
+const askUnlock = (id) => call({ kind: "unlock", id });
 
 // ---- words ------------------------------------------------------------------------------------
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -120,10 +137,19 @@ function describeDays(days) {
   if (sorted === "5,6") return "Weekends";
   return [...days].sort((a, b) => a - b).map((d) => DAYS[d] || "?").join(", ");
 }
+// A lock's *kind*, which is what decisions are made on.
+//
+// Separate from `describeLock` on purpose. Deciding which exit to offer used to mean comparing
+// `describeLock(l)` against a sentence — `=== "asks before ending"` — so the control flow depended
+// on the wording of a label. A copy edit, or a translated build, would have silently removed the
+// confirm and password paths and left "End it early" as a button that can never end anything.
+function lockKind(lock) {
+  return typeof lock === "string" ? lock : lock.kind;
+}
+
 // The lock names are the promise, said the way the user chose it rather than the way it is stored.
 function describeLock(lock) {
-  const kind = typeof lock === "string" ? lock : lock.kind;
-  switch (kind) {
+  switch (lockKind(lock)) {
     case "timer": return "runs to the end";
     case "confirm": return "asks before ending";
     case "device_credential": return "your Windows password";
@@ -131,7 +157,11 @@ function describeLock(lock) {
     case "challenge": return "a challenge";
     case "peer_release": return "another device";
     case "token": return "a tag";
-    default: return String(kind);
+    // A kind this build has never heard of is a newer service, and saying so is more use than a raw
+    // token in a sentence. The raw value still reaches the console for diagnosis.
+    default:
+      console.warn("unknown lock kind", lock);
+      return "a condition this version of Curfew does not know about";
   }
 }
 function describeTarget(target) {
@@ -165,16 +195,50 @@ function describeRefusal(refusal) {
     case "locked":
       return "Not yet: this session is locked by " +
         (refusal.missing || []).map(describeLock).join(" and ") + ".";
-    case "frozen": return "The machine is frozen. Nothing can be ended until it lifts.";
     default: return "The service refused: " + JSON.stringify(refusal);
   }
 }
 
 // ---- state ------------------------------------------------------------------------------------
-const state = { page: "now", status: null, trouble: null, config: null, configError: null, tab: "apps", profile: null };
+const state = { page: "now", status: null, trouble: null, config: null, configPath: null, configError: null, tab: "apps", profile: null,
+  // The figures behind the Time page, fetched alongside the status rather than when the page is
+  // opened: they come over the same pipe, and a page that asked on demand would show an empty chart
+  // for as long as the round trip took.
+  stats: null,
+  // What the Start-a-block sheet is set to. `null` until it is opened, so the sheet's own defaults
+  // apply the first time and a choice the user made survives the refresh that follows it.
+  startProfile: null, startMinutes: null, startStrength: null,
+  // What the Devices page knows about pairing — F-18 step 4. `null` until the page is opened, and
+  // deliberately *not* refreshed every tick: the status is polled twice a second, and minting an invite
+  // that often would put a new nonce in front of the user sixty times a minute. `invite`, `phrase` and
+  // `reply` are set only by the buttons that produce them.
+  pairing: null };
+
+// The ticket of the newest refresh, and the one a run belongs to. See `refresh` for why.
+let refreshTicket = 0;
+
+// How often the config is re-read, in ticks. See `refresh`.
+//
+// Ten seconds against a one-second tick. **The window cannot change the config** — `Call` is `Ipc`,
+// `Config` and `Unlock`, and `Request` has no config-mutating variant at all — so the only way it ever
+// changes is somebody running `curfew` in a terminal or an administrator editing the file. Ten seconds
+// is far below the time it takes to notice, and it takes a full TOML read, parse, validate and
+// re-serialize off the one-second path (P2-1).
+const CONFIG_EVERY = 10;
+let ticksSinceConfig = CONFIG_EVERY;
 
 async function refresh() {
+  // **A ticket, so a slow run cannot overwrite a fresh one** (P2-3).
+  //
+  // This is fired every second *and* awaited after every action, and it performs three round trips
+  // before assigning shared state. Two overlapping runs complete in whatever order the pipe answers
+  // them, so after a successful "End it early" an in-flight older refresh could repaint the
+  // running-session card for a session that had just ended — the window showing a lock that is gone.
+  // Only the newest run is allowed to write.
+  const mine = ++refreshTicket;
+
   const answer = await askService({ request: "status" });
+  if (mine !== refreshTicket) return;
   if (answer.ok && answer.value.response === "status") {
     state.status = answer.value;
     state.trouble = null;
@@ -185,10 +249,34 @@ async function refresh() {
     state.status = null;
     state.trouble = answer;
   }
-  const config = await readConfig();
-  if (config.ok) { state.config = config.value; state.configError = null; }
-  else { state.config = null; state.configError = config.detail; }
+
+  // The config, on its own slower cadence, and always on the first run.
+  ticksSinceConfig += 1;
+  if (ticksSinceConfig >= CONFIG_EVERY) {
+    ticksSinceConfig = 0;
+    const config = await readConfig();
+    if (mine !== refreshTicket) return;
+    if (config.ok) { state.config = config.value; state.configError = null; }
+    else { state.config = null; state.configError = config.detail; }
+    // Kept even on failure, so a page can name the file that could not be read.
+    state.configPath = config.path || null;
+  }
+
+  // The figures for the Time page. A failure leaves the previous answer in place rather than
+  // blanking the chart: these are a fortnight of history, so the last good copy is a better thing to
+  // show than an empty page, and the page says when it has nothing at all.
+  const figures = await askService({ request: "stats", days: 14 });
+  if (mine !== refreshTicket) return;
+  if (figures.ok && figures.value.response === "stats") state.stats = figures.value;
   draw();
+}
+
+/// Force the next refresh to re-read the config.
+///
+/// For the one caller that knows the config may have changed underneath it: a page change, where the
+/// user is about to read the plan and a ten-second-old copy would be the thing they are reading.
+function refreshConfigSoon() {
+  ticksSinceConfig = CONFIG_EVERY;
 }
 
 // What the service is doing, and why the pages cannot say anything if it is not.
@@ -222,15 +310,48 @@ function pageNow() {
   }
   const s = state.status;
   const running = s.running || [];
+  // **The window enforcement was down** — P1-8. `ARCHITECTURE.md` §10 promises that a service which was
+  // killed, crashed or never started reports the exact window it was down, and Android has done this
+  // since `Downtime.kt` while Windows had nothing. It goes at the top because it is a statement about
+  // the trustworthiness of everything below it: a stretch where nothing was enforced means the record
+  // has a hole in it, and the user is the one who has to know that.
+  //
+  // Dismissed by a request rather than by a timer, because the notice exists to be *read*.
+  const downtime = s.downtime
+    ? `<div class="card" style="border-color:rgba(242,114,114,.5);margin-bottom:14px">
+        <div style="display:flex;align-items:flex-start;gap:16px">
+          <div class="grow">
+            <div class="lbl" style="color:var(--bad)">${s.downtime.rebooted ? "This machine was restarted" : "Curfew was not running"}</div>
+            <div style="margin-top:6px;line-height:1.6">${esc(describeDowntime(s.downtime))}</div>
+          </div>
+          <button class="btn ghost" data-act="dismiss-downtime">I have read it</button>
+        </div></div>`
+    : "";
+  // The one action the whole product exists for, and this window did not have it.
+  //
+  // Every other route to a block on Windows is a schedule or a calendar; starting one by hand meant
+  // `curfew start <profile> <minutes>` in a terminal, knowing the profile id and the flag syntax.
+  // `UX-FLOWS.md` Flow 1 — "Now opens … one filled button: Start a block now" — describes this
+  // button, and until now the flow was reachable on the phone and nowhere else. The service has
+  // always accepted `Request::Start`; nothing could send it but the command line.
+  //
+  // Shown while something is running too, and that is deliberate rather than an oversight:
+  // `Request::Start` merges into the running session, so starting the same profile again is how a
+  // block is *extended*, and starting a different one is how a second profile joins it.
+  const start = `<button class="btn" data-act="start-open">Start a block</button>`;
   if (running.length === 0) {
     const next = nextWindows(1)[0];
-    return `<h1>Nothing is running</h1>
+    return downtime + `<h1>Nothing is running</h1>
       <div class="sub">${next
         ? `Next is ${esc(next.name)}, at ${esc(hhmm(next.start_minute))}.`
         : "No window is scheduled. The Plan page is where windows are made."}</div>
+      <div style="height:18px"></div>
+      <div class="strip">${start}</div>
       <div style="height:18px"></div>${blockedSummary()}`;
   }
-  return running.map(sessionCard).join('<div style="height:14px"></div>') +
+  return downtime + running.map(sessionCard).join('<div style="height:14px"></div>') +
+    '<div style="height:14px"></div>' +
+    `<div class="strip">${start}</div>` +
     '<div style="height:14px"></div>' + blockedSummary() +
     `<div style="height:14px"></div><div class="note">A lock is a promise: ending a session early goes through the same check you set up, even here.</div>`;
 }
@@ -240,28 +361,69 @@ function profileName(id) {
   return found ? found.name : id;
 }
 
+/**
+ * The window enforcement was down, in a sentence — P1-8.
+ *
+ * Composed here rather than sent as prose, because the two halves are facts the service stores and the
+ * page knows how it wants to read them: how long, and what it cost. The service's own `describe()` is
+ * what goes to the log, where a reader has no clock in front of them and needs the absolute instants.
+ */
+function describeDowntime(d) {
+  const seconds = Math.max(0, (d.to || 0) - (d.from || 0));
+  let length;
+  if (seconds < 3600) length = Math.max(1, Math.floor(seconds / 60)) + " minutes";
+  else if (seconds < 86400) length = Math.floor(seconds / 3600) + " hours " + Math.floor((seconds % 3600) / 60) + " minutes";
+  else length = Math.floor(seconds / 86400) + " days " + Math.floor((seconds % 86400) / 3600) + " hours";
+  const cost = d.sessions === 0
+    ? "Nothing was locked at the time."
+    : d.sessions === 1
+      ? "One lock was running and was not enforced during it."
+      : d.sessions + " locks were running and were not enforced during it.";
+  return "It was not enforcing for " + length + ", from " + atTime(d.from) + " to " + atTime(d.to) +
+    ". " + cost + " Treat that stretch as time this machine was not held to.";
+}
+
 function sessionCard(session) {
   const s = state.status;
   const ends = session.lock?.ends_at ?? null;
   const left = ends === null ? null : ends - s.now;
   const conditions = session.lock?.conditions || [];
-  const releasable = (s.releasable || []).includes(session.id);
-  const released = (s.released || []).includes(session.id);
-  const delayed = session.lock?.delayed_release_at ?? null;
+  // **Read from the service, never re-derived here** — P1-6. This card used to work out for itself
+  // which release to offer, from `releasable` and `released`, and the answer was wrong in two ways:
+  // a `DeviceCredential` lock rendered *no release affordance at all*, so somebody who had locked a
+  // session with their Windows password and hidden the tray had no route to the last-resort exit from
+  // the product's primary surface; and the one button it did draw, "Release it", sent the immediate,
+  // **irrevocable** peer release with no confirmation — while the tray puts a dialog in front of the
+  // same action. The service now computes `Offers` once (`LockSet::offers`) and every surface renders
+  // it, so the tray, the window and the command line cannot disagree again.
+  const offers = (s.offers || {})[session.id] || {};
   const why = conditions.length === 0
     ? "You can end it whenever you like."
     : "Ends early only for " + conditions.map(describeLock).join(" and ") + ".";
+  // What is holding the lock that no button on this page can satisfy, named rather than summed up as
+  // "locked elsewhere": a tag to go and fetch is a different sentence from a restart.
+  const elsewhere = (offers.elsewhere || []).map(describeLock);
+  const controls = [];
+  if (offers.peer_released) {
+    controls.push('<span class="pill ok">Released by this device</span>');
+  } else if (offers.peer_release) {
+    // Confirmed, because it cannot be withdrawn. The tray already asks; the window did not.
+    controls.push(`<button class="btn ghost" data-act="release-ask" data-id="${esc(session.id)}">Release it&hellip;</button>`);
+  }
+  if (offers.delayed_release) {
+    controls.push(`<button class="btn ghost" data-act="delayed-ask" data-id="${esc(session.id)}">Start the 24-hour release</button>`);
+  }
   return `<div><h1>${esc(profileName(session.profile))} is running</h1>
     <div class="sub">Started ${esc(atTime(session.started_at))}${ends ? `, ends at ${esc(atTime(ends))}` : ""}. ${esc(why)}</div>
+    ${elsewhere.length ? `<div class="meta" style="margin-top:6px">Also needs ${esc(elsewhere.join(", "))} &mdash; this page cannot do that for you.</div>` : ""}
     <div style="height:18px"></div>
     <div class="card" style="display:flex;align-items:center;gap:22px">
       <div><div class="lbl">Time left</div>
         <div class="mono" style="font-size:44px;font-weight:700;letter-spacing:-1.5px;color:var(--live);line-height:1.1">${left === null ? "&mdash;" : esc(clock(left))}</div>
-        <div class="meta" style="margin-top:2px">${delayed ? `Delayed release lands ${esc(atTime(delayed))}` : ends ? `Ends at ${esc(atTime(ends))}` : "Runs until it is released"}</div>
+        <div class="meta" style="margin-top:2px">${offers.delayed_release_at ? `Delayed release lands ${esc(atTime(offers.delayed_release_at))}` : ends ? `Ends at ${esc(atTime(ends))}` : "Runs until it is released"}</div>
       </div>
       <div class="grow"></div>
-      ${released ? '<span class="pill ok">Released by this device</span>' :
-        releasable ? `<button class="btn ghost" data-act="release" data-id="${esc(session.id)}">Release it</button>` : ""}
+      ${controls.join("")}
       ${(s.passes_left || 0) > 0 ? `<button class="btn ghost" data-act="emergency" data-id="${esc(session.id)}">Emergency pass (${s.passes_left})</button>` : ""}
       <button class="btn" data-act="end" data-id="${esc(session.id)}">End it early</button>
     </div></div>`;
@@ -295,11 +457,40 @@ function blockedSummary() {
         <div class="mono meta">${esc(hhmm(w.start_minute))}&ndash;${esc(hhmm(w.end_minute))}</div></div>`).join("")
         || '<div class="meta">No windows are scheduled.</div>'}
       <div style="height:12px"></div>
-      <div class="strip"><span class="pill">${domains.length} sites blocked</span>
-      ${s.freeze ? '<span class="pill" style="color:var(--live)">A freeze is counting down</span>' : ""}</div>
+      <div class="strip"><span class="pill">${domains.length} sites blocked</span></div>
     </div>`;
-  return `<div style="display:flex;gap:14px;align-items:flex-start">${left}${right}</div>`;
+  // A freeze counting down gets its own card above everything, with the time left and a way out.
+  //
+  // It used to be a pill in the corner reading "A freeze is counting down" — no duration, and no
+  // action. So the window told a user their whole machine was about to close and offered them
+  // nothing, while the tray puts "Cancel the freeze" first in its own menu and the design's
+  // `Overlay.dc.html` shows a Dismiss button and a countdown. Cancelling is free and available right
+  // up to the moment it fires, which is exactly the thing a person in that moment needs to know.
+  const freeze = s.freeze
+    ? `<div class="card" style="border-color:rgba(242,166,90,.5);background:rgba(242,166,90,.08)">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div class="grow">
+            <div class="name" style="font-size:15px;font-weight:650">Everything is about to close</div>
+            <div class="meta wrap" style="margin-top:4px">${esc(freezeSentence(s))}</div>
+          </div>
+          <button class="btn ghost" data-act="cancel-freeze">Cancel the freeze</button>
+        </div>
+      </div>
+      <div style="height:14px"></div>`
+    : "";
+  return `${freeze}<div style="display:flex;gap:14px;align-items:flex-start">${left}${right}</div>`;
 }
+
+/** What the freeze card says. Reads the countdown the service reported; never guesses at it. */
+function freezeSentence(status) {
+  const f = status.freeze;
+  const left = Math.max(0, f.fires_at - status.now);
+  const who = f.origin === "peer" ? " Another of your devices asked for it." : "";
+  const then = f.seconds ? ` Then ${profileName(f.profile)} runs for ${clock(f.seconds)}.` : "";
+  return `In ${clock(left)}, ${profileName(f.profile)} closes every app on this machine.${then}${who} ` +
+    "Cancelling is free, and works until the moment it starts.";
+}
+
 function row(bg, glyph, name, meta) {
   return `<div class="row"><span class="tile" style="background:${bg}">${glyph}</span>
     <div class="grow"><div class="name">${esc(name)}</div><div class="meta">${esc(meta)}</div></div></div>`;
@@ -345,8 +536,21 @@ function pagePlan() {
     <div style="height:18px"></div>
     <div class="lbl">From your calendar</div><div style="height:8px"></div><div class="flush">${rules}</div>
     <div style="height:16px"></div>
-    <div class="note">This is what the service is enforcing, read from its own config. Editing it needs
-      an administrator, so it is done from a terminal for now:\n\tcurfew add-window &lt;config&gt; ...</div>`;
+    <div class="note wrap">This is what the service is enforcing, read from its own config. Editing it
+      needs an administrator, so it is done from a terminal for now — and the file it reads is:
+${esc(configHint())}</div>`;
+}
+// The command a user can actually run.
+//
+// This used to end in an unresolved placeholder — `curfew add-window <config> …` — which is the one
+// instruction on the page nobody can act on, because `<config>` is exactly the thing they do not
+// know. The service's config lives under %ProgramData%, while every example in the README says
+// `curfew.toml`, so following the documentation edits a file the service never reads and says
+// nothing about it. Naming the real path here is the shortest way to stop that.
+function configHint() {
+  const path = state.configPath;
+  if (!path) return "curfew add-window <config.toml> ...  (the path is shown on Is it working)";
+  return `curfew add-window "${path}" ...`;
 }
 function describeMatcher(matcher) {
   if (!matcher) return "Every event";
@@ -389,6 +593,71 @@ function pageApps() {
       : `<div class="row"><span class="meta">Nothing here in ${esc(profile.name)}.</span></div>`}</div>`;
 }
 
+// ---- where time went ---------------------------------------------------------------------------
+//
+// The fifth page, and the one the design has always had and the build did not: the nav in every
+// `design/win/*.dc.html` carries six entries and this window carried four, so on Windows the only
+// route to your own usage data was `curfew stats` in a terminal. Android has had this screen since it
+// shipped, which is what made the omission read as an oversight rather than a decision.
+//
+// The figures come from the service rather than from the window reading the state file, even though
+// the file is readable: the service already holds the history in memory, it is the only writer, and a
+// second reader of a file being rewritten under it is how two views of one fortnight start to
+// disagree. `Request::Stats` is that request.
+function pageTime() {
+  if (!state.stats) {
+    return `<h1>Where time went</h1>
+      <div class="sub">The service has not answered yet.</div>
+      <div style="height:18px"></div>${troubleCard()}`;
+  }
+  const s = state.stats;
+  // Bars and totals come from the same array, so the chart cannot disagree with the number under it.
+  const peak = Math.max(1, ...s.days.map((d) => d.blocked_seconds));
+  const bars = s.days.map((d) => {
+    // Height as a fraction of the busiest day, with a floor so a day with a few minutes on it is
+    // visible rather than a hairline. A chart that rounds a real day down to nothing is a chart that
+    // tells the user they did nothing, which is the one thing this page must not get wrong.
+    const full = d.blocked_seconds === 0 ? 3 : Math.max(8, Math.round((d.blocked_seconds / peak) * 96));
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;min-width:0">
+      <div class="mono meta" style="font-size:10px">${d.blocked_seconds ? esc(clock(d.blocked_seconds)) : ""}</div>
+      <div style="width:100%;max-width:26px;height:${full}px;border-radius:5px;background:${d.blocked_seconds ? "var(--live)" : "var(--line)"}"></div>
+      <div class="meta" style="font-size:10px">${esc(dayLabel(d.date))}</div>
+    </div>`;
+  }).join("");
+
+  const total = s.days.reduce((sum, d) => sum + d.blocked_seconds, 0);
+  return `<h1>Where time went</h1>
+    <div class="sub">${total
+      ? `${esc(clock(total))} blocked across ${s.total_sessions} session${s.total_sessions === 1 ? "" : "s"}, over the last ${s.days.length} days.`
+      : `Nothing has been blocked in the last ${s.days.length} days.`}</div>
+    <div style="height:18px"></div>
+    <div class="card">
+      <div class="lbl">Blocked per day</div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:126px">${bars}</div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="strip">
+      <span class="pill">${esc(clock(total))} in total</span>
+      <span class="pill">${s.total_sessions} session${s.total_sessions === 1 ? "" : "s"}</span>
+      ${s.current_streak ? `<span class="pill" style="color:var(--ok)">${s.current_streak} day streak</span>` : ""}
+      ${s.longest_streak > s.current_streak ? `<span class="pill">best ${s.longest_streak} days</span>` : ""}
+    </div>
+    <div style="height:14px"></div>
+    <div class="note wrap">Counted from the sessions themselves, not from time the service happened to
+      be running, so a day with no session on it is a gap and not a zero. A day counts toward the
+      streak when any part of a session fell on it, and today is allowed to be empty without breaking
+      it, because a day you have not finished is not a day you failed. The same figures are on the
+      phone, and <span class="mono">curfew stats</span> prints them in a terminal.</div>`;
+}
+
+/** "Mon 3" — enough to find a day in a fortnight without reading a date twice. */
+function dayLabel(date) {
+  const parsed = new Date(`${date}T12:00:00`);
+  if (isNaN(parsed)) return date;
+  return parsed.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+}
+
 function pageHealth() {
   const s = state.status;
   const lines = [];
@@ -398,8 +667,31 @@ function pageHealth() {
   }
   lines.push(["ok", "The service answered", "That is the part that does the blocking."]);
   if (s.hosts_error) lines.push(["bad", "Website blocking is not working", s.hosts_error]);
-  else lines.push(["ok", `${(s.blocked_domains || []).length} sites in the hosts file`, "Written by the service, checked every tick."]);
+  else {
+    const sites = (s.blocked_domains || []);
+    // The detail says what the user will actually see, because this is the only page that can.
+    //
+    // A blocked domain is answered 0.0.0.0 rather than served a page of Curfew's own — a deliberate
+    // choice recorded in `hosts::SINK` and `dns::refusal`, and the right one: a local web server is
+    // common on a developer's machine, and serving somebody else's domain means holding a certificate
+    // for it. The price is that the browser shows its own "can't be reached" page and nothing else,
+    // so an unexplained broken-looking site is the most common way a user meets this product's
+    // blocking. Naming the symptom here is the closest thing to a block page that the design allows.
+    lines.push(["ok", `${sites.length} ${sites.length === 1 ? "site" : "sites"} in the hosts file`,
+      sites.length
+        ? "A blocked site shows your browser's own \u201ccan't be reached\u201d page — Curfew refuses the name rather than serving a page. That is Curfew working, not a broken connection."
+        : "Written by the service, checked every tick."]);
+  }
   if (s.state_warning) lines.push(["bad", "Saved locks may have been lost", s.state_warning]);
+  // Amber, not red: there is nothing to fix and nothing was lost. A moved clock is refused rather
+  // than obeyed, and time credited across a shutdown is ordinary life. Both are still worth saying,
+  // because a lock that is judged against a clock the user has just changed is exactly the thing
+  // this page exists to make visible.
+  if (s.clock_warning) lines.push(["mut", "The clock", s.clock_warning]);
+  // **Red, not amber** — P2-16. This is not a lock judged against a strange clock; it is rules that
+  // have stopped being enforced while the promise behind them still stands. The user can fix it, which
+  // is why the sentence names the tray rather than just reporting a fault.
+  if (s.foreground_warning) lines.push(["bad", "Some rules are not being enforced", s.foreground_warning]);
   const failing = [...(s.failing || [])];
   if (failing.length) lines.push(["bad", `${failing.length} could not be closed`, failing.join(", ")]);
   const unwatched = [...(s.unwatched || [])];
@@ -407,7 +699,47 @@ function pageHealth() {
     lines.push(["bad", `${unwatched.length} browser${unwatched.length === 1 ? "" : "s"} without the extension`,
       unwatched.join(", ") + " — page-level rules cannot be enforced there, so the browser is closed instead."]);
   }
-  if (s.pass_refusal) lines.push(["mut", "No emergency pass right now", JSON.stringify(s.pass_refusal)]);
+  // Sync, in five statements rather than one flag.
+  //
+  // Windows said nothing about sync on any page until this, so a user could not tell paired from
+  // unpaired, or "paired and waiting" from "paired and broken". They are separated because they have
+  // five different next steps: nothing, wait, wait, nothing, or fix it. Android states this in a
+  // five-way `when`, and the review calls that better than any competitor's.
+  //
+  // **The branch is on `phase`, which the service computes.** It would have been five lines to derive
+  // the same five cases here from `paired`/`running`/`nearby`, and that is exactly the duplication this
+  // branch has spent ten rounds removing — two copies of one rule, free to drift, with the Rust side
+  // covered by tests and the JavaScript side covered by nothing. `phase` is derived at serialization
+  // time (`SyncState`'s hand-written `Serialize`), so it cannot disagree with the facts beside it.
+  {
+    const y = s.sync || {};
+    const paired = y.paired || 0;
+    const nearby = y.nearby || 0;
+    const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    switch (y.phase) {
+      case "broken":
+        lines.push(["bad", "Sync is off",
+          `${y.why_off} — this device still enforces its own locks, and nothing you record has left it.`]);
+        break;
+      case "idle":
+        lines.push(["mut", `Sync starting — ${plural(paired, "device")} paired`,
+          "The listener comes up on the next pass. It is deliberately not started before a device is paired, so Windows never asks for a firewall rule nothing would use."]);
+        break;
+      case "waiting":
+        lines.push(["mut", `${plural(paired, "device")} paired, none in earshot`,
+          "These devices talk when they are on the same network, not on a schedule."]);
+        break;
+      case "working":
+        lines.push(["ok", `Syncing with ${nearby} of ${paired}`,
+          "On this network right now. Blocks and the emergency ration are shared with them."]);
+        break;
+      default:
+        // `unpaired`, and also anything a future service sends that this window does not know. Saying
+        // nothing is paired is true in both cases and is the one that needs no action.
+        lines.push(["mut", "No devices paired",
+          "Sessions stay on this machine. Pairing is Android-only today — see the README."]);
+    }
+  }  if (s.pass_refusal) lines.push(["mut", "No emergency pass right now", JSON.stringify(s.pass_refusal)]);
   else lines.push(["mut", `${s.passes_left || 0} emergency passes`, "Spent from the Now page, on one session."]);
   return `<h1>Is it working</h1>
     <div class="sub">Everything that could be quietly broken, said out loud.</div>
@@ -417,10 +749,255 @@ function pageHealth() {
       <div class="grow"><div class="name">${esc(title)}</div><div class="meta wrap">${esc(detail)}</div></div></div>`).join("")}</div>`;
 }
 
+/** The devices this machine is paired with, as the page shows them. */
+function peersOf(json) {
+  try {
+    const parsed = JSON.parse(json);
+    // `Peers` serializes as a map of id to peer, so the id is the key rather than a field.
+    return Object.entries(parsed.devices || parsed || {}).map(([id, peer]) => ({ id, ...peer }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Load what the Devices page needs. Called when the page is opened, not on every tick.
+ *
+ * The peers always; the identity once, because it does not change. A failure is kept as a sentence rather
+ * than thrown away: a Devices page that cannot say why it is empty is the failure F-18 is about.
+ */
+async function loadPairing() {
+  state.pairing = state.pairing || { loading: true, error: null, peers: null, invite: null, phrase: null, device: null, fingerprint: null, reply: null, replyPhrase: null };
+  state.pairing.loading = true;
+  const [peers, device] = await Promise.all([
+    askService({ request: "peers" }),
+    askService({ request: "invite" }),
+  ]);
+  state.pairing.loading = false;
+  if (peers.ok && peers.value.response === "pairing") {
+    state.pairing.peers = peersOf(peers.value.json);
+    state.pairing.error = null;
+  } else {
+    // The sentence the service gave, which says whether there is no identity or no service — the two
+    // look identical from here and only one of them is the user's to fix.
+    state.pairing.error = (peers.value && (peers.value.detail || peers.value.detail)) || "The service did not answer.";
+  }
+  // `invite` doubles as the identity probe: if it answers, this machine has a sync identity at all.
+  if (device.ok && device.value.response === "pairing") {
+    state.pairing.hasIdentity = true;
+  }
+  draw();
+}
+
+/** Mint a fresh invite and show its phrase. */
+async function offerPairing() {
+  const answer = await askService({ request: "invite" });
+  if (!answer.ok || answer.value.response !== "pairing") {
+    return say("Could not make a code", (answer.value && answer.value.detail) || "The service did not answer.");
+  }
+  state.pairing = state.pairing || {};
+  state.pairing.invite = answer.value.json;
+  state.pairing.phrase = null;
+  // The phrase comes from the invite, and the offering side derives it against the answer it will be
+  // given — so what is shown now is *this* device's half. The page says so rather than pretending it is
+  // final, because a user who compares too early sees a mismatch that is not a problem.
+  const phrased = await askService({ request: "phrase", invite: answer.value.json });
+  if (phrased.ok && phrased.value.response === "pairing") state.pairing.phrase = phrased.value.json;
+  draw();
+}
+
+/** Answer a pasted code, and show the phrase plus what to send back. */
+async function answerPairing() {
+  const field = document.getElementById("pair-reply");
+  const pasted = (field && field.value || "").trim();
+  if (!pasted) return say("Nothing to answer", "Paste the code from the other device first.");
+  const answer = await askService({ request: "reply", invite: pasted });
+  if (!answer.ok || answer.value.response !== "pairing") {
+    return say("That code was not readable", (answer.value && answer.value.detail) || "The service did not answer.");
+  }
+  state.pairing = state.pairing || {};
+  state.pairing.reply = answer.value.json;
+  state.pairing.replyPhrase = null;
+  const phrased = await askService({ request: "phrase", invite: answer.value.json });
+  if (phrased.ok && phrased.value.response === "pairing") state.pairing.replyPhrase = phrased.value.json;
+  draw();
+}
+
+/**
+ * Confirm the revocation, naming the device.
+ *
+ * F-14's lesson applied here: revoking is immediate and local, and a revoked phone cannot release a lock
+ * on this machine until it is paired again — so it is not a one-tap action.
+ */
+function confirmRevoke(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Revoke this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6"><span class="mono" style="user-select:text">${esc(id)}</span>
+    will no longer be able to release a lock on this machine, and this machine will no longer release
+    locks on it. Pairing again takes the same ceremony as the first time.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Keep it</button>
+    <button class="btn" data-act="revoke" data-id="${esc(id)}">Revoke it</button></div>`);
+}
+
+/** Confirm the acceptance, and say what is being confirmed. */
+function confirmAccept() {
+  sheet(`<div style="font-size:17px;font-weight:650">Pair this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">Only if the six digits on
+    the other screen are <b>the same six</b>. Nothing on this machine can check that for you &mdash; that is
+    the point of reading them.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Not yet</button>
+    <button class="btn" data-act="pair-accept">They match &mdash; pair</button></div>`);
+}
+
+/**
+ * Devices — pairing and this device's identity. **F-18 step 4**, the front door.
+ *
+ * Windows had no route to pairing at all: no verb, no page, no tray item, and no artboard. The protocol
+ * was built and tested in `curfew-sync` and reachable from Android, and a Windows user reading the
+ * README's *"Devices → Pair"* had nothing to open. `tools/check_window.py` drives this page.
+ *
+ * **The comparison is the user's, and the page says so.** Both screens show six digits and the person
+ * reads them; nothing here can check that for them, which is the design rather than a shortcoming. Every
+ * message that asks for a confirmation names what is being confirmed, because a dialog that says
+ * "Continue?" teaches nothing.
+ *
+ * **Text, not a code to scan.** The window has no QR renderer, so the invite is shown as text with a
+ * selectable field beside it — and `user-select` is enabled on it, because the point is to get the text
+ * onto the other device.
+ */
+function pageDevices() {
+  const s = state.status || {};
+  const pairing = state.pairing || { loading: false, error: null, peers: null, invite: null, phrase: null, device: null, fingerprint: null, reply: null };
+  const lines = [];
+
+  // --- what this device is ----------------------------------------------------------------------
+  lines.push(`<h1>Devices</h1>
+    <div class="sub">Pairing is what makes two devices enforce the same promise. It needs both screens:
+      you read six digits aloud and confirm they match.</div>
+    <div style="height:16px"></div>`);
+
+  if (pairing.error) {
+    lines.push(`<div class="card" style="border-color:rgba(242,114,114,.5)">
+      <div class="lbl bad">Pairing is not available</div>
+      <div style="margin-top:6px;line-height:1.6">${esc(pairing.error)}</div></div>
+      <div style="height:16px"></div>`);
+  }
+
+  if (pairing.device) {
+    lines.push(`<div class="card">
+      <div class="lbl">This device</div>
+      <div class="mono" style="margin-top:6px;user-select:text">${esc(pairing.device)}</div>
+      ${pairing.fingerprint ? `<div class="meta" style="margin-top:4px">Fingerprint <span class="mono" style="user-select:text">${esc(pairing.fingerprint)}</span> &mdash; compare this with the phone's Devices screen before you trust a pairing.</div>` : ""}
+    </div><div style="height:16px"></div>`);
+  }
+
+  // --- what it is paired with -------------------------------------------------------------------
+  const peers = pairing.peers || [];
+  lines.push(`<div class="card">
+    <div class="lbl">Paired devices</div>`);
+  if (pairing.loading && !pairing.peers) {
+    lines.push(`<div class="meta" style="margin-top:6px">Reading&hellip;</div>`);
+  } else if (peers.length === 0) {
+    lines.push(`<div style="margin-top:6px;line-height:1.6">Nothing is paired yet. A paired device can
+      release a lock on this one, and this one can release a lock on it &mdash; that is the whole
+      reason to pair.</div>`);
+  } else {
+    for (const peer of peers) {
+      const revoked = peer.revoked_at !== null && peer.revoked_at !== undefined;
+      lines.push(`<div style="display:flex;align-items:center;gap:14px;margin-top:12px">
+        <div class="grow">
+          <div class="mono" style="user-select:text">${esc(peer.id)}</div>
+          <div class="meta" style="margin-top:2px">${revoked ? "Revoked &mdash; it can no longer release anything here" : "Paired"}</div>
+        </div>
+        ${revoked ? "" : `<button class="btn ghost" data-act="revoke-ask" data-id="${esc(peer.id)}">Revoke&hellip;</button>`}
+      </div>`);
+    }
+  }
+  lines.push(`</div><div style="height:16px"></div>`);
+
+  // --- offering ---------------------------------------------------------------------------------
+  lines.push(`<div class="card">
+    <div class="lbl">Pair a new device</div>
+    <div style="margin-top:6px;line-height:1.6">Show this device's code. On the other device, choose
+      <b>Answer a code</b> and paste it. Both screens will then show six digits &mdash; those must match.</div>
+    <div style="height:12px"></div>
+    <div class="strip"><button class="btn" data-act="pair-offer">Show this device's code</button></div>`);
+
+  if (pairing.invite) {
+    lines.push(`<div style="height:14px"></div>
+      <textarea class="mono" readonly rows="4" style="width:100%;background:var(--sur2);border:1px solid var(--line);color:var(--tx);border-radius:var(--r-ctl);padding:9px;font-size:11px;user-select:text">${esc(pairing.invite)}</textarea>
+      <div class="meta" style="margin-top:6px">This code is not secret &mdash; it cannot authenticate itself.
+        The six digits are what do that.</div>`);
+  }
+  if (pairing.phrase) {
+    lines.push(`<div style="height:14px"></div>
+      <div class="lbl">These six digits, on both screens</div>
+      <div class="mono" style="font-size:30px;font-weight:700;letter-spacing:4px;margin-top:4px;user-select:text">${esc(pairing.phrase)}</div>
+      <div class="meta" style="margin-top:4px">Read them aloud. If the other device shows something else,
+        something is between you and nothing should be accepted.</div>`);
+  }
+  lines.push(`</div><div style="height:16px"></div>`);
+
+  // --- answering --------------------------------------------------------------------------------
+  lines.push(`<div class="card">
+    <div class="lbl">Answer a code</div>
+    <div style="margin-top:6px;line-height:1.6">Paste the other device's code here. This device will show
+      its own six digits, and the two must match before either accepts.</div>
+    <div style="height:12px"></div>
+    <input id="pair-reply" placeholder="Paste the code from the other device" />
+    <div style="height:10px"></div>
+    <div class="strip"><button class="btn" data-act="pair-answer">Answer it</button></div>`);
+
+  if (pairing.reply && pairing.replyPhrase) {
+    lines.push(`<div style="height:14px"></div>
+      <div class="lbl">These six digits, on both screens</div>
+      <div class="mono" style="font-size:30px;font-weight:700;letter-spacing:4px;margin-top:4px;user-select:text">${esc(pairing.replyPhrase)}</div>
+      <div style="height:12px"></div>
+      <textarea class="mono" readonly rows="3" style="width:100%;background:var(--sur2);border:1px solid var(--line);color:var(--tx);border-radius:var(--r-ctl);padding:9px;font-size:11px;user-select:text">${esc(pairing.reply)}</textarea>
+      <div class="meta" style="margin-top:6px">Send this back to the other device, then accept on both.</div>
+      <div style="height:10px"></div>
+      <div class="strip"><button class="btn" data-act="pair-accept-ask">The digits match &mdash; pair</button></div>`);
+  }
+  lines.push(`</div>`);
+
+  return lines.join("");
+}
+
 // ---- drawing ----------------------------------------------------------------------------------
+// The HTML currently in the body, so an identical redraw can be skipped. See `draw`.
+let drawnHtml = null;
+
 function draw() {
-  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, health: pageHealth };
-  document.getElementById("body").innerHTML = (pages[state.page] || pageNow)();
+  const pages = { now: pageNow, plan: pagePlan, apps: pageApps, time: pageTime, devices: pageDevices, health: pageHealth };
+  const body = document.getElementById("body");
+  const html = (pages[state.page] || pageNow)();
+
+  // **Only replace the DOM when the markup actually changed** (P2-2).
+  //
+  // This runs every second, and `innerHTML =` throws away and rebuilds every node. Two things follow
+  // from that, both of them things a user notices: the scrolling container's `scrollTop` resets, so a
+  // long page — "Is it working" is the long one — snaps back to the top once a second and cannot be
+  // read past the fold; and any text selection is destroyed, so a failure message cannot be selected
+  // to copy. The page exists to be *read* and *reported from*, and it could not do either.
+  //
+  // Comparing the two strings first costs a string compare per tick and skips the rebuild entirely
+  // when nothing on the page has changed, which on a quiet machine is most ticks. The countdown is
+  // what changes most often, and while one is running the page genuinely does change every second —
+  // which is correct, and the user is watching the number rather than scrolling.
+  //
+  // **The guard covers the body rebuild and nothing else.** The first version returned here, which
+  // skipped the live pill below — and the pill is the *countdown in the sidebar*, regenerated every
+  // tick rather than living in the page markup. Returning early would have frozen it, which is a worse
+  // bug than the one being fixed: a stalled clock is the thing this app exists to be trusted about.
+  // The nav classes are outside `#body` too, so they are refreshed unconditionally for the same reason.
+  if (html !== drawnHtml) {
+    drawnHtml = html;
+    body.innerHTML = html;
+    // After every redraw, because every redraw replaces the nodes that need it.
+    makeInteractive(body);
+  }
+
   for (const nav of document.querySelectorAll(".nav")) {
     nav.classList.toggle("on", nav.dataset.page === state.page);
   }
@@ -436,7 +1013,33 @@ function draw() {
 }
 
 // ---- what the buttons do ----------------------------------------------------------------------
-function sheet(html) { document.getElementById("modal").innerHTML = html ? `<div class="scrim"><div class="sheet">${html}</div></div>` : ""; }
+/**
+ * Put something over the page, or take it away.
+ *
+ * `role="dialog"` and `aria-modal`, because a sheet that is not announced as a dialog is read as
+ * more page text by a screen reader, and a keyboard user has no idea the page behind it has stopped
+ * being the thing that takes input. Focus moves into the sheet for the same reason: otherwise the
+ * next Tab continues through the page *underneath*, so the visible dialog is not the one being typed
+ * into. The focused control is remembered and restored, so closing a sheet does not drop the user
+ * back at the top of the document.
+ */
+let focusBeforeSheet = null;
+function sheet(html) {
+  const modal = document.getElementById("modal");
+  if (!html) {
+    modal.innerHTML = "";
+    if (focusBeforeSheet && document.contains(focusBeforeSheet)) focusBeforeSheet.focus();
+    focusBeforeSheet = null;
+    return;
+  }
+  if (!modal.innerHTML) focusBeforeSheet = document.activeElement;
+  modal.innerHTML = `<div class="scrim"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
+  makeInteractive(modal);
+  // The first thing worth pressing, so Enter does what the user came to do. A field takes precedence
+  // over a button: a password sheet should put the caret in the box, not on Cancel.
+  const first = modal.querySelector("input, .btn, button, [data-act]");
+  setTimeout(() => first?.focus(), 0);
+}
 function say(title, text) {
   sheet(`<div style="font-size:17px;font-weight:650">${esc(title)}</div>
     <div style="height:10px"></div><div class="wrap" style="color:var(--mut);line-height:1.6">${esc(text)}</div>
@@ -444,23 +1047,163 @@ function say(title, text) {
     <button class="btn ghost" data-act="close">Close</button></div>`);
 }
 
+// ---- starting a block -------------------------------------------------------------------------
+// The lengths that cover almost every ask, and the vocabulary the phone uses. Both platforms are
+// meant to be one product, so the words and the numbers are the same on purpose: a strength called
+// "Ask me first" here and something else there is two products wearing one name.
+const START_MINUTES = [25, 50, 90, 180];
+const START_DEFAULT_MINUTES = 90;
+
+// What it takes to end the block early. `lock` is the wire form from `curfew_core::Lock` — `null`
+// means no condition at all, which is a block you can stop whenever you like.
+const START_STRENGTHS = [
+  { id: "open", label: "I can stop it", note: "Ends the moment you press stop.", lock: null },
+  { id: "confirm", label: "Ask me first", note: "One confirmation, so it is never an accident.", lock: { kind: "confirm" } },
+  { id: "credential", label: "Your Windows password", note: "Proves it is you, not a pocket.", lock: { kind: "device_credential" } },
+  { id: "locked", label: "Until it ends", note: "Nothing ends this early. The 24-hour release is the way out.", lock: { kind: "timer" } },
+];
+
+/**
+ * The sheet, in its two states: nothing to block yet, and something worth committing to.
+ *
+ * A sheet rather than a page because starting a block is a decision with three parts and one
+ * button, and every part is chosen *before* the thing that cannot be taken back. The default is the
+ * middle strength rather than the strongest: the honest answer changes between a study hour and an
+ * evening off, and a form that opens on "no way out" trains people to change it without reading.
+ */
+function startSheet() {
+  const profiles = state.config?.profiles || [];
+  if (profiles.length === 0) {
+    sheet(`<div style="font-size:17px;font-weight:650">Start a block</div>
+      <div style="height:10px"></div>
+      <div class="wrap" style="color:var(--mut);line-height:1.6">There is nothing to block yet. A block
+        is a profile — a named set of apps and sites — so the Plan page is where to make one.</div>
+      <div style="height:16px"></div><div style="display:flex;justify-content:flex-end">
+      <button class="btn ghost" data-act="close">Close</button></div>`);
+    return;
+  }
+  if (!profiles.some((p) => p.id === state.startProfile)) state.startProfile = profiles[0].id;
+  if (state.startMinutes == null) state.startMinutes = START_DEFAULT_MINUTES;
+  if (state.startStrength == null) state.startStrength = "confirm";
+
+  const profile = profiles.find((p) => p.id === state.startProfile);
+  const pill = (on) => (on ? "tab on" : "tab");
+  sheet(`<div style="font-size:17px;font-weight:650">Start a block</div>
+    <div style="height:12px"></div>
+    <div class="lbl">Which profile</div>
+    <div style="height:8px"></div>
+    <div class="strip">${profiles.map((p) =>
+      `<span class="${pill(p.id === state.startProfile)}" data-act="start-profile" data-id="${esc(p.id)}">${esc(p.name)}</span>`).join("")}</div>
+    <div style="height:14px"></div>
+    <div class="lbl">For how long</div>
+    <div style="height:8px"></div>
+    <div class="strip">${START_MINUTES.map((m) =>
+      `<span class="${pill(m === state.startMinutes)}" data-act="start-minutes" data-minutes="${m}">${esc(spellMinutes(m))}</span>`).join("")}</div>
+    <div style="height:14px"></div>
+    <div class="lbl">What it takes to end it</div>
+    <div style="height:8px"></div>
+    <div class="flush">${START_STRENGTHS.map((s) =>
+      `<div class="row" data-act="start-strength" data-id="${esc(s.id)}" style="cursor:default">
+        <span class="dot" style="background:${s.id === state.startStrength ? "var(--acc)" : "var(--line)"}"></span>
+        <div class="grow"><div class="name">${esc(s.label)}</div><div class="meta">${esc(s.note)}</div></div></div>`).join("")}</div>
+    <div style="height:12px"></div>
+    <div class="note wrap">${esc(whatItBlocks(profile))}</div>
+    <div style="height:16px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn ghost" data-act="close">Cancel</button>
+      <button class="btn" data-act="start-go">Start for ${esc(spellMinutes(state.startMinutes))}</button>
+    </div>`);
+}
+
+/** "25m", "1h 30m" — the spellings the phone uses too. */
+function spellMinutes(m) {
+  return m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${m / 60}h ${m % 60}m`;
+}
+
+/** What the chosen profile actually closes, so the button is a promise rather than a guess. */
+function whatItBlocks(profile) {
+  if (!profile) return "";
+  const rules = profile.rules || [];
+  const apps = rules.filter((r) => ["windows_exe", "app_package", "file_path"].includes(r.target?.kind)).length;
+  const sites = rules.filter((r) => ["domain", "url", "keyword"].includes(r.target?.kind)).length;
+  if (apps === 0 && sites === 0) {
+    return `${profile.name} has no rules yet, so this would block nothing. Add apps or sites on the Plan page first.`;
+  }
+  const parts = [];
+  if (apps) parts.push(`${apps} app${apps === 1 ? "" : "s"}`);
+  if (sites) parts.push(`${sites} site${sites === 1 ? "" : "s"}`);
+  return `${profile.name} closes ${parts.join(" and ")} while it runs.`;
+}
+
+/** Ask the service to start it, and say what happened. */
+async function startBlock() {
+  const profile = state.startProfile;
+  const minutes = state.startMinutes;
+  const strength = START_STRENGTHS.find((s) => s.id === state.startStrength);
+  if (!profile || !strength) return;
+  const locks = strength.lock ? [strength.lock] : [];
+  const answer = await askService({ request: "start", profile, seconds: minutes * 60, locks });
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  const value = answer.value;
+  // A profile that takes the whole machine away is announced and never started on the spot, because
+  // the one thing Curfew cannot give back is unsaved work. Saying so is the difference between a
+  // countdown a person can act on and a block that looks like it failed.
+  if (value.response === "announced") {
+    const at = value.countdown?.fires_at;
+    return say(
+      "This one is announced first",
+      `${profileName(profile)} takes the whole machine, so it counts down before it starts` +
+        (at ? `. Save your work — it freezes at ${atTime(at)}.` : ". Save your work."),
+    );
+  }
+  if (value.response === "error") return say("That could not start", value.detail);
+  await refresh();
+  sheet("");
+}
+
+/**
+ * Call off an announced freeze.
+ *
+ * Sent straight after the click with nothing in between — no confirmation — because cancelling costs
+ * nothing and is reversible in the only direction that matters: the freeze can be started again. It
+ * is also the one action on this page whose whole purpose is to *not* lock something, so putting a
+ * dialog in front of it would be the app arguing with the user about their own machine.
+ */
+async function cancelFreeze() {
+  const answer = await askService({ request: "cancel_freeze" });
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  if (answer.value.response === "error") return say("That could not be cancelled", answer.value.detail);
+  await refresh();
+  sheet("");
+  return say("The freeze is off", "Nothing will close. Starting it again is the same two clicks as before.");
+}
 // Ending a session is the one place the promise is kept or broken, so it is done in two steps: ask
 // the service plainly, and only if it names a condition do we offer the way to satisfy it.
+//
+// The service is always the judge. Every branch here re-asks rather than deciding that something
+// would be refused, so a cancel, a wrong password or a lock this build does not understand all end
+// up as the core's own words instead of this window's guess.
 async function end(id) {
   const answer = await askService({ request: "end", id, satisfied: [] });
   if (!answer.ok) return say("The service did not answer", answer.detail);
   const value = answer.value;
   if (value.response === "ok") { await refresh(); return sheet(""); }
+  if (value.response === "error") return say("That could not be done", value.detail);
   if (value.response === "refused") {
     const missing = value.refusal.refusal === "locked" ? value.refusal.missing || [] : [];
-    if (missing.some((l) => describeLock(l) === "asks before ending")) return confirmEnd(id, missing);
-    if (missing.some((l) => describeLock(l) === "your Windows password")) return password(id);
+    // Password first, confirmation second, and the order is load-bearing rather than cosmetic.
+    // A lock can want both. `Unlock` writes the password proof down for a couple of minutes, and
+    // `End` folds fresh proofs back in — so asking for the password *first* leaves the confirmation
+    // to ride on a proof that is still valid. The other order would need two round trips through
+    // this function and would fail outright if the user took longer than the proof lives.
+    if (missing.some((l) => lockKind(l) === "device_credential")) return password(id);
+    if (missing.some((l) => lockKind(l) === "confirm")) return confirmEnd(id);
     return say("Still locked", describeRefusal(value.refusal));
   }
   return say("The service said", JSON.stringify(value));
 }
 
-function confirmEnd(id, missing) {
+function confirmEnd(id) {
   sheet(`<div style="font-size:17px;font-weight:650">End this session?</div>
     <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You asked to be asked. Nothing else is standing in the way.</div>
     <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
@@ -468,50 +1211,200 @@ function confirmEnd(id, missing) {
     <button class="btn" data-act="confirm-end" data-id="${esc(id)}">End it</button></div>`);
 }
 
-// The password is typed here and checked by the service with LogonUser. This window never sees
-// whether it was right, and never stores it.
-function password(id) {
-  sheet(`<div style="font-size:17px;font-weight:650">Your Windows password</div>
-    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You chose to have this asked for. Windows checks it, not Curfew.</div>
-    <div style="height:14px"></div>
-    <input id="user" placeholder="User name" value="${esc(window.__curfewUser || "")}">
-    <div style="height:8px"></div><input id="pw" type="password" placeholder="Password">
+/**
+ * Confirm the peer release, because it cannot be taken back.
+ *
+ * "This device releases that session" goes out through the op-log, and the protocol is explicit that
+ * it cannot be withdrawn: a release a peer could take back would let one device shut a lock the user
+ * has already been told they are out of. The tray puts a Yes/No in front of it; the window used to
+ * send it on a single click, which made it the one control on this page whose mistake is unfixable.
+ */
+function confirmRelease(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Release this session from this device?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">This device is the one the lock asks. The release goes out to your other devices and <b>cannot be withdrawn</b> &mdash; the lock lifts everywhere.</div>
     <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
     <button class="btn ghost" data-act="close">Cancel</button>
-    <button class="btn" data-act="unlock" data-id="${esc(id)}">Unlock</button></div>`);
-  setTimeout(() => document.getElementById("pw")?.focus(), 0);
+    <button class="btn" data-act="release" data-id="${esc(id)}">Release it</button></div>`);
 }
 
-document.addEventListener("click", async (event) => {
-  const nav = event.target.closest(".nav");
-  if (nav) { state.page = nav.dataset.page; return draw(); }
-  const tab = event.target.closest("[data-tab]");
+/**
+ * Confirm the 24-hour release, and say plainly what it commits to.
+ *
+ * This is the last-resort exit every lock is meant to offer (GAPS D1). It is confirmed rather than
+ * immediate not because it can be undone — it cannot, deliberately, since `LockSet::request_release`
+ * only ever moves the deadline earlier-to-later and never clears it — but because a full day is the
+ * largest thing this page can start, and a mis-click that commits to it silently is worse than one
+ * extra press.
+ */
+function confirmDelayedRelease(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Start the 24-hour release?</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">This is the exit of last resort, and it is deliberately slow. The lock lifts at this time tomorrow, and <b>that cannot be brought forward or cancelled</b>.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Not yet</button>
+    <button class="btn" data-act="request-release" data-id="${esc(id)}">Start it</button></div>`);
+}
+
+/**
+ * Ask Windows for the password, rather than drawing a box for it.
+ *
+ * This page used to render a password input of its own, which contradicted the rule the tray states
+ * and follows: *"Curfew never draws a password box of its own… a user can tell it from a phishing box
+ * drawn by an application"*. The window is the bigger and more prominent surface, so it was the one
+ * breaking the rule.
+ *
+ * (The paragraph above deliberately does not quote the markup it removed. The host asserts that this
+ * page contains none of it, and an assertion short enough to appear in prose is one that can match
+ * prose — which is how two guards in the same test module were vacuous on their first attempt.)
+ *
+ * Worth more than consistency, too. A password typed into this page lives in a DOM, in the page's form
+ * state, and in whatever the rendering process does with it. A password typed into the system dialog
+ * stays in a buffer the host wipes on drop, and **this page never sees it at all** — the host shows the
+ * prompt and sends the result to the service itself. There is no field here to read.
+ */
+function password(id) {
+  sheet(`<div style="font-size:17px;font-weight:650">Your Windows password</div>
+    <div style="height:10px"></div><div style="color:var(--mut);line-height:1.6">You chose to have this
+    asked for. Windows will ask you for it, and Windows checks it — Curfew never draws a password box
+    and never sees what you type.</div>
+    <div style="height:16px"></div><div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn ghost" data-act="close">Cancel</button>
+    <button class="btn" data-act="unlock" data-id="${esc(id)}">Open the Windows prompt</button></div>`);
+}
+
+/** What came back from the system prompt, once the host has shown it. */
+async function finishUnlock(id) {
+  const answer = await askUnlock(id);
+  sheet("");
+  if (!answer.ok) return say("The service did not answer", answer.detail);
+  const value = answer.value || {};
+  // A cancelled prompt is not a failure: the user closed the dialog, so nothing is said and the
+  // session stays locked, which is what closing it meant.
+  if (value.response === "cancelled") return;
+  // A rejected password comes back as `error`, not as a refusal — `LogonUser` said no rather than the
+  // core declining a policy. Handling only `refused` here once meant the sheet closed and nothing
+  // appeared: a user who mistyped watched the dialog vanish and concluded the button was broken.
+  if (value.response === "error") return say("Not unlocked", value.detail);
+  if (value.response === "refused") {
+    // The password satisfied one condition. The lock may want a confirmation as well, and that is
+    // still reachable — so ask again rather than reporting defeat.
+    return end(id);
+  }
+  return refresh();
+}
+
+/**
+ * Do whatever the thing under the pointer *or the caret* is.
+ *
+ * One function for both input methods, and that is the fix rather than an implementation detail.
+ * Everything on this page used to be a `div` or a `span` with a click handler and nothing else, so
+ * the window was mouse-only: a keyboard user could not reach the pages that explain what is blocked
+ * — but *could* tab to "End it early", which is the wrong way round for a program whose entire
+ * promise is that the exits are deliberate.
+ *
+ * Written as one dispatcher on purpose: a control added later gets Enter and Space for free, and
+ * there is no second wiring to forget. The alternative — a key handler per control — is how the
+ * mouse-only state arose in the first place.
+ */
+async function activate(target) {
+  const nav = target.closest(".nav");
+  if (nav) {
+    state.page = nav.dataset.page;
+    // **The Devices page reads on open, and only on open** — F-18 step 4. The status is polled twice a
+    // second, but pairing is not a twice-a-second fact, and minting an invite that often would put a new
+    // nonce in front of the user sixty times a minute. Guarded so re-opening the page does not re-read
+    // what it already has, which would also discard an invite the user is part-way through sending.
+    if (state.page === "devices" && !state.pairing) return loadPairing();
+    return draw();
+  }
+  const tab = target.closest("[data-tab]");
   if (tab) { state.tab = tab.dataset.tab; return draw(); }
-  const profile = event.target.closest("[data-profile]");
+  const profile = target.closest("[data-profile]");
   if (profile) { state.profile = profile.dataset.profile; return draw(); }
-  const button = event.target.closest("[data-act]");
+  // The Start-a-block sheet. Every control redraws the sheet rather than the page, so a choice is
+  // visible where it was made and nothing else on screen moves under the pointer.
+  const byAct = target.closest("[data-act]");
+  if (byAct) {
+    switch (byAct.dataset.act) {
+      case "start-open": return startSheet();
+      case "start-profile": state.startProfile = byAct.dataset.id; return startSheet();
+      case "start-minutes": state.startMinutes = Number(byAct.dataset.minutes); return startSheet();
+      case "start-strength": state.startStrength = byAct.dataset.id; return startSheet();
+      default: break;
+    }
+  }
+  const button = target.closest("[data-act]");
   if (!button) return;
   const id = button.dataset.id;
   switch (button.dataset.act) {
     case "close": return sheet("");
+    case "start-go": return startBlock();
+    case "cancel-freeze": return cancelFreeze();
     case "end": return end(id);
     case "confirm-end": {
       const answer = await askService({ request: "end", id, satisfied: [{ kind: "confirm" }] });
+      // "Still locked" is the wrong thing to say when the service said something else entirely.
+      if (answer.ok && answer.value.response === "refused") {
+        // The lock may also want the password, and a confirmation is not a reason to give up on it.
+        // Re-entering `end` asks the core again rather than assuming the rest is unreachable.
+        sheet("");
+        return end(id);
+      }
       sheet("");
-      if (answer.ok && answer.value.response === "refused") say("Still locked", describeRefusal(answer.value.refusal));
+      if (answer.ok && answer.value.response === "error") return say("That could not be done", answer.value.detail);
       return refresh();
     }
-    case "unlock": {
-      const username = document.getElementById("user").value;
-      const pw = document.getElementById("pw").value;
-      const answer = await askService({ request: "unlock", id, username, domain: "", password: pw });
+    // The button no longer reads a field, because there is no field: the host shows the system
+    // prompt and this page never sees the password.
+    case "unlock": return finishUnlock(id);
+    // **Both of these ask first, and the name says so** — P1-6. The old `case "release"` went straight
+    // to `Request::Release`, which the protocol documents as *"it cannot be withdrawn: a release a peer
+    // could take back would let one device shut a lock the user has already been told they are out
+    // of."* The tray put a Yes/No in front of the identical action; this page did not.
+    // --- pairing (F-18 step 4) -------------------------------------------------------------------
+    case "pair-offer": return offerPairing();
+    case "pair-answer": return answerPairing();
+    case "pair-accept-ask": return confirmAccept();
+    // **Only after the confirmation**, which named what is being confirmed. There is no way for this page
+    // to check the digits, and pretending otherwise would remove the only step a machine in the middle
+    // cannot forge.
+    case "pair-accept": {
+      const pasted = state.pairing && state.pairing.reply;
+      if (!pasted) return say("Nothing to accept", "Answer a code first.");
+      const answer = await askService({ request: "accept", invite: pasted });
       sheet("");
-      if (answer.ok && answer.value.response === "refused") say("Not unlocked", describeRefusal(answer.value.refusal));
+      if (!answer.ok || answer.value.response !== "paired") {
+        return say("Not paired", (answer.value && answer.value.detail) || "The service did not answer.");
+      }
+      state.pairing.reply = null;
+      state.pairing.replyPhrase = null;
+      await loadPairing();
       return refresh();
     }
+    case "revoke-ask": return confirmRevoke(id);
+    case "revoke": {
+      const answer = await askService({ request: "revoke", device: id });
+      sheet("");
+      if (!answer.ok || answer.value.response !== "paired") {
+        return say("Not revoked", (answer.value && answer.value.detail) || "The service did not answer.");
+      }
+      return loadPairing();
+    }
+    case "dismiss-downtime": {
+      // Best-effort: if the service is not answering, the notice stays, which is the right way round —
+      // claiming it was read when the service never heard would lose it silently.
+      await askService({ request: "dismiss_downtime" });
+      return refresh();
+    }
+    case "release-ask": return confirmRelease(id);
+    case "delayed-ask": return confirmDelayedRelease(id);
     case "release": {
       const answer = await askService({ request: "release", id });
       if (answer.ok && answer.value.response === "refused") say("Not released", describeRefusal(answer.value.refusal));
+      return refresh();
+    }
+    case "request-release": {
+      const answer = await askService({ request: "request_release", id });
+      if (answer.ok && answer.value.response === "refused") say("Not started", describeRefusal(answer.value.refusal));
       return refresh();
     }
     case "emergency": {
@@ -520,7 +1413,58 @@ document.addEventListener("click", async (event) => {
       return refresh();
     }
   }
+}
+
+document.addEventListener("click", (event) => activate(event.target));
+
+/**
+ * Enter and Space, on anything that is meant to be a button.
+ *
+ * The selector list is the same set `activate` dispatches on, so the two cannot drift: if a control
+ * is reachable by one input method it is reachable by the other. Space is included because that is
+ * what a Windows user presses on a button, and Enter because that is what they press in a dialog.
+ *
+ * `preventDefault` on Space only, and only for these: without it the page scrolls under the focused
+ * control, which looks like the key did nothing while something else moved.
+ */
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    // The modal is the topmost thing, so Escape belongs to it first.
+    if (document.getElementById("modal").innerHTML) {
+      event.preventDefault();
+      sheet("");
+    }
+    return;
+  }
+  if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+  const target = event.target.closest('[data-act], .nav, [data-tab], [data-profile]');
+  // A real <button> or <input> already activates itself, and would otherwise fire twice.
+  if (!target || target.tagName === "BUTTON" || target.tagName === "INPUT") return;
+  event.preventDefault();
+  activate(target);
 });
+
+/**
+ * Anything tappable must be reachable and must announce itself as tappable.
+ *
+ * Otherwise a screen reader reads a wall of text with no idea what can be pressed, and a keyboard
+ * cannot get past the first control. Applied once, here, rather than written into the markup: the nav
+ * is static and the tabs are regenerated on every redraw, so an attribute typed by hand in one place
+ * would simply be missing in the other.
+ */
+function makeInteractive(root) {
+  for (const el of root.querySelectorAll("[data-act], .nav, [data-tab], [data-profile]")) {
+    if (el.tagName === "BUTTON" || el.tagName === "INPUT") continue;
+    el.setAttribute("role", "button");
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    // "Which one am I on" is not in the text for these two, so it is said explicitly.
+    if (el.classList.contains("nav")) {
+      el.setAttribute("aria-current", el.classList.contains("on") ? "page" : "false");
+    } else if (el.hasAttribute("data-tab") || el.hasAttribute("data-profile")) {
+      el.setAttribute("aria-pressed", el.classList.contains("on") ? "true" : "false");
+    }
+  }
+}
 
 refresh();
 // A second is the resolution of the clock on the page; the pipe call is cheap and local.

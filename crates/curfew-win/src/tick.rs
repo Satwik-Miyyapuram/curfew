@@ -13,6 +13,7 @@ use crate::blocked::blocked_domains;
 use crate::hosts;
 use crate::ipc::{Request, Response, Status};
 use crate::procs::{enforce, Outcome, Process, Processes};
+use curfew_core::clock::{ClockWitness, Reading, Verdict};
 use curfew_core::engine::charged_keys;
 use curfew_core::stats::{summarize, SessionRecord, Stats};
 use curfew_core::{
@@ -56,9 +57,16 @@ pub struct Tick {
 /// underneath them, so the process that showed them is the only possible witness and refusing its
 /// word would make those locks unusable rather than stronger. Everything else -- a password, a tag,
 /// a reboot, a peer -- is checked by the service, and is therefore never taken on a caller's say-so.
+///
+/// `Lock::Timer` is deliberately **not** in this list, and its absence is load-bearing. A timer
+/// lock's whole meaning is the machine fact `ends_at`, which `LockSet::can_release` already honours
+/// by way of `is_expired`. Letting a caller *claim* it added nothing that expiry did not already
+/// grant, and it let anyone with access to the pipe assert that a timer had run out when it had not:
+/// one line, no administrator, no UI. That was a real bypass of every timer-locked session, and the
+/// test that covered this path asserted the bypass was correct behaviour.
 fn claimable(lock: &curfew_core::Lock) -> bool {
     use curfew_core::Lock;
-    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+    matches!(lock, Lock::Confirm | Lock::Challenge { .. })
 }
 
 /// The service's state between passes.
@@ -96,6 +104,21 @@ pub struct Enforcer {
     /// that forgot which boot it was in would answer a restart lock by guessing.
     pub boot_id: u64,
     pub boot_counter: curfew_core::BootCounter,
+    /// The clock locks are judged against, the last reading's verdict, and the sentence that
+    /// reading earned.
+    ///
+    /// The witness is persisted, because a baseline a restart reset is exactly what someone moving
+    /// the clock is hoping for. The other two are not: they describe one reading, and replaying a
+    /// stale one after a restart would claim tampering that had not happened since.
+    ///
+    /// `clock_notice` is deliberately sticky rather than recomputed from the latest verdict. A
+    /// verdict is about one reading, and the pass after a tamper reads a clock that has caught up
+    /// with uptime again and is therefore unremarkable — so a notice that tracked the latest verdict
+    /// would be true for one tick and gone, which is a notice no UI polling at any sane rate would
+    /// ever show. It is replaced by a later notable reading, and cleared by restarting the service.
+    pub clock: Option<ClockWitness>,
+    pub clock_verdict: Option<Verdict>,
+    pub clock_notice: Option<String>,
     /// Conditions this device has actually checked recently -- a password Windows accepted, a tag
     /// that matched. Deliberately not persisted: after a restart nothing is proven again.
     pub proofs: curfew_core::Proofs,
@@ -107,6 +130,16 @@ pub struct Enforcer {
     /// This device's own id in the op-log, once sync knows it. `None` on a machine that has never
     /// paired, where no peer lock can name it anyway.
     pub device_id: Option<String>,
+    /// What sync is doing, for [`crate::ipc::Status`].
+    ///
+    /// **Set by the caller, not computed here.** The sync node lives in the service's run loop and
+    /// `curfew-win` deliberately does not depend on `curfew-sync`, so this crate cannot ask the node
+    /// anything; it can only carry the answer. The alternative — threading the node into the
+    /// `Enforcer` — would put a TCP listener inside the struct that enforcement is judged against,
+    /// which is the wrong place for it.
+    ///
+    /// Defaults to `Unpaired`, which is what a test or a machine with no sync directory should report.
+    pub sync: crate::ipc::SyncState,
     /// A whole-device freeze that has been announced and not yet happened (GAPS B4). At most one:
     /// two countdowns racing each other would leave nobody able to say what is about to occur.
     pub freeze: Option<curfew_core::Countdown>,
@@ -120,9 +153,64 @@ pub struct Enforcer {
     /// The foreground window as the tray last reported it, and when. Not persisted: a window
     /// remembered across a restart is a window nobody is looking at.
     pub seen: Option<(Process, Timestamp)>,
+    /// **What has stopped being enforced because nothing can say what is in front** — P2-16.
+    ///
+    /// Recomputed every pass, and carried on [`crate::ipc::Status`] so a surface can say it.
+    /// See [`Enforcer::foreground_warning`] for why the gap exists and cannot be closed here.
+    pub foreground_warning: Option<String>,
+    /// **The window enforcement was down before this run** — P1-8. Set once by `note_start`, cleared by
+    /// `dismiss_downtime`, and reported on `Status` until somebody has read it.
+    pub downtime: Option<crate::downtime::Downtime>,
+    /// **Pairing, when this machine has any** — F-18, step 2.
+    ///
+    /// `None` on a machine that never started sync, and in every test that does not care about pairing.
+    /// The trait is declared in [`crate::pairing`] rather than this crate depending on `curfew-sync`:
+    /// the enforcement layer is the platform floor and the sync crate is built on the core, so the
+    /// handler states what it needs and the binary supplies it.
+    pub pairing: Option<std::sync::Arc<dyn crate::pairing::Pairing>>,
+    /// Whether `note_start` has run, so the first pass records the gap and later passes cannot.
+    started: bool,
     /// Distinguishes ids minted in the same second. Sessions outlive the process, so ids must not
     /// collide across a restart either — hence the timestamp in the id as well.
     counter: usize,
+}
+
+/// The sentence a reading earns, or `None` when it was unremarkable.
+///
+/// Two different facts, and they deserve different words. Time *refused* is tampering that was
+/// caught and undone. Time *credited* across a reboot is not proof of anything — an honest
+/// overnight shutdown is indistinguishable from an hour stolen in the firmware — so it is reported
+/// as a caveat rather than an accusation, and it says so.
+fn notice_for(verdict: Verdict) -> Option<String> {
+    if verdict.tampered() {
+        let moved = verdict.refused_forward.max(verdict.refused_backward);
+        let direction = if verdict.refused_forward > 0 { "forward" } else { "backward" };
+        return Some(format!(
+            "This machine's clock was moved {direction} by about {}. That time was not credited to \
+             any lock, so nothing ended early — but the clock is not trustworthy until it is \
+             corrected.",
+            rough_duration(moved)
+        ));
+    }
+    if verdict.unverified > 0 {
+        return Some(format!(
+            "{} passed while this machine was switched off. It is counted as real time, because an \
+             honest shutdown cannot be told apart from a clock moved while the machine was off.",
+            rough_duration(verdict.unverified)
+        ));
+    }
+    None
+}
+
+/// "1 h 5 min", "12 min", "40 s" — for a sentence a person reads, not for a log.
+fn rough_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    match seconds {
+        0..=90 => format!("{seconds} s"),
+        s if s < 3600 => format!("{} min", s / 60),
+        s if s % 3600 < 60 => format!("{} h", s / 3600),
+        s => format!("{} h {} min", s / 3600, (s % 3600) / 60),
+    }
 }
 
 impl Enforcer {
@@ -142,14 +230,22 @@ impl Enforcer {
             boots: Default::default(),
             boot_id: 0,
             boot_counter: Default::default(),
+            clock: None,
+            clock_verdict: None,
+            clock_notice: None,
             proofs: Default::default(),
             releases: BTreeSet::new(),
             released: BTreeMap::new(),
             device_id: None,
+            sync: crate::ipc::SyncState::default(),
             freeze: None,
             gates: Default::default(),
             watch: Default::default(),
             seen: None,
+            foreground_warning: None,
+            downtime: None,
+            started: false,
+            pairing: None,
             counter: 0,
         }
     }
@@ -163,6 +259,106 @@ impl Enforcer {
         self.boot_id = self.boot_counter.observe(uptime);
     }
 
+    /// **Record the window enforcement was down, once, on the first pass after a restart** — P1-8.
+    ///
+    /// Called before the first [`Enforcer::observe_clock`], with the `last_tick` the previous run
+    /// persisted. Two things make this the right place:
+    ///
+    /// - **`previous` is a trusted instant.** `Persisted::last_tick` is written from the clock witness,
+    ///   so the gap is measured against the same clock the locks are judged by — not against a wall
+    ///   clock somebody may have moved, which would make the reported window fiction.
+    /// - **The boot counter is restored but not yet observed.** `self.boot_counter` still holds the
+    ///   previous run's numbering, so observing the current uptime and seeing the number *change* is
+    ///   what distinguishes a machine that restarted from a service that was killed while the machine
+    ///   stayed up. That second case is the one nothing caught: uptime never goes backwards, so the
+    ///   clock layer sees nothing wrong, and `last_tick` was only used to charge elapsed time, clamped
+    ///   to one tick — so two unenforced hours were silently discarded.
+    ///
+    /// `previous` is now only read here as well as by the loop, which is why `run` still takes it: the
+    /// charging clamp is a different question from the accountability one, and this does not change it.
+    pub fn note_start(
+        &mut self,
+        previous: Option<Timestamp>,
+        now: Timestamp,
+        uptime: i64,
+    ) -> Option<crate::downtime::Downtime> {
+        if self.started {
+            return None;
+        }
+        self.started = true;
+        let before = self.boot_counter.boot_id();
+        self.observe_boot(uptime);
+        // **`before > 0` is required, and the direction of the guess matters.** A counter of zero means
+        // *no record of a previous boot*, not that the machine restarted. `BootCounter::observe` numbers
+        // the very first reading as boot 1, so treating `0 -> 1` as a restart would have every first-ever
+        // run claim the machine had been restarted — a statement about the world with no evidence behind
+        // it. Left false, the sentence says only that Curfew was not running, which is true either way,
+        // so the honest choice is the less specific one.
+        let rebooted = before > 0 && self.boot_counter.boot_id() > before;
+        self.downtime =
+            crate::downtime::Downtime::detect(previous, now, rebooted, self.sessions.running.len());
+        // Returned as well as stored, so the caller can write it to the log **once**. The stored copy
+        // stays until somebody dismisses it; this one is gone after the first pass.
+        self.downtime
+    }
+
+    /// Forget the notice, because somebody has read it. Android dismisses the same banner.
+    pub fn dismiss_downtime(&mut self) {
+        self.downtime = None;
+    }
+
+    /// Take a reading of both of the machine's clocks and return the instant locks are judged
+    /// against.
+    ///
+    /// This is the *only* place Windows enforcement time comes from. Reading `SystemTime` and using
+    /// it directly was the cheapest bypass there is: the clock is user-settable, so moving it
+    /// forward ended every timer lock, released every host entry, and emptied the domains the
+    /// resolver was holding — and it left no trace, because the ended session was written to history
+    /// as one that had genuinely run out. The core has had the answer to this since
+    /// `curfew_core::clock` was written; the Windows service simply never called it.
+    ///
+    /// Uptime is folded in first, so `boot_id` is current before the witness compares against it.
+    /// That ordering matters: a witness told about a boot after it has already seen a reading from
+    /// it would read the change as a reboot and credit the wall clock's whole delta as unverified.
+    ///
+    /// Called from the edge rather than from inside [`Enforcer::tick`], for the same reason
+    /// [`Enforcer::observe_boot`] is: a test can hand it two numbers instead of waiting for a clock
+    /// to move.
+    pub fn observe_clock(&mut self, wall: Timestamp, uptime: i64) -> Timestamp {
+        self.observe_boot(uptime);
+        let reading = Reading { wall, uptime, boot_id: self.boot_id };
+        let verdict = match self.clock.as_mut() {
+            Some(witness) => witness.observe(reading),
+            None => {
+                // Nothing to check a first reading against, so it is taken on faith and recorded as
+                // the baseline every later reading is measured from.
+                let witness = ClockWitness::new(reading);
+                let now = witness.now();
+                self.clock = Some(witness);
+                Verdict { now, refused_forward: 0, refused_backward: 0, unverified: 0 }
+            }
+        };
+        self.clock_verdict = Some(verdict);
+        if let Some(notice) = notice_for(verdict) {
+            self.clock_notice = Some(notice);
+        }
+        verdict.now
+    }
+
+    /// The trusted instant without taking a new reading, or `None` before the first one.
+    pub fn clock_now(&self) -> Option<Timestamp> {
+        self.clock.as_ref().map(ClockWitness::now)
+    }
+
+    /// What is worth saying out loud about the clock, if anything.
+    ///
+    /// Two different facts, and they deserve different words. Time refused is tampering that was
+    /// caught and undone. Time credited across a reboot is *not* proof of anything — an honest
+    /// overnight shutdown looks exactly like a stolen hour — so it is reported as a caveat rather
+    /// than an accusation.
+    pub fn clock_warning(&self) -> Option<String> {
+        self.clock_notice.clone()
+    }
     /// Everything this device can prove about a session's lock without being told.
     ///
     /// This is what separates a condition that is *checked* from one that is merely claimed. A
@@ -190,6 +386,26 @@ impl Enforcer {
                 })
             })
             .map(|s| s.id.clone())
+            .collect()
+    }
+
+    /// **What a surface may offer for each running session** — one answer, computed once (P1-6).
+    ///
+    /// The decision itself is [`curfew_core::LockSet::offers`]; this only supplies the two facts a
+    /// lock cannot know about itself. Which device a `PeerRelease` names is the service's business —
+    /// a UI has no way to work it out, which is why the window previously rendered no release
+    /// affordance at all for a lock this device *could* release, and none for the 24-hour exit either.
+    pub fn offers(&self) -> std::collections::BTreeMap<String, curfew_core::Offers> {
+        let releasable = self.releasable();
+        self.sessions
+            .running
+            .iter()
+            .map(|session| {
+                let id = session.id.clone();
+                let mine = releasable.contains(&id);
+                let given = self.releases.contains(&id);
+                (id, session.lock.offers(mine, given))
+            })
             .collect()
     }
 
@@ -294,11 +510,121 @@ impl Enforcer {
     /// session 0, where `GetForegroundWindow` returns nothing — and a service that never charged an
     /// app budget would enforce every limit except the ones about time. Asking the machine is the
     /// fallback for `curfew run` on a desktop, where there is no tray in between.
-    fn foreground(&self, now: Timestamp, processes: &impl Processes) -> Option<Process> {
+    ///
+    /// Returns whether the answer **came from the tray**, because the caller has to tell "nothing is in
+    /// front" from "nobody can tell us what is in front" — see [`Enforcer::foreground_warning`].
+    ///
+    /// **This used to return that as a second value, and the caller's check on it was dead code.** A
+    /// fresh report always carries a window, so `reported` was true only when the foreground was already
+    /// `Some`, and `foreground.is_some() || reported` could never differ from `foreground.is_some()`.
+    /// Mutation testing is what showed it: no mutation of that clause could fail a test, because no
+    /// input reaches it. Removed rather than kept, since a guard that cannot fire reads like one that
+    /// can — and this branch has already paid for four of those.
+    ///
+    /// The distinction it was reaching for does not exist here: in session 0 `processes.foreground()`
+    /// cannot answer at all, so a missing foreground *there* always means the report is missing.
+    pub fn foreground_now(&self, now: Timestamp, processes: &impl Processes) -> Option<Process> {
         match &self.seen {
             Some((process, at)) if (now - *at).abs() <= SEEN_SECONDS => Some(process.clone()),
             _ => processes.foreground(),
         }
+    }
+
+    /// Run a pairing step, or answer the sentence that says why there is none.
+    ///
+    /// One place rather than six copies of the same `match`, and the sentence is written once because it
+    /// is the same fact every time: this machine has no sync identity, so there is nothing to pair with.
+    /// The reason a Devices page needs it is that an empty page and a broken page look identical.
+    ///
+    /// **`Error` rather than `Refused`**, because nothing about a lock was the problem — the request could
+    /// not be answered at all, which is what `Response::Error` means on this channel.
+    fn pairing(
+        &self,
+        step: impl FnOnce(&dyn crate::pairing::Pairing) -> Result<Response, String>,
+    ) -> Response {
+        let Some(pairing) = self.pairing.as_ref() else {
+            return Response::Error {
+                detail: "This machine has no sync identity yet, so there is nothing to pair. Sync is set \
+                         up by the service at startup; if it failed, the reason is on the Is it working \
+                         page."
+                    .into(),
+            };
+        };
+        match step(pairing.as_ref()) {
+            Ok(response) => response,
+            Err(detail) => Response::Error { detail },
+        }
+    }
+
+    /// Whether any **running** session has a rule that needs the foreground window.
+    ///
+    /// The one predicate behind both halves of the P2-16 answer: [`Enforcer::foreground_warning`] uses
+    /// it to decide whether a broken foreground report is worth mentioning, and `Status` carries it so a
+    /// surface can warn *before* the report is lost. Written once for the same reason as everything else
+    /// on this branch — two copies of a predicate are two chances to disagree.
+    pub fn needs_foreground(&self) -> bool {
+        self.sessions.running.iter().any(|session| {
+            self.config
+                .profile(&session.profile)
+                .is_some_and(|p| p.rules.iter().any(|r| r.needs_foreground()))
+        })
+    }
+
+    /// **A sentence when a rule in force can no longer be decided** — P2-16.
+    ///
+    /// Hiding or quitting the tray takes the foreground report with it, because this process is in
+    /// session 0 and `GetForegroundWindow` there returns nothing. `Request::Seen` then goes stale,
+    /// `foreground()` falls back to a call that can only answer on a desktop, and every
+    /// foreground-dependent rule quietly stops being enforced while the session still runs: window-title
+    /// and keyword rules stop matching, and budgets stop being charged, so the app the user is
+    /// avoiding stops costing them anything.
+    ///
+    /// **The review's suggested fix — "move the watch into the service" — cannot be done**, and it is
+    /// worth stating why rather than leaving it as an unimplemented to-do. A service runs in session 0;
+    /// session 0 has its own window station and no interactive desktop, so the foreground window of the
+    /// user's session is not merely hard to read from there, it is not addressable at all. The only
+    /// process that can answer is one in the user's own session, which is the tray, and the tray is the
+    /// thing that is gone.
+    ///
+    /// So the gap is **closed as far as it can be and then reported**, which is this project's own rule:
+    /// *"a blocker that quietly fails to block is worse than one that admits it."* What can be fixed is
+    /// the silence. This returns the sentence when
+    ///
+    ///  - no foreground window is available, **and**
+    ///  - it did not come from the tray (so nothing is in front is not the same as nobody can say), and
+    ///  - a running session actually has a rule that needs it.
+    ///
+    /// The third clause matters: a machine running only exe and domain rules loses nothing when the tray
+    /// goes, and warning about enforcement that is still working would be crying wolf.
+    fn foreground_warning(&self, foreground: Option<&Process>) -> Option<String> {
+        if foreground.is_some() || !self.needs_foreground() {
+            return None;
+        }
+        let blind: Vec<String> = self
+            .sessions
+            .running
+            .iter()
+            .filter(|session| {
+                self.config
+                    .profile(&session.profile)
+                    .is_some_and(|p| p.rules.iter().any(|r| r.needs_foreground()))
+            })
+            .map(|session| {
+                // The name the user gave the profile, falling back to the id when a rule names a
+                // profile that is no longer in the config — the sentence is still worth printing.
+                self.config
+                    .profile(&session.profile)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| session.profile.clone())
+            })
+            .collect();
+        Some(format!(
+            "Nothing is telling Curfew which window is in front, so window-title and keyword rules and \
+             app budgets are not being enforced for {}. That report comes from the tray, and quitting or \
+             hiding it is what stopped it — the service runs as a background account with no desktop, so \
+             it cannot see the screen for itself. Start the tray again to resume.",
+            blind.join(", ")
+        ))
     }
 
     /// Run one pass.
@@ -313,7 +639,8 @@ impl Enforcer {
         events: &[CalendarEvent],
         processes: &impl Processes,
     ) -> Tick {
-        let foreground = self.foreground(now, processes);
+        let foreground = self.foreground_now(now, processes);
+        self.foreground_warning = self.foreground_warning(foreground.as_ref());
         self.accrue(now, elapsed, foreground);
 
         let mut tick = Tick { froze: self.settle_freeze(now), ..Default::default() };
@@ -389,12 +716,27 @@ impl Enforcer {
                 unwatched: self.last.processes.unwatched.clone(),
                 delayed: self.last.processes.delayed.clone(),
                 freeze: self.freeze.clone(),
+                // Rebuilt from the config on every status rather than cached: a profile renamed by an
+                // edit is a name the very next status should already be using, and this is a handful
+                // of short strings once a second.
+                profile_names: self
+                    .config
+                    .profiles
+                    .iter()
+                    .map(|p| (p.id.clone(), p.name.clone()))
+                    .collect(),
                 hosts_error: self.last.hosts_error.clone(),
                 state_warning: self.state_warning.clone(),
+                clock_warning: self.clock_warning(),
+                foreground_warning: self.foreground_warning.clone(),
+                needs_foreground: self.needs_foreground(),
+                downtime: self.downtime,
                 passes_left: self.passes.remaining(now, &self.config.emergency),
                 pass_refusal: self.passes.check(now, &self.config.emergency).err(),
                 releasable: self.releasable(),
                 released: self.releases.iter().cloned().collect(),
+                offers: self.offers(),
+                sync: self.sync.clone(),
             })),
 
             Request::Start { profile, seconds, locks } => {
@@ -576,6 +918,53 @@ impl Enforcer {
                 Err(refusal) => Response::Refused { refusal },
             },
 
+            // Somebody has read the notice, so it goes. Nothing else happens: this is a display
+            // acknowledgement, which is why it touches no lock and writes no history.
+            Request::DismissDowntime => {
+                self.dismiss_downtime();
+                Response::Ok
+            }
+
+            // --- pairing (F-18) ------------------------------------------------------------------
+            //
+            // Four steps, and none of them decides anything: the engine in `curfew-sync` holds the
+            // protocol and the phrase, and this is the surface. A machine with no pairing says so in a
+            // sentence rather than answering with an error code, because a Devices page that cannot
+            // explain why it is empty is the failure the finding is about.
+            Request::Peers => self.pairing(|pairing| {
+                let json = pairing.peers_json()?;
+                Ok(Response::Pairing { json })
+            }),
+
+            Request::Invite => self.pairing(|pairing| {
+                let json = pairing.invite_json(now)?;
+                Ok(Response::Pairing { json })
+            }),
+
+            Request::Phrase { invite } => self.pairing(|pairing| {
+                let phrase = pairing.phrase_for(&invite)?;
+                Ok(Response::Pairing { json: phrase })
+            }),
+
+            Request::Reply { invite } => self.pairing(|pairing| {
+                let json = pairing.reply_to(&invite)?;
+                Ok(Response::Pairing { json })
+            }),
+
+            // **Accepted without checking the phrase, deliberately.** The two people reading the six
+            // digits are the check; a service that verified it for them would remove the one thing a
+            // machine in the middle cannot forge. The page is responsible for asking first, and
+            // `Request::Accept`'s doc comment says so.
+            Request::Accept { invite } => self.pairing(|pairing| {
+                pairing.accept_invite(&invite, now)?;
+                Ok(Response::Paired)
+            }),
+
+            Request::Revoke { device } => self.pairing(|pairing| {
+                pairing.revoke(&device, now)?;
+                Ok(Response::Paired)
+            }),
+
             // Recorded and nothing else. A heartbeat is not a request to change anything, which is
             // why it is safe for it to be unauthenticated on a local pipe.
             Request::Beat { browser, url } => {
@@ -608,13 +997,31 @@ impl Enforcer {
                 match curfew_core::decide(now, &state, &obs, &self.config) {
                     curfew_core::Decision::Block { reason } => Response::Verdict {
                         blocked: true,
-                        reason: Some(crate::extension::explain(&reason)),
+                        // Names resolved from this machine's config, so the block page says
+                        // "Deep work" rather than the slug `deep-work`.
+                        reason: Some(crate::extension::explain_named(&reason, &|id| {
+                            self.config
+                                .profiles
+                                .iter()
+                                .find(|p| p.id == id)
+                                .map(|p| p.name.clone())
+                                .unwrap_or_else(|| id.to_string())
+                        })),
                     },
                     // A delay or a mute has no meaning for a page load, and blocking on a decision
                     // the engine did not make is the bug that gets a blocker uninstalled.
                     _ => Response::Verdict { blocked: false, reason: None },
                 }
             }
+
+            // Answered from memory, not by reading the state file: the service owns the history, and
+            // the window asking its own copy would be a second reader of the same file. `self.stats`
+            // includes running sessions counted up to `now`, so the day the user is in the middle of
+            // blocking shows as blocked.
+            Request::Stats { days } => match self.stats(now, days) {
+                Ok(stats) => Response::Stats(Box::new(stats)),
+                Err(detail) => Response::Error { detail },
+            },
 
             Request::Reload => match &self.config_path {
                 None => Response::Error { detail: "no config path is configured".into() },
@@ -626,6 +1033,49 @@ impl Enforcer {
                     // they are: an unparseable file must not be a way out either.
                     Err(detail) => Response::Error { detail },
                     Ok(config) => {
+                        // **A reload may not weaken a running session** — P1-13.
+                        //
+                        // `Engine::decide` reads the rules from the live config on every pass, so
+                        // adopting a config that has dropped a rule stops enforcing it immediately
+                        // while the session and its lock carry on. The surface would say a lock is
+                        // running and the machine would be blocking nothing, which is the worst state
+                        // this product can be in — and the review names the reachable path:
+                        // `curfew unblock` removes enforcement while every screen still reports a
+                        // healthy lock.
+                        //
+                        // This is the "refuse config edits that weaken a running one" half of the
+                        // review's remediation, and the half that does not require every session to
+                        // carry its own copy of the rules.
+                        //
+                        // The file itself is untouched: the user's edit stands and the service simply
+                        // does not adopt it while anything is running. Refusing the *adoption* rather
+                        // than the *edit* also means an administrator editing the file directly gets
+                        // the same protection, which a check inside `curfew` would not have given them.
+                        // **The decision is the core's, not this loop's** — P1-13. Windows grew this
+                        // inline and Android had none at all; the shared version lives beside
+                        // `rules_weakened_by` so the two platforms cannot come to disagree about a
+                        // security check.
+                        let names: std::collections::BTreeMap<String, String> = self
+                            .config
+                            .profiles
+                            .iter()
+                            .map(|p| (p.id.clone(), p.name.clone()))
+                            .collect();
+                        let lost = self.config.weakening_a_running_session(
+                            &config,
+                            &self.sessions.running,
+                            &names,
+                        );
+                        if !lost.is_empty() {
+                            return Response::Error {
+                                detail: format!(
+                                    "not adopting this config while a session is running, because it \
+                                     would enforce less than the session promised: {}. Nothing was \
+                                     changed on disk, and the lock ends on its own.",
+                                    lost.join("; "),
+                                ),
+                            };
+                        }
                         self.config = config;
                         // A delay the user has just rewritten should not be governed by a countdown
                         // started under the old rule.

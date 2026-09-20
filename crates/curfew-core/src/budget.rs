@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// When a budget starts over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum Refill {
     /// One allowance, ever. Spend it and it is gone until the rule changes.
     Never,
@@ -111,25 +111,25 @@ fn clamp_day(year: i32, month: u32, day: u8) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, 1).expect("every month has a first")
 }
 
-/// The UTC instant of `at_minute` minutes after local midnight on `date`, resolving DST folds.
+/// The UTC instant of `at_minute` minutes after local midnight on `date`.
+///
+/// **This delegates to [`crate::schedule::local_instant`] rather than keeping its own copy** — P2-8's
+/// fourth point. The two disagreed about `1440`: this one clamped to 23:59 and the schedule's rolled to
+/// the next day at 00:00, so a refill at "24:00" and a window ending at "24:00" were a minute apart. Both
+/// are reachable from a user config, because `at_minute` is a plain `u32` with no validation.
+///
+/// The fallback for a minute that exists nowhere is kept here rather than pushed into the shared
+/// function: a refill that cannot be placed has to land *somewhere* or the allowance never resets, and
+/// the schedule's `None` is a caller's answer, not this one's.
 fn local_instant(date: NaiveDate, at_minute: u32, tz: Tz) -> Timestamp {
+    if let Some(at) = crate::schedule::local_instant(date, at_minute, tz) {
+        return at;
+    }
+    // No timezone on earth skips three hours; fall back to treating it as UTC rather than panic.
     let at_minute = at_minute.min(24 * 60 - 1);
     let naive = date
         .and_hms_opt(at_minute / 60, at_minute % 60, 0)
         .expect("at_minute is clamped into a valid time");
-
-    // Ambiguous (clock went back): take the earlier of the two. Nonexistent (clock jumped
-    // forward): step forward a minute at a time until the wall clock exists again.
-    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
-        return dt.timestamp();
-    }
-    for extra in 1..=180 {
-        let candidate = naive + Duration::minutes(extra);
-        if let Some(dt) = tz.from_local_datetime(&candidate).earliest() {
-            return dt.timestamp();
-        }
-    }
-    // No timezone on earth skips three hours; fall back to treating it as UTC rather than panic.
     naive.and_utc().timestamp()
 }
 
@@ -188,5 +188,41 @@ impl Launches {
 
     pub fn prune(&mut self, before: Timestamp) {
         self.at.retain(|t| *t >= before);
+    }
+}
+
+#[cfg(test)]
+mod local_instant_tests {
+    use super::*;
+    use chrono_tz::UTC;
+
+    /// **The budget's own helper agrees with the schedule about `1440`** — P2-8's fourth point.
+    ///
+    /// It used to clamp to `24 * 60 - 1`, so a refill at "24:00" happened a minute before a window ending
+    /// at "24:00" did. This calls the private helper directly, which is the only way to see the
+    /// delegation: from an integration test the two would look identical, which is the point.
+    #[test]
+    fn minute_1440_is_the_next_day_at_midnight() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let next = NaiveDate::from_ymd_opt(2026, 5, 21).unwrap();
+
+        assert_eq!(
+            local_instant(day, 1440, UTC),
+            local_instant(next, 0, UTC),
+            "the budget disagrees with the schedule about what 24:00 means"
+        );
+        assert_ne!(
+            local_instant(day, 1440, UTC),
+            local_instant(day, 23 * 60 + 59, UTC),
+            "1440 was clamped to 23:59, which is the divergence this fixes"
+        );
+    }
+
+    /// And an ordinary minute is unaffected, which is the case that must not regress.
+    #[test]
+    fn an_ordinary_minute_is_unchanged() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 20).unwrap();
+        let at = local_instant(day, 4 * 60, UTC);
+        assert_eq!(at, day.and_hms_opt(4, 0, 0).unwrap().and_utc().timestamp());
     }
 }

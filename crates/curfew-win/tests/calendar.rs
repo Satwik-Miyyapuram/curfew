@@ -5,7 +5,9 @@
 //! refresh intervals, id namespacing, size limits — exists in service of that.
 
 use curfew_core::{CalendarSource, Timestamp};
-use curfew_win::calendar::{as_http, is_url, Feeds, LocalFiles, Outcome, MAX_BYTES};
+use curfew_win::calendar::{
+    as_http, is_url, Feeds, LocalFiles, Outcome, MAX_BYTES, RETRY_BASE_SECONDS,
+};
 use std::cell::RefCell;
 
 const UTC: chrono_tz::Tz = chrono_tz::UTC;
@@ -350,4 +352,218 @@ fn asking_for_less_than_enforcement_needs_does_not_narrow_the_window() {
         feeds.events_ahead(NOW, 3_600, &[source("work", "https://cal/x.ics", 3600)], UTC, &fetcher);
 
     assert_eq!(1, events.len(), "{events:?}");
+}
+
+// --- a failing source is not hammered (P1-11) ----------------------------------------------------
+//
+// A failed fetch did not update `cached.at`, so `due` stayed true and the source was retried on the
+// *next tick* — every two seconds, against a twenty-second timeout. A subscription pointing at a host
+// that black-holes packets therefore spent most of every minute inside a fetch, and each attempt held
+// the enforcer lock. Backing off is the half of that fix which lives here.
+
+/// The whole point: one failure does not mean "try again immediately".
+#[test]
+fn a_source_that_failed_is_not_retried_on_the_next_pass() {
+    let feeds_dir = dir("backoff");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let fetcher = Scripted::always(Err("connection refused".into()));
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let (_, outcomes) = feeds.events(NOW, &sources, UTC, &fetcher);
+    assert!(matches!(outcomes[0], Outcome::Failed { .. }), "the first attempt should fail");
+    assert_eq!(fetcher.calls(), 1);
+
+    // The next tick, two seconds later — which used to be another fetch.
+    feeds.events(NOW + 2, &sources, UTC, &fetcher);
+    assert_eq!(fetcher.calls(), 1, "a failing source was fetched again on the very next tick");
+
+    // Still backing off well before the first window has elapsed.
+    feeds.events(NOW + 20, &sources, UTC, &fetcher);
+    assert_eq!(fetcher.calls(), 1, "the backoff was ignored");
+
+    // And it is retried once the wait is over, because a calendar that comes back must be picked up.
+    feeds.events(NOW + RETRY_BASE_SECONDS + 1, &sources, UTC, &fetcher);
+    assert_eq!(fetcher.calls(), 2, "the source was never retried");
+}
+
+/// A long outage climbs to the ceiling rather than the wait growing without bound.
+#[test]
+fn repeated_failures_back_off_towards_the_ceiling() {
+    let feeds_dir = dir("backoff-ceiling");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let fetcher = Scripted::always(Err("down".into()));
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    // Every two seconds for twenty minutes, which is what the tick actually does.
+    let mut at = NOW;
+    for _ in 0..600 {
+        feeds.events(at, &sources, UTC, &fetcher);
+        at += 2;
+    }
+
+    // Without a backoff this would be 600. With one it is the sum of the growing windows.
+    assert!(
+        fetcher.calls() <= 10,
+        "a dead source was attempted {} times in twenty minutes",
+        fetcher.calls()
+    );
+    // And it is still being retried at all, so a calendar that comes back is noticed.
+    assert!(fetcher.calls() >= 3, "the source stopped being retried entirely");
+}
+
+/// A source that starts working again resets to the short wait, so a flapping host recovers quickly.
+#[test]
+fn a_successful_fetch_clears_the_backoff() {
+    let feeds_dir = dir("backoff-cleared");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let broken = Scripted::always(Err("down".into()));
+    feeds.events(NOW, &sources, UTC, &broken);
+    assert_eq!(broken.calls(), 1, "the first attempt should fail");
+
+    // It works again, at the base window.
+    let working = Scripted::always(Ok(meeting()));
+    feeds.events(NOW + RETRY_BASE_SECONDS + 1, &sources, UTC, &working);
+    assert_eq!(working.calls(), 1, "the source was never retried after the base window");
+
+    // **Now fail again, and the wait must be the base window rather than the next doubling.** This is
+    // what clearing the failure count buys, and the first version of this test did not check it: it
+    // only asserted the successful pass reported no failure, which is true whether or not the count
+    // was reset. A source that flaps — one bad minute every hour — would otherwise climb to the
+    // ten-minute ceiling and stay there, so a calendar that is up almost all the time would be read
+    // as though it were down.
+    let broken_again = Scripted::always(Err("down again".into()));
+    feeds.events(NOW + RETRY_BASE_SECONDS + 2, &sources, UTC, &broken_again);
+    assert_eq!(broken_again.calls(), 1);
+
+    // One base window later it is due again. With the count not cleared this would be a 60-second
+    // wait and this pass would skip it.
+    feeds.events(NOW + 2 * RETRY_BASE_SECONDS + 3, &sources, UTC, &broken_again);
+    assert_eq!(
+        broken_again.calls(),
+        2,
+        "the failure count was not cleared by the success, so the wait doubled"
+    );
+}
+
+/// The block survives throughout: a failing fetch must never release what the calendar was driving.
+#[test]
+fn a_failing_source_keeps_serving_its_last_good_copy() {
+    let feeds_dir = dir("keeps-serving");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let good = Scripted::always(Ok(meeting()));
+    let (events, _) = feeds.events(NOW, &sources, UTC, &good);
+    assert_eq!(events.len(), 1, "the meeting should have been read");
+
+    let broken = Scripted::always(Err("offline".into()));
+    let (events, outcomes) = feeds.events(NOW + 10, &sources, UTC, &broken);
+
+    assert_eq!(events.len(), 1, "the cached meeting was dropped during an outage");
+    assert!(
+        matches!(outcomes[0], Outcome::Failed { still_serving: true, .. }),
+        "the failure should say the last good copy is still in force: {:?}",
+        outcomes[0]
+    );
+}
+
+// --- a placeholder is not an authoritative calendar (P2-9) ---------------------------------------
+//
+// `events_between` answers "is this a calendar?" from a single `BEGIN:VCALENDAR`. A provider's
+// auth-expiry page and a truncated export both carry that header and hold no events, so treating any
+// successful parse as authoritative let one overwrite the last good copy — and every calendar-driven
+// block ended with it. That is fail-open on exactly the threat this module was written around, and the
+// module docs state the opposite guarantee.
+
+/// A calendar with one event, then a placeholder: the cache must win.
+#[test]
+fn a_placeholder_does_not_replace_the_last_good_copy() {
+    let feeds_dir = dir("placeholder");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let good = Scripted::always(Ok(meeting()));
+    let (events, _) = feeds.events(NOW, &sources, UTC, &good);
+    assert_eq!(events.len(), 1, "the meeting should have been read");
+
+    // What an expired session or a half-finished download looks like: a valid calendar, no events.
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    let placeholder = Scripted::always(Ok(empty));
+    let (events, outcomes) = feeds.events(NOW + 10, &sources, UTC, &placeholder);
+
+    assert_eq!(events.len(), 1, "the block was released by a calendar with nothing in it");
+    match &outcomes[0] {
+        Outcome::Failed { still_serving, detail, .. } => {
+            assert!(*still_serving, "the failure should say the last good copy is serving");
+            assert!(detail.contains("no events"), "the reason should say what it saw: {detail}");
+        }
+        other => panic!("a placeholder was treated as a good calendar: {other:?}"),
+    }
+}
+
+/// And the on-disk copy is not overwritten either, so a restart during a placeholder outage still
+/// blocks — which is the whole reason the cache is written to disk.
+#[test]
+fn a_placeholder_does_not_overwrite_the_cached_file() {
+    let feeds_dir = dir("placeholder-disk");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    feeds.events(NOW, &sources, UTC, &Scripted::always(Ok(meeting())));
+    let cached = feeds_dir.join("work.ics");
+    let before = std::fs::read_to_string(&cached).expect("the good copy should be on disk");
+    assert!(before.contains("Design review"));
+
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    feeds.events(NOW + 10, &sources, UTC, &Scripted::always(Ok(empty)));
+
+    assert_eq!(
+        std::fs::read_to_string(&cached).unwrap(),
+        before,
+        "the placeholder was written over the cached copy, so a restart would lose the block"
+    );
+
+    // And a fresh `Feeds` restored from that directory still serves the meeting.
+    let mut restarted = Feeds::new(&feeds_dir);
+    restarted.restore(&sources);
+    let (events, _) =
+        restarted.events(NOW + 20, &sources, UTC, &Scripted::always(Err("offline".into())));
+    assert_eq!(events.len(), 1, "the block was lost across a restart during the outage");
+}
+
+/// **The deliberate false positive**, kept because the alternative is worse: a genuinely emptied
+/// calendar keeps serving the old copy once one exists. The user finds out from the failure line, and
+/// the honest way to empty a subscription is to remove it.
+#[test]
+fn an_empty_calendar_is_believed_when_there_is_nothing_to_lose() {
+    let feeds_dir = dir("empty-first");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    let (events, outcomes) = feeds.events(NOW, &sources, UTC, &Scripted::always(Ok(empty)));
+
+    assert!(events.is_empty());
+    // No cached copy, so nothing was lost: this is a fresh subscription to an empty calendar, which is
+    // a legitimate thing to have, and reporting a failure for it would be a false alarm on first run.
+    assert!(
+        matches!(outcomes[0], Outcome::Refreshed { .. }),
+        "a first-ever empty calendar was reported as a failure: {:?}",
+        outcomes[0]
+    );
+}
+
+/// Something that is not a calendar at all is still a failure, unchanged.
+#[test]
+fn text_that_is_not_a_calendar_is_still_a_failure() {
+    let feeds_dir = dir("not-a-calendar");
+    let mut feeds = Feeds::new(&feeds_dir);
+    let sources = vec![source("work", "https://example.test/work.ics", 1)];
+
+    let (_, outcomes) =
+        feeds.events(NOW, &sources, UTC, &Scripted::always(Ok("<html>Sign in</html>".into())));
+
+    assert!(matches!(outcomes[0], Outcome::Failed { .. }), "{:?}", outcomes[0]);
 }

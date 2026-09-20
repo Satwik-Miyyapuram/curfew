@@ -17,10 +17,17 @@
 
 mod menu;
 mod overlay;
-mod prompt;
 #[cfg(windows)]
 mod shell;
 mod welcome;
+
+// The credential prompt lives in `curfew-win` now, because the window needs it too.
+//
+// It used to be here, and the window drew a password box of its own in HTML — the bigger, more
+// prominent surface breaking the rule the smaller one documents. A module that only one of the two
+// callers can reach is how that happens; `curfew-app` already depends on `curfew-win`, so the prompt
+// moves to where both can use it.
+use curfew_win::prompt;
 
 use curfew_win::ipc::{self, Request, Response};
 
@@ -77,11 +84,18 @@ pub fn unreachable_service(kind: std::io::ErrorKind, detail: &str) -> String {
 /// item can quietly acquire a second meaning.
 pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<(Request, String)> {
     match item {
-        menu::Item::End { id, .. } => Some((
-            // No claim of a satisfied condition, ever, from a process running as the user.
-            Request::End { id: id.clone(), satisfied: Default::default() },
-            String::new(),
-        )),
+        menu::Item::End { id, confirm, .. } => {
+            // A confirmation is the one condition a caller may claim, and the shell has already
+            // shown the Yes/No by the time this runs — the claim is the record of that dialog, not
+            // an assertion about the machine. Everything machine-checkable still comes from the
+            // service's own `proven`, which is why an empty set is the right answer for every other
+            // lock: a process running as the user must never be able to say "I did the reboot".
+            let satisfied = match confirm {
+                true => std::collections::BTreeSet::from([curfew_core::Lock::Confirm]),
+                false => Default::default(),
+            };
+            Some((Request::End { id: id.clone(), satisfied }, String::new()))
+        }
         menu::Item::Unlock { id, .. } => {
             let credential = credential?;
             Some((
@@ -114,6 +128,19 @@ pub fn act(item: &menu::Item, credential: Option<prompt::Credential>) -> Option<
 pub fn describe(response: &Response) -> String {
     match response {
         Response::Ok => String::new(),
+        // Nothing on this menu asks for pairing, so both are unreachable in practice — and given a
+        // sentence rather than wildcarded for the reason below. The JSON is not shown: this is a dialog,
+        // and a wall of invite text is not a sentence.
+        Response::Pairing { .. } => String::new(),
+        Response::Paired => "Paired.".to_string(),
+        // Nothing on this menu asks for the figures, so this is unreachable in practice — but the
+        // match is exhaustive rather than wildcarded on purpose: that is why every other variant in
+        // this enum has a sentence, and a catch-all would let the next one arrive silently.
+        Response::Stats(stats) => format!(
+            "{} session(s) in the last {} day(s); `curfew stats` has the breakdown.",
+            stats.total_sessions,
+            stats.days.len(),
+        ),
         Response::Release { at } => format!(
             "The release has started. It lands at {}, and cannot be brought forward.",
             menu::when(*at)
@@ -200,12 +227,33 @@ mod tests {
 
     #[test]
     fn ending_from_the_tray_claims_nothing() {
-        let item = menu::Item::End { id: "s1".into(), label: "End".into() };
+        let item = menu::Item::End { id: "s1".into(), confirm: false, label: "End".into() };
         let (request, _) = act(&item, None).unwrap();
         match request {
             // The service re-checks everything anyway, but a tray that sent a claim would mean the
             // check depended on a process running as the user.
             Request::End { satisfied, .. } => assert!(satisfied.is_empty()),
+            other => panic!("ending sent {other:?}"),
+        }
+    }
+
+    /// The one exception, and it is narrow on purpose.
+    ///
+    /// `Lock::Confirm` is a condition no machine can check — the whole point of it is that a dialog
+    /// was shown — so the process that showed the dialog is the only possible witness. The shell
+    /// shows a Yes/No before reaching here, so this records a dialog rather than asserting a fact.
+    /// It must stay the *only* claim: a `Timer` or a `RestartRequired` in this set would be a way out
+    /// of every lock on the machine.
+    #[test]
+    fn confirming_from_the_tray_claims_the_confirmation_and_nothing_else() {
+        let item = menu::Item::End { id: "s1".into(), confirm: true, label: "End".into() };
+        let (request, _) = act(&item, None).unwrap();
+        match request {
+            Request::End { satisfied, .. } => assert_eq!(
+                satisfied,
+                std::collections::BTreeSet::from([curfew_core::Lock::Confirm]),
+                "a confirmation lock sent the wrong claim"
+            ),
             other => panic!("ending sent {other:?}"),
         }
     }

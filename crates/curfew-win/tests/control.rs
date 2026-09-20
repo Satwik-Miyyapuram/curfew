@@ -6,7 +6,7 @@
 use curfew_core::{Config, Lock, Refusal, Session, SessionSource, Sessions};
 use curfew_win::ipc::{encode, parse_request, Request, Response};
 use curfew_win::procs::{Process, Processes};
-use curfew_win::state::{load, save, Loaded, Persisted};
+use curfew_win::state::{load, save, witness_of, Loaded, Persisted};
 use curfew_win::Enforcer;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -200,6 +200,90 @@ fn requests_and_responses_round_trip_as_one_line_each() {
     let encoded = encode(&Response::Ok);
     assert!(encoded.ends_with('\n'));
     assert_eq!(encoded.matches('\n').count(), 1);
+}
+
+/// The exact bytes the Curfew window sends when someone presses "Start a block".
+///
+/// A contract test rather than a round trip: the test above proves the *enum* is symmetric with
+/// itself, which stays true if `seconds` is renamed to `duration`. This pins the literal JSON the
+/// page builds — the same shapes readable in `crates/curfew-app/ui/app.html` — against the enum that
+/// has to accept it. Renaming a field in Rust is a compile error; renaming it only in the page is a
+/// button that silently does nothing, and this is what catches that.
+#[test]
+fn the_windows_page_can_start_a_block_over_the_wire() {
+    // One case per strength the page offers, including the no-lock one — the case a first-run user is
+    // most likely to send, and the one where an empty `locks` array has to be accepted rather than
+    // rejected for being empty.
+    let cases = [
+        (r#"{"request":"start","profile":"deep-work","seconds":5400,"locks":[]}"#, None),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":5400,"locks":[{"kind":"confirm"}]}"#,
+            Some(Lock::Confirm),
+        ),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":1500,"locks":[{"kind":"device_credential"}]}"#,
+            Some(Lock::DeviceCredential),
+        ),
+        (
+            r#"{"request":"start","profile":"deep-work","seconds":10800,"locks":[{"kind":"timer"}]}"#,
+            Some(Lock::Timer),
+        ),
+    ];
+
+    for (line, expected_lock) in cases {
+        match parse_request(line)
+            .unwrap_or_else(|e| panic!("the page's own request was refused: {e}"))
+        {
+            Request::Start { profile, seconds, locks } => {
+                assert_eq!(profile, "deep-work");
+                assert!(seconds > 0, "a block with no length in {line}");
+                match expected_lock {
+                    Some(lock) => assert_eq!(locks, vec![lock], "wrong lock from {line}"),
+                    None => {
+                        assert!(locks.is_empty(), "an unlocked block carried a condition: {line}")
+                    }
+                }
+            }
+            other => panic!("the start request parsed as {other:?}"),
+        }
+    }
+}
+
+/// The rest of the requests the Curfew window sends, in the page's own JSON.
+///
+/// Cancelling a freeze is the one that matters most here: the window used to *mention* a freeze and
+/// offer no way out of it, so the button is the whole fix and this pins that the service accepts what
+/// it sends. `cancel_freeze` is also a request with no fields at all, which is the shape most easily
+/// broken by a serde rename and least easily noticed — a button that silently does nothing.
+#[test]
+fn the_windows_page_can_ask_for_everything_else_over_the_wire() {
+    // (the page's literal JSON, what it must parse to)
+    let cases: Vec<(&str, Request)> = vec![
+        (r#"{"request":"cancel_freeze"}"#, Request::CancelFreeze),
+        (r#"{"request":"confirm_freeze"}"#, Request::ConfirmFreeze),
+        (r#"{"request":"reload"}"#, Request::Reload),
+        (r#"{"request":"status"}"#, Request::Status),
+        (
+            r#"{"request":"end","id":"s1","satisfied":[]}"#,
+            Request::End { id: "s1".into(), satisfied: BTreeSet::new() },
+        ),
+        (r#"{"request":"release","id":"s1"}"#, Request::Release { id: "s1".into() }),
+        (r#"{"request":"request_release","id":"s1"}"#, Request::RequestRelease { id: "s1".into() }),
+        (r#"{"request":"emergency","id":"s1"}"#, Request::Emergency { id: "s1".into() }),
+        (
+            r#"{"request":"start","profile":"p","seconds":60,"locks":[]}"#,
+            Request::Start { profile: "p".into(), seconds: 60, locks: vec![] },
+        ),
+    ];
+
+    for (line, expected) in cases {
+        assert_eq!(
+            parse_request(line)
+                .unwrap_or_else(|e| panic!("the page's own request was refused: {e}")),
+            expected,
+            "the page's {line} no longer means what it used to"
+        );
+    }
 }
 
 // --- the state file -----------------------------------------------------------------------------
@@ -503,7 +587,20 @@ fn the_service_answers_a_url_check_and_says_which_rule_did_it() {
     match answer {
         Response::Verdict { blocked, reason } => {
             assert!(blocked);
-            assert!(reason.unwrap().contains("deep-work"));
+            let reason = reason.expect("a blocked verdict must say why");
+            // The *name*, not the id. This assertion used to require `deep-work` — the slug from the
+            // config — which made the test a guard on the bug rather than on the behaviour: the page
+            // shown inside a browser said "Blocked by your deep-work profile." while the tray and the
+            // phone both said "Deep work". `URL_CONFIG` gives the profile `id = "deep-work"` and
+            // `name = "Deep work"` precisely so the two cannot be confused.
+            assert!(
+                reason.contains("Deep work"),
+                "the block page did not use the profile's name: {reason}"
+            );
+            assert!(
+                !reason.contains("deep-work"),
+                "the block page leaked the profile's id: {reason}"
+            );
         }
         other => panic!("expected a verdict, got {other:?}"),
     }
@@ -742,6 +839,7 @@ fn passes_survive_a_restart_the_way_sessions_do() {
             passes: e.passes.clone(),
             boots: e.boots.clone(),
             boot_counter: e.boot_counter.clone(),
+            clock: e.clock.clone(),
             releases: e.releases.clone(),
             history: Vec::new(),
             last_tick: Some(NOW),
@@ -935,6 +1033,7 @@ fn restart_evidence_survives_the_service_being_restarted() {
             passes: Default::default(),
             boots: e.boots.clone(),
             boot_counter: e.boot_counter.clone(),
+            clock: e.clock.clone(),
             releases: e.releases.clone(),
             history: Vec::new(),
             last_tick: Some(NOW),
@@ -1018,4 +1117,159 @@ fn a_release_for_a_session_this_device_has_never_heard_of_is_still_recorded() {
 
     assert_eq!(e.handle(NOW, Request::Release { id: "elsewhere".into() }), Response::Ok);
     assert!(e.releases.contains("elsewhere"));
+}
+
+// --- a reload may not weaken a running session (P1-13) ------------------------------------------
+//
+// `Engine::decide` reads the rules from the live config on every pass, so adopting a config that has
+// dropped a rule stops enforcing it immediately while the session and its lock carry on. The surface
+// would say a lock is running and the machine would be blocking nothing. The review names the
+// reachable path: `curfew unblock` removes enforcement while every screen reports a healthy lock.
+//
+// The check refuses the *adoption*, not the edit, so an administrator changing the file directly gets
+// the same protection as someone using the CLI.
+
+/// A config with a profile, and a rule the caller controls.
+fn config_with_rule(id: &str, name: &str, rule: &str) -> String {
+    format!(
+        "schema_version = 1\ntimezone = \"Europe/London\"\n\n[[profiles]]\nid = \"{id}\"\nname = \"{name}\"\n\n{rule}\n"
+    )
+}
+
+const REDDIT: &str =
+    "[[profiles.rules]]\ntarget = { kind = \"domain\", domain = \"reddit.com\" }\naction = { kind = \"block\" }";
+
+/// A whole profile gone is the largest weakening there is.
+#[test]
+fn a_reload_that_removes_a_running_sessions_rule_is_refused() {
+    let mut e = enforcer("reload-drops-rule");
+    let path = dir("reload-drops-rule").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    // The same profile, with the rule removed — `curfew unblock reddit.com`, in effect.
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", "")).unwrap();
+    let response = e.handle(NOW, Request::Reload);
+
+    let Response::Error { detail } = response else {
+        panic!("a weakening reload was adopted: {response:?}")
+    };
+    assert!(detail.contains("reddit.com"), "the refusal should name what would be lost: {detail}");
+    assert!(
+        detail.contains("Deep work"),
+        "the refusal should name the profile the user knows: {detail}"
+    );
+    assert!(e.config.profiles[0].rules.len() == 1, "the running config was replaced anyway");
+    assert_eq!(e.sessions.running.len(), 1, "the session was ended by a reload");
+}
+
+/// An **action** change is a weakening too: a budget cut from an hour to a minute keeps the target.
+#[test]
+fn a_reload_that_weakens_a_running_sessions_action_is_refused() {
+    let mut e = enforcer("reload-weakens-action");
+    let path = dir("reload-weakens-action").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    let budget = "[[profiles.rules]]\ntarget = { kind = \"domain\", domain = \"reddit.com\" }\n\
+                  action = { kind = \"budget\", seconds = 60 }";
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", budget)).unwrap();
+
+    assert!(
+        matches!(e.handle(NOW, Request::Reload), Response::Error { .. }),
+        "a changed action was adopted"
+    );
+}
+
+/// And the legitimate direction still works: a reload that adds a rule is adopted.
+#[test]
+fn a_reload_that_only_adds_a_rule_is_adopted() {
+    let mut e = enforcer("reload-adds-rule");
+    let path = dir("reload-adds-rule").join("curfew.toml");
+    e.config_path = Some(path.clone());
+    e.handle(NOW, Request::Start { profile: "deep-work".into(), seconds: 3600, locks: vec![] });
+    e.tick(NOW, 0, &[], &Empty);
+
+    let extra = format!(
+        "{REDDIT}\n\n[[profiles.rules]]\ntarget = {{ kind = \"domain\", domain = \"youtube.com\" }}\n\
+         action = {{ kind = \"block\" }}"
+    );
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", &extra)).unwrap();
+
+    assert_eq!(e.handle(NOW, Request::Reload), Response::Ok, "a strengthening reload was refused");
+    assert_eq!(e.config.profiles[0].rules.len(), 2);
+}
+
+/// With nothing running, a weakening reload is nobody's business and must go through — otherwise the
+/// check would make the config uneditable between sessions.
+#[test]
+fn a_reload_that_weakens_is_adopted_when_nothing_is_running() {
+    let mut e = enforcer("reload-idle");
+    let path = dir("reload-idle").join("curfew.toml");
+    e.config_path = Some(path.clone());
+
+    std::fs::write(&path, config_with_rule("deep-work", "Deep work", "")).unwrap();
+
+    assert_eq!(e.handle(NOW, Request::Reload), Response::Ok);
+    assert_eq!(e.config.profiles[0].rules.len(), 0, "the edit was not adopted");
+}
+
+// --- deleting the state is not a way out (P1-9) -------------------------------------------------
+//
+// `load` cannot tell a first run from a deliberate deletion, because both leave the same two things
+// missing. A crash mid-write leaves the backup, so the deletion is the case that produces `Fresh` —
+// and `Fresh` is what retires the watchdog (`watchdog::locks_running` is false for it). So deleting
+// two files released every lock *and* switched off the thing that would have restarted enforcement.
+//
+// `state.json.locked` is the out-of-band witness: written whenever a session is running, removed when
+// one is not, and its *existence* is the whole signal.
+
+#[test]
+fn a_first_run_with_no_witness_is_still_a_first_run() {
+    // The ordinary case must not regress: nothing has ever run here.
+    assert_eq!(load(&dir("fresh-no-witness").join("state.json")), Loaded::Fresh);
+}
+
+#[test]
+fn deleting_the_state_files_while_a_lock_ran_is_reported_as_lost_not_fresh() {
+    // A directory of its own: the tests share `std::env::temp_dir()`, and reusing another test's
+    // name leaves its `.bak` behind, so the "both copies gone" case never actually arises.
+    let path = dir("deleted-both").join("state.json");
+    // Twice, because the first `save` has no previous copy to preserve and so writes no `.bak`.
+    save(&path, &locked_state()).unwrap();
+    save(&path, &locked_state()).unwrap();
+
+    // The attack, in two lines: remove the state and its backup.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(path.with_extension("bak")).unwrap();
+
+    match load(&path) {
+        Loaded::Lost { detail } => {
+            assert!(detail.contains("deletion"), "the reason should say what it was: {detail}")
+        }
+        other => panic!("a deletion while a lock ran was reported as {other:?}"),
+    }
+}
+
+// The watchdog's half of this — that `Loaded::Lost` keeps it alive — is tested where the watchdog
+// lives, in `crates/curfew-svc/src/watchdog.rs`: `curfew-win` cannot see `curfew-svc`, and reaching
+// across from here would be a dependency the wrong way round.
+
+/// With the lock ended, the witness goes away and the next load is a first run again — otherwise a
+/// machine that once held a lock could never be treated as clean.
+#[test]
+fn ending_the_last_session_removes_the_witness() {
+    let path = dir("witness-cleared").join("state.json");
+    save(&path, &locked_state()).unwrap();
+    assert!(witness_of(&path).exists(), "a running session left no witness");
+
+    save(&path, &Persisted::default()).unwrap();
+    assert!(!witness_of(&path).exists(), "the witness outlived the lock");
+
+    // And now a deletion of the state looks like the fresh install it is.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(path.with_extension("bak")).unwrap();
+    assert_eq!(load(&path), Loaded::Fresh);
 }

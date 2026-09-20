@@ -67,13 +67,23 @@ object UninstallGuard {
     fun mentions(root: AccessibilityNodeInfo?, label: String, packageName: String): Boolean {
         if (root == null) return false
         val needles = listOf(label.lowercase(), packageName.lowercase())
+        val actions = listOf("uninstall", "force stop", "disable", "clear storage", "clear data", "deactivate", "remove")
         var budget = NODE_BUDGET
         val queue = ArrayDeque(listOf(root))
+        var hasCurfew = false
+        var hasAction = false
+
         while (queue.isNotEmpty() && budget-- > 0) {
             val node = queue.removeFirst()
             val text = (node.text?.toString().orEmpty() + " " + node.contentDescription?.toString().orEmpty())
                 .lowercase()
-            if (needles.any { it.isNotEmpty() && text.contains(it) }) return true
+            if (needles.any { it.isNotEmpty() && text.contains(it) }) {
+                hasCurfew = true
+            }
+            if (actions.any { text.contains(it) }) {
+                hasAction = true
+            }
+            if (hasCurfew && hasAction) return true
             for (i in 0 until node.childCount) node.getChild(i)?.let(queue::addLast)
         }
         return false

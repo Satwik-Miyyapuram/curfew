@@ -66,6 +66,35 @@ pub enum Request {
     Release { id: String },
     /// Start the 24-hour delayed release (GAPS D1). Returns when it lands.
     RequestRelease { id: String },
+    /// "I have read the notice about the window enforcement was down." Clears it.
+    ///
+    /// A request rather than a timer, because the notice exists to be *read* and a timer cannot know
+    /// that happened. Android dismisses its banner the same way, from the screen that shows it.
+    DismissDowntime,
+    /// **Pairing, which had no Windows front door at all** — F-18, step 2.
+    ///
+    /// The engine, the invite format and the six-digit comparison are built and tested in `curfew-sync`,
+    /// and the FFI exposes them to Android. Nothing on Windows could reach any of it: no request, no
+    /// handler, no page. These four are the surface, and they mirror the FFI's calls one for one so the
+    /// two platforms are describing one protocol.
+    ///
+    /// Every payload is JSON, and the four are separate rather than one `Pair` request with a step,
+    /// because they are not a state machine — a device may invite without replying, reply without
+    /// accepting, and revoke at any time.
+    ///
+    /// **The comparison is not here.** `Phrase` computes the six digits; whether they match is answered by
+    /// the two people reading them, which is the only check a machine in the middle cannot forge.
+    Peers,
+    /// Offer to pair, answering with the JSON the other device reads.
+    Invite,
+    /// The six digits for an invite, so a screen can show them.
+    Phrase { invite: String },
+    /// Answer an invite with this device's keys. The second half of the exchange.
+    Reply { invite: String },
+    /// **Accept, and only after the phrases are confirmed to match.**
+    Accept { invite: String },
+    /// Remove a device. Immediate and local.
+    Revoke { device: String },
     /// Spend an emergency pass on one session, ending it whatever its lock says.
     ///
     /// The rationing is the service's to enforce, not the caller's: a tray that decided for itself
@@ -108,6 +137,24 @@ pub enum Request {
     /// "The user is opening this URL. May they?" The service decides; the extension only reports
     /// and obeys, so a tampered extension cannot invent an allow the core did not give.
     Check { browser: String, url: String },
+    /// What the blocking has added up to over the last `days` local days.
+    ///
+    /// The service answers this rather than the window reading the state file for itself, even
+    /// though the file is readable by the user: the service already holds the history in memory, it
+    /// is the only writer, and a second reader of a file being rewritten under it is how two views of
+    /// one fortnight start to disagree. Same reasoning as everything else on this channel.
+    ///
+    /// `days` is bounded by the caller and clamped by the core, so a bad number costs a smaller
+    /// answer rather than a large allocation.
+    Stats {
+        #[serde(default = "default_stats_days")]
+        days: u32,
+    },
+}
+
+/// A fortnight, which is what `curfew stats` defaults to and what the Time page charts.
+fn default_stats_days() -> u32 {
+    14
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,6 +164,9 @@ pub enum Response {
     /// due, every warning — and it is one of a dozen variants the rest of which are a word and a
     /// timestamp. Without the box every response everywhere would be as large as the largest.
     Status(Box<Status>),
+    /// The figures for the Time page. Boxed for the same reason as [`Response::Status`]: a fortnight
+    /// of day rows is the largest thing on this channel after the status itself.
+    Stats(Box<curfew_core::stats::Stats>),
     Ok,
     /// Release lands at this instant, and not before.
     Release {
@@ -149,6 +199,19 @@ pub enum Response {
     Error {
         detail: String,
     },
+    /// The answer to [`Request::Peers`], [`Request::Invite`], [`Request::Phrase`] or [`Request::Reply`]:
+    /// JSON, carried as text.
+    ///
+    /// One variant for all four rather than four variants, because the service does not look inside any of
+    /// them — the page parses what the engine produced, and a variant per payload would be four types the
+    /// service has no use for. What the page must *not* do is invent any of it, and one opaque field is
+    /// the clearest way to say so.
+    Pairing {
+        json: String,
+    },
+    /// The answer to [`Request::Accept`] or [`Request::Revoke`], which produce no payload beyond success.
+    /// Separate from [`Response::Ok`] so a page cannot mistake a pairing step for an acknowledgement.
+    Paired,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,11 +234,58 @@ pub struct Status {
     /// can be showing a stale "nothing is about to happen" while the machine counts down.
     #[serde(default)]
     pub freeze: Option<curfew_core::Countdown>,
+    /// Profile **ids** mapped to the names their owner gave them.
+    ///
+    /// Carried rather than looked up, because every consumer of this struct that prints a profile has
+    /// the same problem and had all solved it the same wrong way: `Session.profile` is the id, so the
+    /// tray overlay said *"Steam is blocked during distractions."* where the phone says
+    /// *"Distractions"*. The starter config's id happens to read like a word, which is why this went
+    /// unnoticed — with `deep-work` it would have been obvious immediately.
+    ///
+    /// The service already holds the config, so resolving it once here means the tray, the overlay,
+    /// the extension and the command line all get the name without each re-reading a file that only
+    /// the service knows the path of.
+    #[serde(default)]
+    pub profile_names: std::collections::BTreeMap<String, String>,
     /// Why website blocking is not working, if it is not.
     pub hosts_error: Option<String>,
     /// Set when the state file could not be read on startup. The user is owed this: it means locks
     /// may have been lost.
     pub state_warning: Option<String>,
+    /// Set when the machine's clock has been moved, or when time was credited across a shutdown.
+    ///
+    /// The user is owed this for the same reason they are owed `state_warning`: both are cases where
+    /// something a lock depends on is not what it appears to be. It is a sentence rather than a flag
+    /// because the two cases mean different things — one is tampering that was caught, the other is
+    /// ordinary downtime — and a UI cannot tell them apart from a boolean.
+    #[serde(default)]
+    pub clock_warning: Option<String>,
+    /// **Set when a rule in force can no longer be decided** — P2-16.
+    ///
+    /// Window-title and keyword rules and app budgets need to know what is in front. That report comes
+    /// from the tray, because the service runs in session 0 where there is no interactive desktop at
+    /// all — so quitting or hiding the tray silently stops those rules being enforced while the session
+    /// keeps running. This is the sentence that says so.
+    ///
+    /// A sentence rather than a flag for the same reason as `clock_warning`: which rules, and what to do
+    /// about it, is the whole content, and a boolean cannot carry either.
+    #[serde(default)]
+    pub foreground_warning: Option<String>,
+    /// **Whether any running session has a rule that needs the foreground window** — P2-16.
+    ///
+    /// `foreground_warning` says the gap has already opened. This says it *would*, which is what a
+    /// surface needs in order to warn somebody before they cause it: the tray's "hide this icon" is the
+    /// action that causes it, and a warning delivered afterwards is no use to the person deciding.
+    #[serde(default)]
+    pub needs_foreground: bool,
+    /// **The window enforcement was down before this run** — P1-8.
+    ///
+    /// `ARCHITECTURE.md` promises that a service which was killed, crashed or never started reports the
+    /// exact window it was down. Android has done this since `Downtime.kt`; Windows had nothing. Carried
+    /// until somebody dismisses it, because a notice that vanishes on its own is one the person it is
+    /// for can miss.
+    #[serde(default)]
+    pub downtime: Option<crate::downtime::Downtime>,
     /// Emergency passes that could be spent right now, and why not when the answer is none. Both
     /// on every status, so a UI never has to ask a second question to know whether to offer the
     /// hatch or to explain its absence.
@@ -191,6 +301,140 @@ pub struct Status {
     /// release is given once and there is nothing further to press.
     #[serde(default)]
     pub released: Vec<String>,
+    /// **What each running session's lock allows a surface to offer**, keyed by session id.
+    ///
+    /// P1-6: the tray worked this out from `conditions`, the window worked it out from
+    /// `releasable`/`released` plus a string comparison, and neither offered `Challenge`. A dead
+    /// `State.lock` field was described in the review as "where a shared release verdict belongs",
+    /// which is what this is: [`curfew_core::LockSet::offers`] computed once by the service, so a
+    /// surface renders what it is told instead of deciding for itself.
+    ///
+    /// Carried rather than left to the caller because one input — whether *this* device is the one a
+    /// peer release names — is known only here.
+    #[serde(default)]
+    pub offers: std::collections::BTreeMap<String, curfew_core::Offers>,
+    /// What this machine's sync is doing, as a fact rather than a promise.
+    ///
+    /// **Windows had no way to say this at all.** `Status` carried nothing about sync, so a user
+    /// could not tell paired from unpaired even once pairing worked, and no page of the window
+    /// mentioned it. The interaction review praises Android for stating sync truth in a five-way
+    /// `when`, and the only Windows surface that mentioned sync was one that could not be reached.
+    #[serde(default)]
+    pub sync: SyncState,
+}
+
+/// Which of the five sync situations a machine is in.
+///
+/// A name rather than a sentence, so the window, the tray and the CLI can each write their own copy
+/// and a test can assert the *distinction* rather than the wording. The five are separated because
+/// they have five different next steps, not because the enum looked thin.
+///
+/// Serialized, and that is why it exists separately from [`SyncState`]'s four facts: the window
+/// switches on this rather than re-deriving it from them, so the rule lives in **one** place. A second
+/// copy in JavaScript would be free to drift from this one, and removing pairs of copies that drift is
+/// what this branch has spent ten rounds doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncPhase {
+    /// Sync could not start and something is wrong: an unwritable sync directory, a log that will not
+    /// parse. The next step is to fix it.
+    Broken,
+    /// Nothing is paired, which is not an error. The next step is to pair, if the user wants to.
+    Unpaired,
+    /// Devices are paired and the node is not up yet — the ordinary state for one pass after a pairing
+    /// lands, because the service starts the node on the following pass rather than binding a listener
+    /// the instant a peer appears. The next step is to wait.
+    Idle,
+    /// Listening, and no paired device is on this network. The next step is to wait: these devices talk
+    /// when they are in earshot, not on a schedule.
+    Waiting,
+    /// Listening, with at least one paired device reachable. Working.
+    Working,
+}
+
+/// What this machine's sync is doing right now.
+///
+/// Carried on every status rather than asked for separately, for the same reason the pass count is: a
+/// UI that had to make a second request to know whether to mention sync would mention it late or not
+/// at all.
+///
+/// `#[serde(default)]` is on the **struct**, not only on [`Status::sync`], and the difference was
+/// found by the test below rather than by reasoning: with the attribute only on the field, a payload
+/// carrying `"sync": {}` failed with `missing field 'running'`. The window and the service are separate
+/// binaries and can be updated at different times, so every field here has to be optional on the wire.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct SyncState {
+    /// Whether a node is listening. False is normal on an unpaired machine — see [`Self::why_off`].
+    pub running: bool,
+    /// Paired devices that have not been revoked.
+    pub paired: usize,
+    /// Paired devices reachable on this network right now.
+    pub nearby: usize,
+    /// Why there is no node, when there is none **and something is wrong**.
+    ///
+    /// `None` covers both "sync is up" and "nothing is paired yet", which are the two cases where
+    /// there is nothing to report and nothing to do. [`Self::phase`] separates them, so a caller never
+    /// has to infer a failure from a missing sentence.
+    pub why_off: Option<String>,
+}
+
+impl SyncState {
+    /// The phase, which is the whole public meaning of this struct.
+    ///
+    /// The order of the checks is the order of the exceptions: a failure outranks everything, because a
+    /// machine that cannot sync must say so rather than report the ordinary idle state and leave the
+    /// user waiting for something that will not happen.
+    pub fn phase(&self) -> SyncPhase {
+        match (self.why_off.is_some(), self.paired, self.running, self.nearby) {
+            (true, ..) => SyncPhase::Broken,
+            (false, 0, ..) => SyncPhase::Unpaired,
+            (false, _, false, _) => SyncPhase::Idle,
+            (false, _, true, 0) => SyncPhase::Waiting,
+            (false, _, true, _) => SyncPhase::Working,
+        }
+    }
+}
+
+/// Hand-written so `phase` is **derived output rather than a stored field**.
+///
+/// A `phase` field on the struct could disagree with the four facts printed beside it — a status saying
+/// "working" while `nearby` is zero. Deriving it at the moment of writing makes that unrepresentable:
+/// there is one constructor of the JSON and it always computes the phase from the same values it is
+/// about to write.
+impl Serialize for SyncState {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("SyncState", 5)?;
+        st.serialize_field("running", &self.running)?;
+        st.serialize_field("paired", &self.paired)?;
+        st.serialize_field("nearby", &self.nearby)?;
+        st.serialize_field("why_off", &self.why_off)?;
+        st.serialize_field("phase", &self.phase())?;
+        st.end()
+    }
+}
+impl Status {
+    /// What to call a profile in a sentence a person reads.
+    ///
+    /// **Every** surface that prints a profile name goes through this, and that is the point: the
+    /// fallback has to be written once. Falling back to the id is deliberate — a profile deleted while
+    /// a session from it is still running has no name to look up, and showing the id beats showing
+    /// nothing, or panicking in a UI thread.
+    /// The returned reference is either the name from [Self::profile_names] or the `id` handed in, so
+    /// both are tied to the same lifetime — which in practice is always the status itself, since call
+    /// sites pass `&session.profile` from a session inside it.
+    pub fn name_of<'a>(&'a self, id: &'a str) -> &'a str {
+        self.profile_names.get(id).map(String::as_str).unwrap_or(id)
+    }
+
+    /// The name of the profile the user is currently inside, if any.
+    ///
+    /// The overlay, the tooltip and the menu all want "which profile is this about", and they all want
+    /// the first running session's — the one the user is actually in.
+    pub fn running_name(&self) -> Option<&str> {
+        self.running.first().map(|s| self.name_of(&s.profile))
+    }
 }
 
 /// The control channel's name. Namespaced, so on Windows this is a named pipe under
@@ -230,4 +474,100 @@ pub fn encode(response: &Response) -> String {
     let body = serde_json::to_string(response)
         .unwrap_or_else(|e| format!(r#"{{"response":"error","detail":"{e}"}}"#));
     format!("{body}\n")
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+    use super::{SyncPhase, SyncState};
+
+    /// The five phases, each pinned by the fact that distinguishes it.
+    ///
+    /// Windows had no sync state on the wire at all before this, so there was nothing to test and
+    /// nothing to get wrong. Now there is one thing to get wrong, and it is the ordering: a machine
+    /// that **cannot** sync must report `Broken` rather than the ordinary `Unpaired`, because
+    /// `Unpaired` reads as "nothing to do here" and would leave a user waiting for a pairing that
+    /// cannot happen. Each case below is the one its phase exists for.
+    #[test]
+    fn a_failure_outranks_every_other_state() {
+        // Broken even while a node is up and a peer is in earshot: the reason outranks the rest.
+        let s = SyncState {
+            running: true,
+            paired: 3,
+            nearby: 2,
+            why_off: Some("sync directory is not writable".into()),
+        };
+        assert_eq!(s.phase(), SyncPhase::Broken);
+    }
+
+    #[test]
+    fn nothing_paired_is_not_an_error() {
+        let s = SyncState::default();
+        assert_eq!(s.phase(), SyncPhase::Unpaired);
+        assert!(s.why_off.is_none(), "an unpaired machine has nothing to report");
+    }
+
+    /// One pass after a pairing lands: peers on disk, node not started yet. Ordinary, and it must
+    /// not read as broken — the service brings the node up on the next pass by design.
+    #[test]
+    fn paired_but_not_listening_yet_is_idle_rather_than_broken() {
+        let s = SyncState { running: false, paired: 1, nearby: 0, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Idle);
+    }
+
+    #[test]
+    fn listening_with_nobody_in_earshot_is_waiting() {
+        let s = SyncState { running: true, paired: 2, nearby: 0, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Waiting);
+    }
+
+    #[test]
+    fn one_reachable_peer_is_working() {
+        let s = SyncState { running: true, paired: 2, nearby: 1, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Working);
+    }
+
+    /// `nearby` without `running` cannot happen, and the phase says the safe thing if it ever does:
+    /// a count of reachable peers is not evidence that we are listening to them.
+    #[test]
+    fn a_reachable_count_does_not_imply_a_listener() {
+        let s = SyncState { running: false, paired: 1, nearby: 3, why_off: None };
+        assert_eq!(s.phase(), SyncPhase::Idle);
+    }
+
+    /// The state survives the wire, including the `Option`, because it is read by a separate process.
+    #[test]
+    fn it_round_trips_through_json() {
+        let s = SyncState { running: true, paired: 2, nearby: 1, why_off: Some("a reason".into()) };
+        let line = serde_json::to_string(&s).expect("serializes");
+        assert_eq!(serde_json::from_str::<SyncState>(&line).expect("parses"), s);
+    }
+
+    /// And an older service that does not send the field at all still parses, as `Unpaired`.
+    ///
+    /// `#[serde(default)]` is why, and this is the test that keeps somebody from removing it: the
+    /// window and the service are separate binaries and can be updated at different times, so a new
+    /// window must not fail to read an old service's status.
+    #[test]
+    fn a_status_without_the_field_still_parses() {
+        let s: SyncState = serde_json::from_str("{}").expect("absent field defaults");
+        assert_eq!(s, SyncState::default());
+        assert_eq!(s.phase(), SyncPhase::Unpaired);
+    }
+    /// The phase travels on the wire, and that is the assertion worth making about the hand-written
+    /// `Serialize`: if it stopped emitting `phase`, the window would silently fall back to its default
+    /// branch and every machine would report "no devices paired" while the Rust side said otherwise.
+    #[test]
+    fn the_phase_is_on_the_wire_and_agrees_with_the_facts() {
+        let s = SyncState { running: true, paired: 3, nearby: 2, why_off: None };
+        let v: serde_json::Value = serde_json::to_value(&s).expect("serializes");
+        assert_eq!(v["phase"], "working");
+        assert_eq!(v["paired"], 3);
+        assert_eq!(v["nearby"], 2);
+
+        // And a failure outranks the rest on the wire too, not only in `phase()`.
+        let broken =
+            SyncState { running: true, paired: 3, nearby: 2, why_off: Some("not writable".into()) };
+        let v: serde_json::Value = serde_json::to_value(&broken).expect("serializes");
+        assert_eq!(v["phase"], "broken");
+    }
 }

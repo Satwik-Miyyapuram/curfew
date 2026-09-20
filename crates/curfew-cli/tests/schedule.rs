@@ -4,6 +4,7 @@
 //! lives between the two — a flag that parses and is then ignored, an edit the core refuses that
 //! leaves half a document behind, an exit code that says a command worked when it did not.
 
+use curfew_cli::removal_target;
 use curfew_core::Config;
 use std::path::{Path, PathBuf};
 
@@ -631,4 +632,43 @@ fn listing_what_a_profile_blocks_reads_rather_than_writes() {
     assert_eq!(0, run(&["blocks", box_.as_str(), "--profile", "deep-work"]));
     assert_eq!(1, run(&["blocks", box_.as_str(), "--profile", "nope"]));
     assert_eq!(before, box_.text());
+}
+
+// --- the id a removal targets (P2-11) ------------------------------------------------------------
+//
+// The service refuses a removal a running lock derives from, and it needs the id to ask. Deriving it in
+// the CLI rather than re-parsing the command line in the caller keeps one copy of the argument layout.
+
+/// The ordinary case, and the shape the usage text documents.
+#[test]
+fn a_removal_names_its_id() {
+    assert_eq!(
+        removal_target(&["remove", "curfew.toml", "weekday-mornings"]),
+        Some("weekday-mornings")
+    );
+    // Extra arguments do not change which id is named.
+    assert_eq!(removal_target(&["remove", "c.toml", "w", "--force"]), Some("w"));
+}
+
+/// **Everything that is not a removal returns `None`.** Adding a window is not a weakening, and a caller
+/// that mistook one for a removal would refuse an ordinary edit — a bug of its own, in the direction that
+/// makes the plan unmaintainable.
+#[test]
+fn a_write_that_is_not_a_removal_names_nothing() {
+    for args in [
+        vec!["add-window", "c.toml", "w"],
+        vec!["add-profile", "c.toml", "p"],
+        vec!["remove", "c.toml"],
+        vec!["schedules", "c.toml"],
+        vec!["check", "c.toml"],
+        vec![],
+    ] {
+        assert_eq!(removal_target(&args), None, "{args:?} was taken for a removal");
+    }
+}
+
+/// A command that merely starts with the word is not it.
+#[test]
+fn a_longer_word_is_not_a_removal() {
+    assert_eq!(removal_target(&["removed", "c.toml", "w"]), None);
 }

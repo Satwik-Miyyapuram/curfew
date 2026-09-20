@@ -1,6 +1,8 @@
 package dev.curfew.app.ui
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,11 +17,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import dev.curfew.app.R
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -30,10 +39,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /**
  * The one screen that is about the app rather than about the phone.
  *
- * It leads with the Simple/Power switch, because that switch changes what every other screen looks
- * like and a user who cannot find it is stuck in whichever half of the app suits them less.
- *
- * Under it is the only question this screen really has to answer: **can Curfew actually enforce
+ * It leads with the only question this screen really has to answer: **can Curfew actually enforce
  * anything right now**. That is a list of what it can do with a tick beside it, and a Fix button
  * beside anything it cannot — not a wall of permission names, and not something filed under an
  * advanced heading, because a permission Curfew is missing is a block that is not going to happen.
@@ -46,6 +52,34 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var showConfig by remember { mutableStateOf(false) }
+
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+            }.getOrNull()
+            if (text == null) model.say("That file could not be read.") else model.importConfig(text)
+        }
+    }
+    val exportFile = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        if (state.configError != null) {
+            model.say("Your config could not be read, so there is nothing to export. Nothing was written.")
+            return@rememberLauncherForActivityResult
+        }
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(state.configToml.toByteArray())
+            }
+        }.onSuccess {
+            model.note("Config exported to file.")
+        }.onFailure { model.say("That file could not be written.") }
+    }
+
     // Two counts, because the card above lists every permission and this line summarises that
     // same list: counting only the required ones said "one permission is missing" under a card
     // showing three red marks, and the reader believed the card.
@@ -63,26 +97,30 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
+                // Resolved outside the semantics block, which is not a composable scope, and
+                // composed from resources with numbered arguments rather than concatenated — the
+                // same reason as on the health screen: a sentence built with `+` is English only.
+                val name = stringResource(entry.grant.title)
+                val cost = stringResource(entry.grant.cost)
+                val described = if (entry.granted) {
+                    context.getString(R.string.settings_grant_allowed, name)
+                } else {
+                    context.getString(R.string.settings_grant_refused, name, cost)
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 17.dp, vertical = 15.dp)
-                        .semantics(mergeDescendants = true) {
-                            contentDescription = if (entry.granted) {
-                                "${entry.grant.title}, allowed"
-                            } else {
-                                "${entry.grant.title}, not allowed. ${entry.grant.cost}"
-                            }
-                        },
+                        .semantics(mergeDescendants = true) { contentDescription = described },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Mark(entry.granted)
                     Column(Modifier.weight(1f)) {
-                        Text(entry.grant.title, fontSize = 15.sp, color = Palette.Text)
+                        Text(name, fontSize = 15.sp, color = Palette.Text)
                         if (!entry.granted) {
                             Text(
-                                entry.grant.cost,
+                                cost,
                                 fontSize = 12.sp,
                                 lineHeight = 17.sp,
                                 color = Palette.Muted,
@@ -95,14 +133,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         // Sending the user to a Health screen to press a second button was the
                         // longest way round to the only thing they came here to do.
                         Fix {
-                            val permission = entry.grant.runtimePermission()
-                            val settings = entry.grant.settingsIntent(context)
-                            when {
-                                permission != null -> requestRuntimePermission(context, permission)
-                                settings != null -> context.startActivity(
-                                    settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }
+                            // Was a bare `startActivity`, which throws on a device whose OEM build
+                            // lacks the page — see `openGrantPage`. F-33.
+                            openGrantPage(context, entry.grant)
                         }
                     }
                 }
@@ -113,11 +146,18 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         SectionLabel("Syncing")
         Gap(10.dp)
         DCard(padding = 18.dp) {
-            // Syncing used to be visible only on the Devices screen, which Simple mode never
-            // reached: a user whose blocks were following them between two devices had no way of
-            // seeing that this was happening, or of making it happen now. There is no "last
-            // synced" clock to show — devices talk when they are in earshot of each other, not on
-            // a schedule — so it says what is actually true at this moment.
+            // Syncing used to be visible only on the Devices screen, one tap further in and reachable
+            // only once a device was paired: a user whose blocks were following them between two
+            // devices had no way of seeing that this was happening, or of making it happen now.
+            //
+            // This comment used to say "which Simple mode never reached". **There is no Simple mode.**
+            // It was designed in `docs/PLAN-mobile-polish.md` §4 and never built — the de-cluttering it
+            // was meant to achieve was done by shortening the nav bar for everyone instead. The reason
+            // above is unchanged and still true; only the mechanism named was fiction, which is the
+            // fifth time this codebase has had a comment describing something the code does not do.
+            //
+            // There is no "last synced" clock to show — devices talk when they are in earshot of each
+            // other, not on a schedule — so it says what is actually true at this moment instead.
             Text(
                 when {
                     !state.sync.available -> "Syncing is not set up on this device."
@@ -131,7 +171,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 },
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
-                color = if (state.sync.running) Palette.Muted else Palette.Live,
+                // The same correction as DevicesScreen: amber for *not* listening was backwards, and
+                // the neutral sentence read as "a block is running". See the note there.
+                color = if (state.sync.running) Palette.Ok else Palette.Muted,
             )
             state.sync.error?.let { problem ->
                 Gap(6.dp)
@@ -197,6 +239,11 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     "${state.sync.active.size} paired. Blocks follow you between them."
                 },
             ) { onOpen(Routes.DEVICES) }
+            Rule()
+            Entry(
+                title = "Config file & backup",
+                note = "Export or import your curfew.toml configuration file.",
+            ) { showConfig = true }
         }
 
         Gap(18.dp)
@@ -204,8 +251,12 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
                 Text("⛨", fontSize = 17.sp, color = Palette.Muted)
                 Text(
-                    "Curfew has no internet permission at all. Your devices sync directly to " +
-                        "each other — no account, no server.",
+                    // The true claim, and the same one Health shows: this sentence existed twice and
+                    // one copy was false. Saying "no internet permission at all" was the earlier
+                    // version of the same mistake — the manifest declares INTERNET for LAN sync —
+                    // and it is load-bearing, because this is the card a user reads to decide
+                    // whether to trust a screen-watching app. See [Privacy].
+                    Privacy.NO_SERVER,
                     fontSize = 13.sp,
                     lineHeight = 20.sp,
                     color = Palette.Muted,
@@ -213,6 +264,64 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }
         Gap(8.dp)
+    }
+
+    if (showConfig) {
+        DSheet(
+            title = "curfew.toml",
+            sub = "Your complete configuration file. Export it to back it up or copy it to another device.",
+            onDismiss = { showConfig = false },
+            confirm = "Done",
+            confirmEnabled = true,
+            onConfirm = { showConfig = false },
+        ) {
+            SheetSection("Backup & Restore") {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PrimaryButton("Export config", Modifier.weight(1f)) {
+                        runCatching {
+                            exportFile.launch("curfew.toml")
+                        }.onFailure { model.say(context.getString(R.string.file_write_failed)) }
+                    }
+                    GhostButton("Import file", Modifier.weight(1f)) {
+                        runCatching {
+                            importFile.launch(arrayOf("*/*", "text/plain", "text/x-toml", "application/octet-stream"))
+                        }.onFailure { model.say(context.getString(R.string.file_read_failed)) }
+                    }
+                }
+                Gap(8.dp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    GhostButton("Copy to clipboard", Modifier.weight(1f)) {
+                        if (state.configToml.isNotBlank()) {
+                            clipboard.setText(AnnotatedString(state.configToml))
+                            model.note("Config copied to clipboard.")
+                        }
+                    }
+                }
+                Gap(10.dp)
+                SheetNote(
+                    "Importing validates the config before applying. A session already running keeps running until its own lock expires.",
+                )
+            }
+            if (state.configToml.isNotBlank()) {
+                SheetSection("Current configuration") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Palette.Raised)
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            state.configToml,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = Palette.Text,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

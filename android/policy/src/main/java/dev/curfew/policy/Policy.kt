@@ -84,8 +84,31 @@ class Policy private constructor(private val inner: Curfew) {
     /**
      * Replace the config. Running sessions are deliberately untouched — a settings edit is not a
      * way out of a lock (design invariant 2).
+     *
+     * **This does not check that the edit keeps what a running session promised** — see
+     * [commitConfig], which does and which every editor should use. Kept because a caller that
+     * genuinely has nothing running still needs the plain write, and because removing it would
+     * break the callers this change has not audited.
      */
     fun setConfig(configToml: String) = inner.setConfig(configToml)
+
+    /**
+     * Replace the config, **refusing an edit that would take a rule away from a running session**.
+     *
+     * P1-13: the profile editor could delete the rule that was holding you, save, and the lock would
+     * carry on while nothing behind it was enforced. Windows has refused that since entry 54; Android
+     * did not, which is the same one-platform-only shape as the browser identity in P1-2.
+     *
+     * The check is Rust's — `Config::weakening_a_running_session`, shared with Windows rather than
+     * reimplemented here, because a second copy of a security check is how two platforms come to
+     * disagree. The core reads a session's rules from the session itself, so Android and Windows
+     * cannot disagree about what a lock promised.
+     *
+     * Fails with a sentence naming the profile and what would stop being enforced, fit to show. A
+     * failure rather than a silent no-op: an edit that quietly did nothing is the behaviour this
+     * fixes.
+     */
+    fun commitConfig(configToml: String) = inner.commitConfig(configToml)
 
     // --- editing schedules ------------------------------------------------------------------------
     //

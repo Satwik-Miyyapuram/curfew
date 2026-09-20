@@ -26,6 +26,18 @@ import androidx.compose.ui.unit.sp
  *  - [Live] means *a block is running right now*. It appears when one is, and never otherwise.
  *  - [Ok] and [Bad] are for state that has already happened: within budget, permission missing.
  *
+ * The [Live] rule is the one that keeps being broken, so it is worth spelling out what it rules out.
+ * A **planning** screen is not live: the timer dial while you are choosing a length, a row that
+ * describes a way to start a profile, a weekly window sitting in a list. A **neutral status** is not
+ * live: sync listening or not listening, a schedule that is switched off. And a **warning** is not
+ * live either — a caution about something that has not happened yet is [Bad], because amber would say
+ * a block is running and that is the opposite of the message. If a screen has no running block on it,
+ * it should have no amber on it.
+ *
+ * The reason this matters more than taste: amber is the only signal in the app that crosses the
+ * screen, the notification shade and the home-screen tile, and it is the one a person learns to read
+ * without thinking. Spend it on a second meaning and it stops meaning anything.
+ *
  * It is dark in both system themes, deliberately. This is an app people open at night to be told
  * no, and a white page at 23:00 is its own small hostility.
  */
@@ -51,8 +63,22 @@ object Palette {
 private val scheme = darkColorScheme(
     primary = Palette.Accent,
     onPrimary = Palette.Ink,
-    secondary = Palette.Live,
+    // Muted, not [Palette.Live]. `secondary` is Material's general-purpose accent role, and pointing
+    // it at the colour meaning *a block is running* broke the palette's one rule the moment any
+    // Material component read it — which, via `secondaryContainer` below, one already did.
+    secondary = Palette.Muted,
     onSecondary = Palette.Ink,
+    // Set rather than left to the baseline, and that matters more than it looks. `FilterChip` — the
+    // only Material component here that draws a selected state — takes its selected fill from
+    // `secondaryContainer`. Leaving a role unset does not mean "no colour": Material falls back to
+    // its own baseline palette, which is a lavender that appears nowhere else in this app. So the one
+    // chip on the app-picker screen was wearing a colour from a different design system.
+    //
+    // A translucent accent, matching how selection is drawn everywhere else here (`Pill`, the profile
+    // tabs, the block screen's tint): an accent wash rather than a solid fill, so the label stays
+    // readable on the dark ground.
+    secondaryContainer = Palette.Accent.copy(alpha = 0.20f),
+    onSecondaryContainer = Palette.Text,
     tertiary = Palette.Ok,
     onTertiary = Palette.Ink,
     background = Palette.Ink,

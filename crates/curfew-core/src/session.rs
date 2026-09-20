@@ -95,6 +95,31 @@ pub struct Sessions {
     pub dismissed: BTreeMap<String, Timestamp>,
 }
 
+/// A running session that a given schedule started.
+///
+/// **P2-11.** `curfew remove <id>` deletes a window or calendar rule and nothing in the running
+/// service notices: the session keeps its own copy of what it blocks, so the lock is not weakened —
+/// but the user is told nothing about that, and `README.md` says *"a lock is a promise — nothing
+/// shortens it except the conditions you chose"*, so they reasonably expect the removal to have
+/// stopped it.
+///
+/// This is the predicate that lets a caller refuse instead. It lives here because [`SessionSource`]
+/// already records which schedule started a session, and because the answer is the same on every
+/// platform — what differs is only who can be asked, which is the caller's problem.
+///
+/// A profile is deliberately **not** matched: a session records the schedule that started it, and a
+/// profile is a list of things to block rather than something that starts on its own.
+pub fn running_from<'a>(running: &'a [Session], schedule: &str) -> Vec<&'a Session> {
+    running
+        .iter()
+        .filter(|session| match &session.source {
+            SessionSource::Weekly { schedule: id } => id == schedule,
+            SessionSource::Calendar { schedule: id, .. } => id == schedule,
+            SessionSource::Manual => false,
+        })
+        .collect()
+}
+
 impl Sessions {
     /// Start a session, or strengthen the one already running for that profile.
     ///
@@ -113,6 +138,56 @@ impl Sessions {
 
     pub fn get(&self, id: &str) -> Option<&Session> {
         self.running.iter().find(|s| s.id == id)
+    }
+
+    /// Adopt sessions read back from storage, **without ever weakening what is already running**.
+    ///
+    /// This exists because the restore path was the one way into session state that did not go
+    /// through the lattice: `curfew-ffi`'s `restore_sessions` deserialized a whole `Sessions` and
+    /// assigned it over the running one, with no lock check, no proof and no op-log entry. Anyone who
+    /// could call it could end every lock by handing over `{"running":[]}` — the same bypass as the
+    /// claimable `Lock::Timer` that was P0-1, through a different door, and on the platform where the
+    /// FFI is the whole interface.
+    ///
+    /// The rule is:
+    ///
+    /// * A session already running is **hardened**, never merged. [`LockSet::harden`] is the join where
+    ///   `None` is top, so a restore may add a condition, push the end time later or push the release
+    ///   later, and can do nothing else.
+    /// * A session in the incoming set that is not running is **started**, which is what a legitimate
+    ///   restore after a restart needs.
+    /// * A session running here and **absent** from the incoming set is **kept**. Deleting the stored
+    ///   state is therefore not a way to end a lock — which is the case that matters, because the
+    ///   stored state is a file a user can delete.
+    ///
+    /// **Not [`LockSet::merge`], and that distinction is the whole point of this function.** `merge`
+    /// combines two trusted promises and takes the *earlier* `delayed_release_at`, so a forged payload
+    /// could hand a running lock a release that had already passed — `is_expired` then returned true and
+    /// every condition was bypassed. The comment here used to claim `merge` "can only add conditions and
+    /// push the end time later", which was false: it also moved the release *earlier*, and a security
+    /// comment asserting something the code does not do is worse than no comment.
+    ///
+    /// `dismissed` is **first-write-wins**: an existing dismissal is never moved. The earlier version took
+    /// the later timestamp on the theory that a later dismissal is the more recent fact, but `reconcile`
+    /// only honours a dismissal that falls *inside* the occurrence it ended — so a timestamp pushed past
+    /// the window's end defeated the dismissal entirely and re-armed a window the user had ended. A
+    /// restore may still **add** a dismissal for a profile that has none, which is what adopting
+    /// persisted state needs.
+    pub fn restore_without_weakening(&mut self, incoming: Sessions) {
+        for session in incoming.running {
+            let profile = session.profile.clone();
+            // The running session is authoritative, so the incoming lock is adopted only where it is
+            // strictly stronger. `started_at` is deliberately left alone: it is not a promise a lock
+            // makes, and letting an untrusted payload move it earlier would distort usage.
+            if let Some(existing) = self.running.iter_mut().find(|s| s.profile == profile) {
+                existing.lock = existing.lock.harden(&session.lock);
+                continue;
+            }
+            self.start(session);
+        }
+        for (occurrence, at) in incoming.dismissed {
+            self.dismissed.entry(occurrence).or_insert(at);
+        }
     }
 
     pub fn for_profile(&self, profile: &str) -> Option<&Session> {
@@ -172,6 +247,13 @@ impl Sessions {
     /// Spending the pass is the caller's job, and must happen before this: [`Passes::spend`] is
     /// what enforces the quota, and it is deliberately not called from in here so the use is
     /// recorded in the op-log whether or not the release that followed it succeeded.
+    ///
+    /// **The pass is a receipt, and the type now says so.** `Pass` has a private field, so the only
+    /// way to obtain one is [`Passes::spend`]; the `let _ = pass` below is therefore not "we trust
+    /// the caller" but "the caller could not have this unless the ration allowed it". Before that
+    /// field was private, any code in the process could write `Pass { at: 0 }` — and through the
+    /// FFI, any code in the Android app, on a rooted device from outside it — and release every
+    /// lock the hatch was supposed to be rationed against.
     ///
     /// [`Passes::spend`]: crate::emergency::Passes::spend
     pub fn end_with_pass(

@@ -99,17 +99,17 @@ impl Sync {
         self.shared.identity.public().fingerprint()
     }
 
-    /// Offer to pair. The result is JSON to put in a QR code; it is not secret and may be
-    /// photographed, but it cannot authenticate itself, which is what the phrase is for.
+    /// Offer to pair. The result is a compact code to put in a QR code or text field; it is not secret
+    /// and may be photographed, but it cannot authenticate itself, which is what the phrase is for.
     pub fn invite_json(&self, now: Timestamp) -> Result<String, CurfewError> {
-        serde_json::to_string(&Invite::offer(&self.shared.identity, now)).map_err(payload)
+        Ok(Invite::offer(&self.shared.identity, now).to_compact())
     }
 
     /// The six digits both devices must show before anyone presses accept. Derived from both public
     /// keys and the invite's nonce, so a device in the middle that swapped a key produces a
     /// different phrase and is caught by the reading.
     pub fn phrase_for(&self, invite_json: String) -> Result<String, CurfewError> {
-        let invite: Invite = serde_json::from_str(&invite_json).map_err(payload)?;
+        let invite = Invite::from_str_lenient(&invite_json).map_err(sync_error)?;
         Ok(pair::phrase(&self.shared.identity.public(), &invite.from, &invite.nonce))
     }
 
@@ -120,14 +120,14 @@ impl Sync {
     /// scans the PC's code, shows this reply, and the PC reads the reply back. Two codes, one
     /// nonce, and both screens show the same six digits before either side accepts.
     pub fn reply_to(&self, invite_json: String) -> Result<String, CurfewError> {
-        let invite: Invite = serde_json::from_str(&invite_json).map_err(payload)?;
+        let invite = Invite::from_str_lenient(&invite_json).map_err(sync_error)?;
         let reply = Invite {
             from: self.shared.identity.public(),
             nonce: invite.nonce,
             issued_at: invite.issued_at,
             expires_at: invite.expires_at,
         };
-        serde_json::to_string(&reply).map_err(payload)
+        Ok(reply.to_compact())
     }
 
     /// Accept an invite. Call this only after the user has confirmed the phrases match: nothing
@@ -137,7 +137,7 @@ impl Sync {
         invite_json: String,
         now: Timestamp,
     ) -> Result<String, CurfewError> {
-        let invite: Invite = serde_json::from_str(&invite_json).map_err(payload)?;
+        let invite = Invite::from_str_lenient(&invite_json).map_err(sync_error)?;
         let id = {
             let mut peers = self.shared.peers.lock().expect("the peers lock is never poisoned");
             peers.accept(&self.shared.identity, &invite, now).map_err(sync_error)?
