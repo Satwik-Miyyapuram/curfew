@@ -85,12 +85,100 @@ pub struct Curfew {
 
 /// Whether a condition is one the caller is the only witness to.
 ///
-/// A timer, a confirmation and a challenge are satisfied inside the UI and nowhere else, so the UI
-/// is allowed to say it did them. Everything else is checked here against something the caller
+/// A confirmation and a challenge are satisfied inside the UI and nowhere else, so the UI is
+/// allowed to say it did them. Everything else is checked here against something the caller
 /// cannot fake, because `end_session` is reachable from any code in the app process -- and on a
 /// rooted device, from outside it.
+///
+/// `Lock::Timer` is deliberately absent. Its condition is the machine fact `ends_at`, which
+/// `LockSet::can_release` already grants through `is_expired`; accepting a caller's word for it
+/// only ever meant accepting a claim that the clock had reached a point it had not.
 fn claimable(lock: &Lock) -> bool {
-    matches!(lock, Lock::Timer | Lock::Confirm | Lock::Challenge { .. })
+    matches!(lock, Lock::Confirm | Lock::Challenge { .. })
+}
+
+/// The largest restore payload the FFI will parse.
+///
+/// These four methods are the only place this crate parses a payload it did not produce, and
+/// `serde_json::from_str` allocates whatever it is handed. A restore payload is a few kilobytes at most —
+/// sessions, a clock witness, a boot map, a pass ration — so a megabyte is generous and anything larger is
+/// either a mistake or an attempt to make the app allocate. The same reasoning as `MAX_FRAME` on the sync
+/// transport and `MAX_MESSAGE` on the extension pipe (P2-13).
+const MAX_RESTORE_BYTES: usize = 1024 * 1024;
+
+/// Refuse a restore payload before parsing it, rather than after it has been allocated.
+fn restoration(json: &str) -> Result<&str, CurfewError> {
+    if json.len() > MAX_RESTORE_BYTES {
+        return Err(CurfewError::Payload {
+            detail: format!(
+                "a restore payload of {} bytes is past the {MAX_RESTORE_BYTES}-byte limit",
+                json.len()
+            ),
+        });
+    }
+    Ok(json)
+}
+
+/// **Refuse to remove a schedule a running lock derives from** — the command line's decision, in the FFI.
+///
+/// `remove_weekly` and `remove_calendar` deleted the schedule a session was started from, with no check.
+/// The command line has refused this since entry 76 through [`curfew_core::session::running_from`], and
+/// this is the same predicate rather than a second copy of the rule — only the wording differs, because a
+/// CLI sentence and an Android `Result` failure are read in different places.
+///
+/// Removing the schedule does not take the rules away (those live on the profile), so this is not the
+/// weakening check. It is the other objection the command line makes: the lock stays in force and the plan
+/// no longer explains why it is running.
+fn refuse_schedule_removal(curfew: &Curfew, schedule: &str) -> Result<(), CurfewError> {
+    let running = curfew.sessions.read().expect("sessions lock").running.clone();
+    let held = curfew_core::session::running_from(&running, schedule);
+    if held.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&str> = held.iter().map(|s| s.profile.as_str()).collect();
+    Err(CurfewError::Payload {
+        detail: format!(
+            "{} is running under this schedule right now, so it cannot be removed. End the session \
+             first — the lock's conditions decide how — or leave it: it stops on its own at the end of \
+             its window, and the removal will go through then.",
+            names.join(", ")
+        ),
+    })
+}
+
+/// **Refuse an edit that would take a rule away from a session that is running** — P1-13.
+///
+/// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated here:
+/// a second copy of a security check is how two platforms come to disagree.
+///
+/// **A free function, not a method.** Everything inside an exported `impl` is part of the UniFFI
+/// interface, and a check that only Rust calls has no business being there — the first version of this was
+/// a method and UniFFI refused to build it, wanting `Config` to be liftable across the boundary.
+///
+/// **This belongs on every call that changes a rule, not only on a whole-document write.** Windows guards
+/// `Request::Reload` because the file is edited freely and the service decides whether to *adopt* it;
+/// Android has no file/adopt split, because the FFI **is** the config. So `remove_rule` weakens a running
+/// session the moment it is called, and a guard on the commit alone can never fire — by then the config it
+/// compares against has already changed. My own tests said so: two of them failed against a check that was
+/// in the wrong place for this platform.
+fn refuse_weakening(curfew: &Curfew, next: &Config) -> Result<(), CurfewError> {
+    let current = curfew.config.read().expect("config lock");
+    let running = curfew.sessions.read().expect("sessions lock").running.clone();
+    let names: std::collections::BTreeMap<String, String> =
+        current.profiles.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+
+    let lost = current.weakening_a_running_session(next, &running, &names);
+    if lost.is_empty() {
+        return Ok(());
+    }
+    Err(CurfewError::Payload {
+        detail: format!(
+            "This would stop enforcing part of a block that is running now: {}. End the session first, \
+             or leave it — it stops on its own at the end of its window. Nothing short of the 24-hour \
+             release shortens a lock that is already running.",
+            lost.join("; ")
+        ),
+    })
 }
 
 impl Curfew {
@@ -150,11 +238,25 @@ impl Curfew {
         }))
     }
 
+    /// **Refuse an edit that would take a rule away from a session that is running** — P1-13.
+    ///
+    /// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated
+    /// here: a second copy of a security check is how two platforms come to disagree.
+    ///
+    /// **This belongs on every call that changes a rule, not only on a whole-document write.** Windows
+    /// guards `Request::Reload` because the file is edited freely and the service decides whether to
+    /// *adopt* it; Android has no file/adopt split, because the FFI **is** the config. So `remove_rule`
+    /// weakens the running session the moment it is called, and a guard on the commit alone can never
+    /// fire — by then the config it compares against has already changed. My own tests said so: two of
+    /// them failed against a check that was in the wrong place for this platform.
     /// Replace the config. Running sessions are untouched: a config edit is not a way out of a
     /// lock, and the session already holds its own copy of what it promised.
+    ///
+    /// **Refuses an edit that would take a rule away from a running session** — see [`refuse_weakening`].
     pub fn set_config(&self, config_toml: String) -> Result<(), CurfewError> {
         let config = Config::from_toml(&config_toml)
             .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &config)?;
         *self.config.write().expect("config lock") = config;
         Ok(())
     }
@@ -184,18 +286,30 @@ impl Curfew {
     /// title — is written without the user editing TOML.
     pub fn upsert_rule(&self, profile: String, rule_json: String) -> Result<(), CurfewError> {
         let rule = serde_json::from_str(&rule_json).map_err(payload)?;
-        self.config
-            .write()
-            .expect("config lock")
-            .upsert_rule(&profile, rule)
-            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+        // Built as a copy first so the check can compare, then stored. The config is small and this runs
+        // on a form save, so the clone costs nothing worth measuring.
+        let mut next = self.config.read().expect("config lock").clone();
+        next.upsert_rule(&profile, rule)
+            .map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
     }
 
     /// Drop every rule in a profile pointing at `target_json`, a serialized `Target`, and say how
     /// many went.
     pub fn remove_rule(&self, profile: String, target_json: String) -> Result<u32, CurfewError> {
         let target = serde_json::from_str(&target_json).map_err(payload)?;
-        Ok(self.config.write().expect("config lock").remove_rule(&profile, &target) as u32)
+        // **The check goes here, not only on the commit** — P1-13. This call is what the profile editor
+        // uses to delete a rule, and it takes effect immediately: the config it would be compared against
+        // at commit time is this one.
+        let mut next = self.config.read().expect("config lock").clone();
+        let removed = next.remove_rule(&profile, &target) as u32;
+        if removed > 0 {
+            refuse_weakening(self, &next)?;
+        }
+        *self.config.write().expect("config lock") = next;
+        Ok(removed)
     }
 
     /// Everything a profile blocks, as a serialized `Vec<Rule>`, for a screen to list.
@@ -228,25 +342,60 @@ impl Curfew {
     /// Refused while a schedule still names it, carrying the core's sentence saying which ones, so
     /// the screen can tell the user what to remove first rather than only that it will not work.
     pub fn remove_profile(&self, id: String) -> Result<(), CurfewError> {
-        self.config
-            .write()
-            .expect("config lock")
-            .remove_profile(&id)
-            .map_err(|e| CurfewError::Config { detail: e.to_string() })
+        // **Deleting the profile deletes every rule behind the lock.** `rules_weakened_by` reports that
+        // correctly without any special case — with the profile gone, `next.profile(id)` is `None` and
+        // every rule reads as lost — it was simply never consulted here.
+        let mut next = self.config.read().expect("config lock").clone();
+        next.remove_profile(&id).map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
     }
 
     /// Add or replace a weekly window. `window_json` is a serialized `WeeklySchedule`.
+    ///
+    /// **The outcome is discarded here, and that is a known remaining gap** (P2-10). The core says
+    /// whether it added, replaced or declined to store a duplicate; the CLI now reports which, and
+    /// this surface does not. Android's profile editor is the caller, and it can hit the same
+    /// duplicate case — a window identical to one already in the plan is discarded and the screen
+    /// shows success. Closing it means returning the outcome across the FFI, which changes the
+    /// generated Kotlin binding, so it is recorded rather than smuggled in here.
+    /// **Write the config, refusing an edit that would take a rule away from a running session** —
+    /// P1-13's Android half.
+    ///
+    /// Android saved the config and reconciled, with no check at all: a user could open the profile
+    /// editor, delete the rule that was holding them, save, and the lock would carry on while nothing
+    /// behind it was enforced. Windows has refused this since entry 54 and Android did not, which is the
+    /// same one-platform-only shape as the browser identity in P1-2.
+    ///
+    /// The decision is [`Config::weakening_a_running_session`], shared with Windows rather than repeated
+    /// here — a second copy of a security check is how two platforms come to disagree.
+    ///
+    /// **Refused with a sentence, not a code.** The caller shows it: it names the profile and what would
+    /// stop being enforced, which is what a person needs in order to decide whether to end the session
+    /// first. `CurfewError::Refused` carries a refusal about a *lock*; this is about a config edit, so it
+    /// is a payload error with wording fit to display.
+    pub fn commit_config(&self, config_toml: String) -> Result<(), CurfewError> {
+        let next = Config::from_toml(restoration(&config_toml)?).map_err(payload)?;
+        refuse_weakening(self, &next)?;
+        *self.config.write().expect("config lock") = next;
+        Ok(())
+    }
+
     pub fn upsert_weekly(&self, window_json: String) -> Result<(), CurfewError> {
         let window = serde_json::from_str(&window_json).map_err(payload)?;
         self.config
             .write()
             .expect("config lock")
             .upsert_weekly(window)
+            .map(|_outcome| ())
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
-    pub fn remove_weekly(&self, id: String) {
+    pub fn remove_weekly(&self, id: String) -> Result<(), CurfewError> {
+        refuse_schedule_removal(self, &id)?;
         self.config.write().expect("config lock").remove_weekly(&id);
+        Ok(())
     }
 
     /// Add or replace a calendar rule. `rule_json` is a serialized `CalendarSchedule`.
@@ -259,8 +408,10 @@ impl Curfew {
             .map_err(|e| CurfewError::Config { detail: e.to_string() })
     }
 
-    pub fn remove_calendar(&self, id: String) {
+    pub fn remove_calendar(&self, id: String) -> Result<(), CurfewError> {
+        refuse_schedule_removal(self, &id)?;
         self.config.write().expect("config lock").remove_calendar(&id);
+        Ok(())
     }
 
     /// Every weekly window, as a serialized `Vec<WeeklySchedule>`, for the editor to list.
@@ -435,7 +586,12 @@ impl Curfew {
     }
 
     pub fn restore_releases(&self, releases_json: String) -> Result<(), CurfewError> {
-        let stored: BTreeSet<String> = serde_json::from_str(&releases_json).map_err(payload)?;
+        // **Capped like the other four.** This one was added later and missed `restoration`, so a
+        // caller-supplied payload was deserialized at whatever size it arrived — the doc on
+        // `restoration` says a megabyte is generous and anything larger is "either a mistake or an
+        // attempt to make the app allocate", which is exactly what this allowed.
+        let releases_json = restoration(&releases_json)?;
+        let stored: BTreeSet<String> = serde_json::from_str(releases_json).map_err(payload)?;
         self.releases.write().expect("releases lock").extend(stored);
         Ok(())
     }
@@ -458,9 +614,17 @@ impl Curfew {
         .map_err(payload)
     }
 
+    /// **Trusts its caller**, on the same terms as [`Curfew::restore_clock`] (P1-3).
+    ///
+    /// `Boots` and `BootCounter` are the evidence `proven()` consults for a `Lock::RestartRequired`, so a
+    /// caller who forges both can satisfy a restart lock without restarting. The same argument applies as
+    /// above: the counter has to survive a restart or the lock becomes unsatisfiable, and nothing this
+    /// crate holds can authenticate the value it is given.
+    ///
+    /// The size cap is the part that *can* be enforced here, and is.
     pub fn restore_boots(&self, boots_json: String) -> Result<(), CurfewError> {
         let (boots, counter): (curfew_core::Boots, curfew_core::BootCounter) =
-            serde_json::from_str(&boots_json).map_err(payload)?;
+            serde_json::from_str(restoration(&boots_json)?).map_err(payload)?;
         *self.boots.write().expect("boots lock") = boots;
         *self.boot_counter.write().expect("boot lock") = counter;
         Ok(())
@@ -525,8 +689,12 @@ impl Curfew {
     /// Restore the spent ration after a restart. Merged rather than replaced: a device that has
     /// heard about a peer's pass since the file was written must not forget it by reading an older
     /// copy of its own.
+    /// The one restore that needs no trust: `Passes::merge` takes the **more spent** of the two, so a
+    /// caller cannot use this to buy back a ration however the payload is crafted (P1-3, and the review
+    /// calls this one out as the instance that got it right).
     pub fn restore_passes(&self, passes_json: String) -> Result<(), CurfewError> {
-        let stored: curfew_core::Passes = serde_json::from_str(&passes_json).map_err(payload)?;
+        let stored: curfew_core::Passes =
+            serde_json::from_str(restoration(&passes_json)?).map_err(payload)?;
         self.passes.write().expect("passes lock").merge(&stored);
         Ok(())
     }
@@ -576,9 +744,38 @@ impl Curfew {
     /// Restore sessions materialized from storage after a restart. The lock a session was under
     /// survives a reboot, a force-stop and an app update -- that is the entire point of persisting
     /// them (design invariant 2).
+    ///
+    /// **Strengthening only, and that is the whole of this function's contract.**
+    ///
+    /// This used to deserialize a whole `Sessions` and assign it over the running one:
+    ///
+    /// ```ignore
+    /// *self.sessions.write().expect("sessions lock") = sessions;
+    /// ```
+    ///
+    /// No lock check, no proof, no op-log entry — and it was the only writer of that state, so it was
+    /// the one way into it that did not pass through the lattice. `restore_sessions(r#"{"running":[]}"#)`
+    /// ended every running lock. That is P0-1's bypass through a different door, on the platform where
+    /// this FFI *is* the interface, and the stored state is a file a user can delete.
+    ///
+    /// The rule now lives in [`Sessions::restore_without_weakening`]: a running session is merged into
+    /// (which the lattice can only make stricter), a session in the incoming set is started, and a
+    /// session running here but absent from the incoming set is **kept**. Deleting the file is
+    /// therefore not a way out, which is the case that matters.
+    /// **Trusts its caller, deliberately and with a limit** (P1-3).
+    ///
+    /// `restore_without_weakening` is what makes this safe against the *payload*: a caller cannot use it
+    /// to end a running session or shorten a lock, which is the bypass the review found. What it cannot
+    /// do is make the caller honest — the FFI has no way to tell the platform's own persistence from a
+    /// forged blob, and any key that authenticated one would live beside it, where a root-capable
+    /// adversary reads both. So the guarantee is: **this cannot make things worse than the state already
+    /// held, whatever the caller sends.**
+    ///
+    /// Android is the only caller, and it reads this from its own private store.
     pub fn restore_sessions(&self, sessions_json: String) -> Result<(), CurfewError> {
-        let sessions: Sessions = serde_json::from_str(&sessions_json).map_err(payload)?;
-        *self.sessions.write().expect("sessions lock") = sessions;
+        let sessions: Sessions =
+            serde_json::from_str(restoration(&sessions_json)?).map_err(payload)?;
+        self.sessions.write().expect("sessions lock").restore_without_weakening(sessions);
         Ok(())
     }
 
@@ -635,9 +832,37 @@ impl Curfew {
     }
 
     /// Restore a witness written by [`Curfew::clock_witness_json`].
+    /// **Installs a trusted-clock baseline, which the caller can therefore choose** (P1-3).
+    ///
+    /// The review asks that this never take a witness from the caller, and it is right that a caller who
+    /// sets `trusted` far forward ends every timer lock. It cannot be fixed from here: the baseline has
+    /// to survive a process restart, or "stop the app, set the clock, start the app" is a way out of
+    /// every timed lock — which is the P0-2 bypass this witness exists to close. Persisting it means
+    /// accepting it from the only thing that can hold it, and the platform is that thing.
+    ///
+    /// So the honest statement is what the code does: this accepts a baseline, and the defence against a
+    /// forged one is the platform's storage rather than this function. Recorded here rather than left as
+    /// an implied guarantee, because an implied guarantee is precisely what the review objected to.
     pub fn restore_clock(&self, witness_json: String) -> Result<(), CurfewError> {
-        let witness: ClockWitness = serde_json::from_str(&witness_json).map_err(payload)?;
-        *self.clock.write().expect("clock lock") = Some(witness);
+        let witness: ClockWitness =
+            serde_json::from_str(restoration(&witness_json)?).map_err(payload)?;
+        let mut slot = self.clock.write().expect("clock lock");
+        // **A restore may not re-baseline the trusted clock forward** — P1-3. `ClockWitness` accumulates:
+        // `now` only ever moves forward, and every lock is judged against it. Replacing it wholesale let a
+        // caller install one whose `trusted` was a year ahead, which expires every timer lock at once —
+        // one call, and the exact thing the clock design exists to prevent.
+        if let Some(current) = slot.as_ref() {
+            if current.adoption_moves_forward(&witness) {
+                return Err(CurfewError::Payload {
+                    detail: "This witness is ahead of the one already running, so it would move the \
+                             trusted clock forward — which is how a lock is expired without any \
+                             condition being met. Restoring a witness may only ever move trusted time \
+                             backwards or leave it where it is."
+                        .to_string(),
+                });
+            }
+        }
+        *slot = Some(witness);
         Ok(())
     }
 

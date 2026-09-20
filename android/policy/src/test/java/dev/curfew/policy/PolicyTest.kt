@@ -448,7 +448,12 @@ class PolicyTest {
         p.startSession(locked("deep-work", listOf(Lock.DeviceCredential), friday0930 + 3600))
         // Rename the profile everywhere it is named, so the replacement is itself a valid config:
         // what is under test is the running session, not the config checker.
-        p.setConfig(configToml.replace("\"deep-work\"", "\"renamed\""))
+        try {
+            p.setConfig(configToml.replace("\"deep-work\"", "\"renamed\""))
+            fail("renaming a profile a session is running under must be refused")
+        } catch (_: uniffi.curfew_ffi.CurfewException.Payload) {
+            // Renaming the profile removes its rules from the running session, so it is refused.
+        }
         assertEquals(listOf("deep-work"), p.activeProfiles(friday0930))
     }
 

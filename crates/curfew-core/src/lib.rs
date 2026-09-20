@@ -22,12 +22,12 @@ pub use boot::{BootCounter, Boots};
 pub use budget::{Consumption, Launches, Refill, Rollup};
 pub use clock::{ClockWitness, Reading, Verdict};
 pub use config::{
-    Action, Config, ConfigError, Platform, Profile, Resolver, Rule, CONFIG_SCHEMA_VERSION,
+    Action, Config, ConfigError, Platform, Profile, Resolver, Rule, Upserted, CONFIG_SCHEMA_VERSION,
 };
 pub use emergency::{EmergencyPolicy, Pass, PassRefusal, Passes};
 pub use engine::{decide, BlockReason, Decision, State};
 pub use frozen::{Countdown, Origin};
-pub use lock::{ChallengeKind, Lock, LockSet, DELAYED_RELEASE_SECONDS};
+pub use lock::{ChallengeKind, Lock, LockSet, Offers, DELAYED_RELEASE_SECONDS};
 pub use proof::{Proofs, PROOF_SECONDS};
 pub use schedule::{
     active_at, next_change_after, Activation, ActivationSource, CalendarEvent, CalendarSchedule,

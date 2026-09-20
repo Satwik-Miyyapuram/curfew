@@ -25,6 +25,7 @@ import org.robolectric.annotation.Config
 class RuleEditingTest {
 
     private val now = TestRuntime.FRIDAY_0930
+    private val idle = TestRuntime.FRIDAY_0930 + 4 * 3600
 
     @Test
     fun `a site blocked from the phone is written to the config file`() = runTest {
@@ -97,7 +98,7 @@ class RuleEditingTest {
 
     @Test
     fun `unblocking removes the rule from the file`() = runTest {
-        val runtime = TestRuntime.create(now)
+        val runtime = TestRuntime.create(idle)
         val target = Target.Url(pattern = "*://*/watch*")
         runtime.saveRule("deep-work", Rule(target = target)).getOrThrow()
         assertTrue(runtime.config.read().contains("*://*/watch*"))
@@ -121,8 +122,8 @@ class RuleEditingTest {
     }
 
     /**
-     * Invariant 2: a lock is a promise. Unblocking is a settings edit, and a settings edit never
-     * ends a session — the session keeps the rules it started with until its own lock lets it go.
+     * Invariant 2: a lock is a promise. Unblocking while a session is running is refused (P1-13)
+     * so that the running session cannot be weakened.
      */
     @Test
     fun `unblocking does not end a running session`() = runTest {
@@ -131,7 +132,8 @@ class RuleEditingTest {
         runtime.saveRule("deep-work", Rule(target = target)).getOrThrow()
         val running = runtime.policy.sessions().running.map { it.id }
 
-        runtime.deleteRule("deep-work", target).getOrThrow()
+        val failure = runtime.deleteRule("deep-work", target).exceptionOrNull()
+        assertTrue("$failure", failure?.message?.contains("running now") == true)
 
         assertEquals(running, runtime.policy.sessions().running.map { it.id })
     }

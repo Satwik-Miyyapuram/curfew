@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
+import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.EventMatcher
 import dev.curfew.policy.Lock
 import dev.curfew.policy.ProfileName
@@ -53,6 +54,8 @@ internal val OFFERED_LOCKS: List<Pair<String, Lock>> = listOf(
     "Runs to the end" to Lock.Timer,
     "Ask before ending" to Lock.Confirm,
     "Screen lock" to Lock.DeviceCredential,
+    "Solve math" to Lock.Challenge(ChallengeKind.MATH),
+    "Type it out" to Lock.Challenge(ChallengeKind.TYPING),
     "Restart the device" to Lock.RestartRequired,
 )
 
@@ -123,81 +126,6 @@ internal fun describePadding(beforeSeconds: Int, afterSeconds: Int): String? {
     }
 }
 
-@Composable
-internal fun WeeklyCard(
-    window: WeeklySchedule,
-    profile: String,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(profile, style = MaterialTheme.typography.titleMedium)
-            Text(describeWindow(window), style = MaterialTheme.typography.bodyMedium)
-            if (window.locks.isNotEmpty()) {
-                Text(
-                    "Locked: needs " + window.locks.joinToString(", ") { describeLock(it) } + ".",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = onEdit,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Edit the window for ${window.profile}"
-                    },
-                ) { Text("Edit") }
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Remove the window for ${window.profile}"
-                    },
-                ) { Text("Remove") }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun CalendarRuleCard(
-    rule: CalendarSchedule,
-    profile: String,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(profile, style = MaterialTheme.typography.titleMedium)
-            Text(describeMatcher(rule.matcher), style = MaterialTheme.typography.bodyMedium)
-            describePadding(rule.padBeforeSeconds, rule.padAfterSeconds)?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall)
-            }
-            if (rule.locks.isNotEmpty()) {
-                Text(
-                    "Locked: needs " + rule.locks.joinToString(", ") { describeLock(it) } + ".",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = onEdit,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Edit the calendar rule for ${rule.profile}"
-                    },
-                ) { Text("Edit") }
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Remove the calendar rule for ${rule.profile}"
-                    },
-                ) { Text("Remove") }
-            }
-        }
-    }
-}
-
 /** The profile a schedule runs. A schedule naming no profile enforces nothing, so one is required. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -253,10 +181,11 @@ internal fun WeeklyDialog(
     existing: WeeklySchedule?,
     profiles: List<ProfileName>,
     now: Long,
+    defaultProfile: String? = null,
     onDismiss: () -> Unit,
     onSave: (WeeklySchedule) -> Unit,
 ) {
-    var profile by remember { mutableStateOf(existing?.profile ?: profiles.firstOrNull()?.id ?: "") }
+    var profile by remember { mutableStateOf(existing?.profile ?: defaultProfile ?: profiles.firstOrNull()?.id ?: "") }
     var days by remember { mutableStateOf(existing?.days ?: emptyList()) }
     var start by remember { mutableStateOf(minutesToHhMm(existing?.startMinute ?: 9 * 60)) }
     var end by remember { mutableStateOf(minutesToHhMm(existing?.endMinute ?: 17 * 60)) }
@@ -354,16 +283,19 @@ internal fun WeeklyDialog(
  * Padding is entered in minutes and stored in seconds: nobody plans a meeting buffer in seconds,
  * and the config keeps seconds because everything else in it does.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun CalendarDialog(
     existing: CalendarSchedule?,
     profiles: List<ProfileName>,
     now: Long,
+    defaultProfile: String? = null,
     onDismiss: () -> Unit,
     onSave: (CalendarSchedule) -> Unit,
     prefill: CalendarEvent? = null,
+    availableCalendars: List<String> = emptyList(),
 ) {
-    var profile by remember { mutableStateOf(existing?.profile ?: profiles.firstOrNull()?.id ?: "") }
+    var profile by remember { mutableStateOf(existing?.profile ?: defaultProfile ?: profiles.firstOrNull()?.id ?: "") }
     // An event picked from the calendar fills the matcher in from what that event actually says.
     // Its exact title, not a wildcard around it: the user pointed at one meeting, and widening
     // that into a pattern behind their back would block things they never chose.
@@ -425,6 +357,23 @@ internal fun CalendarDialog(
         SheetSection("Which events") {
             TextField("Title contains", title, placeholder = "*focus*") { title = it }
             Gap(10.dp)
+            if (availableCalendars.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    availableCalendars.forEach { calName ->
+                        Pill(
+                            text = calName,
+                            selected = calendar.equals(calName, ignoreCase = true),
+                            onClick = {
+                                calendar = if (calendar.equals(calName, ignoreCase = true)) "" else calName
+                            },
+                        )
+                    }
+                }
+                Gap(8.dp)
+            }
             TextField("Calendar", calendar, placeholder = "Work") { calendar = it }
             Gap(10.dp)
             TextField("Location", location, placeholder = "Anywhere") { location = it }
@@ -441,6 +390,24 @@ internal fun CalendarDialog(
         }
 
         SheetSection("Padding") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(0, 5, 10, 15).forEach { mins ->
+                    val selected = before == mins.toString() && after == mins.toString()
+                    Pill(
+                        text = if (mins == 0) "No buffer" else "±${mins}m",
+                        selected = selected,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            before = mins.toString()
+                            after = mins.toString()
+                        },
+                    )
+                }
+            }
+            Gap(10.dp)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ValueField(
                     "Start early",

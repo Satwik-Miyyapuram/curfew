@@ -235,7 +235,15 @@ fn replacing_the_config_does_not_release_a_running_session() {
     start(&c, "s1", "deep-work", json!([{"kind": "device_credential"}]), Some(NOW + 3600));
     // Rename the profile everywhere it is named, so the replacement config is itself valid: what
     // is under test is the running session, not the config checker.
-    c.set_config(config().replace("\"deep-work\"", "\"renamed\"")).expect("loads");
+    //
+    // **The replacement is now refused rather than accepted** — P1-13. It used to load and the session
+    // survived, which was the point of this test; renaming the profile takes its rules away from the
+    // session that is running, so it is a weakening and is refused outright. The session surviving is
+    // still asserted, and now for a stronger reason: nothing about the config changed at all.
+    assert!(
+        c.set_config(config().replace("\"deep-work\"", "\"renamed\"")).is_err(),
+        "renaming a profile a session is running under was accepted"
+    );
     assert_eq!(c.active_profiles(NOW), vec!["deep-work".to_string()]);
     assert!(c.end_session("s1".into(), NOW, String::new()).is_err());
 }
@@ -755,4 +763,543 @@ fn releases_survive_the_app_being_killed() {
     let back = curfew();
     back.restore_releases(c.releases_json().unwrap()).unwrap();
     assert!(back.releases_json().unwrap().contains("s1"));
+}
+
+// --- a restore payload is bounded before it is parsed (P1-3) --------------------------------------
+//
+// These four methods are the only place this crate parses a payload it did not produce, and
+// `serde_json::from_str` allocates whatever it is handed. The review asks for a cap; this is it.
+//
+// What the cap does **not** do is authenticate the caller, and these tests do not pretend otherwise — see
+// the doc comment on `restore_clock`. An oversized payload is a mistake or an attempt to make the app
+// allocate, and both are refused.
+
+/// A payload past the cap is refused **without being parsed**, which is the whole point: the allocation is
+/// what the cap exists to prevent, so a check that ran after `from_str` would be useless.
+#[test]
+fn an_oversized_restore_payload_is_refused_before_it_is_parsed() {
+    let c = curfew();
+    // Valid JSON, and far past the limit. If the cap did not fire, this would either parse (if it were
+    // shaped like sessions) or fail as a *parse* error — so the assertion below is on the error kind.
+    let huge =
+        format!(r#"{{"running":[],"dismissed":{{}},"pad":"{}"}}"#, "x".repeat(2 * 1024 * 1024));
+
+    match c.restore_sessions(huge).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("past the"), "the message should name the cap: {detail}");
+            // And it must not claim to be a parse failure, which is what would happen if the cap ran
+            // second.
+            assert!(
+                !detail.contains("expected") && !detail.contains("EOF"),
+                "the payload was parsed and then rejected: {detail}"
+            );
+        }
+        other => panic!("expected a payload error, got {other:?}"),
+    }
+}
+
+/// All four, because the review names all four. `restore_passes` is the one that merges rather than
+/// replaces, and it still must not be handed an unbounded string.
+#[test]
+fn every_restore_method_is_bounded() {
+    let c = curfew();
+    let huge = "x".repeat(2 * 1024 * 1024);
+
+    for (name, result) in [
+        ("sessions", c.restore_sessions(huge.clone())),
+        ("clock", c.restore_clock(huge.clone())),
+        ("boots", c.restore_boots(huge.clone())),
+        ("passes", c.restore_passes(huge.clone())),
+        // **`releases` was missing here**, so the method was unbounded and this test — which names a
+        // universal property — read as coverage of it.
+        ("releases", c.restore_releases(huge.clone())),
+    ] {
+        match result {
+            Err(CurfewError::Payload { detail }) => assert!(
+                detail.contains("past the"),
+                "restore_{name} was refused, but not by the cap: {detail}"
+            ),
+            other => panic!("restore_{name} accepted a {}-byte payload: {other:?}", huge.len()),
+        }
+    }
+}
+
+/// **Every `restore_` method takes the cap, including ones added later.**
+///
+/// A hand-written list cannot keep the promise in the test above: `restore_releases` was missing from it
+/// for exactly that reason. Rust cannot enumerate its own methods at runtime, so this reads the crate's
+/// own source and requires each `pub fn restore_*` to mention `restoration` — which is what makes
+/// "every" true by construction rather than by maintenance. The same technique `overlay.rs` uses for a
+/// Win32 message it cannot execute.
+#[test]
+fn every_restore_method_in_the_source_takes_the_cap() {
+    let source = include_str!("../src/lib.rs");
+
+    // Each `pub fn restore_x(&self, ...)` up to the closing brace of its body.
+    let mut found = Vec::new();
+    let mut rest = source;
+    while let Some(at) = rest.find("pub fn restore_") {
+        let body = &rest[at..];
+        let name: String = body["pub fn ".len()..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        // The body runs to the next close-brace at method indentation.
+        let finish = body.find("\n    }").unwrap_or(body.len());
+        let text = &body[..finish];
+        assert!(
+            text.contains("restoration("),
+            "{name} does not go through `restoration`, so a caller-supplied payload is unbounded"
+        );
+        found.push(name);
+        rest = &rest[at + finish..];
+    }
+
+    assert!(
+        found.len() >= 5,
+        "the scan found only {} restore methods, so it is not reading what it thinks it is: {found:?}",
+        found.len()
+    );
+    for expected in
+        ["restore_sessions", "restore_clock", "restore_boots", "restore_passes", "restore_releases"]
+    {
+        assert!(found.iter().any(|f| f == expected), "the scan missed {expected}");
+    }
+}
+
+/// **A payload at the cap is still parsed.** A cap that refused the boundary would be a cap set one byte
+/// too low, and the value it is set to is a judgement rather than a fact — so the boundary is asserted
+/// rather than assumed, the same as `read_capped` on the shared folder.
+#[test]
+fn a_payload_at_the_cap_is_still_accepted() {
+    let c = curfew();
+    // Real sessions JSON, padded with a field serde ignores so it sits exactly at the limit.
+    let base = r#"{"running":[],"dismissed":{}}"#;
+    let pad = 1024 * 1024 - base.len() - r#","padding":"""#.len() - 1;
+    let at_cap = format!(r#"{{"running":[],"dismissed":{{}},"padding":"{}"}}"#, "x".repeat(pad));
+    assert!(
+        (at_cap.len() as i64 - 1024 * 1024).abs() <= 4,
+        "the fixture is not at the cap: {} bytes",
+        at_cap.len()
+    );
+
+    c.restore_sessions(at_cap).expect("a payload at the cap should be accepted");
+}
+
+/// And an ordinary payload is unaffected, which is the case that must not regress.
+#[test]
+fn an_ordinary_restore_still_works() {
+    let c = curfew();
+    let saved = c.sessions_json().expect("the sessions serialize");
+    c.restore_sessions(saved).expect("a normal payload restores");
+
+    // `None` before the first observation, which is the honest state rather than an empty string — so
+    // the fixture observes first, then round-trips what that produced.
+    c.observe_clock(1_788_510_600, 1_000, 1).expect("a reading is taken");
+    let witness = c
+        .clock_witness_json()
+        .expect("the witness serializes")
+        .expect("a witness exists after a reading");
+    c.restore_clock(witness).expect("a normal witness restores");
+}
+
+// --- the Android half of P1-13 -------------------------------------------------------------------
+//
+// `CurfewRuntime.commitConfig` on Android wrote the config and reconciled with no check at all, so the
+// profile editor could delete the rule holding the user while the lock carried on enforcing nothing behind
+// it. Windows refused since entry 54; this is the same door for Android.
+
+/// **An edit that takes a rule from a running session is refused**, and the sentence says which.
+#[test]
+fn an_edit_that_weakens_a_running_session_is_refused() {
+    let c = curfew();
+    // Start something, so there is a session whose rules must survive.
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    // **The removal itself is refused**, not the write that follows it. Android has no file/adopt split:
+    // the FFI *is* the config, so `remove_rule` is where the weakening happens and a guard on the commit
+    // could never fire — by then the config it would compare against has already changed. My first version
+    // of this test asserted the opposite order and failed, which is how the guard's placement was found.
+    match c
+        .remove_rule(
+            "deep-work".into(),
+            json!({ "kind": "domain", "domain": "reddit.com" }).to_string(),
+        )
+        .unwrap_err()
+    {
+        CurfewError::Payload { detail } => {
+            assert!(
+                detail.contains("running now"),
+                "the refusal should say what is happening: {detail}"
+            );
+            assert!(
+                detail.contains("Deep work"),
+                "the refusal should name the profile a user recognises: {detail}"
+            );
+            assert!(
+                detail.contains("24-hour release"),
+                "the refusal should say what the way out is: {detail}"
+            );
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And the config is untouched after a refusal**, which is what makes the failure safe to show: the user
+/// fixes their edit rather than discovering a half-applied one.
+#[test]
+fn a_refused_edit_leaves_the_config_as_it_was() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+    let before = c.config_toml().expect("the config");
+
+    assert!(c
+        .remove_rule(
+            "deep-work".into(),
+            json!({ "kind": "domain", "domain": "reddit.com" }).to_string()
+        )
+        .is_err());
+
+    assert_eq!(
+        c.config_toml().expect("the config"),
+        before,
+        "the refused edit was applied anyway, so the user would find a half-applied config"
+    );
+}
+
+/// **With nothing running, the same edit goes through.** Refusing every removal would make the plan
+/// uneditable, which is the failure in the other direction.
+#[test]
+fn the_same_edit_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    let before = c.config_toml().expect("the config");
+    c.remove_rule(
+        "deep-work".into(),
+        json!({ "kind": "domain", "domain": "reddit.com" }).to_string(),
+    )
+    .expect("the rule is removable");
+    let weakened = c.config_toml().expect("the config");
+
+    c.commit_config(weakened.clone())
+        .expect("nothing is running, so the edit is the user's to make");
+    assert_eq!(c.config_toml().unwrap(), weakened, "the edit did not take");
+    assert_ne!(c.config_toml().unwrap(), before);
+}
+
+/// **A rule weakened through `upsert_rule` is refused too**, not only a removal.
+///
+/// `upsert_rule` replaces the rule with the same target, so `block` becoming `delay` leaves the target
+/// listed and stops blocking it — an edit that looks like an addition in a list and is a weakening in
+/// effect. No test did this, so removing the check from `upsert_rule` survived the mutation run.
+#[test]
+fn an_upsert_that_weakens_a_running_session_is_refused() {
+    let c = curfew();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    // The same target, a softer action: still one rule, and no longer a block.
+    let softer = json!({
+        "target": { "kind": "domain", "domain": "reddit.com" },
+        "action": { "kind": "delay", "seconds": 5 },
+    });
+
+    match c.upsert_rule("deep-work".into(), softer.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => assert!(
+            detail.contains("running now"),
+            "the refusal should say what is happening: {detail}"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// And the same upsert is allowed with nothing running, which is what keeps the editor usable.
+#[test]
+fn the_same_upsert_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    let softer = json!({
+        "target": { "kind": "domain", "domain": "reddit.com" },
+        "action": { "kind": "delay", "seconds": 5 },
+    });
+    c.upsert_rule("deep-work".into(), softer.to_string())
+        .expect("nothing is running, so the edit is the user's to make");
+}
+
+// --- every FFI call that can weaken a running session, not just the obvious one (review finding) ----
+//
+// Entry 79 put the guard on `remove_rule`, `upsert_rule` and `set_config`. The review found three more
+// that change the config without it — `remove_profile`, `remove_weekly`, `remove_calendar` — and all
+// three weaken a running session just as directly: deleting the profile deletes every rule behind the
+// lock, and deleting the schedule deletes the reason it is running.
+
+/// **Removing a profile takes every rule behind a running lock with it.**
+#[test]
+fn removing_a_profile_that_a_session_is_running_is_refused() {
+    let c = curfew();
+    // `deep-work` is referenced by `weekday-mornings` and `work-focus`, and the core refuses to remove a
+    // referenced profile before it considers anything else. Clearing those first is what makes this test
+    // about the *weakening* guard rather than about that separate consistency rule.
+    c.remove_weekly("weekday-mornings".into()).unwrap();
+    c.remove_calendar("work-focus".into()).unwrap();
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(1_788_513_600));
+
+    match c.remove_profile("deep-work".into()).unwrap_err() {
+        CurfewError::Payload { detail } => assert!(
+            detail.contains("running now"),
+            "the refusal should say what is happening: {detail}"
+        ),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(!c.rules_json("deep-work".into()).unwrap().is_empty(), "the rules went anyway");
+}
+
+/// **And it is still allowed when the profile is not running**, or an idle machine could not be tidied.
+#[test]
+fn removing_a_profile_is_allowed_when_nothing_is_running() {
+    let c = curfew();
+    // Both schedules have to go first — see the test above for why.
+    c.remove_weekly("weekday-mornings".into()).unwrap();
+    c.remove_calendar("work-focus".into()).unwrap();
+    c.remove_profile("deep-work".into()).expect("nothing is running");
+}
+
+/// **Exploit 5.** `restore_releases` parses a caller-supplied payload with no size cap, while the other
+/// four restore methods all go through `restoration`. The test named `every_restore_method_is_bounded`
+/// covers four of the five, so the gap is invisible.
+#[test]
+fn restore_releases_is_bounded_like_the_others() {
+    let c = curfew();
+    let huge = "x".repeat(2 * 1024 * 1024);
+
+    match c.restore_releases(huge) {
+        Err(CurfewError::Payload { detail }) => {
+            assert!(detail.contains("past the"), "refused, but not by the cap: {detail}")
+        }
+        other => panic!("restore_releases accepted a 2 MiB payload: {other:?}"),
+    }
+}
+
+/// **A schedule a session is running under cannot be removed** — the command line's rule (entry 76),
+/// which the FFI did not apply at all.
+///
+/// This test exists because a mutation run showed removing the check from `remove_weekly` changed no
+/// outcome: I had proved the `remove_profile` half and assumed this one followed from it.
+#[test]
+fn removing_a_weekly_a_session_is_running_under_is_refused() {
+    let c = curfew();
+    // Inside the golden config's `weekday-mornings` window, so this starts a session **from that
+    // schedule** — which is what `running_from` looks for.
+    let started = c.reconcile(FRIDAY_0930, String::new(), "seed".into()).expect("reconciled");
+    assert!(!started.is_empty(), "the fixture did not start a scheduled session");
+
+    match c.remove_weekly("weekday-mornings".into()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("running"), "the refusal should say why: {detail}");
+            assert!(detail.contains("deep-work"), "and name the profile: {detail}");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    // And the schedule is still there, so the plan still explains the lock.
+    assert!(c.weekly_json().unwrap().contains("weekday-mornings"));
+}
+
+/// The same for a calendar rule, which is the other source `running_from` recognises.
+#[test]
+fn removing_a_calendar_rule_a_session_is_running_under_is_refused() {
+    let c = curfew();
+    // **Friday afternoon**, which is outside `weekday-mornings` (Mon-Fri 09:00-12:00 London) and outside
+    // `overnight` — otherwise `reconcile` starts a *weekly* session and this test passes for the wrong
+    // reason. The first version of this fixture used 09:30 and did exactly that.
+    const FRIDAY_1430: i64 = FRIDAY_0930 + 5 * 3600;
+    // And the title has to match the rule's matcher: `title = "*focus*", calendar = "Work",
+    // busy_only = true`. "Standup" matched none of it.
+    let events = json!([{
+        "id": "ev1",
+        "title": "Focus block",
+        "start": FRIDAY_1430,
+        "end": FRIDAY_1430 + 3600,
+        "calendar": "Work",
+        "busy": true,
+    }])
+    .to_string();
+    let started = c.reconcile(FRIDAY_1430, events, "seed".into()).expect("reconciled");
+    assert!(!started.is_empty(), "the fixture did not start a calendar session");
+    // The fixture's own property: the source really is the calendar rule.
+    assert!(
+        c.active_profiles(FRIDAY_1430).contains(&"deep-work".to_string()),
+        "the calendar rule did not start deep-work, so this tests the wrong source"
+    );
+
+    match c.remove_calendar("work-focus".into()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("running"), "the refusal should say why: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And a schedule nothing is running under is still removable**, or the plan could never be edited.
+#[test]
+fn removing_a_weekly_nothing_is_running_under_is_allowed() {
+    let c = curfew();
+    c.remove_weekly("weekday-mornings".into()).expect("nothing is running under it");
+    assert!(!c.weekly_json().unwrap().contains("weekday-mornings"));
+}
+
+// --- the trusted clock cannot be re-baselined forward (P1-3) --------------------------------------
+//
+// `restore_clock` replaced the witness wholesale. Every lock is judged against the witness's `trusted`
+// time, so a caller that installs one whose `trusted` is ahead expires every timer lock at once — one
+// call, and the thing the whole clock design exists to prevent.
+//
+// The first restore is the startup adoption and cannot be checked from here (the FFI has no clock of its
+// own, see the note on the method). Every later one can, and that is what these pin.
+
+/// A witness as a caller would hand it over: serialized from a reading.
+fn witness_json(wall: i64, uptime: i64, boot_id: u64) -> String {
+    let reading = curfew_core::Reading { wall, uptime, boot_id };
+    serde_json::to_string(&curfew_core::ClockWitness::new(reading)).expect("a witness serializes")
+}
+
+/// **A second restore may not move trusted time forward.**
+#[test]
+fn a_restore_cannot_push_the_trusted_clock_forward() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("the first restore is the adoption");
+
+    // A year later, with no readings behind it.
+    let forged = witness_json(NOW + 365 * 86_400, 1_000, 7);
+    match c.restore_clock(forged).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// **And the lock the forged witness would have expired is still held.**
+///
+/// This is the consequence rather than the mechanism: the point of `trusted` is that a timer lock is
+/// judged against it, so the assertion that matters is that the lock survives.
+#[test]
+fn a_forged_witness_cannot_expire_a_timer_lock() {
+    let c = curfew();
+    let future = NOW + 3_600;
+    start(&c, "s1", "deep-work", json!([{ "kind": "timer" }]), Some(future));
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("adopted");
+
+    // The forgery: trusted time is now a year past the lock's end. It must not be adopted.
+    let _ = c.restore_clock(witness_json(NOW + 365 * 86_400, 1_000, 7));
+
+    // A real reading, and the trusted `now` it yields — which is what a lock is judged against, not the
+    // wall clock passed in.
+    let verdict: Value = serde_json::from_str(&c.observe_clock(NOW, 1_000, 7).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+
+    assert!(
+        c.active_profiles(trusted).contains(&"deep-work".to_string()),
+        "a forged witness expired a running timer lock (trusted time was {trusted})"
+    );
+    assert!(
+        trusted < future,
+        "the trusted clock jumped past the lock's end: {trusted} against {future}"
+    );
+}
+
+/// **Re-restoring the same witness is allowed**, because that is the ordinary retry and the adoption
+/// path a restart walks. Without this, "refuse every second restore" would satisfy the test above.
+#[test]
+fn restoring_the_same_witness_twice_is_allowed() {
+    let c = curfew();
+    let same = witness_json(NOW, 1_000, 7);
+    c.restore_clock(same.clone()).expect("the first");
+    c.restore_clock(same).expect("the second, which changes nothing");
+}
+
+/// **A stale witness is refused, and this test used to claim the opposite.**
+///
+/// It read *"a witness that goes backwards is allowed, which is the safe direction"* — but a stale witness
+/// has `last_wall` smaller as well, and that is the attack the test below describes. Only a smaller
+/// `trusted` is harmless; a smaller `last_wall` manufactures a large credit on the next reading. The rule
+/// is asymmetric, which is why the first version of it was wrong in one direction.
+#[test]
+fn a_stale_witness_is_refused() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("the first");
+
+    assert!(
+        c.restore_clock(witness_json(NOW - 600, 400, 7)).is_err(),
+        "an older witness was adopted, and its smaller last_wall is a forward jump on the next reading"
+    );
+}
+
+/// **A small `last_wall` is a forward jump one step removed**, and nothing tested it until a mutation run
+/// dropped the check and no outcome changed.
+///
+/// `trusted` is level with the running witness here, so a guard comparing only `trusted` adopts this. Then
+/// a reading that looks like a reboot — which the forged `boot_id` arranges — computes a wall delta of the
+/// whole gap, credits it as `unverified`, and adds it to `trusted`. The trusted clock jumps a century.
+#[test]
+fn a_restore_cannot_forge_a_small_last_wall_to_jump_forward_next_reading() {
+    let c = curfew();
+    c.restore_clock(witness_json(NOW, 1_000, 7)).expect("adopted");
+
+    // Only `last_wall` is moved, and only backwards.
+    let mut forged: Value = serde_json::from_str(&witness_json(NOW, 1_000, 7)).unwrap();
+    forged["last_wall"] = json!(NOW - 100_000_000);
+    match c.restore_clock(forged.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    // And the trusted clock has not moved. A *different* boot id, which is what makes the wall delta
+    // credible as elapsed time rather than as tampering.
+    let verdict: Value = serde_json::from_str(&c.observe_clock(NOW, 1_000, 8).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+    assert!(
+        trusted <= NOW + curfew_core::clock::TOLERANCE_SECONDS,
+        "the trusted clock jumped to {trusted} on the reading after the forged witness"
+    );
+}
+
+/// **A forged `last_uptime` jumps the trusted clock on the next reading** — the third direction, and the
+/// one the first fix missed.
+///
+/// `observe`'s same-boot branch computes `elapsed = reading.uptime - self.last_uptime`. `rebooted` is
+/// `boot_id != last_boot_id || uptime < last_uptime`, so a witness with the **same** boot id and a
+/// `last_uptime` of zero makes `rebooted` false and `elapsed` the entire uptime — ten hours here. Trusted
+/// time is what every lock is judged against, so every timer lock shorter than that expires at once.
+///
+/// The forgery is built as JSON because `ClockWitness` is `Serialize + Deserialize`: three fields are the
+/// honest current values and only `last_uptime` is moved, which is what a forged stored blob looks like.
+#[test]
+fn a_restore_cannot_forge_a_small_last_uptime_to_jump_forward_next_reading() {
+    let c = curfew();
+    // Ten hours of uptime on boot 7, adopted honestly.
+    c.restore_clock(witness_json(NOW, 36_000, 7)).expect("adopted");
+
+    // Same trusted, same last_wall, same boot id — only the uptime counter is rewound.
+    let forged = json!({
+        "last_wall": NOW,
+        "last_uptime": 0,
+        "last_boot_id": 7,
+        "trusted": NOW,
+    });
+    match c.restore_clock(forged.to_string()).unwrap_err() {
+        CurfewError::Payload { detail } => {
+            assert!(detail.contains("forward"), "the refusal should say what is wrong: {detail}")
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    // And the trusted clock has not moved on the reading that follows.
+    let verdict: Value =
+        serde_json::from_str(&c.observe_clock(NOW + 1, 36_001, 7).unwrap()).unwrap();
+    let trusted = verdict["now"].as_i64().expect("the verdict carries the trusted time");
+    assert_eq!(
+        trusted,
+        NOW + 1,
+        "the trusted clock jumped by the forged uptime: {trusted} against {}",
+        NOW + 1
+    );
 }

@@ -1,6 +1,10 @@
 package dev.curfew.app.ui
 
+import android.app.Activity
+import android.app.KeyguardManager
 import android.content.Context
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -15,20 +19,24 @@ import dev.curfew.policy.Lock
  * one named [Lock] and hands that single fact back, and it is still the core that decides whether
  * the set of proven facts is enough to end the session.
  *
- * `DEVICE_CREDENTIAL` is included alongside biometrics deliberately. A lock that can only be opened
- * by a fingerprint is a lock that a cut finger or a failed sensor turns into a device the user
- * cannot get back — and the design's hard rule is that Curfew never makes a device unrecoverable.
+ * The credential asked for is the device PIN, pattern or password — *only* that. A fingerprint or
+ * a face is not accepted, and the exclusion is the whole point: a biometric is touched by reflex,
+ * and a lock that opens by reflex is not the friction the user asked for. Typing a PIN is a small
+ * act, but it is an act. (The Windows build makes the same choice: the account password, never a
+ * Hello PIN or face.) And a device credential is something every phone with a screen lock has, so
+ * a failed sensor cannot turn a session into a device the user cannot get back — the design's hard
+ * rule is that Curfew never makes a device unrecoverable.
+ *
+ * Before Android 11 the biometric prompt cannot ask for the credential on its own; there, the
+ * system's own confirm-credential screen is used instead. Same question, same answer.
  */
 object Auth {
 
-    private const val ALLOWED =
-        BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+    private const val ALLOWED = BiometricManager.Authenticators.DEVICE_CREDENTIAL
 
-    /** Whether the device can satisfy a [Lock.DeviceCredential] at all. */
+    /** Whether the device can satisfy a [Lock.DeviceCredential] at all: is there a screen lock? */
     fun isAvailable(context: Context): Boolean =
-        BiometricManager.from(context).canAuthenticate(ALLOWED) ==
-            BiometricManager.BIOMETRIC_SUCCESS
+        context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true
 
     /**
      * Ask for the screen lock. [onResult] receives whether the prompt actually succeeded; `false`
@@ -48,6 +56,10 @@ object Auth {
             // No screen lock set on the device. Saying so is better than a prompt that cannot open:
             // the user's next step is to set one, and only they can do that.
             onResult(false)
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            confirmWithKeyguard(activity, title, subtitle, onResult)
             return
         }
         val prompt = BiometricPrompt(
@@ -73,5 +85,35 @@ object Auth {
                 .setAllowedAuthenticators(ALLOWED)
                 .build(),
         )
+    }
+
+    /**
+     * The pre-Android-11 route: the keyguard's own confirm screen, which only ever asks for the
+     * PIN, pattern or password. Registered under a fresh key for each ask and released as soon as
+     * it answers, so nothing outlives the prompt.
+     */
+    @Suppress("DEPRECATION")
+    private fun confirmWithKeyguard(
+        activity: FragmentActivity,
+        title: String,
+        subtitle: String,
+        onResult: (Boolean) -> Unit,
+    ) {
+        val keyguard = activity.getSystemService(KeyguardManager::class.java)
+        val intent = keyguard?.createConfirmDeviceCredentialIntent(title, subtitle)
+        if (intent == null) {
+            onResult(false)
+            return
+        }
+        val key = "curfew-credential-${System.nanoTime()}"
+        lateinit var launcher: androidx.activity.result.ActivityResultLauncher<android.content.Intent>
+        launcher = activity.activityResultRegistry.register(
+            key,
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            launcher.unregister()
+            onResult(result.resultCode == Activity.RESULT_OK)
+        }
+        launcher.launch(intent)
     }
 }

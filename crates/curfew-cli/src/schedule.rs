@@ -14,7 +14,7 @@
 //! guessing at where a value ends. It is said out loud on every write rather than discovered later.
 
 use curfew_core::schedule::{CalendarSchedule, CalendarSource, EventMatcher, WeeklySchedule};
-use curfew_core::{Action, ChallengeKind, Config, Lock, Platform, Rule, Target};
+use curfew_core::{Action, ChallengeKind, Config, Lock, Platform, Rule, Target, Upserted};
 
 pub const USAGE: &str = "\
   curfew add-profile <config.toml> --id <id> [--name <text>] [--description <text>]
@@ -55,6 +55,47 @@ pub fn handles(command: &str) -> bool {
             | "remove"
     )
 }
+
+/// The id a `remove` would delete, when the command is a removal.
+///
+/// **P2-11.** The service refuses a removal that a running lock derives from, and it needs the id to ask.
+/// Deriving it here rather than re-parsing the command line in the caller keeps one copy of the argument
+/// layout — this module owns `CONFIG_ARG` for the same reason.
+///
+/// `None` for anything that is not a removal, so a caller cannot mistake a write for one: adding a
+/// window is not a weakening, and refusing it would be a bug of its own.
+pub fn removal_target<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    match args {
+        ["remove", _config, id, ..] => Some(id),
+        _ => None,
+    }
+}
+
+/// Whether `command` changes the config file rather than only reading it.
+///
+/// The two reading commands need nothing afterwards. Every other verb writes, and a write the running
+/// service has not been told about is the worst kind of failure this product can have: the file says
+/// the plan changed, the window reads the same file and shows the change, and the service is still
+/// enforcing the old one. The caller uses this to decide whether a reload is owed.
+pub fn writes_config(command: &str) -> bool {
+    matches!(
+        command,
+        "add-profile"
+            | "add-window"
+            | "add-calendar"
+            | "add-source"
+            | "block"
+            | "unblock"
+            | "remove"
+    )
+}
+
+/// Where the config path sits in a writing command's argument list.
+///
+/// Every one of them is `<verb> <config> [flags…]`, so it is always index 1 — but saying so here
+/// rather than indexing at the call site means a verb that ever stops following the shape fails a
+/// test instead of silently reloading nothing.
+pub const CONFIG_ARG: usize = 1;
 
 /// Run one schedule subcommand, and return the process exit code.
 ///
@@ -401,7 +442,6 @@ fn add_window(path: &str, args: &[&str]) -> Result<(), String> {
     };
 
     let mut cfg = load(path)?;
-    let replacing = cfg.weekly.iter().any(|w| w.id == window.id);
     let description = format!(
         "{} runs {}, {} to {}",
         window.profile,
@@ -409,9 +449,23 @@ fn add_window(path: &str, args: &[&str]) -> Result<(), String> {
         hhmm(window.start_minute),
         hhmm(window.end_minute)
     );
-    cfg.upsert_weekly(window).map_err(|e| e.to_string())?;
+    // **The core says what happened; this no longer infers it** — P2-10.
+    //
+    // This used to print `Added` unless a row with the same *id* already existed, which is a
+    // different question from whether the window was stored. `upsert_weekly` deliberately declines
+    // to keep a second window with the same profile, days and times under a different id, so the
+    // command reported a lock it had just discarded. On a tool whose whole point is being trusted
+    // about whether a lock exists, that is the wrong thing to be wrong about.
+    match cfg.upsert_weekly(window).map_err(|e| e.to_string())? {
+        Upserted::Added => println!("Added: {description}."),
+        Upserted::Replaced => println!("Replaced: {description}."),
+        Upserted::AlreadyPresent => println!(
+            "Already there: {description}. The plan already holds a window that runs those minutes \
+             on those days, and two of them cannot behave differently from one, so nothing was \
+             added."
+        ),
+    }
     save(path, &cfg)?;
-    println!("{}: {description}.", if replacing { "Replaced" } else { "Added" });
     Ok(())
 }
 
@@ -720,10 +774,7 @@ fn add_source(path: &str, args: &[&str]) -> Result<(), String> {
     let (id, location) = (source.id.clone(), source.location.clone());
     cfg.upsert_source(source).map_err(|e| e.to_string())?;
     save(path, &cfg)?;
-    println!(
-        "{}: {id} reads {location}. The service picks it up on its next reload.",
-        if replacing { "Replaced" } else { "Subscribed" }
-    );
+    println!("{}: {id} reads {location}.", if replacing { "Replaced" } else { "Subscribed" });
     Ok(())
 }
 
@@ -777,6 +828,85 @@ fn remove(path: &str, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The distinction this module exists to make available to its caller.
+    ///
+    /// Getting it wrong in either direction is a real bug: a reading command that owed a reload would
+    /// make `curfew schedules` restart enforcement's view of the world for no reason, and a writing
+    /// command that was not listed would print "Added" while the service kept enforcing the old plan.
+    #[test]
+    fn only_the_commands_that_write_owe_a_reload() {
+        for reading in ["schedules", "blocks"] {
+            assert!(handles(reading), "{reading} is not handled at all");
+            assert!(!writes_config(reading), "{reading} only reads and asked for a reload");
+        }
+        for writing in [
+            "add-profile",
+            "add-window",
+            "add-calendar",
+            "add-source",
+            "block",
+            "unblock",
+            "remove",
+        ] {
+            assert!(handles(writing), "{writing} is not handled at all");
+            assert!(writes_config(writing), "{writing} writes and did not ask for a reload");
+        }
+        // Everything handled is one or the other, so a verb added later cannot be neither.
+        for command in [
+            "schedules",
+            "add-profile",
+            "add-window",
+            "add-calendar",
+            "add-source",
+            "blocks",
+            "block",
+            "unblock",
+            "remove",
+        ] {
+            assert!(writes_config(command) || matches!(command, "schedules" | "blocks"));
+        }
+    }
+
+    /// The config path is the one argument every writing verb agrees on.
+    ///
+    /// `writes_config` and `CONFIG_ARG` are used together to decide whether a failed reload is worth a
+    /// sentence, so a verb that took its path somewhere else would silently compare the wrong argument
+    /// against the service's own config. No file is needed: the assertion is about argument positions,
+    /// which is the half a refactor would break.
+    #[test]
+    fn every_writing_command_takes_its_config_at_the_same_position() {
+        const P: &str = "/tmp/curfew.toml";
+        let invocations: [&[&str]; 7] = [
+            &["add-profile", P, "--id", "x"],
+            &[
+                "add-window",
+                P,
+                "--id",
+                "w",
+                "--profile",
+                "deep-work",
+                "--from",
+                "09:00",
+                "--to",
+                "10:00",
+            ],
+            &["add-calendar", P, "--id", "c", "--profile", "deep-work"],
+            &["add-source", P, "--id", "s", "--location", "/tmp/x.ics"],
+            &["block", P, "--profile", "deep-work", "--site", "reddit.com"],
+            &["unblock", P, "--profile", "deep-work", "--site", "reddit.com"],
+            &["remove", P, "w"],
+        ];
+        for args in invocations {
+            assert!(writes_config(args[0]), "{} does not ask for a reload", args[0]);
+            assert_eq!(
+                args.get(CONFIG_ARG).copied(),
+                Some(P),
+                "{} does not take its config at index {CONFIG_ARG}",
+                args[0]
+            );
+        }
+    }
 
     #[test]
     fn a_time_is_read_the_way_it_is_written() {

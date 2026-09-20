@@ -168,6 +168,13 @@ which makes the OS itself undo our changes if we die.
 uninstall path. A second secret is a second thing to forget and a second thing to leak, and it
 buys nothing: edits that would weaken an active session are refused outright until the lock ends.
 
+> **Corrected (P1-13).** That last clause was **not true when it was written**. A session does not hold
+> its own rules — `Engine::decide` reads them from the live config on every pass — so removing a rule
+> stopped enforcing it immediately while the lock carried on, and `curfew unblock` did exactly that.
+> It is true now, **on Windows**: `Config::rules_weakened_by` is consulted before a reload is adopted,
+> and the service refuses one that would enforce less than a running session promised. **Not yet done
+> on Android**, whose `commitConfig` path takes a weakening edit without that check.
+
 ## E. Process and delivery
 
 **E1. No acceptance criteria per phase.** Fixed in ROADMAP — each phase now has explicit exit

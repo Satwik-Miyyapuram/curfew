@@ -184,6 +184,39 @@ class EnforcerTest {
     }
 
     @Test
+    fun `a tick charges the app that is still in front`() = runTest {
+        enforcer.onObservation(web("https://reddit.com/r/all"), now)
+        enforcer.onTick(now + 300)
+        assertEquals(mapOf("domain:reddit.com" to 300), spent())
+        // The next tick charges only what has passed since the last one, never the slice twice.
+        enforcer.onTick(now + 400)
+        assertEquals(mapOf("domain:reddit.com" to 400), spent())
+        assertTrue(actions.blocked.isEmpty())
+    }
+
+    @Test
+    fun `a budget runs out while the app is open, not when it is left`() = runTest {
+        enforcer.onObservation(web("https://reddit.com/"), now)
+        enforcer.onTick(now + 1201)
+
+        assertEquals(
+            BlockReason.BudgetExhausted("deep-work", 1200),
+            actions.blocked.single().second,
+        )
+        // Blocked means no longer charging: a later tick writes nothing more.
+        enforcer.onTick(now + 2000)
+        assertEquals(mapOf("domain:reddit.com" to 1201), spent())
+    }
+
+    @Test
+    fun `a tick after the screen went off charges nothing`() = runTest {
+        enforcer.onObservation(web("https://reddit.com/"), now)
+        enforcer.onIdle(now + 100)
+        enforcer.onTick(now + 3600)
+        assertEquals(mapOf("domain:reddit.com" to 100), spent())
+    }
+
+    @Test
     fun `an exhausted budget blocks, and the reason says how long it was`() = runTest {
         enforcer.onObservation(web("https://reddit.com/"), now)
         enforcer.onIdle(now + 1200)

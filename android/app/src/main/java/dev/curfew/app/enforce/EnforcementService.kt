@@ -33,6 +33,8 @@ class EnforcementService : Service() {
     private var loop: Job? = null
     private var sync: Job? = null
     private var watch: Job? = null
+    private var charge: Job? = null
+    private var screen: android.content.BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -54,6 +56,56 @@ class EnforcementService : Service() {
         // the End button having done nothing.
         watch = runtime.scope.launch {
             runtime.activeProfiles.collect { updateNotification() }
+        }
+        charge = runtime.scope.launch { chargeLoop() }
+        screen = screenReceiver().also {
+            registerReceiver(
+                it,
+                android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),
+            )
+        }
+    }
+
+    /**
+     * The meter.
+     *
+     * An app that stays in front sends no events, and the poller only samples what is in front,
+     * so nothing here ever told the enforcer that time was passing. A budget therefore never ran
+     * out while the app it covered was open: the slice was written when the app was left, and the
+     * block came on the *next* launch. This loop says "time passed" every few seconds and the
+     * enforcer charges the slice and decides again, so a budget ends a sitting rather than
+     * forbidding the next one.
+     *
+     * Runs whether or not the accessibility service is on, since both detectors have the same
+     * blind spot. The wall clock rather than the trusted one, because a clock moved forward here
+     * only charges a budget faster, and the trusted reading writes to the database each time.
+     */
+    private suspend fun chargeLoop() {
+        while (runtime.scope.isActive) {
+            // **Nothing is charged while nothing is running.** `Enforcer.onTick` returns immediately
+            // unless a target is in front, and a target is only ever set by an observation taken while
+            // the profile it belongs to is being enforced — so with no active profile this loop was
+            // waking every five seconds to do nothing, forever. Gated rather than removed, so the meter
+            // resumes on the first tick after a session starts.
+            if (!EnforcementCadence.enforcementWorkDue(runtime.activeProfiles.value.isNotEmpty())) {
+                delay(EnforcementCadence.POLL_IDLE_MILLIS)
+                continue
+            }
+            delay(EnforcementCadence.CHARGE_MILLIS)
+            runCatching { enforcer(this).onTick(runtime.clock.now()) }
+                .onFailure { android.util.Log.w(TAG, "charging failed", it) }
+        }
+    }
+
+    /**
+     * A screen that is off is not a slice of anything. Without this the meter above would charge
+     * a phone in a pocket for whatever was in front when it went dark — the exact failure the old
+     * charge-on-leave design was built to avoid. When the device is unlocked again the next window
+     * event or poll starts a fresh slice; nothing is resumed by guesswork.
+     */
+    private fun screenReceiver() = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runtime.scope.launch { enforcer(context).onIdle(runtime.clock.now()) }
         }
     }
 
@@ -77,7 +129,7 @@ class EnforcementService : Service() {
             // of those calls take the node's lock. Done after the pass rather than before it, so
             // what lands in the flows is the state the pass left behind.
             runCatching { runtime.sync?.observe(now) }
-            delay(SYNC_MILLIS)
+            delay(EnforcementCadence.SYNC_MILLIS)
         }
     }
 
@@ -109,15 +161,25 @@ class EnforcementService : Service() {
      */
     private suspend fun tick() {
         var previous = 0L
+        var lastIncidental = 0L
         while (runtime.scope.isActive) {
+            val active = runtime.activeProfiles.value.isNotEmpty()
+            // **The wait depends on whether anything is being enforced** — P1-8. It was a flat 30 s, so
+            // an idle phone woke forever for nothing and an active one could be half a minute late
+            // noticing a blocked app. See `EnforcementCadence` for why the idle figure is 15 s and not a
+            // stop.
+            val expected = EnforcementCadence.poll(active)
             // A tick that arrives late is a block that starts late, and until this line there was
             // nothing anywhere that said so: sync once held the session gate across a call measured
             // at fifty-two seconds, and the only symptom was a schedule quietly starting a minute
             // after its time. Warned about rather than counted, because the cause is always
             // something holding the loop up, and the log is where that gets found.
+            //
+            // Measured against `expected` rather than a constant, or every idle tick would be reported
+            // as thirteen seconds late.
             val woke = android.os.SystemClock.elapsedRealtime()
-            if (previous != 0L && woke - previous > POLL_MILLIS * 2) {
-                android.util.Log.w(TAG, "enforcement ran ${woke - previous - POLL_MILLIS}ms late")
+            if (previous != 0L && woke - previous > expected * 2) {
+                android.util.Log.w(TAG, "enforcement ran ${woke - previous - expected}ms late")
             }
             previous = woke
             // Trusted time, not the wall clock: a device whose clock was moved forward must not
@@ -125,18 +187,32 @@ class EnforcementService : Service() {
             val now = runtime.trustedNow()
             val events = runtime.calendarEvents(now)
             runtime.reconcile(now, events)
-            // Written after reconciling, so the recorded time is one Curfew was demonstrably
-            // enforcing at, rather than one it merely woke up at.
-            runtime.heartbeat(now)
-            ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
-            updateNotification()
-            // If the fallback detector is in use, this is also when the foreground app is sampled.
-            if (!CurfewAccessibilityService.isEnabled(this)) {
+            // **The incidental work, on its own slower cadence.** The heartbeat is a database write, the
+            // alarm is an `AlarmManager` call and the notification is an IPC — none of it needs the fast
+            // poll, and doing all three once a second would cost more than the faster poll saves. The
+            // heartbeat is still twenty times more frequent than the five-minute threshold it feeds.
+            val sinceIncidental = if (lastIncidental == 0L) 0L else (woke - lastIncidental)
+            if (EnforcementCadence.incidentalDue(sinceIncidental)) {
+                lastIncidental = woke
+                // Written after reconciling, so the recorded time is one Curfew was demonstrably
+                // enforcing at, rather than one it merely woke up at.
+                runtime.heartbeat(now)
+                ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
+                updateNotification()
+            }
+            // If the fallback detector is in use, this is also when the foreground app is sampled — and
+            // only while a profile is being enforced, because `engine::decide` iterates the active
+            // profiles and allows everything when there are none. A sample taken then cannot change an
+            // answer, and it is a `UsageStatsManager` binder call.
+            if (
+                EnforcementCadence.enforcementWorkDue(active) &&
+                    !CurfewAccessibilityService.isEnabled(this)
+            ) {
                 UsageStatsPoller(this).sample(now)?.let {
                     enforcer(this).onObservation(it, now)
                 }
             }
-            delay(POLL_MILLIS)
+            delay(expected)
         }
     }
 
@@ -173,6 +249,8 @@ class EnforcementService : Service() {
 
     override fun onDestroy() {
         runtime.sync?.stop()
+        screen?.let { runCatching { unregisterReceiver(it) } }
+        charge?.cancel()
         watch?.cancel()
         sync?.cancel()
         loop?.cancel()
@@ -191,9 +269,9 @@ class EnforcementService : Service() {
     companion object {
         private const val TAG = "Curfew"
         private const val NOTIFICATION_ID = 1
-        private const val POLL_MILLIS = 30_000L
-        /** How often peers are talked to. Slower than enforcement: nothing waits on it. */
-        private const val SYNC_MILLIS = 60_000L
+        // **The cadences live in `EnforcementCadence`**, not here (P1-8): they are a policy about battery,
+        // and a policy that cannot be tested is how the documented strategy and the built one drifted
+        // apart. Only the constant this file alone uses stays.
 
         fun start(context: Context) {
             val intent = Intent(context, EnforcementService::class.java)
@@ -218,13 +296,27 @@ class EnforcementService : Service() {
 /** The enforcer's hands: what actually happens on the device when a decision comes back. */
 class AndroidActions(private val context: Context) : Enforcer.Actions {
 
+    private var lastBlockedTarget: String? = null
+    private var lastBlockedAt: Long = 0L
+
     override fun block(target: String, reason: BlockReason) {
-        // A background activity start is refused on modern Android unless the app is allowed to
-        // draw over other apps, and the refusal is silent from in here. Caught and logged so that
-        // a block that never appears leaves a trace pointing at the permission, rather than
-        // looking like a scheduling bug.
-        runCatching { context.startActivity(BlockActivity.intent(context, target, reason, context.curfew.profileName(reason.profile))) }
-            .onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (target == lastBlockedTarget && now - lastBlockedAt < 1200L) {
+            return
+        }
+        lastBlockedTarget = target
+        lastBlockedAt = now
+
+        runCatching {
+            val intent = BlockActivity.intent(
+                context,
+                target,
+                reason,
+                context.curfew.profileName(reason.profile),
+            )
+            val launcher = CurfewAccessibilityService.instance ?: context
+            launcher.startActivity(intent)
+        }.onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
     }
 
     override fun delay(target: String, seconds: Int) {

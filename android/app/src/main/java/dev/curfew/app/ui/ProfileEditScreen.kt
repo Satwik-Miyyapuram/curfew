@@ -17,9 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,16 +37,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.Action
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
+import dev.curfew.policy.Rule
+import dev.curfew.policy.Target
 import dev.curfew.policy.WeeklySchedule
+import dev.curfew.policy.label
 
 private val DAYS = listOf("M", "T", "W", "T", "F", "S", "S")
 
 /** Starting points, as the canvas spells them: an emoji and a word, not a template menu. */
 private val PRESETS = listOf(
     "📚" to "Study",
+    "💼" to "Deep Work",
     "🌙" to "Sleep",
     "📱" to "Socials diet",
-    "🏠" to "Weekend",
+    "🧘" to "Unplug",
 )
 
 /**
@@ -66,25 +69,28 @@ private val PRESETS = listOf(
 @Composable
 fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
-    // Matched on the minted id as well as the routed one, so the screen stops calling itself
-    // "New profile" the moment the first save lands and starts editing what it just created.
     var name by remember(id) { mutableStateOf("") }
-    // Which of the triggers has opened its own picker, so choosing what a profile blocks never
-    // means leaving the profile.
     var picking by remember { mutableStateOf<String?>(null) }
+    var confirmingDelete by remember { mutableStateOf(false) }
     val existing = state.profiles.firstOrNull { it.id == (id ?: slug(name)) }
 
     LaunchedEffect(existing?.id) {
         if (name.isBlank()) existing?.let { name = it.name }
     }
 
-    // The id is minted from the name the first time and never shown or changed afterwards:
-    // renaming a profile must not orphan the schedules pointing at it.
     val profileId = id ?: slug(name)
-    val appCount = remember(profileId, state.configToml) { model.blockedApps(profileId).size }
-    val siteCount = remember(profileId, state.configToml) { model.rulesBeyondApps(profileId).size }
+    val blockedApps = remember(profileId, state.configToml) { model.blockedApps(profileId) }
+    val blockedRules = remember(profileId, state.configToml) { model.rulesBeyondApps(profileId) }
+    val appCount = blockedApps.size
+    val siteCount = blockedRules.size
     val windows = state.weekly.filter { it.profile == profileId }
+    val budgetSeconds = remember(profileId, state.configToml) { model.budgetSeconds(profileId) }
+    val budgeted = budgetSeconds != null
+    val mine = state.calendarRules.filter { it.profile == profileId }
+    val fromCalendar = mine.isNotEmpty()
+
     val tint = Palette.ProfileColours[
         state.profiles.indexOfFirst { it.id == profileId }
             .coerceAtLeast(0) % Palette.ProfileColours.size,
@@ -104,8 +110,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         NameField(name, tint) { name = it }
 
         if (existing == null) {
-            Gap(22.dp)
-            SectionLabel("Or start from one of these")
+            Gap(20.dp)
+            SectionLabel("Or start from a preset")
             Gap(10.dp)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -117,29 +123,371 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
         }
 
-        Gap(22.dp)
+        // ==========================================
+        // SECTION: WHAT IT BLOCKS (Primary section)
+        // ==========================================
+        Gap(24.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionLabel("What it blocks")
+            Text(
+                blocksLine(appCount, siteCount),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (appCount + siteCount > 0) Palette.Accent else Palette.Dim,
+            )
+        }
+        Gap(10.dp)
+
+        var newWebDomain by remember { mutableStateOf("") }
+
+        DCard {
+            // Blocked Apps Section
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Blocked Apps ($appCount)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Text,
+                )
+                if (appCount > 0) {
+                    Text(
+                        "Tap ✕ to remove",
+                        fontSize = 11.5.sp,
+                        color = Palette.Dim,
+                    )
+                }
+            }
+
+            if (blockedApps.isNotEmpty()) {
+                Gap(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    blockedApps.forEach { pkg ->
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Palette.Raised)
+                                .border(1.dp, Palette.Line, RoundedCornerShape(999.dp))
+                                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            AppIcon(pkg, Modifier.size(18.dp).clip(CircleShape))
+                            Text(
+                                appLabel(context, pkg),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Palette.Line)
+                                    .clickable {
+                                        model.deleteRule(profileId, Target.AppPackage(pkg))
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("✕", fontSize = 10.sp, color = Palette.Muted)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Gap(10.dp)
+            GhostButton("📱 Choose Apps to Block") {
+                if (name.isBlank()) {
+                    model.say("Give it a name first.")
+                } else {
+                    model.saveProfile(profileId, name.trim())
+                    picking = "apps"
+                }
+            }
+
+            Gap(14.dp)
+            Rule()
+            Gap(14.dp)
+
+            // Blocked Websites Section (Managed directly inline)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Blocked Websites ($siteCount)",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Palette.Text,
+                )
+                if (siteCount > 0) {
+                    Text(
+                        "Tap ✕ to remove",
+                        fontSize = 11.5.sp,
+                        color = Palette.Dim,
+                    )
+                }
+            }
+
+            if (blockedRules.isNotEmpty()) {
+                Gap(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    blockedRules.forEach { rule ->
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Palette.Raised)
+                                .border(1.dp, Palette.Line, RoundedCornerShape(999.dp))
+                                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text("🌐", fontSize = 11.sp)
+                            Text(
+                                rule.target.label(),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Palette.Line)
+                                    .clickable {
+                                        model.deleteRule(profileId, rule.target)
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("✕", fontSize = 10.sp, color = Palette.Muted)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Gap(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(Dsn.CtlRadius))
+                        .background(Palette.Raised)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (newWebDomain.isEmpty()) {
+                        Text(
+                            "Add domain (e.g. reddit.com)",
+                            fontSize = 13.sp,
+                            color = Palette.Dim,
+                        )
+                    }
+                    BasicTextField(
+                        value = newWebDomain,
+                        onValueChange = { newWebDomain = it },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Palette.Text,
+                        ),
+                        cursorBrush = SolidColor(Palette.Accent),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(Dsn.CtlRadius))
+                        .background(Palette.Raised)
+                        .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
+                        .clickable {
+                            val domain = newWebDomain.trim().lowercase()
+                                .removePrefix("https://")
+                                .removePrefix("http://")
+                                .trimEnd('/')
+                            if (domain.isNotBlank()) {
+                                if (name.isBlank()) {
+                                    model.say("Give it a name first.")
+                                } else {
+                                    model.saveProfile(profileId, name.trim())
+                                    model.saveRule(profileId, Rule(target = Target.Domain(domain), action = Action.Block))
+                                    newWebDomain = ""
+                                }
+                            }
+                        }
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Add",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Accent,
+                    )
+                }
+            }
+        }
+
+        // ==========================================
+        // SECTION: WHEN IT RUNS (Togglable Automation)
+        // ==========================================
+        Gap(26.dp)
         Title("When should it run?", size = 20)
         Gap(6.dp)
-        Sub(
-            "Pick as many as you like. They stack \u2014 a calendar rule and a nightly schedule " +
-                "can both switch the same profile on.",
-        )
+        Sub("Toggle the ways you want this profile to activate. Profiles can also be started manually at any time.")
         Gap(12.dp)
 
-        // Read back from the config rather than from a wizard's own memory: a trigger is chosen
-        // because something in curfew.toml says so, which is the only version of "chosen" that
-        // survives leaving the screen.
-        val budgetSeconds = remember(profileId, state.configToml) { model.budgetSeconds(profileId) }
-        val budgeted = budgetSeconds != null
-        val budgetExample = budgetSeconds
-            ?.let { "${spellDuration(it / 60)} a day, then they close." }
-            ?: "Half an hour of socials a day, then they close."
-        val mine = state.calendarRules.filter { it.profile == profileId }
-        val fromCalendar = mine.isNotEmpty()
+        // 1. Manual / On Demand Card
+        DCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Palette.Ok.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("⏱️", fontSize = 17.sp)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "On Demand Timer",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                    )
+                    Text(
+                        "Available on Now tab and quick settings",
+                        fontSize = 12.sp,
+                        color = Palette.Muted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Pill("Ready ✓", selected = false, tint = Palette.Ok)
+            }
+        }
 
-        // Once a rule exists, the hint is worse than nothing: the row went on offering ‘lecture’ as
-        // an example while sitting under a tick, so the one thing it could not tell you was which
-        // meetings it had actually caught. Named while there are few enough to name.
+        // 2. Weekly Schedule Card (TOGGLABLE)
+        Gap(12.dp)
+        DCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Palette.Accent.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("🔁", fontSize = 17.sp)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Weekly Schedule",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                    )
+                    Text(
+                        if (windows.isNotEmpty()) {
+                            "${windows.size} active window${if (windows.size == 1) "" else "s"}"
+                        } else {
+                            "Off · Set specific hours and days"
+                        },
+                        fontSize = 12.sp,
+                        color = if (windows.isNotEmpty()) Palette.Ok else Palette.Muted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Switch(
+                    on = windows.isNotEmpty(),
+                    onChange = { turnOn ->
+                        if (name.isBlank()) {
+                            model.say("Give it a name first.")
+                        } else if (turnOn) {
+                            model.saveProfileWithWindow(
+                                profileId,
+                                name.trim(),
+                                WeeklySchedule(
+                                    id = "w-${state.now}",
+                                    profile = profileId,
+                                    days = listOf(0, 1, 2, 3, 4),
+                                    startMinute = 21 * 60,
+                                    endMinute = 0,
+                                    locks = listOf(Lock.Confirm),
+                                ),
+                            )
+                        } else {
+                            windows.forEach { model.deleteWeekly(it.id) }
+                        }
+                    },
+                )
+            }
+
+            // Expanded windows list
+            if (windows.isNotEmpty()) {
+                windows.forEach { window ->
+                    Gap(12.dp)
+                    Rule()
+                    Gap(12.dp)
+                    WindowContent(
+                        window = window,
+                        onChange = { model.saveWeekly(it) },
+                        onRemove = { model.deleteWeekly(window.id) },
+                    )
+                }
+                Gap(12.dp)
+                GhostButton("+ Add another window") {
+                    if (name.isBlank()) {
+                        model.say("Give it a name first.")
+                    } else {
+                        model.saveWeekly(
+                            WeeklySchedule(
+                                id = "w-${state.now + windows.size}",
+                                profile = profileId,
+                                days = listOf(0, 1, 2, 3, 4),
+                                startMinute = 21 * 60,
+                                endMinute = 0,
+                                locks = listOf(Lock.Confirm),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Calendar Events Card (TOGGLABLE)
         val calendarExample = when {
             mine.isEmpty() -> "Events whose title contains \u2018lecture\u2019."
             mine.size == 1 -> {
@@ -148,182 +496,178 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
             else -> "${mine.size} events start it."
         }
-        val triggers = listOf(
-            Trigger(
-                glyph = "\uD83D\uDD01",
-                tint = Palette.Accent,
-                title = "A repeating schedule",
-                // A tick with a suggestion under it read as "still not set". Once there is a
-                // window, the row says which one, and the card that edits and removes it sits
-                // directly below rather than underneath the whole rest of the screen.
-                example = when (windows.size) {
-                    0 -> "Weeknights 21:00 to midnight, every Mon\u2013Fri."
-                    1 -> describeWindow(windows.first()) + ". Edit it below."
-                    else -> "${windows.size} windows. Edit them below."
-                },
-                chosen = windows.isNotEmpty(),
-            ),
-            Trigger(
-                glyph = "\u23F1",
-                tint = Palette.Live,
-                title = "A timer I start myself",
-                example = "Tap once, block for 90 minutes. Nothing scheduled.",
-                // Always true: a timer needs no setting up, it is the Now tab's button.
-                chosen = true,
-            ),
-            Trigger(
-                glyph = "\uD83D\uDCC5",
-                tint = Palette.Ok,
-                title = "Anything in my calendar",
-                example = calendarExample,
-                chosen = fromCalendar,
-            ),
-            Trigger(
-                glyph = "\u23F3",
-                tint = Palette.Bad,
-                title = "A daily budget",
-                example = budgetExample,
-                chosen = budgeted,
-            ),
-            Trigger(
-                glyph = "\u221E",
-                tint = Palette.Muted,
-                title = "Always on",
-                example = "Never unblocked, unless you spend a pass.",
-                chosen = windows.any { it.days.size == 7 },
-            ),
-        )
+        Gap(12.dp)
+        DCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Palette.Ok.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("📅", fontSize = 17.sp)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Calendar Events",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                    )
+                    Text(
+                        if (fromCalendar) calendarExample else "Off · Does not sync with calendar",
+                        fontSize = 12.sp,
+                        color = if (fromCalendar) Palette.Ok else Palette.Muted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Switch(
+                    on = fromCalendar,
+                    onChange = { turnOn ->
+                        if (name.isBlank()) {
+                            model.say("Give it a name first.")
+                        } else if (turnOn) {
+                            model.saveProfile(profileId, name.trim())
+                            picking = "calendar"
+                        } else {
+                            mine.forEach { model.deleteCalendarRule(it.id) }
+                        }
+                    },
+                )
+            }
 
-        DCardFlush {
-            triggers.forEachIndexed { index, trigger ->
-                if (index > 0) Rule()
-                TriggerRow(trigger) {
-                    when (trigger.title) {
-                        "A repeating schedule" -> {
-                            if (name.isBlank()) {
-                                model.say("Give it a name first.")
-                            } else if (windows.isNotEmpty()) {
-                                // Already set. Every tap used to mint another 21:00 Mon\u2013Fri
-                                // window, so the trigger could be chosen over and over and never
-                                // unchosen; the window's own card, right below, is where it gets
-                                // edited or removed.
-                                Unit
-                            } else {
-                                model.saveProfileWithWindow(
+            if (fromCalendar) {
+                Gap(10.dp)
+                Rule()
+                Gap(10.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { picking = "calendar" },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Configure calendar events", fontSize = 13.sp, color = Palette.Accent)
+                    Text("›", fontSize = 18.sp, color = Palette.Accent, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // 4. Daily Limit Card (TOGGLABLE)
+        Gap(12.dp)
+        DCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(Palette.Bad.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("⏳", fontSize = 17.sp)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Daily Screen-Time Limit",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Text,
+                    )
+                    Text(
+                        if (budgeted) {
+                            "${spellDuration(budgetSeconds!! / 60)} a day, then apps lock"
+                        } else {
+                            "Off · Total block when active"
+                        },
+                        fontSize = 12.sp,
+                        color = if (budgeted) Palette.Accent else Palette.Muted,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Switch(
+                    on = budgeted,
+                    onChange = { turnOn ->
+                        if (name.isBlank()) {
+                            model.say("Give it a name first.")
+                        } else if (blockedApps.isEmpty()) {
+                            model.say("Add some apps first.")
+                        } else if (turnOn) {
+                            blockedApps.forEach { pkg ->
+                                model.saveRule(
                                     profileId,
-                                    name.trim(),
-                                    WeeklySchedule(
-                                        // Minted from the clock so two windows added in the same
-                                        // session cannot collide, and never shown.
-                                        id = "w-${state.now}",
-                                        profile = profileId,
-                                        // A weeknight evening: the commonest thing anyone sets up,
-                                        // and every part of it is a control on the card below.
-                                        // Monday is 0 and Sunday is 6, the way the core counts
-                                        // days from Monday. Numbering these from 1 made every
-                                        // Sunday window invalid.
-                                        days = listOf(0, 1, 2, 3, 4),
-                                        startMinute = 21 * 60,
-                                        // Midnight at the far end is 0, not 1440: the core reads
-                                        // an end at or before the start as "the next day", and
-                                        // refuses any minute outside the day itself.
-                                        endMinute = 0,
-                                        locks = listOf(Lock.Confirm),
-                                    ),
+                                    Rule(Target.AppPackage(pkg), Action.Budget(30 * 60)),
+                                )
+                            }
+                        } else {
+                            blockedApps.forEach { pkg ->
+                                model.saveRule(
+                                    profileId,
+                                    Rule(Target.AppPackage(pkg), Action.Block),
                                 )
                             }
                         }
-                        "A timer I start myself" -> {
-                            if (name.isBlank()) {
-                                model.say("Give it a name first.")
-                            } else {
-                                model.saveProfile(profileId, name.trim())
-                                picking = "apps"
-                            }
-                        }
-                        "Anything in my calendar" -> {
-                            // The events open here rather than on their own tab. Being told to go
-                            // somewhere else, find the same list, and remember which profile you
-                            // were half way through building is how a profile gets abandoned.
-                            if (name.isBlank()) {
-                                model.say("Give it a name first.")
-                            } else {
-                                model.saveProfile(profileId, name.trim())
-                                picking = "calendar"
-                            }
-                        }
-                        "A daily budget" -> {
-                            if (name.isBlank()) {
-                                model.say("Give it a name first.")
-                            } else {
-                                model.saveProfile(profileId, name.trim())
-                                picking = "budget"
-                            }
-                        }
-                        else ->
-                            model.say(
-                                "Add a window covering the whole week to leave it always on.",
-                            )
+                    },
+                )
+            }
+
+            if (budgeted) {
+                Gap(12.dp)
+                Rule()
+                Gap(10.dp)
+                Text("Daily allowance before locking:", fontSize = 12.sp, color = Palette.Muted)
+                Gap(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(15, 30, 60, 120).forEach { mins ->
+                        val selected = (budgetSeconds ?: 0) / 60 == mins
+                        Pill(
+                            text = spellDuration(mins),
+                            selected = selected,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                blockedApps.forEach { pkg ->
+                                    model.saveRule(
+                                        profileId,
+                                        Rule(Target.AppPackage(pkg), Action.Budget(mins * 60)),
+                                    )
+                                }
+                            },
+                        )
                     }
                 }
             }
         }
 
-        windows.forEach { window ->
-            Gap(12.dp)
-            WindowCard(
-                window = window,
-                onChange = { model.saveWeekly(it) },
-                onRemove = { model.deleteWeekly(window.id) },
-            )
-        }
-
+        // ==========================================
+        // SUMMARY NOTE & ACTIONS
+        // ==========================================
         Gap(16.dp)
-        SectionLabel("What it blocks")
-        Gap(8.dp)
-        // The other half of a profile, and the half that used to live on a tab of its own. Apps
-        // and sites belong to a profile, so the place to set them is inside the profile — the tab
-        // asked which profile you meant when you had just come from it.
-        DCardFlush {
-            TriggerRow(
-                Trigger(
-                    glyph = "■",
-                    tint = Palette.Accent,
-                    title = blocksLine(appCount, siteCount),
-                    example = "Apps and websites, kept apart in two lists.",
-                    chosen = appCount + siteCount > 0,
-                ),
-            ) {
-                if (name.isBlank()) {
-                    model.say("Give it a name first.")
-                } else {
-                    model.saveProfile(profileId, name.trim())
-                    picking = "apps"
-                }
-            }
-        }
-
-        Gap(10.dp)
         Text(
-            "${chosenWord(triggers.count { it.chosen })} Whichever starts first wins, and the " +
-                "block ends when the last one is done.",
+            "Any toggled trigger that turns on activates the profile. While active, all selected apps and websites are blocked.",
             fontSize = 12.sp,
             lineHeight = 18.sp,
             color = Palette.Dim,
         )
 
-
-        Gap(18.dp)
+        Gap(20.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (existing != null) {
                 GhostButton(
                     text = "Delete",
                     modifier = Modifier.weight(1f),
                     colour = Palette.Bad,
-                ) {
-                    model.deleteProfile(existing.id)
-                    onDone()
-                }
+                ) { confirmingDelete = true }
             }
             PrimaryButton(
                 text = "Save",
@@ -361,13 +705,20 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         )
     }
 
-    // Whatever the core said. This screen used to swallow it, which is how "Add a window" could
-    // fail silently and leave a profile with no schedule and no explanation.
-    state.message?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissMessage,
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
+    if (confirmingDelete && existing != null) {
+        DConfirm(
+            title = "Delete ${existing.name}?",
+            sub = "It stops blocking anything, and its apps, sites and windows go with it.",
+            body = "A session it has already started keeps running until its own lock lets it go.\n\nIf you only want it off for a while, turn it off from the schedule list instead — that is reversible.",
+            dismiss = "Keep it",
+            confirm = "Delete",
+            destructive = true,
+            onDismiss = { confirmingDelete = false },
+            onConfirm = {
+                val target = existing.id
+                confirmingDelete = false
+                model.deleteProfile(target) { onDone() }
+            },
         )
     }
 }
@@ -442,6 +793,17 @@ private fun WindowCard(
     onRemove: () -> Unit,
 ) {
     DCard {
+        WindowContent(window, onChange, onRemove)
+    }
+}
+
+@Composable
+private fun WindowContent(
+    window: WeeklySchedule,
+    onChange: (WeeklySchedule) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             DAYS.forEachIndexed { index, letter ->
                 // Monday is 1 in the config, and Sunday is 7 — the ISO numbering the core uses,
@@ -495,6 +857,22 @@ private fun WindowCard(
                 )
             }
         }
+        val currentLock = window.locks.firstOrNull()
+        val note = when (currentLock) {
+            null -> "Ends the moment you tap stop."
+            is Lock.Confirm -> "One confirmation, so it is never an accident."
+            is Lock.DeviceCredential -> "Proves it is you, not a pocket."
+            is Lock.Challenge -> when (currentLock.challenge) {
+                ChallengeKind.MATH -> "A quick puzzle before it opens."
+                ChallengeKind.TYPING -> "A sentence to copy before it opens."
+            }
+            is Lock.Timer -> "Nothing ends this early. The 24-hour release is the way out."
+            else -> null
+        }
+        if (note != null) {
+            Gap(6.dp)
+            Text(note, fontSize = 12.sp, color = Palette.Muted, lineHeight = 16.sp)
+        }
 
         Gap(14.dp)
         Text(
@@ -506,12 +884,14 @@ private fun WindowCard(
     }
 }
 
-/** The four answers to "how hard should this be to escape", in order of how hard they are. */
+/** The answers to "how hard should this be to escape", in order of how hard they are. */
 private fun strengths(): List<Pair<String, Lock?>> = listOf(
     "I can stop it" to null,
     "Ask me first" to Lock.Confirm,
     "Fingerprint" to Lock.DeviceCredential,
+    "Solve math" to Lock.Challenge(ChallengeKind.MATH),
     "Type it out" to Lock.Challenge(ChallengeKind.TYPING),
+    "Until it ends" to Lock.Timer,
 )
 
 @Composable
@@ -552,15 +932,14 @@ private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {
 /**
  * Minutes past midnight as a clock face.
  *
- * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far
- * end of an evening window rather than the start of one, and a window that ends at or before it
- * starts is the core's own way of saying "and on into tomorrow".
+ * Zero is spelled "midnight" rather than "00:00" because in this app it is almost always the far end
+ * of an evening window rather than the start of one, and a window that ends at or before it starts is
+ * the core's own way of saying "and on into tomorrow".
+ *
+ * The formatting itself lives in [clockMinute] with the rest of the app's time words, and the reason
+ * it is not the localised clock is written down there: this text is typed back into a config.
  */
-private fun clock(minute: Int): String {
-    val m = ((minute % (24 * 60)) + 24 * 60) % (24 * 60)
-    if (m == 0) return "midnight"
-    return "%02d:%02d".format(m / 60, m % 60)
-}
+private fun clock(minute: Int): String = clockMinute(minute)
 
 private fun slug(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "profile" }
@@ -584,139 +963,48 @@ private fun Nudge(glyph: String, description: String, accent: Boolean, onClick: 
     }
 }
 
-/** One thing that can switch a profile on, as the canvas lists them. */
-private data class Trigger(
-    val glyph: String,
-    val tint: androidx.compose.ui.graphics.Color,
-    val title: String,
-    val example: String,
-    val chosen: Boolean,
-)
-
-/**
- * A trigger, with a tick when it is already set up and a chevron when it is not.
- *
- * The example line under each title is doing the real work: "a calendar rule" means nothing until
- * it is spelled as an event whose title contains a word, and a list of five abstractions is how a
- * setup screen gets skipped.
- */
-@Composable
-private fun TriggerRow(trigger: Trigger, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(13.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(13.dp))
-                .background(trigger.tint.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(trigger.glyph, fontSize = 17.sp)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                trigger.title,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Palette.Text,
-            )
-            Text(
-                trigger.example,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = Palette.Muted,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        Text(
-            if (trigger.chosen) "\u2713" else "\u203A",
-            fontSize = if (trigger.chosen) 15.sp else 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (trigger.chosen) Palette.Ok else Palette.Dim,
-        )
-    }
-}
-
-/** "Two chosen." \u2014 the count as a word, because a digit here reads like a setting. */
-private fun chosenWord(count: Int): String {
-    val word = when (count) {
-        0 -> "Nothing"
-        1 -> "One"
-        2 -> "Two"
-        3 -> "Three"
-        4 -> "Four"
-        else -> "Five"
-    }
-    return if (count == 0) "$word chosen yet." else "$word chosen."
-}
-
 /**
  * A daily budget, set from inside the profile it belongs to.
- *
- * A budget is not a separate kind of rule so much as a softer verb on the rules already there: the
- * apps this profile blocks get a number of minutes a day instead of none. So the sheet asks for the
- * number and writes it onto every app the profile already names, which is the only version of
- * "half an hour of socials" that means anything — a budget with nothing under it blocks nothing.
  */
 @Composable
 fun BudgetSheet(model: CurfewViewModel, profileId: String, onDone: () -> Unit) {
     val apps = remember(profileId) { model.blockedApps(profileId) }
     var minutes by remember { mutableStateOf(30) }
 
-    AlertDialog(
-        onDismissRequest = onDone,
-        title = { Text("A daily budget") },
-        text = {
-            Column {
-                Text(
-                    if (apps.isEmpty()) {
-                        "This profile does not block any app yet, so there is nothing to ration. " +
-                            "Add some apps first and the budget will apply to those."
-                    } else {
-                        "${apps.size} app${if (apps.size == 1) "" else "s"} in this profile will " +
-                            "open until the budget is spent, then close for the rest of the day."
-                    },
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                    color = Palette.Muted,
+    DSheet(
+        title = "A daily budget",
+        sub = if (apps.isEmpty()) {
+            "This profile does not block any app yet, so there is nothing to ration. Add some apps first and the budget will apply to those."
+        } else {
+            "${apps.size} app${if (apps.size == 1) "" else "s"} in this profile will open until the budget is spent, then close for the rest of the day."
+        },
+        onDismiss = onDone,
+        confirm = "Set it",
+        confirmEnabled = apps.isNotEmpty(),
+        onConfirm = {
+            apps.forEach { packageName ->
+                model.saveRule(
+                    profileId,
+                    dev.curfew.policy.Rule(
+                        target = dev.curfew.policy.Target.AppPackage(packageName),
+                        action = Action.Budget(seconds = minutes * 60),
+                    ),
                 )
-                Gap(14.dp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(15, 30, 60, 120).forEach { option ->
-                        Pill(
-                            text = spellDuration(option),
-                            selected = minutes == option,
-                            onClick = { minutes = option },
-                        )
-                    }
-                }
             }
+            onDone()
         },
-        confirmButton = {
-            TextButton(
-                enabled = apps.isNotEmpty(),
-                onClick = {
-                    apps.forEach { packageName ->
-                        model.saveRule(
-                            profileId,
-                            dev.curfew.policy.Rule(
-                                target = dev.curfew.policy.Target.AppPackage(packageName),
-                                action = Action.Budget(seconds = minutes * 60),
-                            ),
-                        )
-                    }
-                    onDone()
-                },
-            ) { Text("Set it") }
-        },
-        dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } },
-    )
+    ) {
+        Gap(14.dp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(15, 30, 60, 120).forEach { option ->
+                Pill(
+                    text = spellDuration(option),
+                    selected = minutes == option,
+                    onClick = { minutes = option },
+                )
+            }
+        }
+    }
 }
 
 /** "Nothing yet", or what the profile holds, counted in the two kinds it is kept in. */

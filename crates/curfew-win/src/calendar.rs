@@ -96,14 +96,54 @@ struct Cached {
 pub struct Feeds {
     dir: PathBuf,
     cache: BTreeMap<String, Cached>,
+    /// When a source that just failed may be tried again, and how many times it has failed in a row.
+    ///
+    /// **P1-11.** A failed fetch did not update `cached.at`, so `due` stayed true and the source was
+    /// retried on the *next tick* — every two seconds, against a twenty-second timeout. A subscription
+    /// pointing at a host that black-holes packets therefore spent most of every minute inside a
+    /// `fetch`, and each attempt held the enforcer lock (see `runner`). The review calls it out
+    /// separately from the lock because it is a second defect: backing off is what makes a failing
+    /// feed cheap, and moving the fetch is what makes it harmless.
+    retry: BTreeMap<String, (Timestamp, u32)>,
 }
+
+/// How long to wait after the first failure, doubling per consecutive failure up to
+/// [`RETRY_MAX_SECONDS`].
+///
+/// `pub` so a test can assert against the window rather than repeat the number: a test that hard-codes
+/// it keeps passing after somebody changes the constant.
+pub const RETRY_BASE_SECONDS: i64 = 30;
+
+/// The longest a repeatedly failing source is left alone. Ten minutes: long enough that a host which
+/// is down all afternoon costs almost nothing, short enough that a calendar which comes back is
+/// picked up while the user is still looking at the app.
+pub const RETRY_MAX_SECONDS: i64 = 600;
 
 impl Feeds {
     /// `dir` is where cached copies are written. It sits beside the service's state, which on an
     /// installed service means a directory a standard user cannot write — otherwise editing the
     /// cache would be a way to delete tomorrow's block.
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into(), cache: BTreeMap::new() }
+        Self { dir: dir.into(), cache: BTreeMap::new(), retry: BTreeMap::new() }
+    }
+
+    /// Record a failed fetch, and how long to leave the source alone.
+    ///
+    /// Doubling from [`RETRY_BASE_SECONDS`] to a ceiling of [`RETRY_MAX_SECONDS`]. The `saturating`
+    /// shift matters: a source that has failed for a very long time would otherwise overflow the
+    /// shift and wrap to a *small* delay, which is the one wrong answer — a long-broken feed is
+    /// exactly the one that should be costing the least.
+    fn note_failure(&mut self, id: &str, now: Timestamp) {
+        let failures = self.retry.get(id).map(|(_, n)| *n).unwrap_or(0).saturating_add(1);
+        // **`failures - 1`, so the first failure waits `RETRY_BASE_SECONDS`** rather than doubling it
+        // (`2^0 = 1`). The first version shifted by `failures`, which made the opening wait twice what
+        // it should be — a source that recovered after one bad minute was still ignored. Caught by the
+        // test asserting the retry lands at the base window.
+        let doublings = failures.saturating_sub(1).min(10);
+        let wait = RETRY_BASE_SECONDS
+            .saturating_mul(1i64.checked_shl(doublings).unwrap_or(i64::MAX))
+            .min(RETRY_MAX_SECONDS);
+        self.retry.insert(id.to_string(), (now.saturating_add(wait), failures));
     }
 
     fn path(&self, id: &str) -> PathBuf {
@@ -162,32 +202,68 @@ impl Feeds {
         let mut outcomes = Vec::new();
 
         for source in sources {
-            let due = match self.cache.get(&source.id) {
+            let fresh_enough = match self.cache.get(&source.id) {
                 Some(cached) => now.saturating_sub(cached.at) >= source.refresh_seconds as i64,
                 None => true,
             };
 
+            // **And not while it is backing off** (P1-11). A source that failed a moment ago is not
+            // due, however stale its cache is — that is the whole point of the backoff.
+            let not_backing_off = self.retry.get(&source.id).is_none_or(|(at, _)| now >= *at);
+            let due = fresh_enough && not_backing_off;
+
             if due {
                 match fetcher.fetch(&as_http(&source.location)) {
-                    Ok(text) => match curfew_ics::events_between(&text, 0, 0, zone) {
-                        // Parsed as a calendar, so it is safe to keep. Whether this particular
-                        // window has any events in it says nothing about the document's validity.
+                    Ok(text) => match curfew_ics::event_count(&text) {
+                        // **An empty document is not an authoritative one** — P2-9.
+                        //
+                        // Parsing successfully only means the text carried `BEGIN:VCALENDAR`. A
+                        // provider's auth-expiry placeholder and a truncated export both carry it and
+                        // hold no events, and caching one replaces the last good copy, which releases
+                        // every block that copy was driving. That is fail-open on precisely the threat
+                        // this module exists to close, and the module docs state the opposite
+                        // guarantee.
+                        //
+                        // So a document with no events is only believed when there is nothing to lose:
+                        // with no cached copy it is accepted, because a genuinely empty calendar is a
+                        // legitimate thing to subscribe to. With one, the cache keeps serving and the
+                        // source is reported as failing.
+                        Ok(0) if self.cache.contains_key(&source.id) => {
+                            self.note_failure(&source.id, now);
+                            outcomes.push(Outcome::Failed {
+                                id: source.id.clone(),
+                                detail: "the calendar came back with no events at all, which is what a \
+                                         placeholder or a truncated download looks like; keeping the \
+                                         last copy that had some"
+                                    .into(),
+                                still_serving: true,
+                            });
+                        }
                         Ok(_) => {
                             let _ = std::fs::create_dir_all(&self.dir);
                             let _ = std::fs::write(self.path(&source.id), &text);
                             self.cache.insert(source.id.clone(), Cached { text, at: now });
+                            // Working again, so the next failure starts from the short wait rather
+                            // than from wherever the run of failures had climbed to.
+                            self.retry.remove(&source.id);
                         }
-                        Err(e) => outcomes.push(Outcome::Failed {
-                            id: source.id.clone(),
-                            detail: e.to_string(),
-                            still_serving: self.cache.contains_key(&source.id),
-                        }),
+                        Err(e) => {
+                            self.note_failure(&source.id, now);
+                            outcomes.push(Outcome::Failed {
+                                id: source.id.clone(),
+                                detail: e.to_string(),
+                                still_serving: self.cache.contains_key(&source.id),
+                            });
+                        }
                     },
-                    Err(detail) => outcomes.push(Outcome::Failed {
-                        id: source.id.clone(),
-                        detail,
-                        still_serving: self.cache.contains_key(&source.id),
-                    }),
+                    Err(detail) => {
+                        self.note_failure(&source.id, now);
+                        outcomes.push(Outcome::Failed {
+                            id: source.id.clone(),
+                            detail,
+                            still_serving: self.cache.contains_key(&source.id),
+                        });
+                    }
                 }
             }
 

@@ -81,10 +81,28 @@ pub fn summarize(records: &[SessionRecord], now: Timestamp, tz: Tz, days: u32) -
 
     // The session count is per record: two profiles blocking the same hour is two sessions the
     // user started, even though it is one hour of their day.
+    //
+    // **Counted once per session, not once per day it touches** — P2-20. A session running from
+    // 23:00 to 01:00 is one block the user started; the per-day figures legitimately credit both
+    // days, and summing them made `total_sessions` count it twice. The UI prints that number as
+    // "blocks kept", which is a count of sessions.
+    //
+    // **And only when it lands in the window at all.** `for_each_local_day` calls the closure for each
+    // day a span covers, so a session in April visits none of them — an earlier version of this fix
+    // used `spans.len()` and reported a session the window excludes entirely, which
+    // `history_older_than_the_window_is_left_out` caught. The flag is what the two questions need: the
+    // per-day counters answer "did this day contain a block", and `total_sessions` answers "how many
+    // blocks are in this window".
+    let mut total_sessions = 0u32;
     for &(start, end) in &spans {
+        let mut in_window = false;
         for_each_local_day(start, end, first, today, tz, |index, _| {
-            sessions[index] += 1;
+            sessions[index] = sessions[index].saturating_add(1);
+            in_window = true;
         });
+        if in_window {
+            total_sessions = total_sessions.saturating_add(1);
+        }
     }
 
     // The seconds are not. Merging first is what stops two overlapping sessions from reporting
@@ -137,7 +155,10 @@ pub fn summarize(records: &[SessionRecord], now: Timestamp, tz: Tz, days: u32) -
 
     Stats {
         total_blocked_seconds: days_out.iter().map(|d| d.blocked_seconds as u64).sum(),
-        total_sessions: days_out.iter().map(|d| d.sessions).sum(),
+        // Not a sum of the per-day counts: see the note where `total_sessions` is computed. A
+        // session that crosses midnight is credited to both days *and* counted once here, which is
+        // what each figure means.
+        total_sessions,
         current_streak: current,
         longest_streak: longest,
         days: days_out,

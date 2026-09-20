@@ -61,6 +61,23 @@ sealed interface Challenge {
             is Math -> input.trim().toIntOrNull() == challenge.answer
         }
 
+        /**
+         * The most a single edit may grow a typing answer by and still count as typing.
+         *
+         * A keyboard produces one character at a time; accepting a suggestion swaps in one word.
+         * A paste of the passage arrives all at once, and a passage pasted in is a challenge not
+         * taken. Generous enough for the longest word a suggestion strip offers, and nowhere near
+         * a sentence.
+         */
+        const val LONGEST_KEYSTROKE = 24
+
+        /**
+         * Whether an edit from [previous] to [next] could have been typed. Deleting is always
+         * allowed; growing by more than [LONGEST_KEYSTROKE] characters at once is not.
+         */
+        fun isTyped(challenge: Challenge, previous: String, next: String): Boolean =
+            challenge !is Typing || next.length - previous.length <= LONGEST_KEYSTROKE
+
         private fun normalize(s: String) =
             s.trim().replace(Regex("""\s+"""), " ").lowercase()
     }

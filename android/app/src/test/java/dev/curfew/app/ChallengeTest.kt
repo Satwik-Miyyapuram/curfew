@@ -27,6 +27,22 @@ class ChallengeTest {
     }
 
     @Test
+    fun `a passage pasted in is not a passage typed`() {
+        val challenge = Challenge.generate(ChallengeKind.TYPING) as Challenge.Typing
+
+        assertFalse(Challenge.isTyped(challenge, "", challenge.passage))
+        assertTrue(Challenge.isTyped(challenge, "", "T"))
+        assertTrue(Challenge.isTyped(challenge, "Th", "The"))
+        // A suggestion strip swaps in a word; that is still typing.
+        assertTrue(Challenge.isTyped(challenge, "Th", "Therefore "))
+        // Deleting any amount is fine: it never helps.
+        assertTrue(Challenge.isTyped(challenge, challenge.passage, ""))
+        // Arithmetic has a short answer and nothing to paste from.
+        val math = Challenge.generate(ChallengeKind.MATH)
+        assertTrue(Challenge.isTyped(math, "", "1234567890123456789012345"))
+    }
+
+    @Test
     fun `typing is forgiving about the things that are not the point`() {
         val challenge = Challenge.Typing("I decided this in advance.")
 

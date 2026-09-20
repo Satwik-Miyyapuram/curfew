@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,7 +58,8 @@ import dev.curfew.policy.Stats
 @Composable
 fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
-    val activity = LocalContext.current as? FragmentActivity
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
 
     // The conditions this screen can satisfy are gathered one at a time, in a fixed order, and
     // handed to the core together. The core is still the judge: it refuses if the set is short,
@@ -74,9 +74,40 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // device opens the moment this one says yes, and there is no way to say no afterwards.
     var confirmingRelease by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * Asking for the 24-hour release, which was the one irreversible act here that was **not** asked
+     * about.
+     *
+     * `confirmingPass` above says a pass "takes something scarce, shared with every paired device, and
+     * impossible to give back", and `confirmingRelease` says the other device "opens the moment this
+     * one says yes". Both have a confirmation. This one — the strongest route out of the strongest
+     * lock, which cannot be withdrawn once asked for — was a single tap on a button sitting directly
+     * beside "End now", and the two look alike. That is F-7 in the interaction review, and the reason
+     * it survived is that each of the three was reasoned about on its own instead of being one rule.
+     */
+    var confirmingDelayed by remember { mutableStateOf<Session?>(null) }
+
     // The session a tag is being presented to, if any. The tag itself lives inside the dialog and
     // is never lifted into this state, so a recomposition cannot leave it lying around.
     var presenting by remember { mutableStateOf<Session?>(null) }
+
+    // The session whose `Lock.Confirm` is being honoured. Held as a `Session` rather than an id
+    // because the dialog names the profile that is about to end.
+    var confirmingEnd by remember { mutableStateOf<Session?>(null) }
+
+    /**
+     * A profile as a person reads it: the name they gave it, never the slug from the config.
+     *
+     * One helper because there were four call sites each doing the lookup inline and one that did not
+     * do it at all — the biometric prompt's title read `End deep-work`. That is the same defect as
+     * F-28 on Windows, where every surface printed `Session.profile`, except this one reaches the
+     * *system* fingerprint dialog, so the slug appears in a box the app does not draw.
+     *
+     * Falling back to the id is deliberate: a profile deleted while a session from it is still running
+     * has no name to look up, and the id beats an empty title.
+     */
+    fun named(id: String): String =
+        state.profiles.firstOrNull { it.id == id }?.name ?: id
 
     fun finish(session: Session, satisfied: List<Lock>) {
         pending = null
@@ -84,7 +115,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         if (credential.isNotEmpty() && activity != null) {
             Auth.prove(
                 activity,
-                title = "End ${session.profile}",
+                title = "End ${named(session.profile)}",
                 subtitle = "Confirm it is you.",
             ) { proven ->
                 // A cancelled prompt still goes to the core, which refuses and says what is
@@ -99,6 +130,16 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     fun end(session: Session) {
+        // A confirmation the user asked to be shown, shown. `Lock.Confirm` was never branched on
+        // anywhere in the UI, so it went to the core with an empty satisfied set, the core refused
+        // because the condition was unmet, and the refusal dialog offered nothing that could meet
+        // it. "One confirmation, so it is never an accident" — the default strength on the Timer
+        // screen, and the lock behind a seeded weeknight window — was in fact a lock with no exit.
+        val needsConfirm = session.lock.conditions.any { it is Lock.Confirm }
+        if (needsConfirm) {
+            confirmingEnd = session
+            return
+        }
         val challenge = session.lock.conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
         if (challenge == null) {
             finish(session, emptyList())
@@ -108,9 +149,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     val live = state.sessions.firstOrNull()
-    val liveName = live?.let { session ->
-        state.profiles.firstOrNull { it.id == session.profile }?.name ?: session.profile
-    }
+    val liveName = live?.let { session -> named(session.profile) }
 
     Screen(spacing = 0.dp) {
         if (live != null) {
@@ -187,6 +226,54 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         Gap(14.dp)
         GivenBackCard(stats = state.stats, detailed = true)
 
+        // F-2: say what was written on this device's behalf, once.
+        //
+        // The signal is the audit log's newest row: `seedStarterProfile` writes `profile.seeded` and
+        // it is the first thing a fresh install does (`CurfewRuntime:502`, before the first
+        // `refresh`). `recent()` is `ORDER BY at DESC`, so if that is still the most recent entry
+        // then nothing has happened since — the user has not run a block, changed a rule, or saved
+        // anything. The card then retires itself with no stored flag and no dismiss button, which is
+        // the property worth having: a one-time notice whose one-time-ness is *derived* cannot get
+        // out of step with the thing it is describing.
+        // The row's `detail` is the profile's id - commitConfig("profile.seeded", STARTER_PROFILE) -
+        // so this needs no shared constant and cannot disagree with the config.
+        val seedRow = state.audit.firstOrNull()?.takeIf { it.kind == "profile.seeded" }
+        if (seedRow != null && live == null) {
+            Gap(14.dp)
+            val starter = state.profiles.firstOrNull { it.id == seedRow.detail }
+            if (starter != null) {
+                // Labels resolved here rather than in the pure function: this needs a Context, and
+                // the sentence is the part worth testing without one.
+                val labels = model.blockedApps(starter.id).map { appLabel(context, it) }
+                DCard(padding = 16.dp) {
+                    Text(
+                        describeSeed(starter.name, labels),
+                        fontSize = 14.sp,
+                        lineHeight = 21.sp,
+                        color = Palette.Text,
+                    )
+                    // F-48's other half: the privacy claim, at the moment the question arises.
+                    //
+                    // The review calls this "the single strongest thing the app can say to someone
+                    // deciding whether to trust a screen-watching tool", and it lived on Settings and
+                    // Health - two taps in, on screens a first-day user has no reason to open.
+                    //
+                    // It belongs *here* rather than on a screen of its own, because this is the card
+                    // that has just said "we blocked the usual time sinks for you": the next thought
+                    // of anyone reasonable is what that thing sends, and answering it one screen
+                    // later is answering it too late. The card retires with the notice, so Now does
+                    // not carry a permanent privacy banner.
+                    Gap(8.dp)
+                    Text(
+                        Privacy.NO_SERVER,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = Palette.Muted,
+                    )
+                }
+            }
+        }
+
         state.downtime?.let { downtime ->
             Gap(14.dp)
             DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
@@ -201,13 +288,12 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Gap(14.dp)
             SessionCard(
                 session = session,
-                name = state.profiles.firstOrNull { it.id == session.profile }?.name
-                    ?: session.profile,
+                name = named(session.profile),
                 now = state.now,
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
                 onEnd = { end(session) },
-                onRelease = { model.requestRelease(session) },
+                onRelease = { confirmingDelayed = session },
                 onEmergency = { confirmingPass = session },
                 onPresentTag = { presenting = session },
             )
@@ -281,7 +367,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill(
                     if (state.downtime == null) "Ticks on time" else "Missed a stretch",
-                    tint = if (state.downtime == null) Palette.Ok else Palette.Live,
+                    // Bad, not amber. A stretch Curfew missed is a bad thing that already happened —
+                    // which is what Bad is for — where amber would say a block is running, the
+                    // opposite of what this pill reports.
+                    tint = if (state.downtime == null) Palette.Ok else Palette.Bad,
                 )
                 Pill(
                     when (state.sync.active.size) {
@@ -295,50 +384,76 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         }
     }
 
+    confirmingEnd?.let { session ->
+        DConfirm(
+            title = "End ${named(session.profile)}?",
+            body = "You chose \"ask me first\" for this one, so this is the asking. Nothing else " +
+                "is standing in the way.",
+            dismiss = "Keep it running",
+            confirm = "End it",
+            onDismiss = { confirmingEnd = null },
+            onConfirm = {
+                val chosen = session
+                confirmingEnd = null
+                // `Lock.Confirm` is a condition the caller is the only witness to — the core cannot
+                // check that a dialog was shown — so it is named here and nowhere else. That is
+                // exactly the kind of claim `claimable` exists to allow, and exactly the kind it must
+                // not be widened beyond.
+                finish(chosen, listOf(Lock.Confirm))
+            },
+        )
+    }
+
     confirmingPass?.let { session ->
-        AlertDialog(
-            onDismissRequest = { confirmingPass = null },
-            title = { Text("Use an emergency pass?") },
-            text = {
-                Text(
-                    "This ends ${session.profile} now. It counts against your ration on every " +
-                        "paired device, it is written into your history, and it cannot be given " +
-                        "back.",
-                )
+        DConfirm(
+            title = "Use an emergency pass?",
+            body = "This ends ${named(session.profile)} now. It counts against your ration on " +
+                "every paired device, it is written into your history, and it cannot be given back.",
+            dismiss = "Keep it",
+            confirm = "Use one",
+            // Scarce, recorded, and shared with every paired device — the app's one genuinely
+            // irreversible action, so the emphasis goes on keeping it.
+            destructive = true,
+            onDismiss = { confirmingPass = null },
+            onConfirm = {
+                val chosen = session
+                confirmingPass = null
+                model.spendPass(chosen)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = session
-                    confirmingPass = null
-                    model.spendPass(chosen)
-                }) { Text("Use one") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingPass = null }) { Text("Keep it") }
+        )
+    }
+
+    confirmingDelayed?.let { session ->
+        DConfirm(
+            title = "Ask to end ${named(session.profile)} in 24 hours?",
+            body = "This is the way out of a lock nothing here can end. It cannot be taken back, and " +
+                "it cannot be asked for twice, so the landing time is now and stays where it is.",
+            dismiss = "Not yet",
+            confirm = "Ask for it",
+            destructive = true,
+            onDismiss = { confirmingDelayed = null },
+            onConfirm = {
+                val chosen = session
+                confirmingDelayed = null
+                model.requestRelease(chosen)
             },
         )
     }
 
     confirmingRelease?.let { id ->
-        AlertDialog(
-            onDismissRequest = { confirmingRelease = null },
-            title = { Text("Let the other device out?") },
-            text = {
-                Text(
-                    "Your other device is holding a session that only this one can end. Saying " +
-                        "yes ends it there as soon as the two devices next talk, and there is no " +
-                        "way to take it back.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = id
-                    confirmingRelease = null
-                    model.releasePeer(chosen)
-                }) { Text("Let it out") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingRelease = null }) { Text("Not yet") }
+        DConfirm(
+            title = "Let the other device out?",
+            body = "Your other device is holding a session that only this one can end. Saying yes " +
+                "ends it there as soon as the two devices next talk, and there is no way to take it " +
+                "back.",
+            dismiss = "Not yet",
+            confirm = "Let it out",
+            destructive = true,
+            onDismiss = { confirmingRelease = null },
+            onConfirm = {
+                val chosen = id
+                confirmingRelease = null
+                model.releasePeer(chosen)
             },
         )
     }
@@ -366,22 +481,12 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     state.refusal?.let { refusal ->
         RefusalDialog(refusal = refusal, now = state.now, onDismiss = model::dismissRefusal)
     }
-    state.message?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissMessage,
-            confirmButton = { TextButton(onClick = model::dismissMessage) { Text("OK") } },
-            text = { Text(message) },
-        )
-    }
+    // `state.message` used to be a dialog here and in the profile editor, which meant a failure
+    // raised anywhere else was shown on a screen the user was not looking at — or arrived minutes
+    // later when this screen next composed. It is a banner in `CurfewApp` now, so it appears wherever
+    // the user is. Nothing to render here.
 }
 
-/**
- * The banner that admits Curfew was not watching.
- *
- * Android lets an OEM battery manager kill a foreground service, and no app can stop it. What an
- * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
- * leave it on screen until the person has read it.
- */
 /**
  * What the blocking has actually bought, on the home screen.
  *
@@ -390,12 +495,20 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
  * says "this is working" was the one number nobody saw. It is stated as time the phone stayed shut
  * rather than "time saved", because that is the part Curfew can actually vouch for — the phone was
  * locked for this long, on purpose, because you asked it to be.
+ *
+ * **And it used to return early when every number was zero — F-12.** So on the first day, which is
+ * precisely when somebody is deciding whether to keep the app, the card was not there, and the only
+ * thing on Now was a dial and a timeline. The doc's own claim is that this number *"is not allowed to
+ * live behind a tab"*; it is worse than that to have it live behind a *condition*. The honest zero
+ * copy was already written one branch down — *"Nothing blocked yet today"* — so the fix is to stop
+ * leaving and say what the card is for and what will fill it.
  */
 @Composable
 private fun GivenBackCard(stats: Stats, detailed: Boolean) {
     val today = stats.days.lastOrNull()?.blockedSeconds ?: 0
     val week = stats.days.takeLast(7).sumOf { it.blockedSeconds.toLong() }
-    if (today == 0 && week == 0L && stats.currentStreak == 0) return
+    val nothingYet = today == 0 && week == 0L && stats.currentStreak == 0
+
     DCard(padding = 20.dp) {
         Text(
             if (today > 0) "${duration(today)} away from the phone today"
@@ -406,19 +519,29 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
         )
         Gap(6.dp)
         Text(
-            buildString {
-                append(duration(week.toInt()))
-                append(" this week")
-                if (stats.currentStreak > 1) {
-                    append(" · ")
-                    append(stats.currentStreak)
-                    append(" days in a row")
+            if (nothingYet) {
+                // The same shape as the Usage screen's best empty state: say what is being measured
+                // and what starts the measurement, rather than showing a zero and leaving the reader
+                // to guess whether it is broken, unconfigured, or simply early.
+                "The hours a block buys are counted here, so you can see what the no was for. " +
+                    "This fills in once a block has run."
+            } else {
+                buildString {
+                    append(duration(week.toInt()))
+                    append(" this week")
+                    if (stats.currentStreak > 1) {
+                        append(" · ")
+                        append(stats.currentStreak)
+                        append(" days in a row")
+                    }
                 }
             },
             fontSize = 14.sp,
-            color = Palette.Ok,
+            color = if (nothingYet) Palette.Muted else Palette.Ok,
         )
-        if (detailed) {
+        // Not shown while everything is zero: "0 blocks kept, longest run 0 days." is a worse way to
+        // say nothing than the sentence above it.
+        if (detailed && !nothingYet) {
             Gap(4.dp)
             Text(
                 "${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.",
@@ -429,6 +552,18 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
     }
 }
 
+/**
+ * The banner that admits Curfew was not watching.
+ *
+ * Android lets an OEM battery manager kill a foreground service, and no app can stop it. What an
+ * honest blocker can do is refuse to paper over the hole: say when it happened, say how long, and
+ * leave it on screen until the person has read it.
+ *
+ * **This comment was attached to `GivenBackCard`, above it** - a function about hours saved, with
+ * nothing to do with enforcement gaps. So the one banner whose whole job is to explain itself was
+ * the one with no explanation in the source, while the card beside it carried a paragraph
+ * describing something else. Moved here, where it belongs.
+ */
 @Composable
 private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
     Card(
@@ -567,7 +702,7 @@ private fun SessionCard(
                         // Screen readers should hear the whole sentence, not a bare clock time.
                         .semantics {
                             contentDescription =
-                                "${session.profile} ends ${relative(endsAt, now)}"
+                                "$name ends ${relative(endsAt, now)}"
                         },
                 )
             }
@@ -581,11 +716,15 @@ private fun SessionCard(
                 )
             }
 
-            // Why the hatch is not on this card. Said only where someone would look for it, and
-            // never for a hatch nobody switched on: that one is not missing, it is unwanted.
-            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null &&
-                passRefusal !is PassRefusal.Disabled
-            ) {
+            // Why the hatch is not on this card.
+            //
+            // This used to exclude `PassRefusal.Disabled` — "a hatch nobody switched on is not
+            // missing" — which is a fair instinct and was the wrong call. A fresh install configures
+            // no passes, so `Disabled` is the *only* state a new user can be in, and excluding it
+            // meant the one person who would go looking for the hatch was the one person not told
+            // why it was absent. The sentence for it names the config field, which is the honest and
+            // actionable answer; saying nothing left "Still locked" with no explanation at all.
+            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null) {
                 Text(
                     describePassRefusal(passRefusal, now),
                     style = MaterialTheme.typography.bodySmall,
@@ -622,7 +761,7 @@ private fun SessionCard(
                 Button(
                     onClick = onEnd,
                     modifier = Modifier.semantics {
-                        contentDescription = "End ${session.profile} now"
+                        contentDescription = "End $name now"
                     },
                 ) { Text("End now") }
                 // Only offered when there is no release already pending: asking twice must never
@@ -631,7 +770,7 @@ private fun SessionCard(
                     TextButton(
                         onClick = onRelease,
                         modifier = Modifier.semantics {
-                            contentDescription = "Ask to end ${session.profile} in 24 hours"
+                            contentDescription = "Ask to end $name in 24 hours"
                         },
                     ) { Text("Ask to end in 24 hours") }
                 }
@@ -644,7 +783,7 @@ private fun SessionCard(
                     TextButton(
                         onClick = onPresentTag,
                         modifier = Modifier.semantics {
-                            contentDescription = "Present a tag for ${session.profile}"
+                            contentDescription = "Present a tag for $name"
                         },
                     ) { Text("Present a tag") }
                 }
@@ -653,7 +792,7 @@ private fun SessionCard(
                         onClick = onEmergency,
                         modifier = Modifier.semantics {
                             contentDescription =
-                                "Use an emergency pass on ${session.profile}, $passesLeft left"
+                                "Use an emergency pass on $name, $passesLeft left"
                         },
                     ) { Text("Emergency pass ($passesLeft)") }
                 }
@@ -682,12 +821,9 @@ private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
             }
         }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
-        title = { Text("Not yet") },
-        text = { Text(text) },
-    )
+    // A sheet, not a platform dialog: the app has one material, and a refusal is not an occasion to
+    // borrow another one.
+    DNote(title = "Not yet", body = text, onDismiss = onDismiss)
 }
 
 /**
@@ -752,40 +888,39 @@ private fun TagDialog(
             onDispose { stop() }
         }
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Present the tag") },
-        text = {
-            Column {
-                Text(
-                    if (activity != null && Tags.isAvailable(activity)) {
-                        "Hold the tag against the back of the phone, or type what is on it."
-                    } else {
-                        // Said plainly rather than hidden: someone whose NFC is switched off should
-                        // know why tapping is doing nothing.
-                        "This phone is not reading tags right now. Type what is on it instead."
-                    },
-                )
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    singleLine = true,
-                    label = { Text("Tag") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .semantics { contentDescription = "The tag that ends $profile" },
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onPresent(typed.trim()) },
-                enabled = typed.isNotBlank(),
-            ) { Text("Present") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    // `DSheet` rather than a Material dialog: this is a form with a field, which is exactly the shape
+    // `DSheet` was built for, and it was the last Material surface on this screen.
+    DSheet(
+        title = "Present the tag",
+        sub = null,
+        onDismiss = onDismiss,
+        confirm = "Present",
+        confirmEnabled = typed.isNotBlank(),
+        onConfirm = { onPresent(typed.trim()) },
+    ) {
+        Text(
+            if (activity != null && Tags.isAvailable(activity)) {
+                "Hold the tag against the back of the phone, or type what is on it."
+            } else {
+                // Said plainly rather than hidden: someone whose NFC is switched off should know why
+                // tapping is doing nothing.
+                "This phone is not reading tags right now. Type what is on it instead."
+            },
+            fontSize = 14.sp,
+            lineHeight = 21.sp,
+            color = Palette.Muted,
+        )
+        Gap(12.dp)
+        OutlinedTextField(
+            value = typed,
+            onValueChange = { typed = it },
+            singleLine = true,
+            label = { Text("Tag") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "The tag that ends $profile" },
+        )
+    }
 }
 
 /** An end that is waiting on the user to work through a challenge. */
@@ -811,28 +946,26 @@ private fun remaining(session: Session, now: Long): Float {
 /**
  * "1:12", the way a clock left-of-the-colon counts down. Seconds only under a minute.
  *
+ * Kept as a thin name for this screen's own shape — every countdown in the app comes from
+ * [dev.curfew.app.ui.countdown] now, because two copies of this rule had already drifted apart: the
+ * block screen rendered fourteen minutes as "14:00". The epoch-second comment below is why this took
+ * a while to get right and is worth keeping.
+ *
  * Every instant in this app is an epoch SECOND — the core writes them, `state.now` is one, and
  * `Format.clockTime` reads them that way. Dividing by a thousand here turned twenty-five minutes
  * into "1s" while the session card two inches below said "Ends in 24 min".
  */
-private fun countdown(endsAt: Long, now: Long): String {
-    val left = (endsAt - now).coerceAtLeast(0)
-    val hours = left / 3600
-    val minutes = (left % 3600) / 60
-    return when {
-        hours > 0 -> "$hours:%02d".format(minutes)
-        minutes > 0 -> "${minutes}m"
-        else -> "${left}s"
-    }
-}
+private fun countdown(endsAt: Long, now: Long): String =
+    dev.curfew.app.ui.countdown(endsAt - now)
 
-/** An epoch second as a wall clock, in whatever zone the phone is in. */
-private fun clockOf(epochSeconds: Long): String {
-    val time = java.time.Instant.ofEpochSecond(epochSeconds)
-        .atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime()
-    return "%02d:%02d".format(time.hour, time.minute)
-}
+/**
+ * An epoch second as a wall clock, in the device's own format.
+ *
+ * Was a hardcoded `%02d:%02d`, which ignores the device's 12/24-hour setting: on a phone set to a
+ * 12-hour clock the Now dial read "13:30" while the stats card beside it read "1 hr 30 min", and the
+ * calendar on the next tab read "1:30 PM". [clockTime] is the app's one localised clock.
+ */
+private fun clockOf(epochSeconds: Long): String = clockTime(epochSeconds)
 
 /** The earliest start among the weekly windows, as a clock face, or null when there are none. */
 /**

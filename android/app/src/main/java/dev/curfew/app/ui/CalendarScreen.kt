@@ -4,18 +4,23 @@ import android.Manifest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -36,9 +41,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,17 +53,7 @@ import dev.curfew.policy.CalendarSchedule
 /**
  * The device's calendar, and what Curfew is going to do about each entry.
  *
- * This screen exists because a calendar rule used to be written blind: a wildcard typed into a text
- * field, against titles the user could not see from inside the app. A rule that matches nothing and
- * a rule that works look identical that way, and the failure is silent — the meeting arrives and
- * nothing is blocked. Here the events are listed as they actually are, each one says whether a rule
- * already catches it, and "Block this" builds the rule from the event rather than from a guess.
- *
- * The search box highlights what it matched inside each title, and counts how many of the events it
- * kept. That is the whole point of typing here: the user is not looking for one meeting, they are
- * checking what a word like "lect" would catch if they made it a rule.
- *
- * Curfew reads calendars and never writes them, so nothing on this screen changes the calendar.
+ * Provides calendar filtering ("Cal select"), whole-calendar blocking, and polished event cards.
  */
 @Composable
 fun CalendarScreen(model: CurfewViewModel) {
@@ -66,32 +61,83 @@ fun CalendarScreen(model: CurfewViewModel) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<Pick?>(null) }
+    var managingEvent by remember { mutableStateOf<CalendarEvent?>(null) }
 
-    // Profiles answer to an id in the config and to a name on screen. The badge says the name:
-    // an id is an implementation detail the user never chose and, for a renamed profile, is not
-    // even recognisable as the thing they picked.
     val names = remember(state.profiles) { state.profiles.associate { it.id to it.name } }
-
-    val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
+    val availableCalendars = remember(state.calendarEvents) {
+        state.calendarEvents
+            .map { it.calendar.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
 
     CalendarList(
         state = state,
         context = context,
         heading = "Pick from your calendar",
         query = query,
-        shown = shown,
         caught = state.eventRules,
         names = names,
         onQuery = { query = it },
-        // Tapping an event that a rule already catches opens that rule, rather than starting a
-        // second one against the same meeting. That was the bug behind "Change does nothing": it
-        // opened an empty form, and saving it added another identical rule every time.
         onPick = { event ->
-            val existing = state.eventRules[event.id]
-                ?.firstNotNullOfOrNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
-            editing = Pick(event, existing)
+            val matching = state.eventRules[event.id].orEmpty()
+                .mapNotNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
+            if (matching.isNotEmpty()) {
+                managingEvent = event
+            } else {
+                editing = Pick(event, null)
+            }
+        },
+        onToggleWholeCalendar = { calName ->
+            val existing = state.calendarRules.find {
+                it.matcher.calendar.equals(calName, ignoreCase = true) &&
+                    it.matcher.title.isNullOrBlank()
+            }
+            editing = Pick(
+                event = CalendarEvent(
+                    id = "whole:$calName",
+                    title = "",
+                    calendar = calName,
+                    location = "",
+                    start = state.now,
+                    end = state.now + 3600,
+                    allDay = true,
+                    busy = true,
+                ),
+                rule = existing,
+            )
         },
     )
+
+    managingEvent?.let { event ->
+        val matching = state.eventRules[event.id].orEmpty()
+            .mapNotNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
+        if (matching.isEmpty()) {
+            managingEvent = null
+        } else {
+            EventSchedulesSheet(
+                event = event,
+                matchingRules = matching,
+                names = names,
+                onDismiss = { managingEvent = null },
+                onToggleRule = { rule, on ->
+                    model.saveCalendarRule(rule.copy(enabled = on))
+                },
+                onEditRule = { rule ->
+                    editing = Pick(event, rule)
+                    managingEvent = null
+                },
+                onRemoveRule = { rule ->
+                    model.deleteCalendarRule(rule.id)
+                },
+                onAddRuleForEvent = {
+                    editing = Pick(event, null)
+                    managingEvent = null
+                },
+            )
+        }
+    }
 
     editing?.let { pick ->
         CalendarDialog(
@@ -99,6 +145,7 @@ fun CalendarScreen(model: CurfewViewModel) {
             prefill = pick.event,
             profiles = state.profiles,
             now = state.now,
+            availableCalendars = availableCalendars,
             onDismiss = { editing = null },
             onSave = { rule: CalendarSchedule ->
                 editing = null
@@ -112,13 +159,7 @@ fun CalendarScreen(model: CurfewViewModel) {
 private data class Pick(val event: CalendarEvent, val rule: CalendarSchedule?)
 
 /**
- * The list of events itself, with its search field — the part both the Events tab and the profile
- * screen's own picker need.
- *
- * It was only ever a tab before, which meant setting a profile up meant leaving the profile: pick
- * the events somewhere else, against a profile chosen from a dropdown, then come back. Everything
- * here takes its heading and its "what happens when you tap one" from the caller, so the same list
- * can be the tab and can be the sheet that opens inside a profile.
+ * The list of events itself, with its search field and calendar filter pills.
  */
 @Composable
 internal fun CalendarList(
@@ -126,12 +167,30 @@ internal fun CalendarList(
     context: android.content.Context,
     heading: String,
     query: String,
-    shown: List<CalendarEvent>,
+    shown: List<CalendarEvent> = emptyList(),
     caught: Map<String, List<EventRule>>,
     names: Map<String, String>,
     onQuery: (String) -> Unit,
     onPick: (CalendarEvent) -> Unit,
+    targetProfileId: String? = null,
+    targetProfileName: String? = null,
+    onToggleWholeCalendar: ((String) -> Unit)? = null,
 ) {
+    val availableCalendars = remember(state.calendarEvents) {
+        state.calendarEvents
+            .map { it.calendar.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+    var selectedCalendar by remember { mutableStateOf<String?>(null) }
+
+    val filteredByCalendar = remember(state.calendarEvents, selectedCalendar) {
+        if (selectedCalendar == null) state.calendarEvents
+        else state.calendarEvents.filter { it.calendar.equals(selectedCalendar, ignoreCase = true) }
+    }
+    val filteredEvents = remember(filteredByCalendar, query) { search(filteredByCalendar, query) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -143,10 +202,6 @@ internal fun CalendarList(
             }
         }
 
-        // Nothing is claimed before the first refresh has run. Every field below still holds its
-        // default until then, and the default for "may Curfew read the calendar" is no — so a cold
-        // start spent a moment insisting the permission was missing on a device that had granted
-        // it, which reads as the feature being broken rather than as the app still looking.
         if (state.loading) {
             item { Text("Reading your calendar…", fontSize = 14.sp, color = Palette.Muted) }
             return@LazyColumn
@@ -169,53 +224,136 @@ internal fun CalendarList(
             return@LazyColumn
         }
 
+        // Search row with clear button
         item {
-            // Filters as it is typed: there is no search button, because the list is small enough
-            // that a round trip through a button would only be a way to get it wrong.
             SearchRow(
                 query = query,
-                kept = shown.size,
+                kept = filteredEvents.size,
                 total = state.calendarEvents.size,
                 onChange = onQuery,
             )
         }
 
-        if (state.calendarEvents.isEmpty()) {
+        // Calendar filter pills ("Cal Select")
+        if (availableCalendars.isNotEmpty()) {
             item {
-                Text(
-                    "Nothing in the next day and a half. Curfew only reads a narrow window around " +
-                        "now, because that is all a rule can act on.",
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                    color = Palette.Muted,
-                )
-            }
-        } else if (shown.isEmpty()) {
-            item {
-                Text("No event matches “$query”.", fontSize = 14.sp, color = Palette.Muted)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Pill(
+                        text = "All (${state.calendarEvents.size})",
+                        selected = selectedCalendar == null,
+                        onClick = { selectedCalendar = null },
+                    )
+                    availableCalendars.forEach { cal ->
+                        val count = state.calendarEvents.count { it.calendar.equals(cal, ignoreCase = true) }
+                        Pill(
+                            text = "$cal ($count)",
+                            selected = selectedCalendar == cal,
+                            onClick = { selectedCalendar = if (selectedCalendar == cal) null else cal },
+                        )
+                    }
+                }
             }
         }
 
-        // Grouped by day, with the day named once above its events: a flat list of timestamps is
-        // the part of every calendar view people misread. Flattened into header-and-event rows
-        // ahead of time rather than tracked with a running variable, which would be read during
-        // recomposition in an order the list does not promise.
-        items(rows(shown, state.now), key = { it.key }) { row ->
+        // Whole calendar block card
+        if (selectedCalendar != null) {
+            val cal = selectedCalendar!!
+            val coversCalendar = state.calendarRules.any {
+                it.matcher.calendar.equals(cal, ignoreCase = true) &&
+                    it.matcher.title.isNullOrBlank() &&
+                    (targetProfileId == null || it.profile == targetProfileId)
+            }
+            item {
+                DCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Palette.Accent.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("📅", fontSize = 16.sp)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "All “$cal” events",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                if (coversCalendar) "Active · Blocks during every event"
+                                else "Block during every event on this calendar",
+                                fontSize = 12.sp,
+                                color = if (coversCalendar) Palette.Ok else Palette.Muted,
+                            )
+                        }
+                        if (onToggleWholeCalendar != null) {
+                            Switch(coversCalendar) { onToggleWholeCalendar(cal) }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (state.calendarEvents.isEmpty()) {
+            item {
+                val failure = state.calendarError
+                Text(
+                    if (failure != null) {
+                        "Your calendar could not be read just now, so this is not a complete list.\n\n" +
+                            failure
+                    } else {
+                        "Nothing in the next day and a half. Curfew only reads a narrow window " +
+                            "around now, because that is all a rule can act on."
+                    },
+                    fontSize = 14.sp,
+                    lineHeight = 21.sp,
+                    color = if (failure != null) Palette.Bad else Palette.Muted,
+                )
+            }
+        } else if (filteredEvents.isEmpty()) {
+            item {
+                Text(
+                    if (selectedCalendar != null) "No events on “$selectedCalendar” match “$query”."
+                    else "No event matches “$query”.",
+                    fontSize = 14.sp,
+                    color = Palette.Muted,
+                )
+            }
+        }
+
+        // Grouped by day
+        items(rows(filteredEvents, state.now), key = { it.key }) { row ->
             when (row) {
                 is CalendarRow.Day -> Column {
                     Gap(6.dp)
                     Box(Modifier.semantics { heading() }) { SectionLabel(row.label) }
                 }
 
-                is CalendarRow.Event -> EventCard(
-                    event = row.event,
-                    highlight = query.trim(),
-                    blockedBy = caught[row.event.id].orEmpty()
-                        .map { names[it.profile] ?: it.profile }
-                        .distinct(),
-                    canBlock = state.profiles.isNotEmpty(),
-                    onBlock = { onPick(row.event) },
-                )
+                is CalendarRow.Event -> {
+                    val isTargetBlocked = targetProfileId != null &&
+                        caught[row.event.id].orEmpty().any { it.profile == targetProfileId }
+                    EventCard(
+                        event = row.event,
+                        highlight = query.trim(),
+                        blockedBy = caught[row.event.id].orEmpty()
+                            .map { names[it.profile] ?: it.profile }
+                            .distinct(),
+                        canBlock = state.profiles.isNotEmpty(),
+                        targetProfileName = targetProfileName,
+                        isBlockedForTarget = isTargetBlocked,
+                        onBlock = { onPick(row.event) },
+                    )
+                }
             }
         }
 
@@ -231,11 +369,11 @@ internal fun CalendarList(
             }
         }
 
-        item { Gap(8.dp) }
+        item { Gap(Dsn.BottomRoom) }
     }
 }
 
-/** The search field, with the count of what it kept where a submit button would otherwise be. */
+/** The search field with clean clear button. */
 @Composable
 private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -> Unit) {
     Row(
@@ -255,23 +393,34 @@ private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -
                 value = query,
                 onValueChange = onChange,
                 singleLine = true,
-                textStyle = TextStyle(fontSize = 15.sp, color = Palette.Text),
+                textStyle = TextStyle(fontSize = 14.5.sp, color = Palette.Text),
                 cursorBrush = SolidColor(Palette.Accent),
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = "Search your calendar events" },
             )
             if (query.isEmpty()) {
-                Text("Search your events", fontSize = 15.sp, color = Palette.Dim)
+                Text("Search events by title or location", fontSize = 14.sp, color = Palette.Dim)
             }
         }
         if (query.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Palette.Raised)
+                    .clickable { onChange("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✕", fontSize = 11.sp, color = Palette.Muted)
+            }
+        } else if (total > 0) {
             Text("$kept of $total", fontSize = 12.sp, color = Palette.Dim)
         }
     }
 }
 
-/** One event, and the plain answer to "will this block anything?". */
+/** One event with time duration, calendar badge, and unambiguous block status. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EventCard(
@@ -280,11 +429,10 @@ private fun EventCard(
     blockedBy: List<String>,
     canBlock: Boolean,
     onBlock: () -> Unit,
+    targetProfileName: String? = null,
+    isBlockedForTarget: Boolean = false,
 ) {
-    // A caught event is outlined and faintly filled in the accent rather than given a different
-    // background colour: the card must still read as the same kind of thing as the ones around it,
-    // with one of them marked.
-    val tinted = blockedBy.isNotEmpty()
+    val tinted = if (targetProfileName != null) isBlockedForTarget else blockedBy.isNotEmpty()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -292,46 +440,74 @@ private fun EventCard(
             .background(if (tinted) Palette.Accent.copy(alpha = 0.07f) else Palette.Surface)
             .border(
                 1.dp,
-                if (tinted) Palette.Accent.copy(alpha = 0.5f) else Palette.Line,
+                if (tinted) Palette.Accent.copy(alpha = 0.45f) else Palette.Line,
                 RoundedCornerShape(Dsn.CardRadius),
             )
-            .padding(horizontal = 16.dp, vertical = 15.dp),
+            .clickable(enabled = canBlock, onClick = onBlock)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Text(
-                marked(event.title.ifBlank { "(untitled)" }, highlight),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 20.sp,
-                color = Palette.Text,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (event.allDay) "All day" else clockTime(event.start),
-                fontSize = 13.sp,
-                color = Palette.Muted,
-                maxLines = 1,
-            )
-        }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    marked(event.title.ifBlank { "(untitled)" }, highlight),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 20.sp,
+                    color = Palette.Text,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Gap(4.dp)
+                // Calendar name & location
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (event.calendar.isNotBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Palette.Accent),
+                            )
+                            Text(event.calendar, fontSize = 12.sp, color = Palette.Dim)
+                        }
+                    }
+                    if (event.location.isNotBlank()) {
+                        Text(
+                            "📍 " + event.location,
+                            fontSize = 12.sp,
+                            color = Palette.Dim,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (!event.busy) {
+                        Text("(free)", fontSize = 11.5.sp, color = Palette.Dim)
+                    }
+                }
+            }
 
-        val where = listOfNotNull(
-            event.calendar.takeIf { it.isNotBlank() },
-            event.location.takeIf { it.isNotBlank() } ?: "no location",
-        ).joinToString(" · ")
-        Text(where, fontSize = 12.sp, color = Palette.Dim, modifier = Modifier.padding(top = 5.dp))
-
-        if (!event.busy) {
-            Text(
-                "Marked free in your calendar",
-                fontSize = 12.sp,
-                color = Palette.Dim,
-                modifier = Modifier.padding(top = 3.dp),
-            )
+            // Time & Duration column
+            Column(horizontalAlignment = Alignment.End) {
+                if (event.allDay) {
+                    Text("All day", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Palette.Muted)
+                } else {
+                    Text(clockTime(event.start), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Palette.Text)
+                    val diff = (event.end - event.start).toInt().coerceAtLeast(0)
+                    if (diff > 0) {
+                        Text(duration(diff), fontSize = 11.5.sp, color = Palette.Dim)
+                    }
+                }
+            }
         }
 
         Gap(12.dp)
@@ -340,44 +516,48 @@ private fun EventCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Every plan this event starts, named. One chip per plan rather than one chip
-            // saying the first of them: an event caught by two rules that ran different profiles
-            // used to look exactly like an event caught by one.
-            if (blockedBy.isNotEmpty()) {
-                FlowRow(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    blockedBy.forEach { profile -> Pill("Blocks $profile", tint = Palette.Accent) }
+            if (targetProfileName != null) {
+                // Profile sheet view: clear status and untoggle
+                if (isBlockedForTarget) {
+                    Pill("✓ Blocks $targetProfileName", tint = Palette.Accent)
+                    Spacer(Modifier.weight(1f))
+                    Text("Tap to remove", fontSize = 12.sp, color = Palette.Dim)
+                } else {
+                    Text("Not blocked", fontSize = 12.5.sp, color = Palette.Dim, modifier = Modifier.weight(1f))
+                    Pill("+ Block", tint = Palette.Accent)
                 }
             } else {
-                Text(
-                    "Nothing blocked",
-                    fontSize = 13.sp,
-                    color = Palette.Dim,
-                    modifier = Modifier.weight(1f),
-                )
+                // General Events tab view
+                if (blockedBy.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        blockedBy.forEach { profile -> Pill("Blocks $profile", tint = Palette.Accent) }
+                    }
+                    Text(
+                        if (blockedBy.size > 1) "Manage (${blockedBy.size}) ›" else "Manage ›",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Palette.Accent,
+                    )
+                } else {
+                    Text("Nothing blocked", fontSize = 12.5.sp, color = Palette.Dim, modifier = Modifier.weight(1f))
+                    Text(
+                        "Block this",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (canBlock) Palette.Accent else Palette.Dim,
+                    )
+                }
             }
-            Text(
-                if (blockedBy.isNotEmpty()) "Change" else "Block this",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (canBlock) Palette.Accent else Palette.Dim,
-                modifier = Modifier
-                    .clickable(enabled = canBlock, onClick = onBlock)
-                    .semantics { contentDescription = "Block during ${event.title}" },
-            )
         }
     }
 }
 
 /**
  * [title] with whatever the search matched drawn on the accent.
- *
- * The highlight is the answer to the question the search box is really being asked: not "where is
- * this meeting" but "what would this word catch". Seeing `lect` light up inside *Lecture* and
- * inside *collect* is how a user finds out their rule is wider than they meant.
  */
 private fun marked(title: String, needle: String): AnnotatedString {
     if (needle.isBlank()) return AnnotatedString(title)
@@ -394,7 +574,6 @@ private fun marked(title: String, needle: String): AnnotatedString {
 
 /** A day heading, or one event under it. */
 internal sealed interface CalendarRow {
-    /** Stable across recomposition, and unique: day labels and event ids never collide. */
     val key: String
 
     data class Day(val label: String) : CalendarRow {
@@ -408,8 +587,6 @@ internal sealed interface CalendarRow {
 
 /**
  * [events] flattened into the rows the list draws, a day heading before each new day.
- *
- * Expects [events] already in start order, which is how the view model hands them over.
  */
 internal fun rows(events: List<CalendarEvent>, now: Long): List<CalendarRow> {
     val out = mutableListOf<CalendarRow>()
@@ -427,10 +604,6 @@ internal fun rows(events: List<CalendarEvent>, now: Long): List<CalendarRow> {
 
 /**
  * The events matching [query], in order.
- *
- * Matched against title, calendar and location together, because a person searching "work" may
- * mean the calendar named Work or the meeting called Work review, and asking them which is a
- * question the app can answer for itself.
  */
 internal fun search(events: List<CalendarEvent>, query: String): List<CalendarEvent> {
     val needle = query.trim()
@@ -443,16 +616,6 @@ internal fun search(events: List<CalendarEvent>, query: String): List<CalendarEv
 
 /**
  * The same calendar, opened from inside a profile.
- *
- * A profile is the place where a person decides what a block *is*, so it is also where they expect
- * to say "and during these meetings". Sending them to another tab to do it — and to pick, from a
- * dropdown, the profile they were already looking at — is the kind of detour that gets a feature
- * abandoned halfway. Tapping an event here writes the rule against this profile straight away: the
- * profile is not a question that needs asking twice.
- *
- * The sheet then stays open. It asks which meetings, plural, and closing after the first one made
- * that a lie — picking a week of lectures meant reopening the sheet once per lecture. The tapped
- * card turns into a “Blocks …” chip, which is the whole receipt; leaving is the back arrow.
  */
 @Composable
 fun CalendarPickerSheet(
@@ -466,7 +629,6 @@ fun CalendarPickerSheet(
     var query by remember { mutableStateOf("") }
 
     val names = remember(state.profiles) { state.profiles.associate { it.id to it.name } }
-    val shown = remember(state.calendarEvents, query) { search(state.calendarEvents, query) }
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDone,
@@ -486,21 +648,35 @@ fun CalendarPickerSheet(
                     context = context,
                     heading = "Which meetings should start it?",
                     query = query,
-                    shown = shown,
                     caught = state.eventRules,
                     names = names,
                     onQuery = { query = it },
+                    targetProfileId = profileId,
+                    targetProfileName = profileName,
+                    onToggleWholeCalendar = { calName ->
+                        val existing = state.calendarRules.find {
+                            it.profile == profileId &&
+                                it.matcher.calendar.equals(calName, ignoreCase = true) &&
+                                it.matcher.title.isNullOrBlank()
+                        }
+                        if (existing == null) {
+                            model.saveCalendarRule(
+                                CalendarSchedule(
+                                    id = "c-" + System.currentTimeMillis(),
+                                    profile = profileId,
+                                    matcher = dev.curfew.policy.EventMatcher(calendar = calName),
+                                    locks = listOf(dev.curfew.policy.Lock.Confirm),
+                                ),
+                            )
+                        } else {
+                            model.deleteCalendarRule(existing.id)
+                        }
+                    },
                     onPick = { event ->
                         val mine = state.eventRules[event.id].orEmpty()
                             .filter { it.profile == profileId }
                             .mapNotNull { r -> state.calendarRules.find { it.id == r.schedule } }
                         if (mine.isEmpty()) {
-                            // The event as it stands, against this profile: the same rule the
-                            // Events tab would write, minus the two questions the caller has
-                            // already answered. The id comes from the wall clock, not from the
-                            // state's `now` — that only moves when the state refreshes, so two
-                            // events picked in the same second shared an id and the second rule
-                            // quietly replaced the first.
                             model.saveCalendarRule(
                                 CalendarSchedule(
                                     id = "c-" + System.currentTimeMillis(),
@@ -510,14 +686,117 @@ fun CalendarPickerSheet(
                                 ),
                             )
                         } else {
-                            // Tapping it again takes it back out. Adding a second identical rule
-                            // is the one thing a second tap must never do, and there is nowhere
-                            // else in this sheet to undo the first one.
                             mine.forEach { model.deleteCalendarRule(it.id) }
                         }
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * Bottom sheet displaying all schedules currently blocking a specific calendar event.
+ * Allows toggling rules on/off, changing rule buffers, removing rules, and adding new rules.
+ */
+@Composable
+internal fun EventSchedulesSheet(
+    event: CalendarEvent,
+    matchingRules: List<CalendarSchedule>,
+    names: Map<String, String>,
+    onDismiss: () -> Unit,
+    onToggleRule: (CalendarSchedule, Boolean) -> Unit,
+    onEditRule: (CalendarSchedule) -> Unit,
+    onRemoveRule: (CalendarSchedule) -> Unit,
+    onAddRuleForEvent: () -> Unit,
+) {
+    val timeLabel = if (event.allDay) {
+        "All day • ${event.calendar}"
+    } else {
+        "${clockTime(event.start)} – ${clockTime(event.end)} • ${event.calendar}"
+    }
+
+    DSheet(
+        title = event.title.ifBlank { "Event Rules" },
+        sub = timeLabel,
+        onDismiss = onDismiss,
+        confirm = "Done",
+        confirmEnabled = true,
+        onConfirm = onDismiss,
+    ) {
+        Gap(14.dp)
+        Text(
+            "Profiles blocking this event:",
+            fontSize = 14.sp,
+            color = Palette.Muted,
+        )
+        Gap(10.dp)
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            matchingRules.forEach { rule ->
+                val profileName = names[rule.profile] ?: rule.profile
+                val padBefore = rule.padBeforeSeconds / 60
+                val padAfter = rule.padAfterSeconds / 60
+                val bufferText = when {
+                    padBefore > 0 && padAfter > 0 -> "±${padBefore}m buffer"
+                    padBefore > 0 -> "-${padBefore}m buffer"
+                    padAfter > 0 -> "+${padAfter}m buffer"
+                    else -> "Matches event time"
+                }
+
+                DCardFlush {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Dsn.CardPad, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                profileName,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Palette.Text,
+                            )
+                            Text(
+                                bufferText,
+                                fontSize = 13.sp,
+                                color = Palette.Muted,
+                            )
+                        }
+                        Switch(
+                            on = rule.enabled,
+                            onChange = { onToggleRule(rule, it) },
+                        )
+                    }
+                    Rule()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Dsn.CardPad, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        GhostButton(
+                            text = "Edit rule",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onEditRule(rule) },
+                        )
+                        GhostButton(
+                            text = "Remove",
+                            modifier = Modifier.weight(1f),
+                            colour = Palette.Bad,
+                            onClick = { onRemoveRule(rule) },
+                        )
+                    }
+                }
+            }
+
+            Gap(4.dp)
+            GhostButton(
+                text = "+ Block another profile",
+                onClick = onAddRuleForEvent,
+            )
         }
     }
 }
