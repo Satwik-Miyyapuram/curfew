@@ -137,15 +137,15 @@ fn parse_lnk(path: &Path) -> Option<PathBuf> {
         if bytes.len() < offset + 2 {
             return None;
         }
-        let id_list_len = u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?) as usize;
+        let id_list_len =
+            u16::from_le_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?) as usize;
         offset += 2 + id_list_len;
     }
     if bytes.len() < offset + 0x14 {
         return None;
     }
-    let local_base_path_offset = u32::from_le_bytes(
-        bytes.get(offset + 0x10..offset + 0x14)?.try_into().ok()?,
-    ) as usize;
+    let local_base_path_offset =
+        u32::from_le_bytes(bytes.get(offset + 0x10..offset + 0x14)?.try_into().ok()?) as usize;
     let path_start = offset + local_base_path_offset;
     if path_start >= bytes.len() {
         return None;
@@ -163,10 +163,19 @@ fn collect_lnks_in_dir(dir: &Path, apps: &mut std::collections::BTreeMap<String,
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("lnk")).unwrap_or(false) {
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("lnk"))
+                .unwrap_or(false)
+            {
                 let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
                 let stem_lower = stem.to_lowercase();
-                if stem_lower.contains("uninstall") || stem_lower.contains("documentation") || stem_lower.contains("readme") || stem_lower.contains("help") {
+                if stem_lower.contains("uninstall")
+                    || stem_lower.contains("documentation")
+                    || stem_lower.contains("readme")
+                    || stem_lower.contains("help")
+                {
                     continue;
                 }
                 if let Some(target) = parse_lnk(&path) {
@@ -174,7 +183,14 @@ fn collect_lnks_in_dir(dir: &Path, apps: &mut std::collections::BTreeMap<String,
                         if target_ext.eq_ignore_ascii_case("exe") {
                             if let Some(target_name) = target.file_name().and_then(|n| n.to_str()) {
                                 let key = target_name.to_lowercase();
-                                if !matches!(key.as_str(), "cmd.exe" | "powershell.exe" | "pwsh.exe" | "conhost.exe" | "rundll32.exe") {
+                                if !matches!(
+                                    key.as_str(),
+                                    "cmd.exe"
+                                        | "powershell.exe"
+                                        | "pwsh.exe"
+                                        | "conhost.exe"
+                                        | "rundll32.exe"
+                                ) {
                                     apps.entry(key).or_insert_with(|| (stem.to_string(), false));
                                 }
                             }
@@ -190,21 +206,30 @@ fn installed_apps() -> Vec<DiscoveredApp> {
     let mut map = std::collections::BTreeMap::new();
 
     if let Ok(pd) = std::env::var("ProgramData") {
-        let dir = Path::new(&pd).join("Microsoft").join("Windows").join("Start Menu").join("Programs");
+        let dir =
+            Path::new(&pd).join("Microsoft").join("Windows").join("Start Menu").join("Programs");
         collect_lnks_in_dir(&dir, &mut map);
     }
     if let Ok(appdata) = std::env::var("APPDATA") {
-        let dir = Path::new(&appdata).join("Microsoft").join("Windows").join("Start Menu").join("Programs");
+        let dir = Path::new(&appdata)
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs");
         collect_lnks_in_dir(&dir, &mut map);
     }
 
     // Check running windowed processes
-    for proc_ in curfew_win::procs::Processes::list(&curfew_win::procs::SystemProcesses::default()) {
+    for proc_ in curfew_win::procs::Processes::list(&curfew_win::procs::SystemProcesses::default())
+    {
         if proc_.title.is_empty() {
             continue;
         }
         let key = proc_.exe.to_lowercase();
-        if matches!(key.as_str(), "explorer.exe" | "curfew-app.exe" | "curfew-tray.exe" | "msedgewebview2.exe") {
+        if matches!(
+            key.as_str(),
+            "explorer.exe" | "curfew-app.exe" | "curfew-tray.exe" | "msedgewebview2.exe"
+        ) {
             continue;
         }
         if let Some(entry) = map.get_mut(&key) {
@@ -217,11 +242,7 @@ fn installed_apps() -> Vec<DiscoveredApp> {
 
     let mut result: Vec<DiscoveredApp> = map
         .into_iter()
-        .map(|(exe_key, (name, running))| DiscoveredApp {
-            name,
-            exe: exe_key,
-            running,
-        })
+        .map(|(exe_key, (name, running))| DiscoveredApp { name, exe: exe_key, running })
         .collect();
 
     result.sort_by(|a, b| {
@@ -266,18 +287,17 @@ fn ensure_pairing_server(proxy: &tao::event_loop::EventLoopProxy<Ev>) -> (String
                 let n = stream.read(&mut buf).unwrap_or(0);
                 let req = String::from_utf8_lossy(&buf[..n]);
                 if req.starts_with("POST") || req.contains("CRFW:") {
-                    let body = if let Some(idx) = req.find("\r\n\r\n") {
-                        &req[idx + 4..]
-                    } else {
-                        &req
-                    };
+                    let body =
+                        if let Some(idx) = req.find("\r\n\r\n") { &req[idx + 4..] } else { &req };
                     let reply_code = body.trim().trim_start_matches("code=").trim();
                     if !reply_code.is_empty() {
                         let _ = ask(&Request::Accept { invite: reply_code.to_string() });
                         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{\"status\":\"paired\"}\n";
                         let _ = stream.write_all(response.as_bytes());
                         let _ = stream.flush();
-                        let _ = proxy.send_event(Ev::Reply("if (window.__onPeerPaired) window.__onPeerPaired();".to_string()));
+                        let _ = proxy.send_event(Ev::Reply(
+                            "if (window.__onPeerPaired) window.__onPeerPaired();".to_string(),
+                        ));
                     }
                 } else if req.starts_with("OPTIONS") {
                     let response = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n";
@@ -312,7 +332,9 @@ fn answer(call: Call, proxy: &tao::event_loop::EventLoopProxy<Ev>) -> serde_json
             let shown = path.display().to_string();
             let raw_toml = std::fs::read_to_string(&path).unwrap_or_default();
             match curfew_core::Config::from_toml(&raw_toml).map_err(|e| format!("{shown}: {e}")) {
-                Ok(config) => serde_json::json!({ "ok": true, "value": config, "toml": raw_toml, "path": shown }),
+                Ok(config) => {
+                    serde_json::json!({ "ok": true, "value": config, "toml": raw_toml, "path": shown })
+                }
                 Err(detail) => serde_json::json!({
                     "ok": false,
                     "kind": "error",
@@ -354,9 +376,13 @@ fn answer(call: Call, proxy: &tao::event_loop::EventLoopProxy<Ev>) -> serde_json
             match serde_json::from_value::<curfew_core::Config>(config) {
                 Ok(cfg) => match cfg.to_toml() {
                     Ok(toml) => answer(Call::SaveConfig { toml }, proxy),
-                    Err(e) => serde_json::json!({ "ok": false, "kind": "error", "detail": e.to_string() }),
+                    Err(e) => {
+                        serde_json::json!({ "ok": false, "kind": "error", "detail": e.to_string() })
+                    }
                 },
-                Err(e) => serde_json::json!({ "ok": false, "kind": "error", "detail": format!("Invalid config: {e}") }),
+                Err(e) => {
+                    serde_json::json!({ "ok": false, "kind": "error", "detail": format!("Invalid config: {e}") })
+                }
             }
         }
         Call::Unlock { id } => {

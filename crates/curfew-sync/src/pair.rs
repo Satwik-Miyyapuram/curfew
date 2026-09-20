@@ -47,7 +47,7 @@ const COMPACT_VERSION: u8 = 1;
 const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn b64_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
+    let mut out = String::with_capacity((data.len() * 4).div_ceil(3));
     for chunk in data.chunks(3) {
         let b0 = chunk[0];
         let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
@@ -579,7 +579,8 @@ mod tests {
 
         // Lenient parsing handles lowercase prefix and surrounding whitespace:
         let with_spaces = format!("  crfw:{}  ", &compact[5..]);
-        let from_spaces = Invite::from_str_lenient(&with_spaces).expect("parses lowercase prefix with whitespace");
+        let from_spaces = Invite::from_str_lenient(&with_spaces)
+            .expect("parses lowercase prefix with whitespace");
         assert_eq!(from_spaces.from.signing, original.from.signing);
 
         // Lenient parsing handles deep link URLs:

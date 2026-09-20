@@ -235,14 +235,9 @@ impl Mirror {
                 // If this occurrence was already ended by hand on this device, leave it ended.
                 // Starting it again would turn every subsequent sync pass into an unprompted
                 // resurrection of a session the user had just satisfied the lock for.
-                if sessions
-                    .dismissed
-                    .get(&session.profile)
-                    .is_some_and(|at| {
-                        *at >= session.started_at
-                            && session.lock.ends_at.map_or(true, |end| *at < end)
-                    })
-                {
+                if sessions.dismissed.get(&session.profile).is_some_and(|at| {
+                    *at >= session.started_at && session.lock.ends_at.is_none_or(|end| *at < end)
+                }) {
                     continue;
                 }
                 adopted.push(session.id.clone());
@@ -924,10 +919,7 @@ mod tests {
         // Subsequent pass (e.g. 60 seconds later, EnforcementCadence::SYNC_MILLIS):
         let pass3 = phone.pass(NOW + 70);
         assert_eq!(pass3.published, 0);
-        assert!(
-            phone.sessions.running.is_empty(),
-            "session resurrected on subsequent sync pass"
-        );
+        assert!(phone.sessions.running.is_empty(), "session resurrected on subsequent sync pass");
         assert!(pass3.still_locked.is_empty());
     }
 }
