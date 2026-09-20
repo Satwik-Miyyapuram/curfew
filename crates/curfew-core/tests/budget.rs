@@ -211,3 +211,56 @@ fn an_empty_ledger_has_spent_nothing() {
     assert_eq!(Consumption::default().used_since(Some(0)), 0);
     assert_eq!(Launches::default().count_since(None), 0);
 }
+
+/// **Pruning at the window boundary must not change what the window sees.**
+///
+/// The op-log is compacted *and* the budget window is evaluated, and both key on an instant: `prune`
+/// keeps `at >= before` and `used_since` counts `at >= from`. When those two instants coincide — the
+/// compaction horizon sitting exactly on the refill boundary, which is what a daily prune wrote
+/// against a daily refill produces — the two must still agree. They do, because pruning only ever
+/// removes rollups that `used_since` was already going to skip; this test is what stops a future
+/// "tidy-up" of either bound from silently double-counting or dropping a boundary rollup.
+///
+/// A rollup exactly on the boundary belongs *inside* the window, which is why both sides are
+/// inclusive and why the assertion below is "unchanged" rather than "minus one".
+#[test]
+fn pruning_at_the_window_start_does_not_change_what_the_window_spends() {
+    let mut c = Consumption::default();
+    c.record(100, 10);
+    c.record(200, 20); // exactly on the boundary
+    c.record(300, 30);
+
+    let before = c.used_since(Some(200));
+    assert_eq!(before, 50, "the boundary rollup is inside the window before pruning too");
+
+    c.prune(200);
+    assert_eq!(
+        c.used_since(Some(200)),
+        before,
+        "compacting at the window boundary changed what the budget sees"
+    );
+    assert_eq!(c.rollups.len(), 2, "the boundary rollup is kept, not dropped");
+}
+
+/// The same invariant for opens, which is why both ledgers use the same convention.
+#[test]
+fn pruning_at_the_window_start_does_not_change_how_many_opens_are_counted() {
+    let mut l = Launches::default();
+    l.record(100);
+    l.record(200);
+    l.record(300);
+
+    let before = l.count_since(Some(200));
+    l.prune(200);
+    assert_eq!(l.count_since(Some(200)), before, "compaction changed the launch count");
+}
+
+/// And the boundary is genuinely inclusive, stated once so the two places cannot drift apart.
+#[test]
+fn a_rollup_on_the_boundary_counts_and_survives_pruning() {
+    let mut c = Consumption::default();
+    c.record(200, 7);
+    assert_eq!(c.used_since(Some(200)), 7);
+    c.prune(200);
+    assert_eq!(c.used_since(Some(200)), 7);
+}

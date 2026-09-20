@@ -82,17 +82,65 @@ fn domains_are_normalized_for_case_and_stray_dots() {
 fn parsing_splits_a_url_into_the_parts_rules_care_about() {
     let u = Url::parse("HTTPS://user:pw@WWW.Example.com:8443/a/b?x=1#frag");
     assert_eq!(u.host, "www.example.com");
+    assert_eq!(u.scheme, "https");
     assert_eq!(u.path, "/a/b");
     assert_eq!(u.query, "x=1");
-    assert_eq!(u.normalized(), "www.example.com/a/b?x=1", "the fragment never reaches a rule");
+    assert_eq!(
+        u.normalized(),
+        "https://www.example.com/a/b?x=1",
+        "the fragment never reaches a rule, and the scheme is kept so a pattern may name it"
+    );
 }
 
 #[test]
 fn a_url_without_a_scheme_or_path_still_parses() {
     let u = Url::parse("example.com");
     assert_eq!(u.host, "example.com");
+    assert_eq!(u.scheme, "");
     assert_eq!(u.path, "");
     assert_eq!(u.normalized(), "example.com");
+}
+
+/// A path is case-sensitive, and the parser used to destroy the case on its way in — which made
+/// every rule that depended on a path segment silently unmatchable.
+#[test]
+fn case_survives_a_path_and_a_query_but_not_a_host() {
+    let u = Url::parse("https://GitHub.com/User/Repo?list=PLabc123");
+    assert_eq!(u.host, "github.com", "a host is case-insensitive, and only a host is");
+    assert_eq!(u.path, "/User/Repo");
+    assert_eq!(u.query, "list=PLabc123");
+    assert_eq!(u.raw, "https://GitHub.com/User/Repo?list=PLabc123");
+}
+
+/// The rule that could never fire: written with a scheme, matched against a form that had none.
+#[test]
+fn a_url_pattern_may_name_the_scheme() {
+    let t = Target::Url { pattern: "https://github.com/User/*".into() };
+    assert!(t.matches(&web("https://github.com/User/Repo")));
+    assert!(!t.matches(&web("https://github.com/Other/Repo")));
+    // And a pattern without one still matches, because `*` spans the scheme.
+    let bare = Target::Url { pattern: "*github.com/User/*".into() };
+    assert!(bare.matches(&web("https://github.com/User/Repo")));
+}
+
+/// A glob over a URL sees the case the browser actually handed us.
+///
+/// Reaching this at all required the parser to stop lowercasing the whole URL: before, a pattern and
+/// a query value could not disagree, because both had already been folded on the way in. Glob
+/// matching stays case-*in*sensitive, deliberately — one engine serves window titles and file paths
+/// too, and a user writing `*shorts*` does not expect it to stop matching because the page
+/// capitalised it.
+#[test]
+fn a_url_pattern_sees_the_case_of_a_query_value() {
+    let t = Target::Url { pattern: "*list=*WORK*".into() };
+    assert!(t.matches(&web("https://youtube.com/playlist?list=PLWORK123")));
+
+    // What case preservation buys: the URL a rule is compared against now *has* its case, so the
+    // two forms are different strings rather than the same lowercased one.
+    let upper = Url::parse("https://github.com/User/Repo");
+    let lower = Url::parse("https://github.com/user/Repo");
+    assert_eq!(upper.path, "/User/Repo");
+    assert_ne!(upper.normalized(), lower.normalized());
 }
 
 #[test]
