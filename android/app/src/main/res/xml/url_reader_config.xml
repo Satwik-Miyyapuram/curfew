@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  UrlReaderService: the detector that can read an address bar, and the uninstall guard with it.
+
+  This is the service that makes payment and banking apps warn. Android applies
+  `canRetrieveWindowContent` per *service*, not per package: a service that can read any window is
+  treated as one that does, and the apps' risk engines check the capability rather than the
+  behaviour. `android:packageNames` would not help — it is a delivery filter, not a security
+  boundary, and being on it is not something a bank can verify. A user who would rather not hold the
+  capability runs ForegroundTracker instead and loses URL rules and the guard; the wizard presents
+  both and picks neither.
+
+  What is actually read, and nothing else:
+
+    1. The address bar of a package on `BrowserUrlExtractor`'s curated list, by view id. The id list
+       is looked up by package name, so a package that is not on that list cannot reach the node
+       lookup at all — there is no fabricated id and no package-name heuristic anywhere.
+    2. A window belonging to `UninstallGuard.WATCHED` while a lock is running, to answer one
+       question: does this window mention Curfew. Bounded at 400 nodes, storing and logging nothing.
+
+  And what is never read, structurally rather than by review: a package in `ScreenWatcher`'s
+  never-block list, and a package on the sensitive list — payment, banking, wallet and credential
+  apps — which `ScreenWatcher` short-circuits before the guard and before any node access. So the
+  capability is broad and the reading is not.
+
+  `flagReportViewIds` is what makes (1) work at all, and it was missing for two revisions. Android
+  treats a view's resource id as developer metadata and strips it from the node tree handed to an
+  accessibility service unless the service asks for it, so `findAccessibilityNodeInfosByViewId`
+  returned an empty list on every event: `extractUrl` returned null every time, and every site and
+  keyword rule was silently dead on Android while looking healthy. Null is also the legitimate answer
+  for a new tab, which is why nothing noticed. **If URL reading ever stops working, check this flag
+  first.**
+
+  `notificationTimeout` is the system-side coalescer: 250 ms, matching the in-code recheck in
+  `ScreenWatcher`, so a scrolling page's burst of content events is dropped by the framework instead
+  of after a wake-up.
+
+  `android:isAccessibilityTool` is deliberately **absent**, and must stay absent — see
+  `foreground_tracker_config.xml` for the reasoning, which is the same here and matters more,
+  because this is the service that can read a window in the first place.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagIncludeNotImportantViews|flagReportViewIds"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="250" />
