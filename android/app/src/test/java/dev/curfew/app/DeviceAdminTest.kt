@@ -92,4 +92,28 @@ class DeviceAdminTest {
         assertTrue(explanation.contains("cannot erase"))
         assertFalse("admin is optional, so it is not asked for as a requirement", explanation.contains("must"))
     }
+
+    /**
+     * The cost outside Curfew, said at the moment the user is looking at the button.
+     *
+     * What Curfew does *with* admin is narrow, and the dialog says so — but the capability itself
+     * is what banking and payment apps react to, and being told only the narrow half is how a user
+     * ends up surprised when their bank app stops opening. The wizard says this before asking; the
+     * dialog has to say it too, because this is the only place a person reads it while deciding.
+     */
+    @Test
+    fun `the request says what having an active admin costs outside Curfew`() {
+        val explanation = CurfewDeviceAdmin.requestIntent(context)
+            .getCharSequenceExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION)
+            .toString()
+
+        assertTrue(
+            "the banking-app cost of an active admin is not stated: $explanation",
+            explanation.contains("banking and payment apps"),
+        )
+        assertTrue(
+            "the cheaper alternative is not named: $explanation",
+            explanation.contains("accessibility guard"),
+        )
+    }
 }

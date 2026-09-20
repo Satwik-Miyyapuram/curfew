@@ -135,6 +135,41 @@ The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the short v
   excluded from cloud backup; there is no code in this repository that uploads them anywhere. The
   config file is exportable on demand, from *Schedule → Export*.
 
+### What Curfew reads on Android
+
+Android decides "can this app see my screen" per accessibility **service**, not per app. A service
+that *can* read any window is treated as one that *does* — so payment and banking apps refuse to run
+while such a service is enabled, and no filter changes that, because the check is on the capability
+rather than the behaviour. That is why Curfew ships **two** services and expects you to pick one:
+
+| | *Curfew app blocking* | *Curfew site blocking* |
+| --- | --- | --- |
+| Can read a window | **no** | yes |
+| Blocks apps | yes | yes |
+| Blocks sites, URLs, keywords | no — refused at config load | yes |
+| Guards against uninstall | no | yes |
+| Banking apps object | no | yes |
+
+App blocking alone reads a package name and nothing else. Site blocking reads exactly two things: the
+address bar of a browser on a curated list, by view id, and — while a lock is running — a window
+belonging to one of the short list of packages that can remove an app, to answer one question, "does
+this mention Curfew". Nothing else is looked at, nothing is stored, and nothing leaves the device.
+
+**Payment, banking, wallet and password apps are never read.** Curfew will not inspect their screens in
+either mode, on any code path: the check is the first thing every accessibility event does. The list is
+visible and extensible from *Settings → Apps Curfew never reads*.
+
+**They can still be blocked, and that is deliberate.** Which apps a person blocks is theirs to decide.
+What Curfew does not do is let a block on a bank reach that bank's notifications — a blocked app's
+notifications are normally suppressed, and a one-time password that never arrives is a payment that
+never completes, so financial notifications are always delivered. Blocking a bank app costs a block
+screen and nothing else.
+
+Curfew does **not** declare itself an accessibility tool. That is deliberate: on Android 14 and later
+the OS hides from non-tool services any view an app marks `accessibilityDataSensitive` — password
+fields and payment credentials — which is a floor enforced by the platform rather than a promise
+Curfew makes about itself.
+
 ## Building
 
 ```
