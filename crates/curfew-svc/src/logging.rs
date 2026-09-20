@@ -40,6 +40,7 @@ static SINK: OnceLock<Mutex<Sink>> = OnceLock::new();
 
 /// Where the log lives by default — beside the state file, under the same ACL, so a standard user
 /// cannot edit or delete the record of what the service did.
+#[allow(dead_code)]
 pub fn default_path() -> PathBuf {
     let root = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     Path::new(&root).join("Curfew").join("curfew.log")
@@ -51,6 +52,7 @@ pub fn default_path() -> PathBuf {
 /// A path that cannot be opened is **not** fatal. A service that refuses to start because it cannot
 /// write a log is worse than one that starts without a log, and the failure is itself reported to
 /// stderr, which is where the installer sees it.
+#[allow(dead_code)]
 pub fn install(path: PathBuf) {
     if SINK.get().is_some() {
         return;
