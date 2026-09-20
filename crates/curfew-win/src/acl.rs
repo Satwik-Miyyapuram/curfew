@@ -157,6 +157,7 @@ mod tests {
     /// full-control sandbox grant comes out with exactly SYSTEM full, Administrators full, Users
     /// read-and-execute, and no inherited ACEs. That record is in FIXES.md entry 25.
     #[test]
+    #[cfg(windows)]
     fn the_machine_accepts_the_arguments() {
         let dir = std::env::temp_dir().join(format!("curfew-acl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
