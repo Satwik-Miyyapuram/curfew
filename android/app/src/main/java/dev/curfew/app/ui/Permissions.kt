@@ -16,10 +16,11 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
-import dev.curfew.app.enforce.CurfewAccessibilityService
 import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.CurfewNotificationListener
+import dev.curfew.app.enforce.EnforcementMode
 import dev.curfew.app.enforce.UsageStatsPoller
+import dev.curfew.app.enforce.Watchers
 
 /**
  * What Curfew is allowed to do, and what it cannot do without.
@@ -47,6 +48,19 @@ enum class Grant(
     @StringRes val cost: Int,
     val required: Boolean,
 ) {
+    /**
+     * The accessibility grant. **There are two services behind this one grant**, and which of them
+     * the user enables is the choice [dev.curfew.app.enforce.EnforcementMode] describes.
+     *
+     * It is presented as one grant rather than as two rows because it is one decision — "may Curfew
+     * see what is in front" — and the interesting part is the trade-off inside it, which the cost
+     * string states. The wizard shows the service the chosen mode uses and tells the user when the
+     * other one is still enabled; see `Permissions` screen copy.
+     *
+     * It stays [required] because app blocking does not work without one of the two, whichever the
+     * user picks — and the mode they have not picked is not a lesser version of the app, it is a
+     * different set of features.
+     */
     Accessibility(
         title = R.string.perm_accessibility_title,
         because = R.string.perm_accessibility_because,
@@ -139,15 +153,13 @@ enum class Grant(
      * caller should request through the permission launcher instead.
      */
     fun settingsIntents(context: Context): List<Intent> = when (this) {
-        Accessibility -> listOfNotNull(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Intent(ACTION_ACCESSIBILITY_DETAILS).putExtra(
-                    EXTRA_ACCESSIBILITY_COMPONENT,
-                    ComponentName(context, CurfewAccessibilityService::class.java).flattenToString(),
-                )
-            } else null,
-            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
-        )
+        Accessibility -> {
+            // The service the *chosen* mode uses, defaulting to the mode that costs nothing elsewhere
+            // when the user has not chosen one yet. Sending a user who picked app-only to the URL
+            // reader's page would be the wizard quietly arguing for the more invasive option.
+            val mode = EnforcementMode.current(context) ?: EnforcementMode.DEFAULT
+            listOf(Watchers.settingsIntent(context, mode), Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
         UsageAccess -> listOf(
             Intent(
                 Settings.ACTION_USAGE_ACCESS_SETTINGS,
@@ -209,24 +221,31 @@ enum class Grant(
 
     companion object {
         /**
-         * Whether Curfew's accessibility service is switched on.
+         * Whether Curfew is seeing the foreground app at all.
          *
-         * Read from the secure setting rather than from the service instance, because the instance
-         * is null both when the service is off and when the process has just started — and those
-         * two mean very different things to a user staring at a health screen.
+         * True when *either* service is on, because both report the same thing and the user picks
+         * between them by the trade-off in [EnforcementMode] rather than by capability. Which one is
+         * on is a separate question and the screens that care ask [enforcementMode].
+         *
+         * Read from the secure setting rather than from a service instance, because the instance is
+         * null both when the service is off and when the process has just started — and those two
+         * mean very different things to a user staring at a health screen.
          */
-        fun isAccessibilityEnabled(context: Context): Boolean {
-            val expected = ComponentName(context, CurfewAccessibilityService::class.java)
-            val enabled = Settings.Secure.getString(
-                context.contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-            ) ?: return false
-            val splitter = TextUtils.SimpleStringSplitter(':')
-            splitter.setString(enabled)
-            return splitter.any {
-                ComponentName.unflattenFromString(it)?.equals(expected) == true
-            }
-        }
+        fun isAccessibilityEnabled(context: Context): Boolean = Watchers.anyEnabled(context)
+
+        /** Which mode is running, or null when neither service is on. */
+        fun enforcementMode(context: Context): EnforcementMode? = EnforcementMode.current(context)
+
+        /**
+         * Which mode the user has chosen, whether or not it is currently running.
+         *
+         * From the config, falling back to the running service and then to the cheap default — so a
+         * user who has chosen app-only but not yet granted it is still shown app-only.
+         */
+        fun chosenMode(context: Context): EnforcementMode =
+            EnforcementMode.current(context)
+                ?: EnforcementMode.stored(context)
+                ?: EnforcementMode.DEFAULT
 
         /** Asked in one place, in [UsageStatsPoller], so the API-level branch exists only once. */
         fun hasUsageAccess(context: Context): Boolean = UsageStatsPoller.hasPermission(context)

@@ -54,6 +54,13 @@ class CurfewDeviceAdmin : DeviceAdminReceiver() {
         /**
          * The intent that asks for admin. The explanation is shown inside Android's own dialog,
          * which is the only place a user will read it at the moment it matters.
+         *
+         * **The second half is a cost, not a disclaimer.** Being an active device admin is what
+         * stops Curfew being uninstalled mid-lock, and it is also the reason a great many banking
+         * and payment apps will refuse to run: they read the active-admin list as a proxy for
+         * corporate or hostile control, and no scoping on Curfew's side changes that. The permission
+         * wizard already says so before asking; this dialog says it too, because this is the moment
+         * the user is standing in front of the button.
          */
         fun requestIntent(context: Context): Intent =
             Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
@@ -62,7 +69,9 @@ class CurfewDeviceAdmin : DeviceAdminReceiver() {
                     DevicePolicyManager.EXTRA_ADD_EXPLANATION,
                     "This stops Curfew being uninstalled while a lock is running. It grants no " +
                         "other control over the device: Curfew cannot erase it, lock it, or change " +
-                        "any password.",
+                        "any password. Be aware that many banking and payment apps refuse to run " +
+                        "while any app is a device admin — if you use one, leave this off and rely " +
+                        "on the accessibility guard instead.",
                 )
 
         /** Deactivate, so the app can be uninstalled again. Safe to call when not active. */

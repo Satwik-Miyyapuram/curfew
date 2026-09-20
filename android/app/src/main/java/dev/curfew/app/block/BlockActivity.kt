@@ -53,7 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.R
 import dev.curfew.app.curfew
-import dev.curfew.app.enforce.CurfewAccessibilityService
+import dev.curfew.app.enforce.Watchers
 import dev.curfew.app.ui.CurfewTheme
 import dev.curfew.app.ui.glass
 import dev.curfew.app.ui.Palette
@@ -125,9 +125,14 @@ class BlockActivity : ComponentActivity() {
 
     /**
      * Opens a fresh tab in the active browser, leaving the blocked URL behind.
+     *
+     * The browser comes from [Watchers], which the URL reader sets while the user is in a browser and
+     * clears when they leave one or the service stops. Advisory: pinning the intent to a package that
+     * turned out to be wrong would fail rather than fall back, so the failure path below re-sends the
+     * intent unpinned and lets the system choose.
      */
     private fun openNewTab() {
-        val browserPackage = CurfewAccessibilityService.activeBrowserPackage
+        val browserPackage = Watchers.activeBrowserPackage
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(Browser.EXTRA_CREATE_NEW_TAB, true)

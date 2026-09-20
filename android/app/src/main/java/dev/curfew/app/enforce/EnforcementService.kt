@@ -13,8 +13,14 @@ import dev.curfew.app.block.BlockActivity
 import dev.curfew.app.curfew
 import dev.curfew.app.data.CurfewRuntime
 import dev.curfew.policy.BlockReason
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -36,11 +42,33 @@ class EnforcementService : Service() {
     private var charge: Job? = null
     private var screen: android.content.BroadcastReceiver? = null
 
+    /**
+     * The scope every loop in this service runs in, and the reason it is not the runtime's.
+     *
+     * `runtime.scope` lives as long as the process, so a loop launched into it outlives the service
+     * that owns it unless `onDestroy` is guaranteed to run — and it is not. A service restarted by
+     * `START_STICKY` after being killed, or a second `onCreate` racing a slow teardown, would leave
+     * a second `chargeLoop` beside the first: `onTick` firing twice per five seconds, budget time
+     * charged at double rate, database writes doubled. Structured concurrency exists so a
+     * component's work dies with the component, and this is that.
+     */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * Whether the screen is on, for the meter below.
+     *
+     * Starts true because the service starts while the user is looking at something — an
+     * accessibility service becoming available is itself a sign the device is in use — and the
+     * screen-off receiver corrects it within a second of being wrong in the only direction that
+     * matters.
+     */
+    private val screenOn = MutableStateFlow(true)
+
     override fun onCreate() {
         super.onCreate()
         runtime = curfew
         startForeground(NOTIFICATION_ID, notification(running = false))
-        loop = runtime.scope.launch {
+        loop = serviceScope.launch {
             runtime.restore()
             tick()
         }
@@ -48,23 +76,37 @@ class EnforcementService : Service() {
         // takes a multicast lock, and on this device that call did not come back — which stalled
         // the tick loop behind it and meant nothing was enforced at all. Sync is the feature that
         // may fail; enforcement is the promise that may not, so the promise does not wait on it.
-        sync = runtime.scope.launch(kotlinx.coroutines.Dispatchers.IO) { syncLoop() }
+        sync = serviceScope.launch(kotlinx.coroutines.Dispatchers.IO) { syncLoop() }
         // The notification, the widget and the tile follow what is being enforced rather than
         // waiting for the next tick. Ending a session updates `activeProfiles` the moment the core
         // accepts it, but until this the three surfaces that tell the user whether a block is on
         // went on saying it was for up to thirty seconds — which is exactly long enough to read as
         // the End button having done nothing.
-        watch = runtime.scope.launch {
+        watch = serviceScope.launch {
             runtime.activeProfiles.collect { updateNotification() }
         }
-        charge = runtime.scope.launch { chargeLoop() }
+        charge = serviceScope.launch { chargeLoop() }
         screen = screenReceiver().also {
             registerReceiver(
                 it,
-                android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),
+                android.content.IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    // Then on again: the meter has to know when it may resume, or a screen-off
+                    // suspension would become a permanent one.
+                    addAction(Intent.ACTION_SCREEN_ON)
+                },
             )
         }
     }
+
+    /**
+     * The fallback detector, held rather than rebuilt.
+     *
+     * It carries a watermark and the app it last saw in front, so one instance per tick would discard
+     * both and re-read the wide window every time — which is the re-reading the watermark exists to
+     * remove. Lazily, because a device that never needs the fallback should not pay to construct it.
+     */
+    private val poller: UsageStatsPoller by lazy { UsageStatsPoller(this) }
 
     /**
      * The meter.
@@ -79,18 +121,23 @@ class EnforcementService : Service() {
      * Runs whether or not the accessibility service is on, since both detectors have the same
      * blind spot. The wall clock rather than the trusted one, because a clock moved forward here
      * only charges a budget faster, and the trusted reading writes to the database each time.
+     *
+     * **It suspends rather than polls when there is nothing to meter.** A profile that is active
+     * around the clock — "always-on deep work" — used to keep this waking every five seconds
+     * through the night with the screen off, and each wake-up found nothing in front, charged
+     * nothing and slept again. Two conditions gate it now, and both are waits rather than sleeps:
+     *
+     *  - an active profile, waited for on the flow, so the first charge after a session starts is
+     *    [CHARGE_MILLIS] late instead of up to [POLL_IDLE_MILLIS] + [CHARGE_MILLIS];
+     *  - the screen on, waited for the same way, because a phone in a pocket is not a slice of
+     *    anything and [onIdle] has already said so.
      */
     private suspend fun chargeLoop() {
-        while (runtime.scope.isActive) {
-            // **Nothing is charged while nothing is running.** `Enforcer.onTick` returns immediately
-            // unless a target is in front, and a target is only ever set by an observation taken while
-            // the profile it belongs to is being enforced — so with no active profile this loop was
-            // waking every five seconds to do nothing, forever. Gated rather than removed, so the meter
-            // resumes on the first tick after a session starts.
-            if (!EnforcementCadence.enforcementWorkDue(runtime.activeProfiles.value.isNotEmpty())) {
-                delay(EnforcementCadence.POLL_IDLE_MILLIS)
-                continue
+        while (serviceScope.isActive) {
+            if (runtime.activeProfiles.value.isEmpty()) {
+                runtime.activeProfiles.first { it.isNotEmpty() }
             }
+            screenOn.first { it }
             delay(EnforcementCadence.CHARGE_MILLIS)
             runCatching { enforcer(this).onTick(runtime.clock.now()) }
                 .onFailure { android.util.Log.w(TAG, "charging failed", it) }
@@ -105,7 +152,11 @@ class EnforcementService : Service() {
      */
     private fun screenReceiver() = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            runtime.scope.launch { enforcer(context).onIdle(runtime.clock.now()) }
+            val off = intent.action == Intent.ACTION_SCREEN_OFF
+            screenOn.value = !off
+            if (off) {
+                serviceScope.launch { enforcer(context).onIdle(runtime.clock.now()) }
+            }
         }
     }
 
@@ -199,16 +250,25 @@ class EnforcementService : Service() {
                 runtime.heartbeat(now)
                 ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
                 updateNotification()
+                // The accessibility subscription follows the rules, and a rule can be written at any
+                // moment. On the incidental cadence rather than the fast one because it is an IPC and
+                // the answer changes only when the user edits a config — and it is a no-op when the
+                // subscription already matches. See `ServiceSurface`.
+                Watchers.reader?.refreshSurface()
             }
             // If the fallback detector is in use, this is also when the foreground app is sampled — and
             // only while a profile is being enforced, because `engine::decide` iterates the active
             // profiles and allows everything when there are none. A sample taken then cannot change an
             // answer, and it is a `UsageStatsManager` binder call.
+            //
+            // Either accessibility service makes this unnecessary: both report the foreground app, and
+            // the mode with URL reading reports it sooner. The poller is for a user who granted
+            // neither, which is a real configuration rather than a fallback nobody uses.
             if (
                 EnforcementCadence.enforcementWorkDue(active) &&
-                    !CurfewAccessibilityService.isEnabled(this)
+                    !Watchers.anyEnabled(this)
             ) {
-                UsageStatsPoller(this).sample(now)?.let {
+                poller.sample(now)?.let {
                     enforcer(this).onObservation(it, now)
                 }
             }
@@ -250,10 +310,16 @@ class EnforcementService : Service() {
     override fun onDestroy() {
         runtime.sync?.stop()
         screen?.let { runCatching { unregisterReceiver(it) } }
+        // **Everything this service started dies with it.** `serviceScope.cancel()` stops all four
+        // loops at once, so the individual `cancel` calls are documentation rather than mechanism —
+        // kept because they say which loops exist, and because the one thing worse than a missing
+        // cancel is a reader believing one of these is the thing keeping a second `chargeLoop` from
+        // running.
         charge?.cancel()
         watch?.cancel()
         sync?.cancel()
         loop?.cancel()
+        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -314,7 +380,10 @@ class AndroidActions(private val context: Context) : Enforcer.Actions {
                 reason,
                 context.curfew.profileName(reason.profile),
             )
-            val launcher = CurfewAccessibilityService.instance ?: context
+            // A service's context is the one that may start an activity from the background without
+            // the ten-second delay a plain application context gets on Android 10 and later. Either
+            // detector will do; whichever is running is the one that saw this app come to the front.
+            val launcher = Watchers.reader ?: context
             launcher.startActivity(intent)
         }.onFailure { android.util.Log.w("Curfew", "block screen refused for $target", it) }
     }
@@ -324,6 +393,22 @@ class AndroidActions(private val context: Context) : Enforcer.Actions {
     }
 
     override fun allow(target: String) = Unit
+
+    /**
+     * Leave the blocked page in the browser that is showing it.
+     *
+     * A global Back is the only way to move a browser off a page on Android, and only an
+     * accessibility service can perform one. That is `Watchers.reader`: the URL reader is the only
+     * mode that can *have* a blocked page in the first place, because the mode that cannot read an
+     * address bar cannot produce a `web:` target. So this is unreachable with `reader` null, and the
+     * null check is for the instant the service is being torn down rather than for a configuration.
+     */
+    override fun navigateBack(target: String) {
+        runCatching {
+            Watchers.reader
+                ?.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+        }.onFailure { android.util.Log.w("Curfew", "could not leave the blocked page $target", it) }
+    }
 
     /**
      * Muting is best-effort on Android: without a notification listener Curfew cannot cancel a

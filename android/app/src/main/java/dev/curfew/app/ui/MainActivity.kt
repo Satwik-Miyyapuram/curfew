@@ -157,6 +157,15 @@ object Routes {
     const val USAGE = "usage"
     const val DEVICES = "devices"
     const val HEALTH = "health"
+
+    /**
+     * Which apps Curfew may not read.
+     *
+     * Reached from the accessibility section rather than from a list of features, because what it
+     * governs is the accessibility privilege and not a preference — and because the one thing a user
+     * needs it for is the bank app the shipped list does not know about.
+     */
+    const val SENSITIVE_APPS = "sensitive-apps"
     const val PROFILE_NEW = "profile/new"
     const val TIMER = "timer"
 
@@ -222,6 +231,7 @@ fun CurfewApp(
             composable(Routes.USAGE) { UsageScreen(model) }
             composable(Routes.DEVICES) { DevicesScreen(model) }
             composable(Routes.HEALTH) { HealthScreen(model) }
+            composable(Routes.SENSITIVE_APPS) { SensitiveAppsScreen(model) }
             composable(Routes.TIMER) { TimerScreen(model, onDone = { navController.popBackStack() }) }
             composable(Routes.PROFILE_NEW) {
                 ProfileEditScreen(model, id = null, onDone = { navController.popBackStack() })
