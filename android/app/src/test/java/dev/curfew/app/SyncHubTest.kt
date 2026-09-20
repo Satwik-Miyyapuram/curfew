@@ -138,7 +138,7 @@ class SyncHubTest {
         phone.syncPass(now + 1)
         phone.syncPass(now + 2)
 
-        val spent = phone.usage(now + 2).usage["reddit.com"]?.rollups?.sumOf { it.seconds }
+        val spent = phone.usageFromDb(now + 2).usage["reddit.com"]?.rollups?.sumOf { it.seconds }
         assertEquals(600, spent)
     }
 

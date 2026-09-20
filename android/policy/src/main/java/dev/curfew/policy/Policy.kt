@@ -417,6 +417,53 @@ class Policy private constructor(private val inner: Curfew) {
 
     fun activeProfiles(now: Long): List<String> = inner.activeProfiles(now)
 
+    /**
+     * Whether any profile has a rule only a window reader can enforce.
+     *
+     * A `url` or `keyword` rule needs the browser's address bar, and the address bar is re-read on
+     * content events — so this is what decides whether the URL reader's subscription has to include
+     * them. Asked of every profile rather than of the running ones: a rule in a profile that is not
+     * running this minute still has to be enforceable when its schedule comes round, and a
+     * subscription narrowed for the wrong minute is a block that silently does not happen.
+     *
+     * `keyword` counts because it searches the normalized URL, which does not exist without a window
+     * to read. Every other target kind is decided from the window-state event's package name alone.
+     */
+    fun hasUrlLevelRules(): Boolean {
+        val toml = configToml()
+        return profiles(toml).any { profile ->
+            runCatching {
+                rules(profile.id).any { rule ->
+                    val target = rule.target
+                    target is Target.Url || target is Target.Keyword
+                }
+            }.getOrDefault(false)
+        }
+    }
+
+    /**
+     * Whether anything running right now can care about usage history.
+     *
+     * A decision with no budget and no launch limit in it never reads the usage state — the core
+     * only touches it inside the `Budget` and `LaunchLimit` arms — so the caller can skip
+     * materializing it entirely. That matters because materializing it means reading a day of rows
+     * out of an encrypted database and serializing them across this boundary, on every foreground
+     * change on the device.
+     *
+     * Asked of the *active* profiles, not of the whole config: a budget on a profile that is not
+     * running cannot change any answer, and saying so is the point of the question.
+     */
+    fun hasMeteredRules(now: Long): Boolean {
+        val active = inner.activeProfiles(now)
+        if (active.isEmpty()) return false
+        return active.any { id ->
+            rules(id).any { rule ->
+                val action = rule.action
+                action is Action.Budget || action is Action.LaunchLimit
+            }
+        }
+    }
+
     fun mergedLock(now: Long): LockSet = json.decodeFromString(inner.mergedLockJson(now))
 
     fun activations(now: Long, events: List<CalendarEvent>): List<Activation> =
@@ -480,7 +527,20 @@ sealed interface Observation {
 }
 
 @Serializable
-data class Url(val raw: String, val host: String, val path: String, val query: String) {
+data class Url(
+    val raw: String,
+    val host: String,
+    /**
+     * The scheme, lowercased, or empty when the string carried none.
+     *
+     * Kept rather than discarded because the core puts it back when it normalizes a URL for
+     * matching, so a rule written `https://github.com/User/Repo` can match. The host is the only
+     * part that is lowercased: a URL path is case-sensitive.
+     */
+    val scheme: String = "",
+    val path: String,
+    val query: String,
+) {
     companion object {
         /**
          * Split a URL the way the core does. Kept in step with `Url::parse` in Rust and checked
@@ -489,7 +549,9 @@ data class Url(val raw: String, val host: String, val path: String, val query: S
          */
         fun parse(raw: String): Url {
             val trimmed = raw.trim()
-            val afterScheme = trimmed.substringAfter("://", trimmed)
+            val marker = trimmed.indexOf("://")
+            val scheme = if (marker < 0) "" else trimmed.substring(0, marker).lowercase()
+            val afterScheme = if (marker < 0) trimmed else trimmed.substring(marker + 3)
             val cut = afterScheme.indexOfFirst { it == '/' || it == '?' || it == '#' }
             val authority = if (cut < 0) afterScheme else afterScheme.substring(0, cut)
             val rest = if (cut < 0) "" else afterScheme.substring(cut)
@@ -497,7 +559,7 @@ data class Url(val raw: String, val host: String, val path: String, val query: S
             val withoutFragment = rest.substringBefore('#')
             val path = withoutFragment.substringBefore('?')
             val query = withoutFragment.substringAfter('?', "")
-            return Url(raw = trimmed, host = host, path = path, query = query)
+            return Url(raw = trimmed, host = host, scheme = scheme, path = path, query = query)
         }
     }
 }
@@ -751,7 +813,31 @@ data class Activation(
 data class UsageState(
     val usage: Map<String, Consumption> = emptyMap(),
     val launches: Map<String, Launches> = emptyMap(),
-)
+) {
+    /**
+     * This state with one more slice charged to [target].
+     *
+     * The enforcer writes a slice every few seconds and reads the state back on every decision, so
+     * it keeps the state in memory rather than re-reading it. Adding a slice is appending to a list,
+     * which is what the database would otherwise have to be asked to re-derive in full.
+     *
+     * The rollups of one target stay ordered by instant because slices are only ever recorded
+     * forwards in time; the core does not rely on the order, but a state that disagrees with the
+     * order it would have had from the database is a state that will one day be compared to one.
+     */
+    fun withUsage(target: String, at: Long, seconds: Int): UsageState = copy(
+        usage = usage + (target to Consumption(
+            (usage[target]?.rollups ?: emptyList()) + Rollup(at, seconds),
+        )),
+    )
+
+    /** This state with one more open of [target] recorded. */
+    fun withLaunch(target: String, at: Long): UsageState = copy(
+        launches = launches + (target to Launches(
+            (launches[target]?.opens ?: emptyList()) + at,
+        )),
+    )
+}
 
 @Serializable
 data class Consumption(val rollups: List<Rollup> = emptyList())

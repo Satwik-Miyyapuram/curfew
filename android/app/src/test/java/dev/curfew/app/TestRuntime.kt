@@ -7,6 +7,8 @@ import dev.curfew.app.data.Clock
 import dev.curfew.app.data.ConfigStore
 import dev.curfew.app.data.CurfewDatabase
 import dev.curfew.app.data.CurfewRuntime
+import dev.curfew.app.enforce.EnforcementMode
+import dev.curfew.app.enforce.SensitiveApps
 import dev.curfew.policy.Policy
 import java.io.File
 
@@ -65,21 +67,46 @@ locks = [{ kind = "timer" }]
         configToml: String = CONFIG,
         context: Context = ApplicationProvider.getApplicationContext(),
         clock: MovableClock = MovableClock(now),
+        /**
+         * The enforcement mode the config is judged against.
+         *
+         * Defaults to [EnforcementMode.APP_AND_URL] rather than to the shipping default, because these
+         * tests are about the policy and about the config round-trip, and a mode that may not read a
+         * window deliberately refuses `url` and `keyword` rules at load. A test that wants to exercise
+         * that refusal passes [EnforcementMode.APP_ONLY] and says so; see `AppOnlyConfigTest`.
+         */
+        mode: EnforcementMode = EnforcementMode.APP_AND_URL,
     ): CurfewRuntime {
         val db = Room.inMemoryDatabaseBuilder(context, CurfewDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         val file = File.createTempFile("curfew", ".toml").apply { deleteOnExit() }
-        val store = ConfigStore(file)
-        store.write(configToml).getOrThrow()
+        val store = ConfigStore(file = file, mode = { mode }, unblockable = { unblockable() })
+        // Seeded by writing the *file*, the way a restored backup or a hand edit arrives, rather than
+        // through `ConfigStore.write`. The two paths do different things on purpose: `write` refuses an
+        // edit it cannot honour and says why, because the person making it is looking at a form; `read`
+        // narrows a config it finds on disk, because discarding somebody's whole ruleset over one rule
+        // is worse than loading the rest. A test that wants the refusal calls `write` — see
+        // `AppOnlyConfigTest`.
+        file.writeText(configToml)
         return CurfewRuntime(
             context = context,
-            policy = Policy.load(configToml),
+            policy = Policy.load(store.read()),
             config = store,
             db = db,
             clock = clock,
         )
     }
+
+    /**
+     * The apps treated as unblockable, resolved the way the app resolves them.
+     *
+     * The curated list plus the user's own additions, minus their exemptions — the real
+     * [SensitiveApps.resolve] rather than the constant, so a test sees the same set the device does.
+     */
+    private fun unblockable(): Set<String> =
+        runCatching { SensitiveApps.resolve(ApplicationProvider.getApplicationContext()) }
+            .getOrDefault(SensitiveApps.CURATED)
 }
 
 /**
