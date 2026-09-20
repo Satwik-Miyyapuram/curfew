@@ -121,8 +121,39 @@
                 android:value="Enforces the user's own focus schedule while it is running." />
         </service>
 
+        <!--
+          Two detectors, and the device runs exactly one of them.
+
+          Android applies `canRetrieveWindowContent` per *service*: a service that can read any window
+          is treated as one that does, and payment and banking apps refuse to run on that basis alone.
+          So the mode a user picks is a choice between capability and cost, and it is presented as
+          one — see `EnforcementMode`.
+
+            - ForegroundTracker cannot read a window. App blocking only, no URL rules, no uninstall
+              guard. No banking app can object to it. A fresh install is offered this.
+            - UrlReaderService can. Browser address bars and the uninstall guard, at the price of the
+              banking-app warning. It never reads a payment, banking or credential app: `ScreenWatcher`
+              short-circuits those before any node access.
+
+          Both are declared here because the user may switch between them; the wizard shows the one
+          the chosen mode uses and tells them if the other is still on, since having both enabled is
+          the worst of both worlds — the capability is present and nothing is gained by it.
+        -->
         <service
-            android:name=".enforce.CurfewAccessibilityService"
+            android:name=".enforce.ForegroundTracker"
+            android:exported="true"
+            android:label="@string/foreground_tracker_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/foreground_tracker_config" />
+        </service>
+
+        <service
+            android:name=".enforce.UrlReaderService"
             android:exported="true"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
@@ -131,7 +162,7 @@
             </intent-filter>
             <meta-data
                 android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
+                android:resource="@xml/url_reader_config" />
         </service>
 
         <!--
@@ -155,6 +186,31 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Installs and removals, because two things derived from the package list are otherwise frozen
+          for the life of the process: the app picker's candidates, and the sensitive list every
+          accessibility reader checks. The second is the one that matters — a payment app installed
+          while Curfew is running must become unreadable then, not at the next service restart — and
+          neither is fixed by anything else, since the platform sends these broadcasts only to
+          receivers that asked for them.
+
+          The `data android:scheme="package"` is required rather than decorative: these broadcasts
+          carry a `package:` data URI, and an intent filter with no data element does not match an
+          intent that has one — so without it this filter silently matches nothing at all.
+        -->
+        <receiver
+            android:name=".enforce.PackageChangeReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.PACKAGE_CHANGED" />
+                <data android:scheme="package" />
             </intent-filter>
         </receiver>
 

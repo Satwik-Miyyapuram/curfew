@@ -10,7 +10,7 @@
 //!
 //! Nothing here reads a clock. `now` comes from the caller, exactly as it does in the core.
 
-use curfew_core::config::Platform;
+use curfew_core::config::{Action, Platform};
 use curfew_core::engine::{charged_keys, State};
 use curfew_core::schedule::{active_at, next_change_after, upcoming, CalendarEvent};
 use curfew_core::session::{reconcile, Session, Sessions};
@@ -868,6 +868,30 @@ impl Curfew {
 
     pub fn active_profiles(&self, now: Timestamp) -> Vec<String> {
         self.sessions.read().expect("sessions lock").active_profiles(now)
+    }
+
+    /// Whether anything running right now can care about usage history.
+    ///
+    /// A decision that involves no budget and no launch limit never reads `State::usage` at all —
+    /// `engine::decide` only touches it inside the `Budget` and `LaunchLimit` arms. The Android
+    /// caller materializes that state by reading a day of rows out of an encrypted database and
+    /// serializing them across this boundary, on every foreground change, so asking this question
+    /// first is what lets it skip the read entirely for a config that only blocks things.
+    ///
+    /// It is asked of the *active* profiles rather than of the whole config on purpose: a budget on
+    /// a profile that is not running cannot affect any answer, and answering `false` for it is what
+    /// makes this worth doing.
+    pub fn has_metered_rules(&self, now: Timestamp) -> bool {
+        let active = self.sessions.read().expect("sessions lock").active_profiles(now);
+        if active.is_empty() {
+            return false;
+        }
+        let config = self.config.read().expect("config lock");
+        active.iter().filter_map(|id| config.profile(id)).any(|profile| {
+            profile.rules.iter().any(|rule| {
+                matches!(rule.action, Action::Budget { .. } | Action::LaunchLimit { .. })
+            })
+        })
     }
 
     /// The merged lock, as JSON, for the "you are locked until..." screen.

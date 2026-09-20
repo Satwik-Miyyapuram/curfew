@@ -82,20 +82,46 @@ pub fn question(message: &[u8]) -> Option<String> {
     Some(labels.join("."))
 }
 
-/// Whether `name` is covered by a blocked domain.
+/// Whether `name` is covered by a blocked domain, and by which entry.
 ///
 /// A blocked `reddit.com` covers `old.reddit.com` and `i.redd.it` is not covered by it — matching is
 /// on label boundaries only, so blocking `red.com` never takes down `notred.com`, and blocking
 /// `example.com` never takes down `example.company`.
+///
+/// **The allocation is gone; the predicate is not.** This runs for every name the machine looks up,
+/// and it used to build a `format!(".{domain}")` per entry to test the suffix. The suffix is now
+/// compared on byte slices, and the whole name against the entry needs no allocation at all. What it
+/// *decides* is unchanged, deliberately, including the order it decides in: a blocked entry is
+/// reported by its own spelling, and `find` over the list picks the first that matches.
+///
+/// The obvious "just walk the query's labels" rewrite is **not** equivalent and was tried and
+/// reverted — see `the_label_walk_would_not_have_been_equivalent` below.
 pub fn covered(name: &str, blocked: &BTreeSet<String>) -> Option<String> {
     let name = name.to_lowercase();
-    blocked
-        .iter()
-        .find(|domain| {
-            let domain = domain.trim_start_matches("www.");
-            name == domain || name.ends_with(&format!(".{domain}"))
-        })
-        .cloned()
+    for domain in blocked {
+        // The entry's own spelling, with the `www.` the old scan stripped from it. An entry of only
+        // `www.` becomes empty and matches nothing, which is also what the scan did.
+        let bare = domain.trim_start_matches("www.");
+        if name == bare {
+            return Some(domain.clone());
+        }
+        // A subdomain of the entry. The character before the suffix has to be the label dot, or
+        // `notreddit.com` would be covered by a rule on `reddit.com`.
+        //
+        // Note what this compares against: the entry with `www.` *removed*, so a rule on
+        // `www.a.reddit.com` covers `x.a.reddit.com` — `x.a.reddit.com` ends in `.a.reddit.com`.
+        // That is the shipped behaviour and is preserved exactly; the test below exists because it
+        // is surprising enough that a rewrite "fixing" it would be an undetected behaviour change.
+        if name.len() > bare.len() {
+            let split = name.len() - bare.len();
+            if name.as_bytes()[split - 1] == b'.'
+                && name.as_bytes()[split..].eq_ignore_ascii_case(bare.as_bytes())
+            {
+                return Some(domain.clone());
+            }
+        }
+    }
+    None
 }
 
 /// The decision for one message.
@@ -264,6 +290,110 @@ mod tests {
     #[test]
     fn nothing_is_refused_when_nothing_is_blocked() {
         assert_eq!(answer(&query("old.reddit.com", 1), &BTreeSet::new()), Answer::Forward);
+    }
+
+    /// The walk up the labels and the linear scan it replaced must agree, including on the `www.`
+    /// quirk the scan produced by accident.
+    #[test]
+    fn a_blocked_www_name_covers_the_subdomain_that_carries_it() {
+        // `www.youtube.com` is in the fixture, and `old.www.youtube.com` is a subdomain of it.
+        assert_eq!(covered("old.www.youtube.com", &blocked()).as_deref(), Some("www.youtube.com"));
+        // A deeper query under the bare name is covered by the bare entry.
+        assert_eq!(covered("a.b.reddit.com", &blocked()).as_deref(), Some("reddit.com"));
+    }
+
+    /// A dot in the middle of a label is not a boundary, and the walk must not treat it as one.
+    #[test]
+    fn a_label_boundary_is_the_only_place_a_suffix_may_start() {
+        let blocked: BTreeSet<String> = ["reddit.com".to_string()].into_iter().collect();
+        assert_eq!(covered("notreddit.com", &blocked), None);
+        assert_eq!(covered("reddit.com.evil.test", &blocked), None);
+        assert_eq!(covered("myreddit.community", &blocked), None);
+        assert_eq!(covered("reddit.com", &blocked).as_deref(), Some("reddit.com"));
+    }
+
+    /// **The predicate is compared against the version it replaced, name by name.**
+    ///
+    /// The reference is the old body written out — `blocked.iter().find(|d| name ==
+    /// d.trim_start_matches("www.") || name.ends_with(&format!(".{d}")))` — rather than trusted to
+    /// memory, because the point of the rewrite was to remove the allocation without moving the
+    /// answer. This is a comparison, not a restatement.
+    #[test]
+    fn the_allocation_free_scan_decides_what_the_allocating_one_did() {
+        let sets: [BTreeSet<String>; 3] = [
+            ["reddit.com".to_string()].into_iter().collect(),
+            ["reddit.com".to_string(), "www.youtube.com".to_string()].into_iter().collect(),
+            ["com".to_string(), "www.a.reddit.com".to_string()].into_iter().collect(),
+        ];
+        let names = [
+            "reddit.com",
+            "www.reddit.com",
+            "old.reddit.com",
+            "a.b.reddit.com",
+            "notreddit.com",
+            "reddit.com.evil.test",
+            "myreddit.community",
+            "youtube.com",
+            "www.youtube.com",
+            "old.www.youtube.com",
+            "x.a.reddit.com",
+            "a.reddit.com",
+            "com",
+            "com.evil.test",
+            "example.com",
+            "",
+        ];
+        for blocked in &sets {
+            for name in names {
+                assert_eq!(
+                    covered(name, blocked),
+                    allocating_scan(name, blocked),
+                    "the rewrite changed the answer for {name:?} against {blocked:?}"
+                );
+            }
+        }
+    }
+
+    /// **Why the obvious rewrite was reverted, stated correctly.**
+    ///
+    /// "Walk the query's own labels and look each parent up in the set" is O(labels) instead of
+    /// O(blocklist), and it looked equivalent. It is not — and the reason is *not* which names are
+    /// covered, which is what this test originally asserted before the arithmetic was checked. Both
+    /// predicates cover `x.a.reddit.com` under a rule on `www.a.reddit.com`, because the shipped
+    /// scan compares against the entry with `www.` stripped, and `x.a.reddit.com` ends in
+    /// `.a.reddit.com`.
+    ///
+    /// The real difference is *which entry is reported*. `covered` returns the rule that fired by
+    /// its own spelling, and the callers use it: the refusal the resolver sends, and the name the
+    /// tray shows. The scan returns `www.a.reddit.com` for a lookup of `x.a.reddit.com`; a label
+    /// walk finds the parent `a.reddit.com` in the keyed set and returns `a.reddit.com`, a rule that
+    /// is not in the config at all.
+    ///
+    /// That is what this pins. The scan's cost grows with the blocklist, and if a config with
+    /// thousands of domains ever becomes real the answer is to build an index over the blocklist at
+    /// load — not to change what a match reports on the query path.
+    #[test]
+    fn the_label_walk_would_not_have_been_equivalent() {
+        let blocked: BTreeSet<String> = ["www.a.reddit.com".to_string()].into_iter().collect();
+        assert_eq!(covered("www.a.reddit.com", &blocked).as_deref(), Some("www.a.reddit.com"));
+        assert_eq!(covered("x.www.a.reddit.com", &blocked).as_deref(), Some("www.a.reddit.com"));
+        assert_eq!(covered("a.reddit.com", &blocked).as_deref(), Some("www.a.reddit.com"));
+        // Covered by the same rule, and the rule is named as it was configured — not as the label
+        // walk's candidate spelling.
+        assert_eq!(covered("x.a.reddit.com", &blocked).as_deref(), Some("www.a.reddit.com"));
+    }
+
+    /// The old predicate, written out. Used only by the agreement test above, which is what makes
+    /// that test a comparison rather than a restatement.
+    fn allocating_scan(name: &str, blocked: &BTreeSet<String>) -> Option<String> {
+        let name = name.to_lowercase();
+        blocked
+            .iter()
+            .find(|domain| {
+                let domain = domain.trim_start_matches("www.");
+                name == domain || name.ends_with(&format!(".{domain}"))
+            })
+            .cloned()
     }
 
     // --- what a refusal looks like on the wire -------------------------------------------------

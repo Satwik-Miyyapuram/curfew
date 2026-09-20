@@ -195,7 +195,10 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 // several rules, and the card is supposed to name all of them.
                 .groupBy({ it.first }, { it.second })
                 .mapValues { (_, rules) -> rules.distinct() }
-            val usage = runCatching { runtime.usage(now) }.getOrNull()
+            // The exact history, not the enforcer's cached view. This screen is the one place the
+            // user can check what Curfew believes it has charged them, and a number that lags the
+            // database by a charge tick would be a number they could catch out.
+            val usage = runCatching { runtime.usageFromDb(now) }.getOrNull()
             val spent = usage?.usage.orEmpty()
                 .mapValues { (_, consumption) -> consumption.rollups.sumOf { it.seconds } }
                 .toList()
@@ -857,6 +860,18 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     fun blockedApps(profile: String): List<String> =
         Policy.blockedApps(runCatching { runtime.policy.configToml() }.getOrDefault(""), profile)
+
+    /**
+     * A plural phrase, for a screen that needs one and cannot reach [plural].
+     *
+     * The one place the app resolved plurals was [describeBlocks] and the sync notes, both inside this
+     * class, because [plural] is private. The app picker needs the same thing — a sentence whose
+     * wording depends on a count — and `pluralStringResource` from Compose is not the answer here: it
+     * is a different API from the one every other plural in this app goes through, and the test that
+     * checks format arguments across the whole app does not know it, so a phrase resolved that way is
+     * a phrase nothing verifies.
+     */
+    fun phrase(@PluralsRes id: Int, count: Int): String = plural(id, count)
 
     /**
      * Import a config from a file the user chose.

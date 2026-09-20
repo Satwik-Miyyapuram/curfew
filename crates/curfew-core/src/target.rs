@@ -47,7 +47,9 @@ impl Target {
             }
             Target::WindowsExe { exe } => format!("exe:{}", exe.to_lowercase()),
             Target::WindowTitle { pattern } => format!("title:{}", pattern.to_lowercase()),
-            Target::Domain { domain } => format!("domain:{}", normalize_domain(domain)),
+            Target::Domain { domain } => {
+                format!("domain:{}", trim_dots(domain.trim()).to_lowercase())
+            }
             Target::Url { pattern } => format!("url:{}", pattern.to_lowercase()),
             Target::Keyword { text } => format!("keyword:{}", text.to_lowercase()),
             Target::FilePath { pattern } => format!("path:{}", pattern.to_lowercase()),
@@ -145,20 +147,40 @@ impl Observation {
 
 /// Just enough URL for rule matching. Deliberately not a full parser: we take what the browser or
 /// the accessibility layer hands us, lowercase the host, and keep the rest verbatim.
+///
+/// **"The rest" means the rest, and this used to be a lie.** The scheme was dropped, and every
+/// other part was lowercased on the way in, so a rule written `https://github.com/User/Repo` could
+/// never match anything: the pattern kept its capital letters and the URL it was compared against
+/// had lost them. URL paths are case-sensitive (RFC 3986), so a path segment naming a GitHub user, a
+/// video id or a base64 query value is a real distinction and not a cosmetic one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Url {
+    /// The URL as handed in, trimmed and otherwise untouched. Its case is information.
     pub raw: String,
+    /// Lowercase: a host is case-insensitive, and this is the only part that is.
     pub host: String,
+    /// The scheme, lowercased, or empty when the input carried none. Stored so that
+    /// [`Url::normalized`] can put it back.
+    ///
+    /// Defaulted, because it arrived after the field did: a payload written by an older Kotlin
+    /// binding carries no scheme, and refusing to deserialize it would turn a version skew into a
+    /// crash in the enforcer.
+    #[serde(default)]
+    pub scheme: String,
+    /// Verbatim. Case-sensitive per RFC 3986.
     pub path: String,
+    /// Verbatim, and without the leading `?`. Case-sensitive.
     pub query: String,
 }
 
 impl Url {
     pub fn parse(raw: &str) -> Self {
         let trimmed = raw.trim();
-        let after_scheme = match trimmed.find("://") {
-            Some(i) => &trimmed[i + 3..],
-            None => trimmed,
+        // Split the scheme off rather than discarding it: `normalized` needs it back, and a rule
+        // is allowed to name one.
+        let (scheme, after_scheme) = match trimmed.find("://") {
+            Some(i) => (trimmed[..i].to_ascii_lowercase(), &trimmed[i + 3..]),
+            None => (String::new(), trimmed),
         };
         let (authority, rest) = match after_scheme.find(['/', '?', '#']) {
             Some(i) => (&after_scheme[..i], &after_scheme[i..]),
@@ -174,14 +196,23 @@ impl Url {
             None => (without_fragment.to_string(), String::new()),
         };
 
-        Self { raw: trimmed.to_lowercase(), host, path, query }
+        Self { raw: trimmed.to_string(), scheme, host, path, query }
     }
 
-    /// `host/path?query`: the URL with everything that never participates in matching (scheme,
-    /// credentials, port, fragment) already removed.
+    /// `scheme://host/path?query`: the URL with everything that never participates in matching
+    /// (credentials, port, fragment) already removed, and the scheme kept when there was one.
+    ///
+    /// The scheme is kept rather than dropped so that both spellings of a rule work: a pattern
+    /// written `*youtube.com/shorts*` still matches, because `*` spans `https://www.`, and a
+    /// pattern written `https://github.com/User/*` now matches too, which is what it always meant.
     pub fn normalized(&self) -> String {
-        let mut out =
-            String::with_capacity(self.host.len() + self.path.len() + self.query.len() + 1);
+        let mut out = String::with_capacity(
+            self.scheme.len() + self.host.len() + self.path.len() + self.query.len() + 4,
+        );
+        if !self.scheme.is_empty() {
+            out.push_str(&self.scheme);
+            out.push_str("://");
+        }
         out.push_str(&self.host);
         out.push_str(&self.path);
         if !self.query.is_empty() {
@@ -194,26 +225,88 @@ impl Url {
 
 /// A domain rule covers the domain itself and every subdomain, but never a domain that merely ends
 /// with the same characters: `notreddit.com` is not `reddit.com`.
+///
+/// Compared on bytes, with no allocation. This runs once per domain rule per observation and once
+/// per blocked name per DNS query (`curfew_win::dns`), so the `format!(".{rule}")` this used to
+/// build on every call was pure waste: the label-boundary test is a single byte comparison.
+///
+/// Folding is ASCII-only, which is what a hostname is. The DNS is ASCII by definition, so the
+/// Unicode path would be doing work to compare strings that cannot contain it.
 pub fn domain_matches(rule: &str, observed: &str) -> bool {
-    let rule = normalize_domain(rule);
-    let observed = normalize_domain(observed);
-    observed == rule || observed.ends_with(&format!(".{rule}"))
+    let rule = trim_dots(rule.trim());
+    let observed = trim_dots(observed.trim());
+    if rule.is_empty() || observed.len() < rule.len() {
+        return false;
+    }
+    if observed.len() == rule.len() {
+        return observed.eq_ignore_ascii_case(rule);
+    }
+    // A subdomain: the character before the suffix has to be the label dot, or `notreddit.com`
+    // would be covered by `reddit.com`.
+    let split = observed.len() - rule.len();
+    observed.as_bytes()[split - 1] == b'.'
+        && observed.as_bytes()[split..].eq_ignore_ascii_case(rule.as_bytes())
 }
 
-fn normalize_domain(d: &str) -> String {
-    d.trim().trim_start_matches('.').trim_end_matches('.').to_lowercase()
+/// A domain with its leading and trailing dots removed, for comparison.
+fn trim_dots(d: &str) -> &str {
+    d.trim_start_matches('.').trim_end_matches('.')
 }
 
 /// Case-insensitive glob match supporting `*` (any run, including empty) and `?` (one character).
 ///
 /// Iterative with a single backtrack point, so it cannot blow up the way a backtracking regex can:
 /// worst case is O(pattern x text), and there is no recursion to overflow.
+///
+/// **No allocation on the path that matters.** This used to collect the lowercased pattern and text
+/// into two `Vec<char>` on every call — two allocations and two passes to compare a 30-character
+/// pattern against a window title, on every foreground change, on a battery. Everything a rule
+/// actually matches (URLs, window titles, package names, file paths) is ASCII, so ASCII input is
+/// compared byte by byte with `eq_ignore_ascii_case`, and only genuinely non-ASCII input falls back
+/// to the char-based fold, where correctness is worth the allocation.
 pub fn glob_match(pattern: &str, text: &str) -> bool {
+    if pattern.is_ascii() && text.is_ascii() {
+        glob_match_ascii(pattern.as_bytes(), text.as_bytes())
+    } else {
+        glob_match_folded(pattern, text)
+    }
+}
+
+fn glob_match_ascii(p: &[u8], t: &[u8]) -> bool {
+    let (mut pi, mut ti) = (0usize, 0usize);
+    // Where to resume if the current `*` expansion turns out to be too short.
+    let (mut star, mut star_ti) = (None, 0usize);
+
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == b'?' || p[pi].eq_ignore_ascii_case(&t[ti])) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == b'*' {
+            star = Some(pi);
+            star_ti = ti;
+            pi += 1;
+        } else if let Some(s) = star {
+            // Let the last `*` swallow one more character and try again.
+            pi = s + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < p.len() && p[pi] == b'*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// The non-ASCII path: fold both sides to chars, then run the same algorithm.
+fn glob_match_folded(pattern: &str, text: &str) -> bool {
     let p: Vec<char> = pattern.to_lowercase().chars().collect();
     let t: Vec<char> = text.to_lowercase().chars().collect();
 
     let (mut pi, mut ti) = (0usize, 0usize);
-    // Where to resume if the current `*` expansion turns out to be too short.
     let (mut star, mut star_ti) = (None, 0usize);
 
     while ti < t.len() {
@@ -225,7 +318,6 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
             star_ti = ti;
             pi += 1;
         } else if let Some(s) = star {
-            // Let the last `*` swallow one more character and try again.
             pi = s + 1;
             star_ti += 1;
             ti = star_ti;

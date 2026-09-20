@@ -6,7 +6,9 @@ import dev.curfew.policy.BlockReason
 import dev.curfew.policy.LockSet
 import dev.curfew.policy.Observation
 import dev.curfew.policy.Session
+import dev.curfew.policy.Rule
 import dev.curfew.policy.SessionSource
+import dev.curfew.policy.Target
 import dev.curfew.policy.Url
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -39,6 +41,7 @@ class EnforcerTest {
         val delayed = mutableListOf<Pair<String, Int>>()
         val allowed = mutableListOf<String>()
         val muted = mutableListOf<String>()
+        val navigatedBack = mutableListOf<String>()
 
         override fun block(target: String, reason: BlockReason) {
             blocked += target to reason
@@ -54,6 +57,10 @@ class EnforcerTest {
 
         override fun muteNotification(target: String) {
             muted += target
+        }
+
+        override fun navigateBack(target: String) {
+            navigatedBack += target
         }
     }
 
@@ -239,11 +246,42 @@ class EnforcerTest {
         assertEquals(listOf("app:com.instagram.android"), actions.allowed)
     }
 
+    /**
+     * A blocked page is left as well as reported.
+     *
+     * The decision used to be made in the accessibility service *and* again in here, because the
+     * service wanted to press Back before showing the block screen and had no other way to find
+     * out whether it should. That made one address-bar repaint cost three full policy evaluations,
+     * each reading 25 hours of history out of an encrypted database. Back-navigation is an action
+     * the enforcer requests now, so there is one decision and one actor — and this is where the
+     * browser half of it is pinned.
+     */
+    @Test
+    fun `a blocked page is left, and only a page`() = runTest {
+        // An outright block. `reddit.com` in the shared fixture is a *budget*, which correctly
+        // allows while there is time left, and this test is about what happens once a page really
+        // is blocked.
+        runtime.saveRule("deep-work", Rule(target = Target.Domain(domain = "news.invalid"))).getOrThrow()
+
+        enforcer.onObservation(web("https://news.invalid/front"), now)
+
+        assertEquals(listOf("web:news.invalid/front"), actions.blocked.map { it.first })
+        assertEquals(listOf("web:news.invalid/front"), actions.navigatedBack)
+
+        // An app is not navigated away from: there is no page to leave, and a Back press would
+        // land on whatever is behind the block screen rather than on the app.
+        actions.navigatedBack.clear()
+        enforcer.onObservation(Observation.App("com.instagram.android"), now + 10)
+
+        assertEquals("app:com.instagram.android", actions.blocked.last().first)
+        assertEquals(emptyList<String>(), actions.navigatedBack)
+    }
+
     private suspend fun spent(): Map<String, Int> =
-        runtime.usage(now + 7200).usage
+        runtime.usageFromDb(now + 7200).usage
             .mapValues { (_, c) -> c.rollups.sumOf { it.seconds } }
             .filterValues { it > 0 }
 
     private suspend fun launches(key: String): Int =
-        runtime.usage(now + 7200).launches[key]?.opens?.size ?: 0
+        runtime.usageFromDb(now + 7200).launches[key]?.opens?.size ?: 0
 }

@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Curfew</string>
-    <string name="accessibility_service_label">Curfew enforcement</string>
-    <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can close the ones you have chosen to block. While a lock is running it also checks whether the screen in front is the Curfew settings or uninstall page, so it can hold that page shut; that is the only time it looks at what is on screen, and it looks only for its own name. Nothing it sees is stored, and nothing leaves your device.</string>
+    <string name="accessibility_service_label">Curfew site blocking</string>
+    <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can replace the ones you have chosen to block. To block websites it also reads the address bar of a browser it recognises. While a lock is running it checks whether the screen in front is the Curfew settings or uninstall page, so it can hold that page shut; that check looks only for its own name. It never reads payment, banking or password apps. Nothing it sees is stored, and nothing leaves your device. Because this service can read a screen, some banking and payment apps will refuse to run while it is on; Curfew\'s app-only service cannot read a screen and costs nothing elsewhere.</string>
+    <string name="foreground_tracker_label">Curfew app blocking</string>
+    <string name="foreground_tracker_description">Curfew reads the name of the app in the foreground so it can replace the ones you have chosen to block. That is all it can see: this service cannot read the contents of any screen, so it cannot block websites and cannot guard against Curfew being uninstalled. It also cannot be objected to by banking and payment apps, which is exactly why it exists. Nothing it sees is stored, and nothing leaves your device.</string>
 
     <string name="notification_listener_label">Curfew notification muting</string>
 
@@ -24,7 +26,12 @@
          Emitted from the source rather than retyped, so no word differs from the original. -->
     <string name="perm_accessibility_title">Accessibility service</string>
     <string name="perm_accessibility_because">Curfew needs to see which app is in front to replace it when it is blocked.</string>
-    <string name="perm_accessibility_cost">Nothing is blocked at all: this is the only way to act on an app the moment it opens.</string>
+    <string name="perm_accessibility_cost">Nothing is blocked at all: this is the only way to act on an app the moment it opens. There are two versions of this service and the choice is yours. App blocking alone reads no screen and costs nothing outside Curfew, but it cannot block websites and cannot guard against Curfew being uninstalled. Site blocking can read a browser\'s address bar and does guard uninstall, and it makes some banking and payment apps refuse to run while it is on. Neither version is ever allowed to read a payment, banking or password app.</string>
+    <string name="perm_accessibility_mode_app_only">App blocking only</string>
+    <string name="perm_accessibility_mode_app_and_url">App and site blocking</string>
+    <string name="perm_accessibility_mode_app_only_note">Reads no screen. Nothing outside Curfew notices it. No site rules, no uninstall guard.</string>
+    <string name="perm_accessibility_mode_app_and_url_note">Reads a browser\'s address bar and guards uninstall. Some banking and payment apps will refuse to run.</string>
+    <string name="perm_accessibility_mode_other_still_on">The other accessibility service is also switched on, which keeps the banking-app warning without adding anything. Turn off %1$s to get the benefit of this mode.</string>
     <string name="perm_usage_access_title">Usage access</string>
     <string name="perm_usage_access_because">Time budgets are counted from the system\'s own usage figures, which survive Curfew being killed.</string>
     <string name="perm_usage_access_cost">Budgets and launch limits stop counting; blocks and schedules still work.</string>
@@ -134,4 +141,41 @@
         <item quantity="one">Took in %1$d update, left %2$d behind.</item>
         <item quantity="other">Took in %1$d updates, left %2$d behind.</item>
     </plurals>
+
+    <!--
+      The sensitive-app list screen. Every sentence here is one a user has to be able to read in
+      their own language: it is the screen that explains why their bank app will not open, and the one
+      where they add the bank the shipped list does not know about.
+    -->
+    <string name="sensitive_title">Apps Curfew never reads</string>
+    <string name="sensitive_intro">Curfew does not read the screen of a payment, banking, wallet or password app. The accessibility privilege is broad and a bank\'s screen is none of its business, so those screens are skipped before anything else happens. They can still be blocked like any other app — blocking one costs a block screen and nothing else, because its notifications are never suppressed.</string>
+    <string name="sensitive_curated_section">Covered by the shipped list</string>
+    <string name="sensitive_curated_note">%1$d apps, including the major UPI, wallet, banking and authenticator apps. These cannot be taken off the list: this is the guarantee the permission screen makes, and a guarantee with an off switch is not one.</string>
+    <string name="sensitive_added_section">Added by you</string>
+    <string name="sensitive_added_empty">Nothing yet. Add an app below if your bank\'s app is not on the shipped list.</string>
+    <string name="sensitive_exempt_section">Taken off the list by you</string>
+    <string name="sensitive_exempt_note">These look financial by name and permissions, but you have said Curfew may read them. They were blockable all along.</string>
+    <string name="sensitive_all_section">Everything Curfew will not read</string>
+    <string name="sensitive_candidates_section">Not on the list yet</string>
+    <string name="sensitive_candidates_note">Tap an app to stop Curfew reading it. Use this for a bank the shipped list does not know about.</string>
+    <string name="sensitive_action_add">Never read</string>
+    <string name="sensitive_action_remove">Remove</string>
+    <string name="sensitive_action_allow">Allow reading</string>
+    <string name="sensitive_action_restore">Put back</string>
+    <string name="sensitive_always">always</string>
+    <string name="sensitive_footer">Reading is what is restricted here, not blocking. A financial app can be blocked; what Curfew refuses to do is look at it.</string>
+    <string name="settings_accessibility_mode">Accessibility mode</string>
+    <string name="settings_sensitive_entry">Apps Curfew never reads</string>
+    <string name="settings_sensitive_entry_note">Payment, banking, wallet and password apps. Add your bank if it is missing.</string>
+
+    <!--
+      Shown in the app picker. Payment and banking apps are listed like anything else and can be
+      blocked like anything else; this says only that Curfew will not *read* them, which is a property
+      of the accessibility service rather than a limit on what a user may block.
+    -->
+    <string name="picker_sensitive_note">Payment, banking and password apps are listed here like any other app, and can be blocked. Curfew still never reads their screens.</string>
+    <string name="picker_sensitive_note_action">See the list</string>
+    <string name="picker_no_blockable_match">No app matches “%1$s”.</string>
+    <string name="picker_no_apps_found">No apps found</string>
+    <string name="picker_reading_apps">Reading your apps…</string>
 </resources>

@@ -163,7 +163,7 @@ class CurfewRuntimeTest {
 
         runtime.prune(now)
 
-        val kept = runtime.usage(now).usage["domain:reddit.com"]!!.rollups
+        val kept = runtime.usageFromDb(now).usage["domain:reddit.com"]!!.rollups
         assertEquals(listOf(200), kept.map { it.seconds })
     }
 

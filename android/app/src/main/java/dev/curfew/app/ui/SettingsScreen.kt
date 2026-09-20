@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import dev.curfew.app.R
+import dev.curfew.app.enforce.EnforcementMode
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -185,6 +186,96 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     GhostButton(text = "Sync now", onClick = model::syncNow)
                     GhostButton(text = "Devices") { onOpen(Routes.DEVICES) }
                 }
+            }
+        }
+
+        Gap(18.dp)
+        SectionLabel(stringResource(R.string.settings_accessibility_mode))
+        Gap(10.dp)
+        DCard(padding = 18.dp) {
+            // The choice the accessibility grant hides inside it, given its own section because it is
+            // the one permission where the *kind* of access matters more than whether it is held. The
+            // two services are not two strengths of one thing: one of them cannot read a screen at
+            // all, and that is the whole reason a user with a bank app they need can still run Curfew.
+            val chosen = Grant.chosenMode(context)
+            val running = Grant.enforcementMode(context)
+            Text(
+                stringResource(
+                    if (chosen == EnforcementMode.APP_ONLY) {
+                        R.string.perm_accessibility_mode_app_only
+                    } else {
+                        R.string.perm_accessibility_mode_app_and_url
+                    },
+                ),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Palette.Text,
+            )
+            Gap(4.dp)
+            Text(
+                stringResource(
+                    if (chosen == EnforcementMode.APP_ONLY) {
+                        R.string.perm_accessibility_mode_app_only_note
+                    } else {
+                        R.string.perm_accessibility_mode_app_and_url_note
+                    },
+                ),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = Palette.Muted,
+            )
+            Gap(12.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                EnforcementMode.entries.forEach { mode ->
+                    GhostButton(
+                        text = stringResource(
+                            if (mode == EnforcementMode.APP_ONLY) {
+                                R.string.perm_accessibility_mode_app_only
+                            } else {
+                                R.string.perm_accessibility_mode_app_and_url
+                            },
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        // Remembered *and* acted on. Remembering is what makes the next screen agree
+                        // with this one while the user is still in Settings; the settings intent is
+                        // what actually changes which service is on.
+                        EnforcementMode.remember(context, mode)
+                        openGrantPage(context, Grant.Accessibility)
+                    }
+                }
+            }
+            // Having both services on is the worst of both worlds and worth saying out loud: the
+            // banking warning is present because one of them holds the capability, and the other adds
+            // nothing that the reader does not already do.
+            val other = EnforcementMode.entries.firstOrNull { it != chosen && running == it }
+            if (other != null) {
+                Gap(10.dp)
+                Text(
+                    stringResource(
+                        R.string.perm_accessibility_mode_other_still_on,
+                        stringResource(
+                            if (other == EnforcementMode.APP_ONLY) {
+                                R.string.perm_accessibility_mode_app_only
+                            } else {
+                                R.string.perm_accessibility_mode_app_and_url
+                            },
+                        ),
+                    ),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = Palette.Bad,
+                )
+            }
+            Gap(12.dp)
+            // The list itself, one tap away rather than summarised here: which apps are exempt is a
+            // long list, and the only two reasons anyone comes to change it are a regional bank that
+            // is missing and an app wrongly caught by the label signal.
+            Entry(
+                title = stringResource(R.string.settings_sensitive_entry),
+                note = stringResource(R.string.settings_sensitive_entry_note),
+            ) {
+                onOpen(Routes.SENSITIVE_APPS)
             }
         }
 

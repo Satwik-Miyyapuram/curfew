@@ -28,12 +28,10 @@ AppPickerScreen.kt|Done
 AppPickerScreen.kt|Done
 AppPickerScreen.kt|Matches the title of a window, on the PC.
 AppPickerScreen.kt|Matches whole addresses; * stands for any run of characters.
-AppPickerScreen.kt|No apps found
 AppPickerScreen.kt|Nothing has been changed, and this screen will work again once the config 
 AppPickerScreen.kt|Nothing to block yet
 AppPickerScreen.kt|Nothing yet. A site blocks it and everything under it; a word blocks 
 AppPickerScreen.kt|Plan tab and it will appear here.
-AppPickerScreen.kt|Reading your apps…
 AppPickerScreen.kt|Search your apps
 AppPickerScreen.kt|Select Apps to Block
 AppPickerScreen.kt|Site

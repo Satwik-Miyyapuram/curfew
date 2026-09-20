@@ -3,7 +3,9 @@ package dev.curfew.app.data
 import android.content.Context
 import androidx.room.Room
 import dev.curfew.app.enforce.CurfewDeviceAdmin
+import dev.curfew.app.enforce.EnforcementMode
 import dev.curfew.app.enforce.ScreenTime
+import dev.curfew.app.enforce.SensitiveApps
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.ClockVerdict
@@ -75,18 +77,54 @@ class CurfewRuntime internal constructor(
 
     // --- decisions ---------------------------------------------------------------------------------
 
-    /** What to do about what is in front of the user, given everything already spent today. */
+    /**
+     * What to do about what is in front of the user, given everything already spent today.
+     *
+     * **No database read happens here unless something running can actually use one.** This is the
+     * hottest path in the app — every foreground change, every charge tick — and it used to rebuild
+     * 25 hours of usage on every call: a decrypt-read of every usage and launch row, a `groupBy` in
+     * Kotlin, and then the whole thing serialized to JSON across the FFI boundary, all of it thrown
+     * away after one pure decision. On a day of heavy use that is thousands of full-history
+     * decrypt-read-serialize cycles an hour, and a budget rule is the only thing that ever reads any
+     * of it.
+     *
+     * Two things fix that, and they are separable:
+     *
+     *  - [Policy.hasMeteredRules] asks whether any *active* profile has a budget or launch limit. If
+     *    none does, the state passed to the core is empty and nothing was read. This is the common
+     *    case: most blocking is "this app is blocked", which needs no history.
+     *  - When there is a metered rule, [usageCache] answers instead of the database. It is
+     *    write-through: [recordUsage] and [recordLaunch] are the only writers, and every other
+     *    route into the tables drops the cache.
+     */
     suspend fun decide(observation: Observation, now: Long = clock.now()): Decision =
         policy.decide(now, observation, usage(now))
 
     /**
+     * The usage the core should judge against, from cache when that is safe.
+     *
+     * Safe means: something active meters time or launches, the cache has been built at least once,
+     * and nothing has written to the tables behind its back. See [invalidateUsage] for the writers
+     * that are not the enforcer's own.
+     */
+    private suspend fun usage(now: Long): UsageState {
+        if (!policy.hasMeteredRules(now)) return UsageState()
+        usageCache?.let { return it }
+        return rebuildUsage(now).also { usageCache = it }
+    }
+
+    /**
      * Time actually spent, read back from storage.
      *
-     * The core is a pure function and holds no history, so every decision that involves a budget
-     * has to be handed the history. Only the last day is read: no rule can look further back than a
+     * The core is a pure function and holds no history, so every decision that involves a budget has
+     * to be handed the history. Only the last day is read: no rule can look further back than a
      * daily refill, so nothing older can change an answer.
+     *
+     * **This one always reads the database.** [usage] is the cached view for enforcement; this is
+     * the exact one, for the callers that need what is on disk right now rather than what the
+     * enforcer has seen: the sync pass, which decides what to publish, and the statistics screens.
      */
-    suspend fun usage(now: Long): UsageState {
+    suspend fun usageFromDb(now: Long): UsageState {
         val since = now - LOOKBACK_SECONDS
         val usage = db.usage().usageSince(since)
             .groupBy { it.target }
@@ -97,12 +135,31 @@ class CurfewRuntime internal constructor(
         return UsageState(usage = usage, launches = launches)
     }
 
+    /**
+     * The in-memory view of usage, or null when it has to be read again.
+     *
+     * A whole-state cache rather than a keyed one, because that is the shape the core is given and
+     * converting between the two on every observation would cost more than the read it saves.
+     */
+    @Volatile
+    private var usageCache: UsageState? = null
+
+    private suspend fun rebuildUsage(now: Long): UsageState =
+        usageFromDb(now).also { usageCache = it }
+
+    /** Drop the cached history. Called by everything that writes usage outside the enforcer. */
+    fun invalidateUsage() {
+        usageCache = null
+    }
+
     suspend fun recordUsage(target: String, at: Long, seconds: Int) {
         db.usage().addUsage(UsageRow(target = target, at = at, seconds = seconds))
+        usageCache = usageCache?.withUsage(target, at, seconds)
     }
 
     suspend fun recordLaunch(target: String, at: Long) {
         db.usage().addLaunch(LaunchRow(target = target, at = at))
+        usageCache = usageCache?.withLaunch(target, at)
     }
 
     // --- statistics -------------------------------------------------------------------------------
@@ -463,7 +520,9 @@ class CurfewRuntime internal constructor(
      */
     suspend fun syncPass(now: Long = clock.now()): dev.curfew.policy.Pass? {
         val hub = hub ?: return null
-        val before = usage(now)
+        // The exact state, not the enforcer's cached view: this decides what gets published to the
+        // other devices, and what this one publishes has to be what is actually on disk here.
+        val before = usageFromDb(now)
         // Only this device's own events are published; the peers' are merged in for enforcement
         // only, so a calendar cannot be echoed back and forth between two devices.
         val seen = runCatching { localCalendarEvents(now) }.getOrDefault(emptyList())
@@ -482,6 +541,11 @@ class CurfewRuntime internal constructor(
             for ((target, opened) in pass.launches) {
                 for (at in opened.opens) db.usage().addLaunch(LaunchRow(target = target, at = at))
             }
+            // A peer's slices arrive outside `recordUsage`, so the enforcer's cached view of
+            // history is now missing rows it would otherwise never learn about — and a slice that
+            // happened on the PC counts against the same budget as one that happened here. Dropped
+            // rather than merged: this happens once a minute, and the next decision rebuilds it.
+            if (pass.usage.isNotEmpty() || pass.launches.isNotEmpty()) invalidateUsage()
             for (id in pass.adopted) audit(now, "sync.adopted", id)
             for (id in pass.stillLocked) audit(now, "sync.refused", id)
             persist(now)
@@ -748,6 +812,11 @@ class CurfewRuntime internal constructor(
         db.usage().pruneUsage(now - LOOKBACK_SECONDS)
         db.usage().pruneLaunches(now - LOOKBACK_SECONDS)
         db.audit().prune(now - AUDIT_RETENTION_SECONDS)
+        // Rows have gone from under the cache without the enforcer having written anything. Left
+        // alone the cache would keep charging against usage the database no longer holds, which is
+        // harmless for an answer (the core only sums what is inside the current window, and
+        // everything pruned is older than any window) but wrong as a picture of the last day.
+        invalidateUsage()
     }
 
     companion object {
@@ -809,14 +878,38 @@ class CurfewRuntime internal constructor(
          */
         fun create(context: Context, clock: Clock = Clock.System): CurfewRuntime {
             loadSqlCipher()
-            val config = ConfigStore(File(context.filesDir, "curfew.toml"))
+            // The mode is asked for through the system's enabled-service list every time the config is
+            // read, rather than captured once: the user can switch mode from Settings while this
+            // process is alive, and a config that was fine under one service may be unenforceable
+            // under the other.
+            val mode = {
+                EnforcementMode.current(context) ?: EnforcementMode.stored(context)
+                    ?: EnforcementMode.DEFAULT
+            }
+            // Asked per call for the same reason as the mode: the user can add their bank to the
+            // sensitive list while this process is alive, and the check that refuses to block it has
+            // to know about the addition from that moment rather than from the next process start.
+            val unblockable = { SensitiveApps.resolve(context) }
+            val config = ConfigStore(
+                file = File(context.filesDir, "curfew.toml"),
+                mode = mode,
+                unblockable = unblockable,
+            )
             val db = Room.databaseBuilder(context, CurfewDatabase::class.java, "curfew.db")
                 .openHelperFactory(SupportOpenHelperFactory(DatabaseKey.passphrase(context)))
                 .build()
             // A config that fails to load is a bug in a previous write, not a reason to run with no
             // policy at all: fall back to the empty config so the app still opens and can be fixed.
             val policy = runCatching { Policy.load(config.read()) }
-                .getOrElse { Policy.load(ConfigStore(File(context.filesDir, "unused")).read()) }
+                .getOrElse {
+                    Policy.load(
+                        ConfigStore(
+                            file = File(context.filesDir, "unused"),
+                            mode = mode,
+                            unblockable = unblockable,
+                        ).read(),
+                    )
+                }
             return CurfewRuntime(context.applicationContext, policy, config, db, clock)
         }
 

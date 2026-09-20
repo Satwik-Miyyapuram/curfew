@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ForegroundTracker: the detector that cannot read a screen.
+
+  `canRetrieveWindowContent="false"`, and that single bit is the reason this service exists. Android
+  applies the privilege per *service*: a device whose only enabled accessibility service cannot read
+  a window is a device where payment and banking apps have nothing to object to. This is what
+  "app-only mode" means, and it is the mode a fresh install is offered.
+
+  `typeWindowStateChanged` alone is all this needs. It carries the foreground package name and
+  nothing else, which is exactly the input the app blocker wants.
+
+  Deliberately absent, and each absence is load-bearing:
+
+    - `canRetrieveWindowContent` — see above. With it false there is no `rootInActiveWindow` to call.
+    - `flagReportViewIds` — there are no view ids to look up.
+    - `typeWindowContentChanged` — no content is read, so content events would be pure wake-ups.
+    - `android:isAccessibilityTool` — Curfew does not assist anyone with a disability. Because it is
+      not a tool, Android 14 and later hides from it any view an app marks
+      `accessibilityDataSensitive` — password fields and payment credentials — which is an
+      OS-enforced privacy floor rather than a promise Curfew makes about itself. Setting it true
+      would silently remove that floor.
+
+  What this mode gives up, and the user is told before choosing: no URL, site or keyword rules, and
+  no uninstall guard — the guard reads a window to recognise Curfew's own removal screen, and this
+  service has no window to read. Device admin is the remaining way to resist uninstall, and it is the
+  option that costs banking apps instead.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/foreground_tracker_description"
+    android:notificationTimeout="0" />

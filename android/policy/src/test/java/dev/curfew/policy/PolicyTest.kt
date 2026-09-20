@@ -149,12 +149,22 @@ class PolicyTest {
     fun `the kotlin url parser agrees with the core about what a url is`() {
         val url = Url.parse("https://user:pw@M.YouTube.com:443/shorts/abc?x=1#frag")
         assertEquals("m.youtube.com", url.host)
+        assertEquals("https", url.scheme)
         assertEquals("/shorts/abc", url.path)
         assertEquals("x=1", url.query)
 
         val bare = Url.parse("example.com")
         assertEquals("example.com", bare.host)
+        assertEquals("", bare.scheme)
         assertEquals("", bare.path)
+
+        // Case is information in a path and in a query, and the host is the only part that is
+        // folded. The core does the same, and the two are compared against each other.
+        val cased = Url.parse("HTTPS://GitHub.com/User/Repo?list=PLabc123")
+        assertEquals("github.com", cased.host)
+        assertEquals("https", cased.scheme)
+        assertEquals("/User/Repo", cased.path)
+        assertEquals("list=PLabc123", cased.query)
     }
 
     // --- sessions ---------------------------------------------------------------------------------
