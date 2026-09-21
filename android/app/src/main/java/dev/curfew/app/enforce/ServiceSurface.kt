@@ -30,15 +30,15 @@ import android.view.accessibility.AccessibilityEvent
 object ServiceSurface {
 
     /**
-     * Whether this config has anything that a content event could serve.
+     * The subscription this config justifies.
      *
-     * A URL or keyword rule is the only thing that needs the address bar, and the address bar is only
-     * re-read on a content event. Everything else — app blocks, budgets, launch limits, schedules,
-     * `allow_only` — is decided from the window-state event, which carries the package name and
-     * nothing else.
-     *
-     * [webRulesExist] comes from `Policy.hasUrlLevelRules`, which is the one authority on whether any
-     * profile holds a rule only a window reader could enforce.
+     * [webRulesExist] comes from `Policy.needsUrlReading`, which is the one authority on whether any
+     * profile holds a rule that only reading a window can enforce. That decision deliberately lives in
+     * the policy module and is deliberately not restated here — this object used to carry its own list
+     * of which rule kinds count, the two lists disagreed, and the one here left out `domain`. That is
+     * why site blocking was narrowed off on a config whose only web rules were domains: the address bar
+     * was read once as the browser came to the front, before any navigation, and never again. One
+     * decision, one place.
      */
     fun desired(webRulesExist: Boolean): Subscription = if (webRulesExist) {
         Subscription(

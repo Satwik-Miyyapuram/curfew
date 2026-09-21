@@ -70,7 +70,7 @@ class UrlReaderService : AccessibilityService() {
         val runtime = runCatching { curfew }.getOrNull() ?: return
         // Default true on a policy that will not answer: the more capable subscription is the safe
         // direction, and the rules are still there when it can be read.
-        val needed = runCatching { runtime.policy.hasUrlLevelRules() }.getOrDefault(true)
+        val needed = runCatching { runtime.policy.needsUrlReading() }.getOrDefault(true)
         if (!ServiceSurface.apply(this, webRulesExist = needed)) {
             android.util.Log.w(
                 TAG,
