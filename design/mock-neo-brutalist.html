@@ -1,0 +1,1940 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curfew — neo-brutalist mock</title>
+<meta name="description" content="Curfew Android app UI mock in neo-brutalist style. Self-contained, no build step, no network requests.">
+<style>
+/* ==========================================================================
+   CURFEW — NEO-BRUTALIST MOCK
+   One file. No network fonts. No build step. Opens by double-click.
+
+   Everything retunable lives in the two token blocks below (:root and
+   [data-theme="dark"]). Nothing else in this file hard-codes a colour.
+   ========================================================================== */
+
+/* ---------- PALETTE: LIGHT ("newsprint") -------------------------------- */
+:root{
+  --paper:      #F1EFE7;   /* ground — matte unbleached paper */
+  --card:       #FFFFFF;   /* raised surface */
+  --ink:        #0B0B0B;   /* structure + body text */
+  --ink-2:      #55534C;   /* muted text (6.69:1 on paper) */
+  --red:        #C81E14;   /* ACCENT 1 — locks, emergency, alerts */
+  --red-ink:    #FFFFFF;   /* text on --red */
+  --blue:       #2B4BE8;   /* ACCENT 2 — the primary action */
+  --blue-ink:   #FFFFFF;   /* text on --blue */
+  --yellow:     #FFC400;   /* ACCENT 3 — pause, a warning that is not a failure */
+  --yellow-ink: #0B0B0B;
+  --shade:      #0B0B0B;   /* the hard shadow IS this colour, never a blur */
+  --screen:     #FFFFFF;   /* phone screen surface */
+
+  --bw: 4px;               /* standard border weight — deliberately thick */
+  --bw-h: 5px;             /* weight for macro blocks */
+  --off: 6px;              /* the offset: element moves this far on press */
+
+  --f-heavy: "Helvetica Neue", Helvetica, Arial, "Segoe UI", system-ui, sans-serif;
+  --f-mono:  ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+
+  --pad: 16px;             /* phone inner gutter */
+}
+
+/* ---------- PALETTE: DARK ("deactivated CRT") -------------------------- */
+[data-theme="dark"]{
+  --paper:      #0B0B0C;
+  --card:       #16161A;
+  --ink:        #F2F0E8;
+  --ink-2:      #A8A9AF;
+  --red:        #D62A1E;
+  --red-ink:    #FFFFFF;
+  --blue:       #6E8CFF;   /* lifted so the primary button takes BLACK text: 6.66:1 */
+  --blue-ink:   #050505;
+  --yellow:     #FFC400;
+  --yellow-ink: #050505;
+  --shade:      #000000;
+  --screen:     #0B0B0C;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+html{-webkit-text-size-adjust:100%}
+
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--f-mono);
+  font-size:13px;
+  line-height:1.5;
+  padding:0 0 80px;
+}
+
+/* The one texture in the whole file: a 1-bit dither grid, drawn with
+   repeating gradients. No gradient is ever used for shading. */
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  background-image:
+    repeating-linear-gradient(0deg,  color-mix(in srgb, var(--ink) 7%, transparent) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 0 1px, transparent 1px 5px);
+  opacity:.5;
+}
+body > *{position:relative;z-index:1}
+
+.wrap{max-width:1720px;margin:0 auto;padding:0 20px}
+
+/* ---------- THE MASTHEAD ------------------------------------------------- */
+.masthead{
+  border-bottom:var(--bw-h) solid var(--ink);
+  background:var(--paper);
+  position:sticky;
+  top:0;
+  z-index:60;
+}
+.masthead-in{
+  display:flex;
+  align-items:stretch;
+  gap:14px;
+  flex-wrap:wrap;
+  padding:14px 20px;
+  max-width:1720px;
+  margin:0 auto;
+}
+.masthead h1{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:clamp(28px,4.4vw,46px);
+  letter-spacing:-.045em;
+  line-height:.9;
+  text-transform:uppercase;
+  align-self:center;
+}
+.masthead h1 span{
+  -webkit-text-stroke:2px var(--ink);
+  color:transparent;
+}
+.tag-mock{
+  align-self:center;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:12px;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  background:var(--red);
+  color:var(--red-ink);
+  border:var(--bw) solid var(--ink);
+  padding:7px 11px;
+  box-shadow:4px 4px 0 0 var(--shade);
+  white-space:nowrap;
+}
+.masthead .spacer{flex:1 1 auto}
+
+/* The theme switch. Never colour-alone: it always reads TOGGLE: LIGHT. */
+.theme-btn{
+  align-self:center;
+  font-family:var(--f-mono);
+  font-weight:700;
+  font-size:12px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  background:var(--yellow);
+  color:var(--yellow-ink);
+  border:var(--bw) solid var(--ink);
+  padding:12px 14px;
+  min-height:44px;
+  cursor:pointer;
+  box-shadow:5px 5px 0 0 var(--shade);
+  transition:transform .06s linear, box-shadow .06s linear;
+}
+.theme-btn:hover,.theme-btn:focus-visible{transform:translate(5px,5px);box-shadow:0 0 0 0 var(--shade)}
+.theme-btn:active{transform:translate(5px,5px);box-shadow:0 0 0 0 var(--shade)}
+:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+
+/* ---------- CAPTION BLOCK (the brief, stated on the page) ---------------- */
+.captions{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:22px;
+  padding:30px 0 34px;
+  border-bottom:var(--bw) solid var(--ink);
+  margin-bottom:34px;
+}
+.cap{
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  box-shadow:8px 8px 0 0 var(--shade);
+  padding:18px 18px 20px;
+}
+.cap h2{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:15px;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  line-height:1.15;
+  border-bottom:3px solid var(--ink);
+  padding-bottom:9px;
+  margin-bottom:11px;
+  display:flex;
+  gap:9px;
+  align-items:baseline;
+}
+.cap h2 b{
+  background:var(--ink);
+  color:var(--paper);
+  font-size:11px;
+  padding:3px 7px;
+  letter-spacing:.06em;
+  flex:none;
+}
+.cap p{font-size:12.5px;line-height:1.62;margin-bottom:9px;color:var(--ink)}
+.cap p:last-child{margin-bottom:0}
+.cap .fig{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:19px;
+  letter-spacing:-.02em;
+}
+.cap code{
+  font-family:var(--f-mono);
+  background:var(--paper);
+  border:2px solid var(--ink);
+  padding:0 5px;
+  font-size:11.5px;
+}
+
+/* contrast ledger */
+.ledger{display:grid;grid-template-columns:1fr auto;gap:0;border:2px solid var(--ink);margin-top:6px}
+.ledger div{
+  padding:5px 9px;
+  font-size:11.5px;
+  border-bottom:2px solid var(--ink);
+  font-family:var(--f-mono);
+  letter-spacing:.01em;
+}
+.ledger div:nth-last-child(-n+2){border-bottom:0}
+.ledger div:nth-child(odd){border-right:2px solid var(--ink)}
+.ledger .r{
+  font-weight:700;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  background:var(--paper);
+  white-space:nowrap;
+}
+.ledger .pass{background:var(--yellow);color:var(--yellow-ink)}
+
+.swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.sw{
+  border:var(--bw) solid var(--ink);
+  padding:8px 9px 7px;
+  font-size:10.5px;
+  font-weight:700;
+  letter-spacing:.05em;
+  min-width:88px;
+}
+.sw i{display:block;font-style:normal;font-weight:400;opacity:.95;font-size:10px}
+
+/* ---------- THE GLOBAL PAUSE BANNER ------------------------------------- */
+/* While a pause is running this sits above every phone frame on the page.
+   In the real app the equivalent is (a) the foreground notification and
+   (b) a band at the top of every screen inside Curfew. */
+.pause-global{
+  display:none;
+  border:var(--bw-h) solid var(--ink);
+  background:var(--yellow);
+  color:var(--yellow-ink);
+  box-shadow:8px 8px 0 0 var(--shade);
+  padding:16px 18px;
+  margin:0 0 30px;
+  grid-template-columns:auto 1fr auto;
+  gap:16px;
+  align-items:center;
+}
+.pause-global.on{display:grid}
+.pause-global .pg-mark{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:34px;
+  line-height:.8;
+  letter-spacing:-.06em;
+  border:var(--bw) solid var(--ink);
+  padding:8px 11px;
+  background:var(--paper);
+  color:var(--ink);
+}
+.pause-global .pg-t{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:19px;
+  letter-spacing:-.01em;
+  text-transform:uppercase;
+  line-height:1.05;
+}
+.pause-global .pg-s{font-size:12px;line-height:1.5;max-width:74ch;margin-top:3px}
+.pause-global .pg-clock{
+  font-family:var(--f-mono);
+  font-weight:700;
+  font-size:26px;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.02em;
+  border:var(--bw) solid var(--ink);
+  padding:9px 13px;
+  background:var(--paper);
+  color:var(--ink);
+  white-space:nowrap;
+  text-align:center;
+}
+.pause-global .pg-clock small{display:block;font-size:9.5px;letter-spacing:.14em;font-weight:700;opacity:.75}
+[data-phase="resumed"] .pause-global{background:var(--blue);color:var(--blue-ink)}
+
+/* ---------- THE FRAME WALL ---------------------------------------------- */
+.wall{
+  display:flex;
+  flex-wrap:wrap;
+  gap:52px 44px;
+  align-items:flex-start;
+}
+.frame{width:390px;flex:0 0 390px}
+
+.frame-head{
+  border:var(--bw) solid var(--ink);
+  border-bottom:0;
+  background:var(--ink);
+  color:var(--paper);
+  padding:9px 11px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:11.5px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.frame-head .num{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:13px;
+  background:var(--paper);
+  color:var(--ink);
+  padding:2px 6px;
+  letter-spacing:.02em;
+  flex:none;
+}
+.frame-head .ttl{flex:1 1 auto}
+.frame-head .flag{
+  font-size:9.5px;
+  letter-spacing:.1em;
+  border:2px solid var(--paper);
+  padding:2px 6px;
+  flex:none;
+}
+.frame-head .flag.new{background:var(--yellow);color:var(--yellow-ink);border-color:var(--ink)}
+
+/* The phone itself. 390px of screen, plus a 4px black bezel. */
+.phone{
+  width:390px;
+  height:844px;
+  border:var(--bw) solid var(--ink);
+  background:var(--screen);
+  color:var(--ink);
+  box-shadow:10px 10px 0 0 var(--shade);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  position:relative;
+  font-size:13px;
+}
+/* The pause / back-on stamp. `fixed`, so it never enters the frame grid's
+   layout, and it rides above every frame the way the notification rides
+   above Android. */
+[data-phase="paused"] .phone::after,
+[data-phase="resumed"] .phone::after{
+  position:fixed;
+  z-index:80;
+  right:0;
+  top:46%;
+  transform:rotate(-90deg);
+  transform-origin:right center;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  letter-spacing:.28em;
+  border:3px solid var(--ink);
+  border-right:0;
+  padding:6px 12px;
+}
+[data-phase="paused"] .phone::after{
+  content:"PAUSED";
+  font-size:13px;
+  background:var(--yellow);
+  color:var(--yellow-ink);
+}
+[data-phase="resumed"] .phone::after{
+  content:"BACK ON";
+  font-size:12px;
+  letter-spacing:.24em;
+  background:var(--blue);
+  color:var(--blue-ink);
+}
+
+/* caption under a frame */
+.frame-cap{
+  border:var(--bw) solid var(--ink);
+  border-top:0;
+  background:var(--card);
+  padding:11px 12px 12px;
+  font-size:11.5px;
+  line-height:1.58;
+  box-shadow:10px 10px 0 0 var(--shade);
+}
+.frame-cap b{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  font-size:10.5px;
+}
+.frame-cap .rule{
+  display:block;
+  border-top:2px solid var(--ink);
+  margin:7px 0 7px;
+}
+.frame-cap ul{margin:6px 0 0 16px}
+.frame-cap li{margin-bottom:3px}
+
+/* ---------- STATUS BAR (in-phone) --------------------------------------- */
+.statusbar{
+  flex:none;
+  height:30px;
+  border-bottom:3px solid var(--ink);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 12px;
+  font-family:var(--f-mono);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.06em;
+  background:var(--screen);
+  color:var(--ink);
+}
+.statusbar .sb-r{display:flex;gap:8px;align-items:center}
+.statusbar .bars{display:flex;gap:2px;align-items:flex-end;height:11px}
+.statusbar .bars i{width:3px;background:var(--ink);display:block}
+.statusbar .bars i:nth-child(1){height:4px}
+.statusbar .bars i:nth-child(2){height:7px}
+.statusbar .bars i:nth-child(3){height:11px}
+
+/* ---------- IN-PHONE STRUCTURE ------------------------------------------ */
+.titlescreen{flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column;background:var(--screen)}
+
+.tbar{
+  flex:none;
+  border-bottom:var(--bw) solid var(--ink);
+  padding:10px var(--pad) 11px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:var(--screen);
+}
+.tbar h3{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:23px;
+  letter-spacing:-.035em;
+  line-height:1;
+  text-transform:uppercase;
+  flex:1 1 auto;
+}
+.tbar .up{
+  font-size:9.5px;
+  font-weight:700;
+  letter-spacing:.14em;
+  border:3px solid var(--ink);
+  padding:2px 6px;
+}
+.tbar .back{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:17px;
+  line-height:1;
+  border:3px solid var(--ink);
+  width:30px;height:30px;
+  display:grid;place-items:center;
+  flex:none;
+}
+
+.pane{
+  flex:1 1 auto;
+  overflow:hidden;
+  padding:14px var(--pad) 0;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.pane.tight{gap:9px}
+
+/* ---------- PRIMITIVES -------------------------------------------------- */
+.lbl{
+  font-size:9.5px;
+  font-weight:700;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--ink-2);
+}
+.lbl.on-ink{color:var(--paper)}
+.rule{height:3px;background:var(--ink);border:0;flex:none}
+
+.tag{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:9.5px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  border:3px solid var(--ink);
+  padding:3px 7px;
+  background:var(--card);
+  color:var(--ink);
+  white-space:nowrap;
+}
+.tag.red{background:var(--red);color:var(--red-ink)}
+.tag.blue{background:var(--blue);color:var(--blue-ink)}
+.tag.yellow{background:var(--yellow);color:var(--yellow-ink)}
+.tag.ink{background:var(--ink);color:var(--paper)}
+.tag.open{background:transparent}
+
+.block{
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  padding:14px;
+}
+.block.red{background:var(--red);color:var(--red-ink)}
+.block.red .lbl{color:var(--red-ink);opacity:.85}
+.block.red .muted{color:var(--red-ink);opacity:.9}
+.block.yellow{background:var(--yellow);color:var(--yellow-ink)}
+.block.yellow .lbl{color:var(--yellow-ink);opacity:.8}
+.block.blue{background:var(--blue);color:var(--blue-ink)}
+.block.blue .lbl{color:var(--blue-ink);opacity:.85}
+.block.ink{background:var(--ink);color:var(--paper)}
+.block.ink .lbl{color:var(--paper);opacity:.75}
+
+.h1{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  letter-spacing:-.03em;
+  line-height:.98;
+  text-transform:uppercase;
+}
+.h1.xl{font-size:40px}
+.h1.l{font-size:28px}
+.h1.m{font-size:21px}
+
+.muted{color:var(--ink-2);font-size:12.5px;line-height:1.55}
+.mono{font-family:var(--f-mono)}
+.big{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:34px;
+  line-height:.92;
+  letter-spacing:-.04em;
+  font-variant-numeric:tabular-nums;
+}
+.huge{
+  font-family:var(--f-mono);
+  font-weight:700;
+  font-size:52px;
+  line-height:.92;
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+
+.tagrow{display:flex;flex-wrap:wrap;gap:6px}
+
+/* ---------- BUTTONS: the brutalist press --------------------------------- */
+/* Rest: a solid block offset 6px into its own shadow.
+   Press: the block translates 6px into the shadow. Nothing blurs, ever. */
+.btn{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  width:100%;
+  min-height:52px;
+  padding:13px 15px;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:15px;
+  letter-spacing:.01em;
+  text-transform:uppercase;
+  text-align:left;
+  border:var(--bw) solid var(--ink);
+  background:var(--blue);
+  color:var(--blue-ink);
+  cursor:pointer;
+  box-shadow:var(--off) var(--off) 0 0 var(--shade);
+  transition:transform .06s linear, box-shadow .06s linear;
+}
+.btn:hover:not(:disabled),
+.btn:focus-visible:not(:disabled),
+.btn:active:not(:disabled){transform:translate(var(--off),var(--off));box-shadow:0 0 0 0 var(--shade)}
+.btn:hover:not(:disabled){filter:brightness(1.06)}
+.btn:disabled{
+  background:var(--card);
+  color:var(--ink-2);
+  cursor:not-allowed;
+  box-shadow:2px 2px 0 0 var(--shade);
+  transform:translate(4px,4px);
+  border-style:solid;
+}
+.btn.red{background:var(--red);color:var(--red-ink)}
+.btn.yellow{background:var(--yellow);color:var(--yellow-ink)}
+.btn.ink{background:var(--ink);color:var(--paper)}
+.btn.ghost{background:var(--card);color:var(--ink)}
+.btn.sm{min-height:44px;font-size:13px;padding:11px 13px}
+.btn .sub{
+  display:block;
+  font-family:var(--f-mono);
+  font-weight:400;
+  font-size:10.5px;
+  letter-spacing:.02em;
+  text-transform:none;
+  opacity:.9;
+  margin-top:3px;
+}
+.btn .arr{font-family:var(--f-mono);font-weight:700;font-size:16px;flex:none}
+
+.btns-2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+
+/* ---------- ROWS -------------------------------------------------------- */
+.rows{
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  display:flex;
+  flex-direction:column;
+}
+.row{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  padding:11px 12px;
+  border-bottom:3px solid var(--ink);
+  min-height:52px;
+}
+.row:last-child{border-bottom:0}
+.row.hot{background:var(--yellow);color:var(--yellow-ink)}
+.row.cold{background:var(--card)}
+.row .icon{
+  width:36px;height:36px;
+  flex:none;
+  border:3px solid var(--ink);
+  background:var(--paper);
+  color:var(--ink);
+  display:grid;
+  place-items:center;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:15px;
+  letter-spacing:-.02em;
+}
+.row .what{flex:1 1 auto;min-width:0}
+.row .what .nm{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:14px;
+  letter-spacing:-.01em;
+  line-height:1.15;
+}
+.row .what .sb{
+  font-family:var(--f-mono);
+  font-size:10px;
+  line-height:1.35;
+  color:var(--ink-2);
+  margin-top:2px;
+}
+.row.hot .what .sb{color:var(--yellow-ink);opacity:.8}
+
+/* switch — a checkbox, so state is never colour-only: the knob's POSITION
+   is the signal, and the label text repeats it. */
+.sw{
+  all:unset;
+  flex:none;
+  width:58px;height:32px;
+  border:3px solid var(--ink);
+  background:var(--card);
+  position:relative;
+  cursor:pointer;
+  display:block;
+}
+.sw::after{
+  content:"";
+  position:absolute;
+  top:0;left:0;
+  width:26px;height:26px;
+  background:var(--ink);
+  transition:transform .08s linear;
+}
+.sw::before{
+  content:"OFF";
+  position:absolute;
+  top:7px;left:30px;
+  font-family:var(--f-mono);
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.06em;
+  color:var(--ink-2);
+}
+.sw:checked{background:var(--blue)}
+.sw:checked::after{transform:translateX(26px);background:var(--blue-ink)}
+.sw:checked::before{content:"ON";left:7px;color:var(--blue-ink)}
+.sw:focus-visible{outline:3px solid var(--blue);outline-offset:2px}
+
+/* radio cards (accessibility mode) */
+.pick{
+  display:flex;
+  gap:11px;
+  align-items:flex-start;
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  padding:13px 12px;
+  cursor:pointer;
+  min-height:44px;
+}
+.pick.on{background:var(--yellow);color:var(--yellow-ink)}
+.pick .dot{
+  flex:none;
+  width:26px;height:26px;
+  border:3px solid var(--ink);
+  background:var(--card);
+  display:grid;
+  place-items:center;
+  font-family:var(--f-mono);
+  font-size:13px;
+  font-weight:700;
+  line-height:1;
+}
+.pick.on .dot{background:var(--ink);color:var(--yellow)}
+.pick .body{flex:1 1 auto}
+.pick .t{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:15px;
+  letter-spacing:-.015em;
+  text-transform:uppercase;
+  line-height:1.1;
+}
+.pick .n{font-size:11.5px;line-height:1.5;margin-top:4px}
+.pick .cost{
+  margin-top:6px;
+  border-top:2px solid var(--ink);
+  padding-top:6px;
+  font-size:11px;
+  line-height:1.45;
+}
+
+/* trim — used by the densest screens so nothing is cut off at 844px */
+.trim .row{padding:8px 11px;min-height:46px;gap:9px}
+.trim .block{padding:11px 12px}
+.trim.pane{gap:8px}
+[data-theme="dark"] .pick.on .dot{color:var(--yellow)}
+.pick.on .cost{border-top-color:var(--yellow-ink)}
+
+/* numbered list markers */
+.steps{counter-reset:s;display:flex;flex-direction:column;gap:8px}
+.step{
+  counter-increment:s;
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  font-size:11.5px;
+  line-height:1.5;
+}
+.step::before{
+  content:counter(s,decimal-leading-zero);
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:11px;
+  background:var(--ink);
+  color:var(--paper);
+  padding:2px 5px;
+  flex:none;
+  line-height:1.35;
+}
+
+/* in-phone notification mock */
+.notif{
+  border:3px solid var(--ink);
+  background:var(--card);
+  padding:9px 10px;
+  display:flex;
+  gap:9px;
+  align-items:flex-start;
+}
+.notif .app{
+  width:26px;height:26px;
+  flex:none;
+  border:3px solid var(--ink);
+  display:grid;
+  place-items:center;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:11px;
+  background:var(--ink);
+  color:var(--paper);
+}
+.notif .txt{flex:1 1 auto;min-width:0}
+.notif .who{
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--ink-2);
+}
+.notif .msg{font-size:12px;line-height:1.4;margin-top:2px}
+.notif .msg b{font-family:var(--f-heavy);font-weight:900}
+.notif.paused{background:var(--yellow);color:var(--yellow-ink)}
+.notif.paused .who{color:var(--yellow-ink);opacity:.8}
+
+/* the tab bar */
+.tabbar{
+  flex:none;
+  border-top:var(--bw-h) solid var(--ink);
+  display:flex;
+  background:var(--screen);
+}
+.tabbar .tab{
+  flex:1 1 0;
+  text-align:center;
+  padding:9px 2px 11px;
+  font-size:9.5px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--ink-2);
+  border-right:3px solid var(--ink);
+  min-height:44px;
+}
+.tabbar .tab:last-child{border-right:0}
+.tabbar .tab .n{
+  display:block;
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:15px;
+  letter-spacing:-.02em;
+  line-height:1;
+  margin-bottom:4px;
+}
+.tabbar .tab.on{background:var(--ink);color:var(--paper)}
+.tabbar .tab.on .n{color:var(--paper)}
+
+/* the pause toggle row inside Now */
+.pause-strip{
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  padding:11px 12px;
+  display:flex;
+  gap:11px;
+  align-items:center;
+}
+.pause-strip.on{background:var(--yellow);color:var(--yellow-ink)}
+.pause-strip .pk{
+  font-family:var(--f-heavy);
+  font-weight:900;
+  font-size:19px;
+  line-height:1;
+  letter-spacing:-.03em;
+  border:3px solid var(--ink);
+  padding:6px 8px;
+  flex:none;
+  background:var(--paper);
+  color:var(--ink);
+}
+.pause-strip.on .pk{background:var(--ink);color:var(--paper)}
+
+/* the pause receipt (state 3) */
+.receipt{
+  border:var(--bw) solid var(--ink);
+  background:var(--card);
+  padding:12px;
+}
+.receipt .ln{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:11.5px;
+  padding:4px 0;
+  border-bottom:2px solid var(--ink);
+}
+.receipt .ln:last-child{border-bottom:0}
+.receipt .ln .k{color:var(--ink-2)}
+.receipt .ln .v{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+
+.foot{margin-top:auto;padding:0 0 12px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+@media (max-width:900px){
+  .wrap{padding:0 12px}
+  .wall{gap:40px 20px;justify-content:center}
+  .frame{flex:0 0 auto}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<!-- ======================================================================
+     MASTHEAD
+     ====================================================================== -->
+<header class="masthead">
+  <div class="masthead-in">
+    <h1>Curfew<br><span>Mock</span></h1>
+    <span class="tag-mock">Neo-brutalist / v1</span>
+    <span class="tag-mock" style="background:var(--blue);color:var(--blue-ink)">Pause = the new bit</span>
+    <span class="spacer"></span>
+    <button class="theme-btn" id="theme" type="button" aria-pressed="false">
+      Toggle: <span id="themeName">Light</span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ======================================================================
+     CAPTION BLOCK — palette, pause rules, accessibility, open questions
+     ====================================================================== -->
+<section class="captions" aria-label="Design notes">
+
+  <div class="cap">
+    <h2><b>01</b> Palette — three loud accents, one paper ground</h2>
+    <p>Flat fills only. No gradients, no blurred shadows, no rounded corners. The shadow is a
+       <em>solid block</em> of <code>--shade</code> offset 6&nbsp;px; pressing a control translates it
+       into its own shadow.</p>
+    <div class="swatches">
+      <div class="sw" style="background:#F1EFE7">PAPER<i>#F1EFE7</i></div>
+      <div class="sw" style="background:#0B0B0B;color:#F1EFE7">INK<i>#0B0B0B</i></div>
+      <div class="sw" style="background:#C81E14;color:#fff">RED<i>#C81E14</i></div>
+      <div class="sw" style="background:#2B4BE8;color:#fff">COBALT<i>#2B4BE8</i></div>
+      <div class="sw" style="background:#FFC400">YELLOW<i>#FFC400</i></div>
+    </div>
+    <p style="margin-top:11px"><b>Red</b> is used for exactly one idea: <em>a lock is holding</em>.
+       <b>Cobalt</b> is the ordinary primary action. <b>Yellow</b> is a warning that is not a failure —
+       which is why <em>pause</em> is yellow, not red or green. Green is never used: nothing here is a
+       win.</p>
+    <p>Type is a heavy grotesque (Helvetica/Arial/&ldquo;Segoe UI&rdquo;) at tight tracking for structure,
+       and the system mono for all labels, counts and timestamps. Both are local stacks — this file makes
+       <b>zero network requests</b> and opens offline by double-click.</p>
+  </div>
+
+  <div class="cap">
+    <h2><b>02</b> Pause — the rules I chose</h2>
+    <div class="ledger">
+      <div>Pause window</div><div class="r pass">3:00, fixed</div>
+      <div>Per day</div><div class="r pass">2</div>
+      <div>Rollover</div><div class="r">none</div>
+      <div>Concurrent pauses</div><div class="r pass">1 — enforced</div>
+      <div>Cooldown after one ends</div><div class="r">5 minutes</div>
+      <div>Resume</div><div class="r pass">automatic, at expiry</div>
+      <div>Can it end a lock?</div><div class="r">No. It only suspends.</div>
+      <div>Recorded?</div><div class="r pass">Yes — Usage timeline</div>
+    </div>
+    <p style="margin-top:11px"><b>Why 3 minutes.</b> Long enough for the real emergencies — find the
+       bus times, get the one-time code, phone the person back, pay at the till. Short enough that it is
+       not a place to sit: you cannot complete anything you would call a session in three minutes, and the
+       countdown is on screen the whole time. Pause is <b>visible everywhere</b> while it runs (banner,
+       notification, a band on all five tabs) and <b>ends itself</b>. It is an expiry, not a switch — a
+       switch would need the user to remember to undo it, which is exactly the failure mode a pause
+       feature is supposed to avoid.</p>
+  </div>
+
+  <div class="cap">
+    <h2><b>03</b> Pause during a lock — my decision</h2>
+    <p><b>Pause never subtracts time from a lock.</b> It only suspends. When the three minutes expire the
+       lock resumes with its full remaining duration — it does not quietly burn itself down while you are
+       away. So a pause buys you a window; it does not buy you the lock.</p>
+    <p><b>It costs one of the two daily pauses, and it counts as the emergency pass in spirit.</b> Which
+       is why the tap is charged in one of two ways, depending on what the user explicitly chose:</p>
+    <ul style="margin:8px 0 8px 17px;font-size:12.5px;line-height:1.6">
+      <li><b>Timer or Confirm lock →</b> pause starts in one tap. The lock itself is already the
+          ceremony; layers of friction on top of it would be theatre.</li>
+      <li><b>Challenge or Device-credential lock →</b> pause starts only after the phrase is typed
+          correctly. These are the modes whose stated meaning is &ldquo;a decision, not a reflex&rdquo;,
+          so the pause inherits that charge. Bypassing it would have made those two modes
+          meaningless.</li>
+    </ul>
+    <p><b>Reasoning:</b> the honest way out of a lock the user deliberately took is the
+       <b>emergency pass</b>, which <em>ends</em> the lock and is spent for the month. Pause is the
+       cheap, temporary, self-expiring door beside it. Both are published, both are recorded, neither
+       pretend the lock was never taken.</p>
+  </div>
+
+  <div class="cap">
+    <h2><b>04</b> Accessibility — measured, not asserted</h2>
+    <p>Every ratio below was computed with the WCAG relative-luminance formula, not eyeballed. Normal text
+       needs 4.5:1; large text and UI borders need 3:1.</p>
+    <div class="ledger">
+      <div>Ink on paper</div><div class="r pass">17.10 : 1</div>
+      <div>Muted on paper</div><div class="r pass">6.69 : 1</div>
+      <div>White on cobalt (button)</div><div class="r pass">6.41 : 1</div>
+      <div>White on red (alert)</div><div class="r pass">5.75 : 1</div>
+      <div>Ink on yellow (pause)</div><div class="r pass">12.32 : 1</div>
+      <div>Dark: ink on ground</div><div class="r pass">17.24 : 1</div>
+      <div>Dark: black on cobalt button</div><div class="r pass">6.66 : 1</div>
+      <div>Dark: white on red alert</div><div class="r pass">4.99 : 1</div>
+    </div>
+    <p style="margin-top:11px">The dark theme is not an inversion trick — cobalt is <em>lightened</em> to
+       <code>#6E8CFF</code> so the primary button flips to black text and still clears 6.66:1.</p>
+    <p><b>Beyond contrast:</b> minimum tap target is 44&nbsp;px everywhere (the theme toggle, every
+       button, every switch, every tab). <b>State is never colour alone</b> — a switch carries the word
+       ON/OFF <em>and</em> knob position, a locked screen carries the word LOCKED, a paused screen is
+       stamped PAUSED, and each state has its own glyph. Focus rings are a 3&nbsp;px cobalt outline.
+       Reduced-motion is honoured.</p>
+  </div>
+
+  <div class="cap">
+    <h2><b>05</b> What is real here, and what I invented</h2>
+    <p><b>Real, and taken from the code rather than invented:</b> the two accessibility modes and their
+       exact wording (&ldquo;Blocks any app, reads no screen. No site rules, and no uninstall
+       guard.&rdquo;); the fact that <em>both</em> modes block any app; the
+       &ldquo;never reads payment, banking, wallet or password apps&rdquo; guarantee and its Settings
+       home; the four lock kinds; the emergency pass as a ration that ends a lock; the
+       &ldquo;not read by Curfew&rdquo; note in the app picker that is explicitly <em>not</em> a
+       filter.</p>
+    <p><b>Invented for this mock:</b> the pause feature itself and every number attached to it; the
+       five-tab bar labels shown; the specific profiles and app names in the picker. I also had to
+       <b>guess that the pause lives on the Now screen and on the block screen</b> rather than in
+       Settings — see question 06.</p>
+  </div>
+
+  <div class="cap">
+    <h2><b>06</b> What I was unsure about</h2>
+    <div class="steps">
+      <div class="step"><span><b>Where &ldquo;fast to reach&rdquo; really is.</b> I put pause on the Now
+        screen (large, always one tap from opening the app) and on the block screen itself. If Curfew is
+        usually reached by long-pressing the notification, the notification action is the only entry
+        point that survives a locked phone — worth deciding.</span></div>
+      <div class="step"><span><b>Whether the charge is legible.</b> Requiring the phrase during a Challenge
+        lock makes pause slower in an emergency than the requirement asks for. The alternative — one tap
+        always, rationed by the daily cap — is simpler and faster. I chose friction because a Challenge
+        lock is a deliberate statement; the owner may reasonably overrule me.</span></div>
+      <div class="step"><span><b>Does pause stop an <em>upcoming</em> block from starting?</b> I show it
+        suspending what is running. If a schedule fires 30 seconds into a pause, my reading is that the
+        pause wins for its remaining seconds — but that is a policy call the Rust engine has to make,
+        not a UI call.</span></div>
+      <div class="step"><span><b>Uninstall guard during a pause.</b> Not shown. I assume the guard keeps
+        running — a pause is for getting to a browser, not for getting to the uninstall page.</span></div>
+      <div class="step"><span><b>Two pauses a day.</b> Forest uses 5 minutes once a day; Unpluq 5 minutes
+        daily. Two is at the generous end. One would be stricter and still usable.</span></div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ======================================================================
+     GLOBAL PAUSE BANNER — exists while a pause is active, above every frame
+     ====================================================================== -->
+<div class="pause-global" id="pauseGlobal" role="status" aria-live="polite">
+  <div class="pg-mark" id="pgMark">||</div>
+  <div>
+    <div class="pg-t" id="pgT">Enforcement paused</div>
+    <div class="pg-s" id="pgS">
+      Every block is off. Two things are still true: pauses left today, and the record.
+    </div>
+  </div>
+  <div class="pg-clock"><small id="pgClockLbl">RESUMES IN</small><span id="pgClock">03:00</span></div>
+</div>
+
+<!-- ======================================================================
+     THE FRAME WALL
+     ====================================================================== -->
+<main class="wall" id="wall">
+
+  <!-- =================== 1. NOW (pause available) ====================== -->
+  <section class="frame" data-frame="now-available" aria-label="Now screen, pause available">
+    <div class="frame-head">
+      <span class="num">01</span>
+      <span class="ttl">Now — pause available</span>
+      <span class="flag">Resting</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:04</span>
+        <span class="sb-r">
+          <span>84%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <h3>Now</h3>
+          <span class="up">Service on</span>
+        </div>
+        <div class="pane">
+
+          <div class="tagrow">
+            <span class="tag ink" data-note="pauses">Pauses left today:&nbsp;<span data-pauses-left>2</span></span>
+            <span class="tag open" data-note="modes">Mode: app &amp; site</span>
+          </div>
+
+          <div class="block yellow">
+            <div class="lbl" style="color:var(--yellow-ink)">Not locked</div>
+            <div class="h1 l" style="margin:7px 0 6px">Nothing<br>right now</div>
+            <p class="muted" style="color:var(--yellow-ink);opacity:.92">
+              No session is running. The next one starts by itself at <b>22:00</b>, from the profile
+              <b>Weeknights</b>.
+            </p>
+            <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
+              <span class="tag open" style="border-color:currentColor;color:inherit">No lock holding</span>
+            </div>
+          </div>
+
+          <div class="lbl">Start a block on purpose</div>
+          <button class="btn" type="button">
+            <span>Block for 90 minutes<span class="sub">Nothing scheduled. Ends by itself.</span></span>
+            <span class="arr">&gt;&gt;</span>
+          </button>
+
+          <!-- PAUSE ENTRY POINT: on Now, above the fold, full width, 52px tall -->
+          <div class="lbl">In an emergency</div>
+          <button class="btn ink" type="button" id="startPauseBtn">
+            <span>Pause 3 minutes<span class="sub">Everything off, then it comes back by itself</span></span>
+            <span class="arr">||</span>
+          </button>
+
+          <div class="pause-strip" data-if="available">
+            <div class="pk">2×</div>
+            <div>
+              <div style="font-family:var(--f-heavy);font-weight:900;font-size:12.5px;letter-spacing:.02em">
+                TWO PAUSES TODAY · ONE AT A TIME
+              </div>
+              <div style="font-size:11px;line-height:1.45;margin-top:2px;color:var(--ink-2)">
+                5-minute cooldown after one ends. No rollover. Recorded in Usage.
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab on"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>Where pause lives</b>
+      <span class="rule"></span>
+      It is not in Settings. It is a full-width 52&nbsp;px button on <b>Now</b>, in a band labelled
+      <em>In an emergency</em>, directly under the start-a-block button — so it is one tap from opening
+      the app and never more than one screen deep. The real build also needs it as a notification action,
+      which is the only entry point that works from a locked phone. State is carried by the word
+      <b>PAUSE</b> <em>and</em> the colour, never colour alone.
+    </div>
+  </section>
+
+  <!-- =================== 2. NOW (paused) =============================== -->
+  <section class="frame" data-frame="now-paused" aria-label="Now screen, pause active">
+    <div class="frame-head">
+      <span class="num">02</span>
+      <span class="ttl">Pause — active (countdown)</span>
+      <span class="flag new">State 2</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:06</span>
+        <span class="sb-r">
+          <span>84%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <h3>Now</h3>
+          <span class="up" style="background:var(--yellow);color:var(--yellow-ink)">Paused</span>
+        </div>
+        <div class="pane">
+
+          <div class="tagrow">
+            <span class="tag yellow">|| Paused by you</span>
+            <span class="tag open" data-note="pauses">Pauses left today:&nbsp;<span data-pauses-left>1</span></span>
+          </div>
+
+          <div class="block yellow">
+            <div class="lbl">Suspends in</div>
+            <div class="huge" data-clock aria-live="polite" aria-label="Pause remaining">02:13</div>
+            <p class="muted" style="color:var(--yellow-ink);opacity:.9;margin-top:6px">
+              <b>Resumes by itself at 21:08.</b> You do not have to do anything, and you cannot extend it.
+            </p>
+          </div>
+
+          <div class="notif paused">
+            <div class="app">C</div>
+            <div class="txt">
+              <div class="who">Curfew · now</div>
+              <div class="msg"><b>Paused — resumes 21:08.</b> Blocks are off.
+                The lock is still holding.</div>
+            </div>
+          </div>
+
+          <div class="rows">
+            <div class="row cold">
+              <div class="icon">02</div>
+              <div class="what">
+                <div class="nm">Pauses left today</div>
+                <div class="sb">1 of 2 · resets at midnight · no rollover</div>
+              </div>
+            </div>
+            <div class="row cold">
+              <div class="icon">R</div>
+              <div class="what">
+                <div class="nm">What is still running</div>
+                <div class="sb">Uninstall guard: on · foreground reader: on</div>
+              </div>
+            </div>
+            <div class="row cold">
+              <div class="icon">W</div>
+              <div class="what">
+                <div class="nm">The lock is not being spent</div>
+                <div class="sb">Weeknights still ends at 23:00, not at 21:05.</div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn ghost" type="button" disabled>
+            <span>Pause 3 minutes<span class="sub">Already paused. One pause at a time.</span></span>
+            <span class="arr">||</span>
+          </button>
+
+          <p class="muted" style="font-size:11px">
+            Cooldown of 5 minutes starts when this pause ends.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab on"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>Honest while it runs</b>
+      <span class="rule"></span>
+      Four separate tells, so it cannot be forgotten or missed: the yellow band on Now, the in-app
+      notification card, the <b>PAUSED</b> stamp rotated into the bezel, and the page-wide banner above
+      this wall. The primary pause control is <em>disabled and says why</em> — one pause at a time. The
+      countdown is the only thing on the screen at 52&nbsp;px.
+    </div>
+  </section>
+
+  <!-- =================== 3. NOW (just resumed) ========================= -->
+  <section class="frame" data-frame="now-resumed" aria-label="Now screen, pause just ended">
+    <div class="frame-head">
+      <span class="num">03</span>
+      <span class="ttl">Pause — just resumed</span>
+      <span class="flag new">State 3</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:08</span>
+        <span class="sb-r">
+          <span>83%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <h3>Now</h3>
+          <span class="up" style="background:var(--blue);color:var(--blue-ink)">Back on</span>
+        </div>
+        <div class="pane">
+
+          <div class="tagrow">
+            <span class="tag blue">Back on 0:12 ago</span>
+            <span class="tag open" data-note="pauses">Pauses left today:&nbsp;<span data-pauses-left>1</span></span>
+            <span class="tag open">Cooldown 4:48</span>
+          </div>
+
+          <div class="block blue">
+            <div class="lbl">Curfew is enforcing again</div>
+            <div class="h1 m" style="margin:7px 0 6px">Your pause ended.<br>The lock did not.</div>
+            <p class="muted" style="color:var(--blue-ink);opacity:.92">
+              <b>Weeknights</b> is holding again and still ends at <b>23:00</b> — the three paused
+              minutes were not taken off it.
+            </p>
+          </div>
+
+          <div class="notif">
+            <div class="app">C</div>
+            <div class="txt">
+              <div class="who">Curfew · 21:08</div>
+              <div class="msg"><b>Pause ended — enforcement resumed.</b> Weeknights is holding until
+                23:00. One pause left today.</div>
+            </div>
+          </div>
+
+          <div class="lbl">The record · Usage</div>
+          <div class="receipt">
+            <div class="ln"><span class="k">Pause started</span><span class="v">21:05</span></div>
+            <div class="ln"><span class="k">Pause ended</span><span class="v">21:08 (expired)</span></div>
+            <div class="ln"><span class="k">Cancelled by</span><span class="v">nobody — expiry</span></div>
+            <div class="ln"><span class="k">Lock held by</span><span class="v">Weeknights</span></div>
+            <div class="ln"><span class="k">Lock time given up</span><span class="v">0 minutes</span></div>
+            <div class="ln"><span class="k">Pauses used today</span><span class="v">1 of 2</span></div>
+          </div>
+
+          <button class="btn yellow" type="button" disabled>
+            <span>Pause 3 minutes<span class="sub">Cooling down — 4:48 left</span></span>
+            <span class="arr">||</span>
+          </button>
+          <p class="muted" style="font-size:11px">
+            No button was pressed to get here. It expired.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab on"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>The receipt is the point</b>
+      <span class="rule"></span>
+      Resume is stated in the past tense and with evidence: when it started, when it expired, that
+      <em>nobody</em> cancelled it, and that the lock lost <b>0 minutes</b>. That last line is the one
+      that keeps pause honest — a pause that silently ate lock time would be a loophole with a friendly
+      name.
+    </div>
+  </section>
+
+  <!-- =================== 4. BLOCK SCREEN =============================== -->
+  <section class="frame" data-frame="blocked" aria-label="Block screen">
+    <div class="frame-head">
+      <span class="num">04</span>
+      <span class="ttl">Block screen</span>
+      <span class="flag">Replaces the app</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:12</span>
+        <span class="sb-r">
+          <span>83%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <h3>Blocked</h3>
+          <span class="up" style="background:var(--red);color:var(--red-ink)">Locked</span>
+        </div>
+        <div class="pane">
+
+          <div class="block red">
+            <div class="lbl">Blocked by Curfew</div>
+            <div class="h1 xl" style="margin:9px 0 8px">This app is<br>blocked.</div>
+            <p class="muted" style="color:var(--red-ink);opacity:.95">
+              You asked for this one. It does not open until the session ends.
+            </p>
+          </div>
+
+          <div class="rows">
+            <div class="row cold">
+              <div class="icon">P</div>
+              <div class="what">
+                <div class="nm">Weeknights</div>
+                <div class="sb">The profile that asked for it</div>
+              </div>
+            </div>
+            <div class="row cold">
+              <div class="icon">T</div>
+              <div class="what">
+                <div class="nm">Ends 23:00 — in 1 h 48 m</div>
+                <div class="sb">Timer. Ends by itself; nothing to press.</div>
+              </div>
+            </div>
+            <div class="row cold">
+              <div class="icon">IG</div>
+              <div class="what">
+                <div class="nm">Instagram</div>
+                <div class="sb">Blocked as an app · read normally</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="lbl">The way out</div>
+
+          <!-- Pause from the block screen: the fastest possible reach -->
+          <button class="btn yellow" type="button" data-pause-allowed="1">
+            <span>Pause 3 minutes<span class="sub">One tap · 1 left today · resumes by itself</span></span>
+            <span class="arr">||</span>
+          </button>
+
+          <button class="btn ghost sm" type="button" data-pause-allowed="0" disabled>
+            <span>Use an emergency pass<span class="sub">Ends the lock entirely · 1 left this month</span></span>
+            <span class="arr">!</span>
+          </button>
+          <p class="muted" style="font-size:10.5px">
+            Only one pause at a time. Pause <b>suspends</b> a lock; it never shortens one.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>Pause is not the emergency pass</b>
+      <span class="rule"></span>
+      Two doors, stacked, and labelled so they cannot be confused. <b>Yellow</b> pauses — three minutes,
+      the lock returns intact, and the ration is by the day. <b>Ghost</b> is the emergency pass, which
+      turns red once it is live — it ends the lock outright and its ration is by the month. In a Challenge
+      or device-credential lock, the pause asks for the phrase first; frame 08 shows that variant.
+    </div>
+  </section>
+
+  <!-- =================== 5. APPS / PROFILE PICKER ====================== -->
+  <section class="frame" data-frame="apps" aria-label="Profile app picker">
+    <div class="frame-head">
+      <span class="num">05</span>
+      <span class="ttl">Profile · app picker</span>
+      <span class="flag">Both modes block any app</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:15</span>
+        <span class="sb-r">
+          <span>83%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <span class="back">&#8592;</span>
+          <h3>Apps</h3>
+          <span class="up">7 on</span>
+        </div>
+        <div class="pane tight trim">
+
+          <div class="lbl">Weeknights · apps this profile blocks</div>
+
+          <div class="rows">
+            <div class="row cold">
+              <div class="icon">IG</div>
+              <div class="what">
+                <div class="nm">Instagram</div>
+                <div class="sb">Read normally</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Block Instagram">
+            </div>
+            <div class="row cold">
+              <div class="icon">YT</div>
+              <div class="what">
+                <div class="nm">YouTube</div>
+                <div class="sb">Read normally</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Block YouTube">
+            </div>
+            <div class="row cold">
+              <div class="icon">RD</div>
+              <div class="what">
+                <div class="nm">Reddit</div>
+                <div class="sb">Read normally</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Block Reddit">
+            </div>
+            <div class="row hot">
+              <div class="icon">PT</div>
+              <div class="what">
+                <div class="nm">Paytm</div>
+                <div class="sb">Not read by Curfew — blockable anyway</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Block Paytm">
+            </div>
+            <div class="row hot">
+              <div class="icon">HD</div>
+              <div class="what">
+                <div class="nm">HDFC Bank</div>
+                <div class="sb">Not read by Curfew — blockable anyway</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Block HDFC Bank">
+            </div>
+            <div class="row cold">
+              <div class="icon">GM</div>
+              <div class="what">
+                <div class="nm">Gmail</div>
+                <div class="sb">Read normally</div>
+              </div>
+              <input class="sw" type="checkbox" aria-label="Block Gmail">
+            </div>
+          </div>
+
+          <div class="block yellow" style="padding:11px 12px">
+            <div class="lbl" style="color:var(--yellow-ink)">Not a filter</div>
+            <p style="font-size:11.5px;line-height:1.5;margin-top:4px">
+              Two rows here are apps Curfew never reads. They are listed like any other app and
+              <b>can be blocked</b> — which apps you block is yours to decide. The reading restriction
+              belongs to the accessibility service; it is not a limit on what you may block.
+            </p>
+            <p style="font-size:11.5px;line-height:1.5;margin-top:6px">
+              Blocking a bank app costs a block screen and nothing else: its notifications are never
+              suppressed.
+            </p>
+            <div style="margin-top:8px">
+              <span class="tag ink">Screens Curfew will not read &nbsp;&gt;&gt;</span>
+            </div>
+          </div>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab on"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>Two of these rows are the whole honesty test</b>
+      <span class="rule"></span>
+      Paytm and HDFC are yellow-banded with the words <em>not read by Curfew — blockable anyway</em>.
+      They are <b>switched on</b> in this mock, on purpose, so the screen demonstrates that the
+      restriction is on <em>reading</em> and not on <em>blocking</em>. The note is a footnote, never a
+      filter — hiding these rows made a user search for their bank and conclude the app was broken.
+    </div>
+  </section>
+
+  <!-- =================== 6. SETTINGS → ACCESSIBILITY MODE ============== -->
+  <section class="frame" data-frame="modes" aria-label="Settings accessibility mode">
+    <div class="frame-head">
+      <span class="num">06</span>
+      <span class="ttl">Settings · accessibility mode</span>
+      <span class="flag">Stated trade-off</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:19</span>
+        <span class="sb-r">
+          <span>82%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <span class="back">&#8592;</span>
+          <h3>Accessibility</h3>
+        </div>
+        <div class="pane tight">
+
+          <p class="muted" style="font-size:12px">
+            <b>Both versions block apps.</b> The difference is only whether Curfew may read a browser's
+            address bar.
+          </p>
+
+          <div class="pick" role="radio" aria-checked="false" tabindex="0">
+            <div class="dot"></div>
+            <div class="body">
+              <div class="t">App blocking only</div>
+              <div class="n">Blocks any app, reads no screen. No site rules, and no uninstall guard.</div>
+              <div class="cost">
+                <b>Cost:</b> cannot block websites, and nothing holds the uninstall page shut.
+                <br><b>Bought:</b> no banking app notices this mode exists.
+              </div>
+            </div>
+          </div>
+
+          <div class="pick on" role="radio" aria-checked="true" tabindex="0">
+            <div class="dot">&#10003;</div>
+            <div class="body">
+              <div class="t">App and site blocking</div>
+              <div class="n">Blocks any app, and also reads a browser's address bar to block sites.</div>
+              <div class="cost">
+                <b>Cost:</b> some banking and payment apps will refuse to run while it is on.
+                <br><b>Bought:</b> site blocking, and the uninstall guard.
+              </div>
+            </div>
+          </div>
+
+          <hr class="rule">
+
+          <div class="rows">
+            <div class="row cold">
+              <div class="icon">U</div>
+              <div class="what">
+                <div class="nm">Uninstall guard</div>
+                <div class="sb">On · needs app &amp; site blocking · held shut through the service</div>
+              </div>
+              <input class="sw" type="checkbox" checked aria-label="Uninstall guard">
+            </div>
+            <div class="row hot">
+              <div class="icon">B</div>
+              <div class="what">
+                <div class="nm">Device admin (stricter guard)</div>
+                <div class="sb">Off · many banking apps refuse to run while any admin is active</div>
+              </div>
+              <input class="sw" type="checkbox" aria-label="Device admin">
+            </div>
+          </div>
+
+          <div class="block ink" style="padding:11px 12px">
+            <div class="lbl">Never read, in either mode</div>
+            <p style="font-size:11.5px;line-height:1.5;margin-top:4px">
+              Payment, banking, wallet and password screens are skipped before anything else happens.
+              That list is visible and editable.
+            </p>
+            <div style="margin-top:8px">
+              <span class="tag yellow">Screens Curfew will not read &nbsp;&gt;&gt;</span>
+            </div>
+          </div>
+
+          <p class="muted" style="font-size:10.5px">
+            Whichever you pick, <b>you can block any app you like</b> — including a bank.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab on"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>The trade-off, in the card and not in a help page</b>
+      <span class="rule"></span>
+      Each mode carries two labelled lines — <b>Cost</b> and <b>Bought</b> — because a mode picker that
+      only lists benefits is how users end up surprised by a bank app refusing to open. The selected
+      card is yellow <em>and</em> its marker dot is filled with a &#10003; <em>and</em> it is marked
+      <code>aria-checked</code>: three signals, one of which is not colour.
+    </div>
+  </section>
+
+  <!-- =================== 7. EMERGENCY PASS ============================= -->
+  <section class="frame" data-frame="pass" aria-label="Emergency pass">
+    <div class="frame-head">
+      <span class="num">07</span>
+      <span class="ttl">Emergency pass</span>
+      <span class="flag">Ends a lock</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:24</span>
+        <span class="sb-r">
+          <span>82%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <h3>End early?</h3>
+          <span class="up" style="background:var(--red);color:var(--red-ink)">Locked</span>
+        </div>
+        <div class="pane">
+
+          <div class="block yellow">
+            <div class="lbl" style="color:var(--yellow-ink)">Emergency pass</div>
+            <div class="big" style="margin:6px 0 4px">1 left<br>this month</div>
+            <p class="muted" style="color:var(--yellow-ink);opacity:.92">
+              A pass <b>ends the lock</b>. It does not shorten it. The ration comes back on the 1st —
+              and if you have paired a device, spending it here spends it there too.
+            </p>
+          </div>
+
+          <div class="receipt">
+            <div class="ln"><span class="k">Lock</span><span class="v">Weeknights</span></div>
+            <div class="ln"><span class="k">Would have ended</span><span class="v">23:00</span></div>
+            <div class="ln"><span class="k">Ends if you spend this</span><span class="v">now</span></div>
+            <div class="ln"><span class="k">Time given up</span><span class="v">1 h 41 m</span></div>
+            <div class="ln"><span class="k">Recorded in</span><span class="v">Usage</span></div>
+          </div>
+
+          <button class="btn red" type="button">
+            <span>Spend the pass — end now<span class="sub">This is the honest way out. It is not a pause.</span></span>
+            <span class="arr">!</span>
+          </button>
+
+          <button class="btn ghost sm" type="button" data-pause-allowed="1">
+            <span>Rather pause for 3 minutes<span class="sub">1 left today · lock returns intact</span></span>
+            <span class="arr">||</span>
+          </button>
+
+          <p class="muted" style="font-size:10.5px">
+            No shame copy here, and none on the screen after. Curfew says what happened and stops.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab on"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab on"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>The pass is the exit; pause is the delay</b>
+      <span class="rule"></span>
+      The pass ends the lock and costs the month's ration. Pause holds the lock off for three minutes
+      and costs one of the day's two pauses. Offering both on one screen, side by side and differently
+      coloured, is the whole argument: take the cheap door when it is enough, and know exactly what the
+      expensive one costs before you take it.
+    </div>
+  </section>
+
+  <!-- =================== 8. PAUSE UNDER A CHALLENGE LOCK =============== -->
+  <section class="frame" data-frame="challenge" aria-label="Pause charged during a challenge lock">
+    <div class="frame-head">
+      <span class="num">08</span>
+      <span class="ttl">Pause · charged variant</span>
+      <span class="flag new">Decision</span>
+    </div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>21:31</span>
+        <span class="sb-r">
+          <span>81%</span>
+          <span class="bars"><i></i><i></i><i></i></span>
+        </span>
+      </div>
+      <div class="titlescreen">
+        <div class="tbar">
+          <span class="back">&#8592;</span>
+          <h3>To pause</h3>
+          <span class="up" style="background:var(--red);color:var(--red-ink)">Challenge</span>
+        </div>
+        <div class="pane">
+
+          <div class="block red">
+            <div class="lbl">Challenge lock · ends 23:00</div>
+            <div class="h1 m" style="margin:7px 0 6px">This lock asks you<br>to mean it.</div>
+            <p class="muted" style="color:var(--red-ink);opacity:.95">
+              You chose a Challenge when you took it. Pause inherits that charge: type the phrase and the
+              pause starts. Nothing else is required.
+            </p>
+          </div>
+
+          <div class="lbl">Type this phrase, exactly</div>
+          <div class="block" style="padding:13px 12px">
+            <div style="font-family:var(--f-mono);font-weight:700;font-size:14px;letter-spacing:.02em;line-height:1.5">
+              a pause is three minutes<br>and the lock is still mine
+            </div>
+          </div>
+
+          <div class="block" style="padding:0;border-width:var(--bw)">
+            <div style="padding:12px;font-family:var(--f-mono);font-size:14px;border-bottom:3px solid var(--ink);min-height:48px;color:var(--ink-2)">
+              a pause is three min<span style="color:var(--ink)">|</span>
+            </div>
+            <div style="padding:8px 12px;font-size:10.5px;color:var(--ink-2);background:var(--paper)">
+              34 of 46 characters · not yet a match
+            </div>
+          </div>
+
+          <button class="btn yellow" type="button" disabled>
+            <span>Start the 3 minutes<span class="sub">Available when the phrase matches</span></span>
+            <span class="arr">||</span>
+          </button>
+
+          <p class="muted" style="font-size:11px">
+            <b>Why here and not on the block screen:</b> a Challenge exists so the exit from a lock is a
+            decision rather than a reflex. If pause skipped the phrase, the reflex would simply move one
+            button to the left, and the mode would mean nothing.
+          </p>
+
+        </div>
+        <nav class="tabbar" aria-label="Curfew tabs">
+          <span class="tab on"><span class="n">01</span>Now</span>
+          <span class="tab"><span class="n">02</span>Plan</span>
+          <span class="tab"><span class="n">03</span>Events</span>
+          <span class="tab"><span class="n">04</span>Apps</span>
+          <span class="tab"><span class="n">05</span>Set</span>
+        </nav>
+      </div>
+    </div>
+    <div class="frame-cap">
+      <b>My defensible answer, open to overrule</b>
+      <span class="rule"></span>
+      Pause is charged <em>only</em> on the two lock kinds whose stated meaning is a deliberate choice
+      (<b>Challenge</b> and <b>device credential</b>). On Timer and Confirm locks it is one tap. The
+      trade is real: this makes pause slower in an emergency, which cuts against the
+      &ldquo;fast to reach&rdquo; requirement. I chose it because a pause that quietly defeats the
+      strongest lock Curfew has would make that lock decorative. <b>If the owner prefers uniform speed,
+      the fix is one line of policy: always one tap, rationed by the daily cap alone.</b>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<script>
+/* =========================================================================
+   PAUSE — the only script in this file.
+   State 1 (available) -> State 2 (active, live countdown) -> State 3 (resumed).
+   Drives: the page-wide banner, the in-phone countdown, the pause stamps,
+   and the pause controls on Now, the block screen and the pass screen.
+   ========================================================================= */
+(function () {
+  'use strict';
+
+  var body        = document.body;
+  var themeBtn    = document.getElementById('theme');
+  var themeName   = document.getElementById('themeName');
+  var banner      = document.getElementById('pauseGlobal');
+  var pgMark      = document.getElementById('pgMark');
+  var pgT         = document.getElementById('pgT');
+  var pgS         = document.getElementById('pgS');
+  var pgClock     = document.getElementById('pgClock');
+  var pgClockLbl  = document.getElementById('pgClockLbl');
+  var clocks      = document.querySelectorAll('[data-clock]');
+  var pauseBtns   = document.querySelectorAll('[data-pause-allowed="1"], #startPauseBtn');
+  var leftEls     = document.querySelectorAll('[data-pauses-left]');
+
+  var PAUSE_SECONDS = 180;   /* 3:00  — defended in caption 02 */
+  var COOLDOWN_SECS = 300;   /* 5:00  — starts when a pause ends    */
+  var PAUSES_PER_DAY = 2;
+
+  var state   = 'available'; /* available | active | cooldown */
+  var left    = PAUSE_SECONDS;
+  var pausesLeftToday = PAUSES_PER_DAY;
+  var tick    = null;
+  var cdTick  = null;
+
+  function mmss(s) {
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  function setLeft(n) {
+    for (var i = 0; i < leftEls.length; i++) { leftEls[i].textContent = String(n); }
+  }
+
+  function setBtns(label, sub, disabled) {
+    for (var i = 0; i < pauseBtns.length; i++) {
+      var b = pauseBtns[i];
+      var span = b.querySelector('span');
+      if (!span) { continue; }
+      var s = span.querySelector('.sub');
+      /* first text node is the label */
+      span.childNodes[0].nodeValue = label;
+      if (s && sub) { s.textContent = sub; }
+      b.disabled = !!disabled;
+    }
+  }
+
+  function showAvailable() {
+    state = 'available';
+    body.setAttribute('data-phase', 'available');
+    banner.classList.remove('on');
+    pgClockLbl.textContent = 'RESUMES IN';
+    pgClock.textContent = mmss(PAUSE_SECONDS);
+    setBtns('Pause 3 minutes', 'Everything off, then it comes back by itself', false);
+    for (var i = 0; i < clocks.length; i++) { clocks[i].textContent = mmss(PAUSE_SECONDS); }
+  }
+
+  function showActive() {
+    state = 'active';
+    body.setAttribute('data-phase', 'paused');
+    banner.classList.add('on');
+    pgMark.textContent = '||';
+    pgT.textContent = 'Enforcement paused';
+    pgS.innerHTML = 'Every block is off. Two things are still true: <b>' + pausesLeftToday +
+                    ' pause' + (pausesLeftToday === 1 ? '' : 's') +
+                    ' left today</b>, and the record. The lock is not being spent — it resumes intact.';
+    pgClockLbl.textContent = 'RESUMES IN';
+    pgClock.textContent = mmss(left);
+    setBtns('Pause 3 minutes', 'Already paused. One pause at a time.', true);
+    for (var i = 0; i < clocks.length; i++) { clocks[i].textContent = mmss(left); }
+
+    clearInterval(tick);
+    tick = setInterval(function () {
+      left -= 1;
+      if (left <= 0) { clearInterval(tick); left = 0; showResumed(); return; }
+      pgClock.textContent = mmss(left);
+      for (var i = 0; i < clocks.length; i++) { clocks[i].textContent = mmss(left); }
+    }, 1000);
+  }
+
+  function showResumed() {
+    state = 'cooldown';
+    body.setAttribute('data-phase', 'resumed');
+    banner.classList.add('on');
+    pgMark.textContent = '\u25A0';
+    pgT.textContent = 'Pause ended — enforcement resumed';
+    pgS.innerHTML = 'It expired on its own; nobody cancelled it. The lock came back with its full ' +
+                    'remaining time — <b>0 minutes of it were given up</b>.';
+    pgClockLbl.textContent = 'COOLDOWN';
+    setBtns('Pause 3 minutes', 'Cooling down', true);
+    for (var i = 0; i < clocks.length; i++) { clocks[i].textContent = '00:00'; }
+
+    var cd = COOLDOWN_SECS;
+    clearInterval(cdTick);
+    cdTick = setInterval(function () {
+      cd -= 1;
+      pgClock.textContent = mmss(cd);
+      setBtns('Pause 3 minutes', 'Cooling down — ' + mmss(cd) + ' left', true);
+      if (cd <= 0) {
+        clearInterval(cdTick);
+        if (pausesLeftToday > 0) {
+          showAvailable();
+          setBtns('Pause 3 minutes', 'Everything off, then it comes back by itself', false);
+        } else {
+          banner.classList.remove('on');
+          setBtns('Pause 3 minutes', 'None left today. Resets at midnight.', true);
+        }
+      }
+    }, 250);
+  }
+
+  function startPause() {
+    if (state !== 'available' || pausesLeftToday <= 0) { return; }
+    pausesLeftToday -= 1;
+    setLeft(pausesLeftToday);
+    left = PAUSE_SECONDS;
+    showActive();
+  }
+
+  /* Every pause affordance on the page starts the same pause. They are one
+     feature, so they share one state. */
+  for (var i = 0; i < pauseBtns.length; i++) {
+    pauseBtns[i].addEventListener('click', startPause);
+  }
+
+  /* Any control marked data-pause-allowed="0" is the emergency pass / not-a-pause
+     door. It deliberately does nothing here — it is a different feature. */
+  var notPause = document.querySelectorAll('[data-pause-allowed="0"]');
+  for (var j = 0; j < notPause.length; j++) {
+    notPause[j].addEventListener('click', function (e) { e.preventDefault(); });
+  }
+
+  /* ---- theme toggle: light <-> dark, both measured in caption 04 ---- */
+  themeBtn.addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+    themeName.textContent = dark ? 'Light' : 'Dark';
+    themeBtn.setAttribute('aria-pressed', String(!dark));
+  });
+
+  showAvailable();
+})();
+</script>
+</body>
+</html>

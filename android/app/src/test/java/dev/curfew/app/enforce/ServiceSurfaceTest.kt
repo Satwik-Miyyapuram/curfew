@@ -1,6 +1,7 @@
 package dev.curfew.app.enforce
 
 import android.view.accessibility.AccessibilityEvent
+import dev.curfew.policy.Policy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -69,5 +70,57 @@ class ServiceSurfaceTest {
         assertEquals(narrow.eventTypes and wide.eventTypes, narrow.eventTypes)
         assertFalse(narrow.eventTypes == wide.eventTypes)
         assertTrue(wide.eventTypes and narrow.eventTypes != 0)
+    }
+
+    /**
+     * **A `domain` rule needs the address bar on Android, and that is what broke site blocking.**
+     *
+     * This is the second half of the site-blocking failure. `flagReportViewIds` missing meant the URL
+     * could never be read at all; this meant that even once it could, the subscription had been narrowed
+     * to window-state-only on a config whose only web rules were domains — so the bar was read once as
+     * the browser came to the front, before any navigation, and never again.
+     *
+     * The decision lives in `Policy.needsUrlReading`, and this asserts it from a real policy rather than
+     * from a hand-built target list, because the bug was precisely that two lists of "which rule kinds
+     * count" disagreed. There is only one list now, and it is this one.
+     */
+    @Test
+    fun `a domain rule asks for content events`() {
+        assertTrue(
+            "a config whose only web rule is a domain would narrow the subscription off",
+            policyWith("""target = { kind = "domain", domain = "reddit.com" }""").needsUrlReading(),
+        )
+        assertTrue(
+            policyWith("""target = { kind = "url", pattern = "*://*/watch*" }""").needsUrlReading(),
+        )
+        assertTrue(
+            policyWith("""target = { kind = "keyword", text = "shorts" }""").needsUrlReading(),
+        )
+    }
+
+    /** And a config that blocks only apps does not, which is the saving this exists for. */
+    @Test
+    fun `an app-only config does not ask for content events`() {
+        assertFalse(
+            "an app-only config paid for the content-event firehose",
+            policyWith("""target = { kind = "app_package", package = "com.instagram.android" }""")
+                .needsUrlReading(),
+        )
+    }
+
+    private fun policyWith(target: String): Policy {
+        val toml = """
+            schema_version = 1
+            timezone = "Europe/London"
+
+            [[profiles]]
+            id = "deep-work"
+            name = "Deep work"
+
+            [[profiles.rules]]
+            $target
+            action = { kind = "block" }
+        """.trimIndent()
+        return Policy.load(toml)
     }
 }

@@ -313,18 +313,26 @@ carried through by construction. It refuses to act if the platform reports no fl
 failure leaves the more capable subscription standing. Verified by test; whether a given OEM
 accepts the change still needs a device, and this one does.
 
-### And: bank apps are not blocked at all
+### And: bank apps are blockable, after a detour that was wrong
 
-At the owner's instruction. This is stronger than the reading guarantee, and the reason is
-concrete rather than aesthetic: `engine::decide` mutes the notifications of any target a block
-covers, so blocking a bank app also silences it — and a one-time password that never arrives is a
-payment that never completes, during the two minutes the user can do least about it. Built as:
+**This section originally said the opposite, and the reversal is the point.** A block on a payment or
+banking app was refused, then narrowed off, on the argument that `engine::decide` mutes the
+notifications of any target a block covers and a one-time password that never arrives is a payment that
+never completes. The premise was wrong: `CurfewNotificationListener` returns early for every package on
+the sensitive list, so a blocked bank app is blocked on screen and **its notifications still arrive**.
 
-- **not offered for blocking** — filtered out of both app pickers;
-- **refused on save** — `ConfigStore.write` returns the reason, so a form shows it;
-- **narrowed on load** — `ConfigStore.read` drops *only the offending rule* and leaves the rest.
+Which apps a person blocks is theirs to decide, and the reading restriction belongs to the
+accessibility service rather than to the config. All three of the mechanisms above are gone:
 
-That last distinction was learned the hard way, and is the most valuable thing the device found.
+- the app pickers filter nothing out;
+- `ConfigStore.write` refuses only url/keyword rules in a mode that cannot read a window;
+- `ConfigStore.read` narrows nothing — `dropRulesFor` no longer exists.
+
+The cost of getting this wrong was real: the first version loaded the *baseline* config when it met a
+rule it would not honour, which would have silently stopped enforcing an entire fifty-rule config; the
+second dropped only the offending rules, which still deleted two Amazon blocks from a live device. Both
+are recorded in `ConfigGuardTest` and `AppOnlyConfigTest`, which now assert the removed behaviour stays
+removed.
 
 ### What driving the real device found
 
@@ -465,11 +473,12 @@ opposite failure to the one being fixed. Wants a device.
 
 ### D5. Notification-listener sensitivity — `PAY-06`
 
-Done as a carve-out (financial notifications never muted, and now never inspected, because a
-bank app is not blockable at all so the interaction cannot arise). The stronger options — not
-holding the listener at all, or scanning notification content — were rejected: the first removes a
-feature users asked for, the second contradicts the documented promise that notification content is
-never read.
+Done as a carve-out, and it is load-bearing rather than tidy: financial notifications are never muted
+and never inspected. A bank app **is** blockable, so the interaction the finding was about arises
+exactly as it describes — a block on a bank would otherwise suppress that bank's notifications — and
+this carve-out is what makes blocking one safe. The stronger options (not holding the listener at all,
+or scanning notification content) were rejected: the first removes a feature users asked for, the
+second contradicts the documented promise that notification content is never read.
 
 ### D6. `NotificationListener` / `UsageStatsPoller` as a general detector — `PAY-03`
 

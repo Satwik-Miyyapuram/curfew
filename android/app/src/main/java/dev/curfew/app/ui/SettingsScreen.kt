@@ -4,6 +4,9 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +29,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import dev.curfew.app.R
+import dev.curfew.app.enforce.Detector
 import dev.curfew.app.enforce.EnforcementMode
+import dev.curfew.app.enforce.Watchers
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -194,80 +199,97 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         Gap(10.dp)
         DCard(padding = 18.dp) {
             // The choice the accessibility grant hides inside it, given its own section because it is
-            // the one permission where the *kind* of access matters more than whether it is held. The
-            // two services are not two strengths of one thing: one of them cannot read a screen at
-            // all, and that is the whole reason a user with a bank app they need can still run Curfew.
+            // the one permission where the *kind* of access matters more than whether it is held.
+            //
+            // **What is running and what is chosen are different things, and this used to conflate
+            // them.** `chosenMode` is a remembered preference; `enforcementMode` is read from the
+            // system's own list of enabled services. A user who picked a mode and has not granted it
+            // yet — or who granted a different one in Settings — saw the preference reported as though
+            // it were the fact, which is the app lying about the user's own device. So the status
+            // shown is always what is *running*, the buttons are what is *chosen*, and a disagreement
+            // is stated rather than smoothed over.
+            // **What is detecting right now, which is the question this section exists to answer.**
+            // Three answers, not two: one of the two accessibility services, or the usage log, which
+            // needs no special access at all. The third is what makes "app blocking without
+            // accessibility" a real mode rather than something the architecture document claimed and
+            // the interface denied.
+            val detector = Grant.detector(context)
             val chosen = Grant.chosenMode(context)
-            val running = Grant.enforcementMode(context)
+
+            ModeStatus(detector)
+            Gap(14.dp)
+            ModePicker(chosen) { mode ->
+                // Remembered *and* acted on: remembering keeps the next screen agreeing with this one
+                // while the user is still in Settings, and the settings intent is what changes which
+                // service the system runs. The poller needs neither — it is what happens when this is
+                // turned off, which is why turning it off is a legitimate answer rather than a failure.
+                EnforcementMode.remember(context, mode)
+                Watchers.rememberAccessibilityWanted(context, wanted = true)
+                openGrantPage(context, Grant.Accessibility)
+            }
+            Gap(10.dp)
+            // The unified switch's "off". One tap, and blocking keeps working through the polling
+            // detector — it is only the precision, the site rules and the uninstall guard that go.
+            GhostButton(
+                text = stringResource(R.string.settings_use_no_special_access),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Watchers.rememberAccessibilityWanted(context, wanted = false)
+                // Nothing to open: the poller has no settings page. Turning the services *off* is what
+                // this asks for, and Android has no intent for that, so the user does it in Settings —
+                // which the copy says.
+                turnOffAccessibilityHint(context)
+            }
+            Gap(12.dp)
+            // Said plainly, because a mode named "App blocking" reads as though the choice were about
+            // *which* apps may be blocked. It is not: every version blocks every app the user picks.
+            // What changes is how fast a block lands and whether Curfew may read an address bar.
             Text(
-                stringResource(
-                    if (chosen == EnforcementMode.APP_ONLY) {
-                        R.string.perm_accessibility_mode_app_only
-                    } else {
-                        R.string.perm_accessibility_mode_app_and_url
-                    },
-                ),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Palette.Text,
-            )
-            Gap(4.dp)
-            Text(
-                stringResource(
-                    if (chosen == EnforcementMode.APP_ONLY) {
-                        R.string.perm_accessibility_mode_app_only_note
-                    } else {
-                        R.string.perm_accessibility_mode_app_and_url_note
-                    },
-                ),
+                stringResource(R.string.perm_accessibility_mode_neither_blocks_apps),
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
-                color = Palette.Muted,
+                color = Palette.Text,
             )
-            Gap(12.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                EnforcementMode.entries.forEach { mode ->
-                    GhostButton(
-                        text = stringResource(
-                            if (mode == EnforcementMode.APP_ONLY) {
-                                R.string.perm_accessibility_mode_app_only
-                            } else {
-                                R.string.perm_accessibility_mode_app_and_url
-                            },
-                        ),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        // Remembered *and* acted on. Remembering is what makes the next screen agree
-                        // with this one while the user is still in Settings; the settings intent is
-                        // what actually changes which service is on.
-                        EnforcementMode.remember(context, mode)
-                        openGrantPage(context, Grant.Accessibility)
-                    }
-                }
-            }
+
             // Having both services on is the worst of both worlds and worth saying out loud: the
             // banking warning is present because one of them holds the capability, and the other adds
             // nothing that the reader does not already do.
-            val other = EnforcementMode.entries.firstOrNull { it != chosen && running == it }
+            val other = EnforcementMode.entries.firstOrNull {
+                it.serviceClass() != detector.serviceClass() && Grant.isModeEnabled(context, it)
+            }
             if (other != null) {
-                Gap(10.dp)
-                Text(
-                    stringResource(
+                Gap(12.dp)
+                Notice(
+                    text = stringResource(
                         R.string.perm_accessibility_mode_other_still_on,
-                        stringResource(
-                            if (other == EnforcementMode.APP_ONLY) {
-                                R.string.perm_accessibility_mode_app_only
-                            } else {
-                                R.string.perm_accessibility_mode_app_and_url
-                            },
-                        ),
+                        stringResource(other.label()),
                     ),
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    color = Palette.Bad,
+                    tone = NoticeTone.Warning,
                 )
             }
-            Gap(12.dp)
+
+            // Chosen but not what is detecting: said out loud rather than left as a button that looks
+            // selected over a device running something else. The poller makes this the ordinary case
+            // rather than an error, so it is a note and not a complaint.
+            if (detector != Detector.Poller && chosen != detector.mode()) {
+                // Resolved into names first. Two nested `stringResource` calls inside this one read as
+                // a single argument to the guard that checks format arity across the app, and it was
+                // right to complain: the shallow reading is the one a human makes too.
+                val chosenName = stringResource(chosen.label())
+                val runningName = stringResource(detector.label())
+                Gap(12.dp)
+                Notice(
+                    text = stringResource(
+                        R.string.perm_accessibility_mode_chosen_not_running,
+                        chosenName,
+                        runningName,
+                    ),
+                    tone = NoticeTone.Warning,
+                )
+            }
+
+            Gap(14.dp)
+            Rule()
             // The list itself, one tap away rather than summarised here: which apps are exempt is a
             // long list, and the only two reasons anyone comes to change it are a regional bank that
             // is missing and an app wrongly caught by the label signal.
@@ -426,6 +448,158 @@ private fun Mark(granted: Boolean) {
         color = if (granted) Palette.Ok else Palette.Bad,
         modifier = Modifier.size(18.dp),
     )
+}
+
+/** What is detecting right now, and what that costs. */
+@Composable
+private fun ModeStatus(detector: Detector) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.settings_mode_running_label),
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = Palette.Dim,
+        )
+        Gap(3.dp)
+        Text(
+            stringResource(detector.label()),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            // The polling detector is not a failure and is not coloured as one: it is a real detector
+            // the user may have chosen on purpose, because it needs no alarming permission.
+            color = Palette.Text,
+        )
+        Gap(2.dp)
+        Text(
+            stringResource(detector.note()),
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            color = Palette.Muted,
+        )
+    }
+}
+
+/**
+ * The two modes, as a segmented control rather than two buttons.
+ *
+ * Two identical-looking buttons over a line of prose made it impossible to see which one was in force,
+ * which is the only question this section exists to answer. One border, a shared baseline, and the
+ * chosen half filled — so the selection is a shape rather than something to be read out of a sentence.
+ */
+@Composable
+private fun ModePicker(chosen: EnforcementMode, onPick: (EnforcementMode) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Dsn.CtlRadius))
+            .background(Palette.Surface)
+            .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius)),
+    ) {
+        EnforcementMode.entries.forEachIndexed { index, mode ->
+            if (index > 0) {
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(Dsn.MinTouch)
+                        .background(Palette.Line),
+                )
+            }
+            val selected = mode == chosen
+            // Resolved out here: `semantics` takes a non-composable lambda and `stringResource` is
+            // composable, so hoisting it is required rather than tidier.
+            val name = stringResource(mode.label())
+            val described = if (selected) "$name, selected" else name
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(Dsn.MinTouch)
+                    .background(if (selected) Palette.Accent.copy(alpha = 0.20f) else Color.Transparent)
+                    .clickable { onPick(mode) }
+                    // The label *and* the state, so a screen reader says which one is chosen instead of
+                    // reading two labels and leaving the listener to work it out.
+                    .semantics(mergeDescendants = true) { contentDescription = described },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    name,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) Palette.Text else Palette.Muted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** A sentence worth interrupting the page for. Distinct from body text by shape, not only by colour. */
+@Composable
+private fun Notice(text: String, tone: NoticeTone) {
+    val edge = if (tone == NoticeTone.Warning) Palette.Live else Palette.Muted
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(edge.copy(alpha = 0.10f)),
+    ) {
+        // A bar rather than a tinted card, so the kind is legible without colour: the shape says
+        // "notice" and the colour only says which sort.
+        Box(Modifier.width(3.dp).height(Dsn.MinTouch).background(edge))
+        Text(
+            text,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            color = Palette.Text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        )
+    }
+}
+
+private enum class NoticeTone { Warning, Info }
+
+/** The resource naming this mode, in one place so a call site cannot pick the wrong pairing. */
+private fun EnforcementMode.label(): Int = when (this) {
+    EnforcementMode.APP_ONLY -> R.string.perm_accessibility_mode_app_only
+    EnforcementMode.APP_AND_URL -> R.string.perm_accessibility_mode_app_and_url
+}
+
+/** The resource naming a detector, paired with [Detector.note]. */
+private fun Detector.label(): Int = when (this) {
+    Detector.Tracker -> R.string.perm_accessibility_mode_app_only
+    Detector.Reader -> R.string.perm_accessibility_mode_app_and_url
+    Detector.Poller -> R.string.settings_detector_poller
+}
+
+/** The resource saying what a detector costs. */
+private fun Detector.note(): Int = when (this) {
+    Detector.Tracker -> R.string.perm_accessibility_mode_app_only_note
+    Detector.Reader -> R.string.perm_accessibility_mode_app_and_url_note
+    Detector.Poller -> R.string.settings_detector_poller_note
+}
+
+/** The mode a detector corresponds to, for comparing a choice against what is running. */
+private fun Detector.mode(): EnforcementMode? = when (this) {
+    Detector.Tracker -> EnforcementMode.APP_ONLY
+    Detector.Reader -> EnforcementMode.APP_AND_URL
+    Detector.Poller -> null
+}
+
+/**
+ * Say where the switch is, since we cannot flip it.
+ *
+ * There is no intent that turns an accessibility service *off* — `ACTION_ACCESSIBILITY_SETTINGS`
+ * opens the list, and the only API that can change a component's enabled state needs a permission
+ * this app does not hold and should not ask for. So the honest answer is to say the path and open the
+ * list, rather than to leave a toggle that appears to do nothing.
+ */
+private fun turnOffAccessibilityHint(context: android.content.Context) {
+    android.widget.Toast.makeText(
+        context,
+        context.getString(R.string.settings_use_no_special_access_how),
+        android.widget.Toast.LENGTH_LONG,
+    ).show()
+    openGrantPage(context, Grant.Accessibility)
 }
 
 @Composable

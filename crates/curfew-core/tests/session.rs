@@ -983,3 +983,190 @@ fn a_restore_cannot_remove_a_running_end_time() {
          nothing can open it"
     );
 }
+
+// --- "if I end a block it stays ended", on every path -------------------------------------------
+//
+// The requirement, verbatim: *"I also want you to make sure that if i end a block it stays ended"*.
+// The guard that makes it true is one line of arithmetic in `reconcile` (`at >= start && at < end`),
+// so the interesting question is not whether it fires but which instants can be written into it, and
+// which other paths start a session without asking it. Each test below is one of those.
+
+/// A session exactly as `reconcile` mints one: started at the instant it first saw the window, and
+/// ending when the window does. The started_at matters to the tests here — it is the lower bound a
+/// clamped dismissal is pulled to — so they cannot use the `NOW`-based `session` fixture.
+fn running_in(id: &str, profile: &str, started_at: Timestamp, ends_at: Timestamp) -> Session {
+    Session {
+        id: id.into(),
+        profile: profile.into(),
+        source: SessionSource::Weekly { schedule: "w".into() },
+        started_at,
+        lock: LockSet::new([], Some(ends_at)),
+    }
+}
+
+/// **Hole 1, forward clock.** `end` takes `now` from the caller, because a core has no clock of its
+/// own. A device whose clock had been moved past the end of the window — and which then ended the
+/// block — recorded the ending *outside* the occurrence, where `reconcile` refuses to honour it, so
+/// the block was back on the next pass a second later: the clock was an exit that lasted a second.
+#[test]
+fn ending_a_block_while_the_clock_says_the_window_is_over_still_ends_that_window() {
+    let mut s = Sessions::default();
+    let window = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&window), |_| "id".into());
+
+    // The clock reads an hour past the window's end, and the user ends the block.
+    s.end("id", 1_000, &BTreeSet::new()).expect("the lock is satisfied, whatever the clock says");
+    assert_eq!(
+        s.dismissed.get("study").copied(),
+        Some(399),
+        "the end was recorded outside the window it ended"
+    );
+
+    // The clock comes back inside the window.
+    let started = reconcile(200, &mut s, std::slice::from_ref(&window), |_| "id2".into());
+
+    assert!(started.is_empty(), "the window the user ended started again: {started:?}");
+    assert!(s.running.is_empty(), "the block came back after being ended");
+}
+
+/// **Hole 1, backward clock.** The same arithmetic from the other side. A clock moved *before* the
+/// window's start puts the recorded end where the window does not cover it either, and the same
+/// second-long resurrection followed.
+#[test]
+fn ending_a_block_while_the_clock_is_before_the_window_still_ends_that_window() {
+    let mut s = Sessions::default();
+    let window = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&window), |_| "id".into());
+
+    // The clock reads before the window opened, and the user ends the block.
+    s.end("id", 50, &BTreeSet::new()).expect("the lock is satisfied");
+    assert_eq!(
+        s.dismissed.get("study").copied(),
+        Some(150),
+        "the end was pulled earlier than the session it ended"
+    );
+
+    let started = reconcile(200, &mut s, std::slice::from_ref(&window), |_| "id2".into());
+
+    assert!(started.is_empty(), "the window the user ended started again: {started:?}");
+    assert!(s.running.is_empty(), "the block came back after being ended");
+}
+
+/// **Hole 1, through the escape hatch.** `spend_pass` ends a session through [`Sessions::end`]
+/// underneath, so a pass dismisses the occurrence exactly as a plain end does — which matters because
+/// a pass is the one route that ends a session whose conditions cannot be met. Pinned here because a
+/// future refactor could release the lock without going through `end`, and nothing else would notice.
+#[test]
+fn ending_with_a_spent_pass_dismisses_the_occurrence_too() {
+    let policy = EmergencyPolicy { passes: 1, window_seconds: 7 * 86_400, cooldown_seconds: 0 };
+    let mut passes = Passes::default();
+    let mut s = Sessions::default();
+    let window = activation("study", 100, 400, vec![Lock::Token { id: "tag".into() }]);
+    reconcile(150, &mut s, std::slice::from_ref(&window), |_| "id".into());
+
+    let pass = passes.spend(150, &policy).expect("the only pass");
+    s.end_with_pass("id", 200, pass).expect("a spent pass ends the session");
+    let started = reconcile(201, &mut s, std::slice::from_ref(&window), |_| "id2".into());
+
+    assert!(started.is_empty(), "a pass ended the session but not the occurrence: {started:?}");
+    assert!(s.running.is_empty(), "the block came back after a pass ended it");
+}
+
+/// **Hole 2.** A manual session with no end time has no occurrence for `reconcile` to match, so
+/// nothing in enforcement can start it back up — the only door back in is storage. It must be shut
+/// there too, and the same guard closes it: with `ends_at: None` the session is endless, so any end
+/// at or after its start belongs to it.
+#[test]
+fn an_endless_session_that_was_ended_does_not_come_back_from_storage() {
+    let mut s = Sessions::default();
+    let mut lock = LockSet::new([Lock::Confirm], None);
+    lock.delayed_release_at = None;
+    s.start(session("m1", "study", lock));
+    s.end("m1", NOW + 10, &evidence(&[Lock::Confirm])).expect("the condition was met");
+
+    // The store still holds it — a write that did not land, or one written before the end.
+    let mut stored = Sessions::default();
+    stored.start(session("m1", "study", LockSet::new([Lock::Confirm], None)));
+    s.restore_without_weakening(stored);
+
+    assert!(s.running.is_empty(), "an ended endless session came back from storage");
+}
+
+/// **Hole 3.** The restore path starts sessions that are not running, and it did so without asking
+/// whether the occurrence had been ended here. A store written a moment before the end — or one whose
+/// write did not land because the process died between the end and the flush — therefore put the block
+/// straight back, and `reconcile` would not have undone it, because `reconcile` never ends anything.
+#[test]
+fn a_restore_cannot_restart_an_occurrence_the_user_ended() {
+    let mut s = Sessions::default();
+    let window = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&window), |_| "id".into());
+    s.end("id", 200, &BTreeSet::new()).expect("an unlocked session ends on request");
+    assert!(s.running.is_empty());
+
+    // The stale blob: the same session, as this device had it a moment before the end.
+    let mut stored = Sessions::default();
+    stored.start(running_in("id", "study", 150, 400));
+    s.restore_without_weakening(stored);
+
+    assert!(s.running.is_empty(), "a restore put back the block the user had just ended");
+    let started = reconcile(201, &mut s, std::slice::from_ref(&window), |_| "id2".into());
+    assert!(started.is_empty(), "the restored occurrence then restarted: {started:?}");
+}
+
+/// **And the boundary that keeps this from being "a dismissed profile can never be restored".** A
+/// restore for a *later* occurrence — tomorrow's window, which starts after the end here — still
+/// starts, because that end does not cover it.
+#[test]
+fn a_restore_of_a_later_occurrence_still_starts_after_an_end() {
+    let mut s = Sessions::default();
+    let tonight = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&tonight), |_| "id".into());
+    s.end("id", 200, &BTreeSet::new()).expect("an unlocked session ends on request");
+
+    let mut stored = Sessions::default();
+    stored.start(running_in("id2", "study", 1_000, 1_300));
+    s.restore_without_weakening(stored);
+
+    assert_eq!(s.running.len(), 1, "tomorrow's session was dropped by tonight's dismissal");
+    assert_eq!(s.active_profiles(1_050), vec!["study".to_string()]);
+}
+
+/// **Hole 5.** An expired session ends because its own lock said so, not because anybody decided
+/// anything. `reap` must therefore write no dismissal, and the instant the session ran out must not
+/// be mistaken for one against a later window.
+#[test]
+fn an_expired_session_writes_no_dismissal_and_the_next_window_still_starts() {
+    let mut s = Sessions::default();
+    let window = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&window), |_| "id".into());
+
+    let reaped = s.reap(400);
+    assert_eq!(reaped.len(), 1, "the fixture's window has not ended");
+    assert!(
+        s.dismissed.is_empty(),
+        "an expiry was remembered as an ending by hand: {:?}",
+        s.dismissed
+    );
+
+    let tomorrow = activation("study", 1_000, 1_300, vec![]);
+    let started = reconcile(1_050, &mut s, std::slice::from_ref(&tomorrow), |_| "id2".into());
+    assert_eq!(started.len(), 1, "the next occurrence did not start after an expiry");
+}
+
+/// **Hole 5, the other side.** Ending a session whose time was already up — the second between the
+/// timer reaching zero and the reap that follows it — records a dismissal clamped into *that*
+/// window, so it cannot reach the next one. The comment on `dismissed` claims "this ends tonight's
+/// window, never the schedule"; this is the case where the arithmetic could break that claim.
+#[test]
+fn an_end_recorded_from_a_clock_past_the_window_does_not_reach_the_next_window() {
+    let mut s = Sessions::default();
+    let tonight = activation("study", 100, 400, vec![]);
+    reconcile(150, &mut s, std::slice::from_ref(&tonight), |_| "id".into());
+    s.end("id", 500, &BTreeSet::new()).expect("an expired session ends freely");
+
+    let tomorrow = activation("study", 1_000, 1_300, vec![]);
+    let started = reconcile(1_050, &mut s, std::slice::from_ref(&tomorrow), |_| "id2".into());
+
+    assert_eq!(started.len(), 1, "tonight's end silenced tomorrow's window: {started:?}");
+}

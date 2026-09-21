@@ -81,6 +81,7 @@ enum class EnforcementMode {
 
         private const val PREFS = "curfew_enforcement"
         private const val KEY_MODE = "mode"
+        private const val KEY_A11Y = "accessibility_wanted"
 
         /**
          * The mode the user chose, or null when they have never chosen.
@@ -89,9 +90,9 @@ enum class EnforcementMode {
          * user picks a mode, is sent to Settings, and comes back — and every screen in between has to
          * show the mode they are mid-way through granting rather than the one still running.
          *
-         * It is a *request*, never a fact. What is running is [current], read from the system, and the
-         * two disagreeing is the ordinary case rather than an error: the user may have turned the
-         * service off in Settings, or granted the other one.
+         * It is a *request*, never a fact. What is running is [Detector.current], read from the system,
+         * and the two disagreeing is the ordinary case rather than an error: the user may have turned
+         * the service off in Settings, or granted the other one.
          */
         fun stored(context: Context): EnforcementMode? {
             val raw = context.applicationContext
@@ -113,6 +114,79 @@ enum class EnforcementMode {
 }
 
 /**
+ * What is actually watching for the foreground app — the question every screen really wants answered.
+ *
+ * **This exists because "which mode did you pick" and "what is running" were being conflated, and
+ * neither one is a detector.** There are two accessibility services and a poller, and the poller is
+ * not a mode: it is what runs when no accessibility service is granted. Three states, then, and the
+ * app only ever talked about the first two:
+ *
+ *  - [Tracker] — the accessibility service that reads no window. Precise, no banking warning.
+ *  - [Reader] — the accessibility service that reads browser address bars. Precise, blocks sites, warns banks.
+ *  - [Poller] — `UsageStatsManager`, needing only `PACKAGE_USAGE_STATS`. **This is app blocking with
+ *    no accessibility at all**, and it is what `docs/ARCHITECTURE.md` has always claimed exists
+ *    ("Losing one permission weakens blocking; it never disables the app") while the interface said
+ *    the opposite and marked the accessibility grant *required*.
+ *
+ * The honest cost of [Poller], which every screen must say when it is in use: it samples, so there is a
+ * lag of up to a poll interval before a block appears; it cannot re-assert a block against a user who
+ * keeps returning to the app; and it cannot block a site, because a URL is not something usage stats
+ * record. It is a real detector and a weaker one, and calling it a fallback is not the same as calling
+ * it useless.
+ */
+enum class Detector {
+    Tracker,
+    Reader,
+    Poller,
+    ;
+
+    /** Whether this detector reads window content. Only the reader does. */
+    val readsWindowContent: Boolean get() = this == Reader
+
+    /** Whether this detector can enforce a url, keyword or domain rule. */
+    val blocksSites: Boolean get() = this == Reader
+
+    /** Whether a block appears the moment the app opens, rather than within a poll interval. */
+    val isPrecise: Boolean get() = this != Poller
+
+    /** Whether payment and banking apps are entitled to refuse to run beside it. */
+    val warnsBanks: Boolean get() = this == Reader
+
+    /**
+     * The accessibility service behind this detector, or null for the poller.
+     *
+     * Null is the point rather than an inconvenience: a caller that wants to open a Settings page has
+     * to handle "there is no page for this" instead of being handed one that does not exist.
+     */
+    fun serviceClass(): Class<out AccessibilityService>? = when (this) {
+        Tracker -> ForegroundTracker::class.java
+        Reader -> UrlReaderService::class.java
+        Poller -> null
+    }
+
+    companion object {
+        /**
+         * What is watching right now, preferring the one the user asked for.
+         *
+         * Read from the system's own enabled-service list rather than from the preference, because the
+         * preference is a request and this is the fact: either service can be turned off from Settings
+         * at any moment. Falls back to [Poller] — which is to say, to no accessibility service at all,
+         * since the poller needs no component to be enabled — rather than returning null, because
+         * something *is* always watching: `EnforcementService` runs either way.
+         */
+        fun current(context: Context): Detector = when {
+            Watchers.isEnabled(context, EnforcementMode.APP_AND_URL) -> Reader
+            Watchers.isEnabled(context, EnforcementMode.APP_ONLY) -> Tracker
+            else -> Poller
+        }
+
+        /** Whether any accessibility detector is running, as opposed to the poller. */
+        fun accessibilityRunning(context: Context): Boolean =
+            Watchers.anyEnabled(context)
+    }
+}
+
+/**
  * Which of Curfew's two accessibility services are on, and what the URL reader is currently doing.
  *
  * A small object rather than fields on one of the services, because the two are alternatives and
@@ -121,6 +195,9 @@ enum class EnforcementMode {
  * to know whether the fallback poller is required).
  */
 object Watchers {
+
+    private const val PREFS = "curfew_enforcement"
+    private const val KEY_A11Y = "accessibility_wanted"
 
     /** The running URL reader, for the one global action an enforcer needs to perform. */
     @Volatile
@@ -135,6 +212,36 @@ object Watchers {
      */
     @Volatile
     var activeBrowserPackage: String? = null
+
+    /**
+     * Whether the user wants an accessibility service at all.
+     *
+     * **The unified switch.** There are two services because Android applies the window-content
+     * privilege per *service*, but there is one decision — do you want precise blocking, or would you
+     * rather not grant accessibility at all. That decision lives here; which service it maps to, and
+     * what happens when it is off, is [EnforcementMode]'s and [Detector]'s business.
+     *
+     * Defaults to true: a user who has never chosen has also never been told there is a choice, and
+     * the precise detector is the one the app is designed around.
+     *
+     * A *request*, like [EnforcementMode.stored] and for the same reason — we cannot enable or disable
+     * an accessibility service ourselves. `CHANGE_COMPONENT_ENABLED_STATE` is a system permission, and
+     * a component disabled by us would vanish from the list the user needs to reach later. What is
+     * actually running is [Detector.current], read from the system.
+     */
+    fun wantsAccessibility(context: Context): Boolean =
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_A11Y, true)
+
+    /** Record the choice. See [wantsAccessibility] for why this is not the source of truth. */
+    fun rememberAccessibilityWanted(context: Context, wanted: Boolean) {
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_A11Y, wanted)
+            .apply()
+    }
 
     /**
      * The apps no reader may look at, as of the last time anything asked.

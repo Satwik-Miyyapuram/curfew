@@ -418,24 +418,27 @@ class Policy private constructor(private val inner: Curfew) {
     fun activeProfiles(now: Long): List<String> = inner.activeProfiles(now)
 
     /**
-     * Whether any profile has a rule only a window reader can enforce.
+     * Whether any profile has a rule that only reading a window can enforce.
      *
-     * A `url` or `keyword` rule needs the browser's address bar, and the address bar is re-read on
-     * content events — so this is what decides whether the URL reader's subscription has to include
-     * them. Asked of every profile rather than of the running ones: a rule in a profile that is not
-     * running this minute still has to be enforceable when its schedule comes round, and a
-     * subscription narrowed for the wrong minute is a block that silently does not happen.
+     * **Three kinds, and leaving one out cost site blocking twice.** A `url` or `keyword` rule needs the
+     * browser's address bar, and so does a `domain` rule *on Android*: Windows enforces a domain in the
+     * resolver and the hosts file, but there is no resolver here, so a blocked domain is enforced by
+     * reading the URL and navigating away from it. This originally counted only `url` and `keyword`,
+     * which narrowed the reader's subscription to window-state-only on a config whose only web rules
+     * were domains — so the address bar was read once as the browser came to the front, before any
+     * navigation, and never again.
      *
-     * `keyword` counts because it searches the normalized URL, which does not exist without a window
-     * to read. Every other target kind is decided from the window-state event's package name alone.
+     * Asked of every profile rather than of the running ones: a rule in a profile that is not running
+     * this minute still has to be enforceable when its schedule comes round, and a subscription
+     * narrowed for the wrong minute is a block that silently does not happen.
      */
-    fun hasUrlLevelRules(): Boolean {
+    fun needsUrlReading(): Boolean {
         val toml = configToml()
         return profiles(toml).any { profile ->
             runCatching {
                 rules(profile.id).any { rule ->
                     val target = rule.target
-                    target is Target.Url || target is Target.Keyword
+                    target is Target.Url || target is Target.Keyword || target is Target.Domain
                 }
             }.getOrDefault(false)
         }

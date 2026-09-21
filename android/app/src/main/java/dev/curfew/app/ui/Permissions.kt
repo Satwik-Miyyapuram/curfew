@@ -18,6 +18,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.CurfewNotificationListener
+import dev.curfew.app.enforce.Detector
 import dev.curfew.app.enforce.EnforcementMode
 import dev.curfew.app.enforce.UsageStatsPoller
 import dev.curfew.app.enforce.Watchers
@@ -49,23 +50,23 @@ enum class Grant(
     val required: Boolean,
 ) {
     /**
-     * The accessibility grant. **There are two services behind this one grant**, and which of them
-     * the user enables is the choice [dev.curfew.app.enforce.EnforcementMode] describes.
+     * The accessibility grant. **There are two services behind this one grant**, and which of them the
+     * user enables is the choice [dev.curfew.app.enforce.EnforcementMode] describes.
      *
      * It is presented as one grant rather than as two rows because it is one decision — "may Curfew
-     * see what is in front" — and the interesting part is the trade-off inside it, which the cost
-     * string states. The wizard shows the service the chosen mode uses and tells the user when the
-     * other one is still enabled; see `Permissions` screen copy.
+     * see what is in front, precisely" — and the trade-off inside it is stated in the cost string.
+     * The wizard shows the service the chosen mode uses and says when the other one is still enabled.
      *
-     * It stays [required] because app blocking does not work without one of the two, whichever the
-     * user picks — and the mode they have not picked is not a lesser version of the app, it is a
-     * different set of features.
+     * **Not required, and that is a correction.** This was marked required while `UsageStatsPoller`
+     * was already enforcing app blocks with nothing but `PACKAGE_USAGE_STATS` — which meant the health
+     * screen announced "nothing is being blocked" to a user whose apps were being blocked. It is the
+     * precise detector that needs this grant, not blocking itself. See [Detector].
      */
     Accessibility(
         title = R.string.perm_accessibility_title,
         because = R.string.perm_accessibility_because,
         cost = R.string.perm_accessibility_cost,
-        required = true,
+        required = false,
     ),
     UsageAccess(
         title = R.string.perm_usage_access_title,
@@ -237,15 +238,36 @@ enum class Grant(
         fun enforcementMode(context: Context): EnforcementMode? = EnforcementMode.current(context)
 
         /**
+         * What is actually detecting the foreground app: one of the services, or the usage log.
+         *
+         * Not nullable, and that is the correction. This used to be [enforcementMode] returning null
+         * when no service was granted, which every screen read as "nothing is blocking" — while
+         * `UsageStatsPoller` was enforcing app blocks with nothing but `PACKAGE_USAGE_STATS`. There is
+         * always a detector. Which one it is, and what it costs, is the interesting part.
+         */
+        fun detector(context: Context): Detector = Detector.current(context)
+
+        /**
          * Which mode the user has chosen, whether or not it is currently running.
          *
-         * From the config, falling back to the running service and then to the cheap default — so a
-         * user who has chosen app-only but not yet granted it is still shown app-only.
+         * From the running service first, then the stored preference, then the cheap default — so a
+         * user who chose app-only but has not granted it yet is still shown app-only, while a user who
+         * granted one mode and later changed their mind sees the one actually in force.
          */
         fun chosenMode(context: Context): EnforcementMode =
             EnforcementMode.current(context)
                 ?: EnforcementMode.stored(context)
                 ?: EnforcementMode.DEFAULT
+
+        /**
+         * Whether one specific mode's service is switched on.
+         *
+         * Asked per mode rather than inferred from the running one, because both can be on at once —
+         * which is the worst configuration and the one the settings screen warns about. See
+         * [Watchers.isEnabled].
+         */
+        fun isModeEnabled(context: Context, mode: EnforcementMode): Boolean =
+            Watchers.isEnabled(context, mode)
 
         /** Asked in one place, in [UsageStatsPoller], so the API-level branch exists only once. */
         fun hasUsageAccess(context: Context): Boolean = UsageStatsPoller.hasPermission(context)
