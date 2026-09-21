@@ -81,13 +81,12 @@ locks = [{ kind = "timer" }]
             .allowMainThreadQueries()
             .build()
         val file = File.createTempFile("curfew", ".toml").apply { deleteOnExit() }
-        val store = ConfigStore(file = file, mode = { mode }, unblockable = { unblockable() })
+        val store = ConfigStore(file = file, mode = { mode })
         // Seeded by writing the *file*, the way a restored backup or a hand edit arrives, rather than
         // through `ConfigStore.write`. The two paths do different things on purpose: `write` refuses an
         // edit it cannot honour and says why, because the person making it is looking at a form; `read`
-        // narrows a config it finds on disk, because discarding somebody's whole ruleset over one rule
-        // is worse than loading the rest. A test that wants the refusal calls `write` — see
-        // `AppOnlyConfigTest`.
+        // narrows only what cannot be enforced at all. A test that wants the refusal calls `write` —
+        // see `AppOnlyConfigTest`.
         file.writeText(configToml)
         return CurfewRuntime(
             context = context,
@@ -97,16 +96,6 @@ locks = [{ kind = "timer" }]
             clock = clock,
         )
     }
-
-    /**
-     * The apps treated as unblockable, resolved the way the app resolves them.
-     *
-     * The curated list plus the user's own additions, minus their exemptions — the real
-     * [SensitiveApps.resolve] rather than the constant, so a test sees the same set the device does.
-     */
-    private fun unblockable(): Set<String> =
-        runCatching { SensitiveApps.resolve(ApplicationProvider.getApplicationContext()) }
-            .getOrDefault(SensitiveApps.CURATED)
 }
 
 /**

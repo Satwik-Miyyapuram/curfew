@@ -26,13 +26,6 @@ class ConfigStore(
      * taken at construction would keep answering with whatever was true when the process started.
      */
     private val mode: () -> EnforcementMode = { EnforcementMode.DEFAULT },
-    /**
-     * The apps that may not be blocked, resolved per call.
-     *
-     * A function for the same reason as [mode], and defaulted to the curated list so a unit test that
-     * does not care gets the shipped guarantee rather than no guarantee at all.
-     */
-    private val unblockable: () -> Set<String> = { SensitiveApps.CURATED },
 ) {
 
     /** The default config for a fresh install: valid, empty of rules, and blocking nothing. */

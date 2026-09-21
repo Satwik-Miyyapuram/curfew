@@ -886,14 +886,12 @@ class CurfewRuntime internal constructor(
                 EnforcementMode.current(context) ?: EnforcementMode.stored(context)
                     ?: EnforcementMode.DEFAULT
             }
-            // Asked per call for the same reason as the mode: the user can add their bank to the
-            // sensitive list while this process is alive, and the check that refuses to block it has
-            // to know about the addition from that moment rather than from the next process start.
-            val unblockable = { SensitiveApps.resolve(context) }
+            // Only the mode is passed. A config is judged on whether this device can *enforce* it —
+            // a url rule under a detector that cannot read a window — and on nothing else. Which apps
+            // a person blocks is theirs to decide, so there is no "unblockable" list here to consult.
             val config = ConfigStore(
                 file = File(context.filesDir, "curfew.toml"),
                 mode = mode,
-                unblockable = unblockable,
             )
             val db = Room.databaseBuilder(context, CurfewDatabase::class.java, "curfew.db")
                 .openHelperFactory(SupportOpenHelperFactory(DatabaseKey.passphrase(context)))
@@ -906,7 +904,6 @@ class CurfewRuntime internal constructor(
                         ConfigStore(
                             file = File(context.filesDir, "unused"),
                             mode = mode,
-                            unblockable = unblockable,
                         ).read(),
                     )
                 }
