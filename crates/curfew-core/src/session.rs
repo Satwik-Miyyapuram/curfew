@@ -91,6 +91,12 @@ pub struct Sessions {
     ///
     /// So an end is remembered against the occurrence it ended, and reconcile skips exactly that
     /// occurrence. The *next* one starts normally: this ends tonight's window, never the schedule.
+    ///
+    /// The instant stored is the end as [`Sessions::end`] recorded it, which is *clamped* into the
+    /// window the session was under — see the comment there. That clamp is what makes "inside the
+    /// occurrence" a property of the value rather than a hope about the caller's clock: a timestamp
+    /// from a clock that had been moved past either end of the window would otherwise name no
+    /// occurrence at all, and the window would start again.
     #[serde(default)]
     pub dismissed: BTreeMap<String, Timestamp>,
 }
@@ -155,7 +161,9 @@ impl Sessions {
     ///   `None` is top, so a restore may add a condition, push the end time later or push the release
     ///   later, and can do nothing else.
     /// * A session in the incoming set that is not running is **started**, which is what a legitimate
-    ///   restore after a restart needs.
+    ///   restore after a restart needs — unless the occurrence it belongs to was ended by hand here,
+    ///   which the live [`Sessions::dismissed`] map is the newer record of. A restore must not be able
+    ///   to put back a block the user ended on this device.
     /// * A session running here and **absent** from the incoming set is **kept**. Deleting the stored
     ///   state is therefore not a way to end a lock — which is the case that matters, because the
     ///   stored state is a file a user can delete.
@@ -183,6 +191,21 @@ impl Sessions {
                 existing.lock = existing.lock.harden(&session.lock);
                 continue;
             }
+            // **An occurrence this device ended by hand does not come back from storage.**
+            //
+            // A restore is this device reading its own past back, and the past can be behind: a store
+            // written a moment before the end, or a write that never landed because the process was
+            // killed between the end and the flush, still holds the session the user had just ended.
+            // Starting it puts the block back on screen, and `reconcile` will not undo that — it never
+            // ends anything. The live dismissal is the newer fact, so it wins.
+            //
+            // This cannot break the case the function exists for. On a real restart `self` is empty,
+            // so there is no dismissal to consult and everything starts as before; and a dismissal
+            // for a *later* occurrence cannot cover an earlier session, because `dismissal_covers`
+            // requires the end to be at or after that session's own start.
+            if self.dismissal_covers(&session) {
+                continue;
+            }
             self.start(session);
         }
         for (occurrence, at) in incoming.dismissed {
@@ -192,6 +215,33 @@ impl Sessions {
 
     pub fn for_profile(&self, profile: &str) -> Option<&Session> {
         self.running.iter().find(|s| s.profile == profile)
+    }
+
+    /// **Whether this exact occurrence was ended by hand here** — the predicate [`reconcile`] uses to
+    /// leave a window alone after the user ended it.
+    ///
+    /// It lives here rather than inline in `reconcile` because a second caller needs the same answer
+    /// for a different decision: sync adoption must not start a session for an occurrence this device
+    /// ended. Two copies of this rule is exactly how the two would come to disagree.
+    pub fn is_dismissed(&self, activation: &Activation) -> bool {
+        self.dismissed
+            .get(&activation.profile)
+            .is_some_and(|at| *at >= activation.start && *at < activation.end)
+    }
+
+    /// Whether the hand-end remembered for this session's profile still covers *this* session.
+    ///
+    /// The same question as [`Sessions::is_dismissed`], asked with a session rather than an
+    /// activation: the dismissal falls inside the span the session was under. Used by
+    /// [`Sessions::restore_without_weakening`] and by the sync mirror, which have a stored or a
+    /// peer-supplied session in hand and no activation to compare against.
+    ///
+    /// A session with no end time (`ends_at: None`, "until released") is endless, so any end at or
+    /// after its start belongs to it.
+    pub fn dismissal_covers(&self, session: &Session) -> bool {
+        self.dismissed.get(&session.profile).is_some_and(|at| {
+            *at >= session.started_at && session.lock.ends_at.is_none_or(|end| *at < end)
+        })
     }
 
     /// Profiles currently running, for [`crate::engine::State`].
@@ -232,7 +282,17 @@ impl Sessions {
         let ended = self.running.remove(index);
         // Remembered against the profile, so the occurrence that is matching right now does not
         // restart on the next reconcile a second from now.
-        self.dismissed.insert(ended.profile.clone(), now);
+        //
+        // **Clamped into the window the session was actually under, and that is not cosmetic.**
+        // `reconcile` honours a dismissal only while it falls *inside* the occurrence it ended, and
+        // `now` is the caller's clock — a reading this type cannot check, because the core has no
+        // clock of its own. A device whose clock had been moved past the end of the window (or back
+        // before its start) and which then pressed End would otherwise record the ending somewhere
+        // the window does not cover, and the very next reconcile would start the block straight back
+        // up: the clock would have been a way out that lasted about a second. A session cannot have
+        // been running outside its own lock, so a dismissal clamped into `[started_at, ends_at)`
+        // cannot invent an ending, and cannot move one out of the occurrence it belongs to.
+        self.dismissed.insert(ended.profile.clone(), clamped_into(&ended, now));
         Ok(ended)
     }
 
@@ -278,11 +338,33 @@ impl Sessions {
     }
 
     /// Drop sessions whose time is up. Returns what it removed, so the caller can log and notify.
+    ///
+    /// **Expiry is not an ending by hand, and this deliberately writes no dismissal.** A session that
+    /// reached its own end time ends because its lock said so, and `reconcile` skips an occurrence
+    /// whose end has passed anyway; remembering it as dismissed would be remembering a decision
+    /// nobody made. [`Sessions::end`] is the only thing that dismisses, so the two cannot be
+    /// confused.
     pub fn reap(&mut self, now: Timestamp) -> Vec<Session> {
         let (over, still_running): (Vec<_>, Vec<_>) =
             std::mem::take(&mut self.running).into_iter().partition(|s| s.is_over(now));
         self.running = still_running;
         over
+    }
+}
+
+/// `now`, pulled inside the window the session that just ended was actually under.
+///
+/// See [`Sessions::end`] for why the recorded dismissal is clamped rather than taken as given. The
+/// upper bound is `ends_at - 1` rather than `ends_at` because an occurrence is half-open,
+/// `[start, end)`: the last instant that belongs to it is one second before its end, and a dismissal
+/// at exactly the end is one `reconcile` would refuse to honour.
+fn clamped_into(session: &Session, now: Timestamp) -> Timestamp {
+    match session.lock.ends_at {
+        Some(end) => {
+            let latest = end.saturating_sub(1).max(session.started_at);
+            now.clamp(session.started_at, latest)
+        }
+        None => now.max(session.started_at),
     }
 }
 
@@ -310,11 +392,7 @@ pub fn reconcile(
         }
         // This exact occurrence was ended by hand: leave it ended. Anything starting later is a
         // new occurrence and is unaffected.
-        if sessions
-            .dismissed
-            .get(&activation.profile)
-            .is_some_and(|at| *at >= activation.start && *at < activation.end)
-        {
+        if sessions.is_dismissed(activation) {
             continue;
         }
         let existing_lock = sessions.for_profile(&activation.profile).map(|s| s.lock.clone());

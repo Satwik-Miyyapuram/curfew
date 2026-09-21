@@ -17,12 +17,20 @@
 //! Adoption can only ever add. A session a peer started is started here; a session a peer ended is
 //! ended here only if the *local* lock allows it, which is [`Sessions::end`] refusing, not this
 //! module deciding. An `End` from a peer is a request, never an instruction.
+//!
+//! **With one exception, and it is the user's own decision rather than a peer's.** A session a peer
+//! started for an occurrence this device's user ended by hand is *not* adopted: the peer's start
+//! would otherwise put back, a pass later, a block the user had just satisfied the lock to end. That
+//! is the only thing here that refuses to add, it can only ever leave this device enforcing *less*
+//! than the log says, and it is confined to the occurrence that was ended — the next one is adopted
+//! as usual. See [`Mirror::adopt`] and [`ended_here`].
 
 use crate::node::Shared;
 use crate::oplog::Op;
 use curfew_core::budget::{Consumption, Launches};
 use curfew_core::emergency::Passes;
-use curfew_core::session::Sessions;
+use curfew_core::schedule::Activation;
+use curfew_core::session::{Session, Sessions};
 use curfew_core::{CalendarEvent, Timestamp};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -218,6 +226,13 @@ impl Mirror {
     /// `usage` and `launches` are replaced rather than merged: after [`Mirror::publish`] the log
     /// contains this device's own rollups too, so the replay is the complete picture and merging
     /// would count local time twice.
+    ///
+    /// **`activations` is what the schedules say is running at `now`, and the caller must supply the
+    /// same list it enforces with** — built from the same config, timezone and calendar snapshot
+    /// `reconcile` was given. One decision needs it: a peer's session for an occurrence this device
+    /// ended by hand is not adopted. A peer's own `started_at` cannot answer that, because a peer
+    /// that was asleep when the window opened reports the moment it woke up instead; the instant the
+    /// occurrence ends is what identifies it, and only the schedules know that. See [`ended_here`].
     pub fn adopt(
         &mut self,
         shared: &Shared,
@@ -225,6 +240,7 @@ impl Mirror {
         sessions: &mut Sessions,
         usage: &mut BTreeMap<String, Consumption>,
         launches: &mut BTreeMap<String, Launches>,
+        activations: &[Activation],
     ) -> Pass {
         let believed = shared.replay(now);
         let mut adopted = Vec::new();
@@ -234,10 +250,15 @@ impl Mirror {
             if before.is_none() {
                 // If this occurrence was already ended by hand on this device, leave it ended.
                 // Starting it again would turn every subsequent sync pass into an unprompted
-                // resurrection of a session the user had just satisfied the lock for.
-                if sessions.dismissed.get(&session.profile).is_some_and(|at| {
-                    *at >= session.started_at && session.lock.ends_at.is_none_or(|end| *at < end)
-                }) {
+                // resurrection of a session the user had just satisfied the lock for. The peer's
+                // session spans the instant the user ended — the ordinary case, a session both
+                // devices were already holding.
+                if sessions.dismissal_covers(session) {
+                    continue;
+                }
+                // And the same occurrence started *later* by a peer, which the span test cannot see
+                // because that peer's session begins after the end. See [`ended_here`].
+                if ended_here(sessions, activations, session) {
                     continue;
                 }
                 adopted.push(session.id.clone());
@@ -324,12 +345,36 @@ impl Mirror {
         sessions: &mut Sessions,
         usage: &mut BTreeMap<String, Consumption>,
         launches: &mut BTreeMap<String, Launches>,
+        activations: &[Activation],
     ) -> Pass {
         let published = self.publish(shared, now, sessions, usage, launches);
-        let mut pass = self.adopt(shared, now, sessions, usage, launches);
+        let mut pass = self.adopt(shared, now, sessions, usage, launches, activations);
         pass.published = published;
         pass
     }
+}
+
+/// Whether a peer's session belongs to an occurrence this device ended by hand and is still inside.
+///
+/// **The identity of an occurrence is the instant it ends**, and that instant travels with every
+/// session a schedule starts: [`Activation::lock`] pins a started session's `ends_at` to the
+/// activation's `end`. So a peer running the same window carries the same end here, and the next
+/// occurrence — which ends at a different instant — is untouched, which is what keeps "this ends
+/// tonight's window, never the schedule" true across devices as well as on one.
+///
+/// **Why not `started_at`.** That field is when the peer's *device* materialized the session, not
+/// when the occurrence began. A peer that was asleep, offline or switched off when the window opened
+/// reports the moment it woke, which can be long after this device's user ended the block — so a
+/// comparison against it says "different occurrence" for the very occurrence that was ended, and the
+/// block comes back. The end time has no such gap: both devices compute it from the same window.
+fn ended_here(sessions: &Sessions, activations: &[Activation], session: &Session) -> bool {
+    session.lock.ends_at.is_some_and(|end| {
+        activations.iter().any(|activation| {
+            activation.profile == session.profile
+                && activation.end == end
+                && sessions.is_dismissed(activation)
+        })
+    })
 }
 
 #[cfg(test)]
@@ -356,12 +401,21 @@ mod tests {
 
     impl Device {
         fn pass(&mut self, now: Timestamp) -> Pass {
+            self.pass_with(now, &[])
+        }
+
+        /// A pass with the schedules this device is enforcing. Most of these tests are about the
+        /// log rather than about schedules, so `pass` passes none; the schedule-shaped decision —
+        /// a peer's session for an occurrence ended here — is covered by
+        /// `tests/ended_stays_ended.rs`, which supplies real activations.
+        fn pass_with(&mut self, now: Timestamp, activations: &[Activation]) -> Pass {
             self.mirror.pass(
                 &self.shared,
                 now,
                 &mut self.sessions,
                 &mut self.usage,
                 &mut self.launches,
+                activations,
             )
         }
 

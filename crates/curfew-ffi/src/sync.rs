@@ -262,6 +262,16 @@ impl Sync {
             )
         };
 
+        // **What the schedules say is running, for the mirror's one schedule-shaped decision**: a
+        // peer's session for an occurrence this device ended by hand is not adopted. Computed from
+        // the core's own config and the calendar snapshot the caller handed in — the same inputs
+        // `reconcile` is given — so the two cannot disagree about which occurrences exist.
+        let activations = {
+            let config = curfew.config.read().expect("config lock");
+            let tz = config.tz().map_err(|e| CurfewError::Config { detail: e.to_string() })?;
+            curfew_core::schedule::active_at(now, tz, &config.weekly, &config.calendars, &seen)
+        };
+
         let pass = {
             let mut sessions = curfew.sessions.write().expect("sessions lock");
             self.mirror.lock().expect("the mirror lock is never poisoned").pass(
@@ -270,6 +280,7 @@ impl Sync {
                 &mut sessions,
                 &mut usage,
                 &mut launches,
+                &activations,
             )
         };
 
@@ -752,5 +763,102 @@ mod tests {
             .unwrap();
 
         assert!(phone_core.end_session("p1".into(), NOW + 3, String::new()).is_err());
+    }
+
+    /// A core whose config runs one weekly window, 08:00 to 20:00 UTC, for `deep-work`. `NOW` is
+    /// 08:30, so the window is active and the two instants the tests care about — half an hour in and
+    /// an hour and a half in — are inside it.
+    fn core_with_a_window() -> Arc<Curfew> {
+        Curfew::new(
+            "timezone = \"UTC\"\n\n[[profiles]]\nid = \"deep-work\"\nname = \"Deep work\"\n\n\
+             [[weekly]]\nid = \"always\"\nprofile = \"deep-work\"\nstart_minute = 480\n\
+             end_minute = 1200\n"
+                .into(),
+        )
+        .unwrap()
+    }
+
+    /// When that day's window ends: 20:00 UTC on the day `at` falls in.
+    fn window_end_for(at: Timestamp) -> Timestamp {
+        const DAY: Timestamp = 86_400;
+        (at / DAY) * DAY + 20 * HOUR
+    }
+
+    /// A session as a reconcile of that window would mint one: it carries the window's end in its
+    /// lock, because `Activation::lock` pins it there.
+    fn window_session_json(id: &str, started_at: Timestamp, ends_at: Timestamp) -> String {
+        serde_json::to_string(&Session {
+            id: id.into(),
+            profile: "deep-work".into(),
+            source: SessionSource::Weekly { schedule: "always".into() },
+            started_at,
+            lock: LockSet::new([], Some(ends_at)),
+        })
+        .unwrap()
+    }
+
+    /// **The wiring, not the rule.** `curfew-sync` proves that adoption refuses a peer's session for
+    /// an occurrence ended here *when it is told which occurrences those are*; this is the test that
+    /// the FFI tells it, built from the core's own config and the calendar snapshot it was given.
+    /// Handing the mirror an empty list — which is what a caller that did not know why the parameter
+    /// exists would write — leaves every other test in this file green and reopens the hole.
+    #[test]
+    fn a_peer_starting_the_same_window_later_does_not_restart_a_block_ended_here() {
+        stay_local();
+        let (phone, pc) = paired("ended-stays-ended");
+        let (phone_core, pc_core) = (core_with_a_window(), core_with_a_window());
+        let window_end = window_end_for(NOW);
+
+        // The phone holds the window, and its user ends the block half an hour in.
+        phone_core.start_session(window_session_json("phone-1", NOW, window_end)).unwrap();
+        phone_core.end_session("phone-1".into(), NOW + 1800, String::new()).unwrap();
+
+        // The PC was off when the window opened and only wakes at 09:30, still inside the same
+        // window, so its session starts after the end here.
+        pc_core.start_session(window_session_json("pc-1", NOW + 3600, window_end)).unwrap();
+        pc.pass(pc_core, NOW + 3600, String::new(), String::new(), String::new()).unwrap();
+        carry(&pc, &phone);
+
+        let result = phone
+            .pass(phone_core.clone(), NOW + 3601, String::new(), String::new(), String::new())
+            .unwrap();
+        let sessions: Sessions =
+            serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
+
+        assert!(
+            sessions.running.is_empty(),
+            "a peer restarted the occurrence this device ended: {result}"
+        );
+    }
+
+    /// The other half, so the fix above cannot be "refuse everything for a dismissed profile": a
+    /// peer starting the *next* window is still adopted.
+    #[test]
+    fn the_next_window_from_a_peer_is_still_adopted_after_an_end_here() {
+        stay_local();
+        let (phone, pc) = paired("next-window");
+        let (phone_core, pc_core) = (core_with_a_window(), core_with_a_window());
+        let window_end = window_end_for(NOW);
+
+        phone_core.start_session(window_session_json("phone-1", NOW, window_end)).unwrap();
+        phone_core.end_session("phone-1".into(), NOW + 1800, String::new()).unwrap();
+
+        // Tomorrow's window: a different occurrence, ending at a different instant.
+        const DAY: Timestamp = 86_400;
+        let tomorrow = NOW + DAY;
+        pc_core
+            .start_session(window_session_json("pc-2", tomorrow, window_end_for(tomorrow)))
+            .unwrap();
+        pc.pass(pc_core, tomorrow, String::new(), String::new(), String::new()).unwrap();
+        carry(&pc, &phone);
+
+        phone
+            .pass(phone_core.clone(), tomorrow + 1, String::new(), String::new(), String::new())
+            .unwrap();
+        let sessions: Sessions =
+            serde_json::from_str(&phone_core.sessions_json().unwrap()).unwrap();
+
+        assert_eq!(sessions.running.len(), 1, "tomorrow's window did not reach the phone");
+        assert_eq!(sessions.running[0].id, "pc-2");
     }
 }

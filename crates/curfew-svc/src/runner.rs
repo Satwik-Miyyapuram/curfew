@@ -831,8 +831,23 @@ pub fn run(
                 // the one after.
                 let said_releases =
                     mirror.publish_releases(node.shared(), now, &guard.releases.clone());
+                // **What the schedules say is running, for the mirror's one schedule-shaped
+                // decision**: a peer's session for an occurrence this device ended by hand is not
+                // adopted. Built from the same config and the same merged event list the pass above
+                // just enforced with, so adoption and enforcement cannot disagree about which
+                // occurrences exist.
+                let activations = match guard.config.tz() {
+                    Ok(tz) => curfew_core::schedule::active_at(
+                        now,
+                        tz,
+                        &guard.config.weekly,
+                        &guard.config.calendars,
+                        &events,
+                    ),
+                    Err(_) => Vec::new(),
+                };
                 let Enforcer { sessions, usage, launches, .. } = &mut *guard;
-                let pass = mirror.pass(node.shared(), now, sessions, usage, launches);
+                let pass = mirror.pass(node.shared(), now, sessions, usage, launches, &activations);
                 guard.passes = pass.passes.clone();
                 guard.released = pass.released.clone();
                 guard.device_id = node.shared().identity.id().as_str().to_string().into();
