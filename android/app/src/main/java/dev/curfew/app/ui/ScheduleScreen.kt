@@ -6,6 +6,7 @@
 package dev.curfew.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -32,7 +33,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
@@ -74,7 +74,7 @@ fun ScheduleScreen(
 
     Screen(spacing = 0.dp) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Column(Modifier.weight(1f).padding(end = Space.m)) {
                 Title("Plan")
                 Sub(
                     summarise(
@@ -87,47 +87,102 @@ fun ScheduleScreen(
             }
             Box(
                 modifier = Modifier
-                    .padding(top = 4.dp)
+                    .padding(top = Space.xs)
                     .size(42.dp)
                     .clip(RoundedCornerShape(Dsn.CtlRadius))
-                    .background(Palette.Accent)
+                    .background(Palette.accent)
                     .clickable(onClickLabel = "Add a profile", onClick = onNewProfile),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+                Text("+", style = Type.h2, fontWeight = FontWeight.Bold, color = Palette.surface)
             }
         }
 
-        Gap(20.dp)
+        Gap(Space.xl)
+
+        // -----------------------------------------------------------------------------------------
+        // Week at a glance — `docs/design.md` section 5.3.
+        //
+        // Above the rule list, because it is the one thing on this screen that answers "what will be
+        // blocked next" without being read: seven days across, twenty-four hours down, and every
+        // window in the plan drawn where it falls.
+        //
+        // **Disabled rules are filtered out first** (section 7 rule 12). A chart that drew a paused
+        // window would be a chart claiming something will happen that the core will not do.
+        //
+        // The bands are folded by [foldWeekWindows] rather than drawn one per rule: sync stores the
+        // same weekly window once per paired device, so a user with two phones has each of their
+        // rules in the file twice, and drawing them literally put two identical bands on top of each
+        // other. Folding is a *view* decision — the rules stay two rules and stay independently
+        // editable in the list below.
+        // -----------------------------------------------------------------------------------------
+        val names = state.profiles.associate { it.id to it.name }
+        val enabled = state.weekly.filter { it.enabled }
+        val chartWindows = foldWeekWindows(
+            windows = enabled.map {
+                Triple(it.days, it.startMinute, it.endMinute)
+            },
+            profileOf = { index -> names[enabled[index].profile].orEmpty() },
+        )
+        // Which calendar events Curfew would block, and by whose rule.
+        //
+        // This is the half of the chart the legend has always promised ("From your calendar") and
+        // that nothing ever drew — the week showed weekly windows only, so a plan whose blocking is
+        // mostly meeting-driven looked empty. Each enabled calendar rule is matched against the
+        // events Curfew can currently see, using the same `matches` the rule rows below use, so the
+        // chart and the list cannot disagree about what a rule catches.
+        val calendarBlocks = state.calendarRules
+            .filter { it.enabled }
+            .flatMap { rule ->
+                val owner = names[rule.profile].orEmpty()
+                state.calendarEvents.filter { matches(rule, it) }.mapNotNull { event ->
+                    calendarBlockAt(
+                        startEpochSeconds = event.start,
+                        endEpochSeconds = event.end,
+                        padBeforeSeconds = rule.padBeforeSeconds,
+                        padAfterSeconds = rule.padAfterSeconds,
+                        profileName = owner,
+                    )
+                }
+            }
+        SectionLabel("Week at a glance")
+        Gap(Space.m)
+        DCard(modifier = Modifier.landIn(from = 12f)) {
+            WeekAtAGlance(windows = chartWindows, calendarBlocks = calendarBlocks)
+        }
+
+        Gap(Space.xl)
 
         if (state.profiles.isEmpty()) {
             DCard {
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = Space.m),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text("No profiles yet", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
-                    Gap(6.dp)
+                    Text("No profiles yet", style = Type.h3, color = Palette.text)
+                    Gap(Space.s)
                     Text(
                         "A profile is the set of apps and sites to block. Create your first profile to start scheduling focus time.",
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp,
-                        color = Palette.Muted,
+                        style = Type.meta,
+                        color = Palette.muted,
                         textAlign = TextAlign.Center,
                     )
-                    Gap(16.dp)
+                    Gap(Space.l)
                     PrimaryButton("Create a profile", onClick = onNewProfile)
                 }
             }
         } else {
             state.profiles.forEachIndexed { index, profile ->
-                val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
+                val tint = Palette.profileColours[index % Palette.profileColours.size]
                 val isExpanded = profile.id in expandedProfileIds
                 val windows = state.weekly.filter { it.profile == profile.id }
                 val calendar = state.calendarRules.filter { it.profile == profile.id }
                 val live = windows.any { it.enabled } || calendar.any { it.enabled }
 
-                DCardFlush {
+                // Cards land in a fast cascade, staggered by their position. The stagger is what
+                // makes a plan read as *assembled* rather than *switched on*, and it is capped at
+                // eight places inside `landIn` so a long plan never makes a reader wait.
+                DCardFlush(modifier = Modifier.landIn(index = index)) {
                     // Header row of the profile card (clickable to toggle expanded)
                     Row(
                         modifier = Modifier
@@ -141,28 +196,26 @@ fun ScheduleScreen(
                             }
                             .padding(Dsn.CardPad),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Glyph(tint, size = 42.dp) {
                             Text(
                                 profile.name.take(1).uppercase(),
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = Type.h3,
                                 color = tint,
                             )
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 profile.name,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.h3,
+                                color = Palette.text,
                             )
                             Text(
                                 model.describeBlocks(profile.id),
-                                fontSize = 12.sp,
-                                color = Palette.Muted,
-                                modifier = Modifier.padding(top = 2.dp),
+                                style = Type.meta,
+                                color = Palette.muted,
+                                modifier = Modifier.padding(top = Space.xxs),
                             )
                         }
 
@@ -177,10 +230,9 @@ fun ScheduleScreen(
                         // Caret indicator
                         Text(
                             if (isExpanded) "▾" else "▸",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Palette.Dim,
-                            modifier = Modifier.padding(start = 4.dp),
+                            style = Type.h3,
+                            color = Palette.dim,
+                            modifier = Modifier.padding(start = Space.xs),
                         )
                     }
 
@@ -191,7 +243,7 @@ fun ScheduleScreen(
                             TriggerRow(
                                 title = describeDays(window.days),
                                 note = describeWindow(window).substringAfter(" · "),
-                                tint = Palette.Accent,
+                                tint = Palette.accent,
                                 enabled = window.enabled,
                                 onToggle = { model.saveWeekly(window.copy(enabled = it)) },
                                 onOpen = { weeklyForm = Editing(window, profile.id) },
@@ -208,7 +260,7 @@ fun ScheduleScreen(
                             TriggerRow(
                                 title = "From your calendar",
                                 note = describeMatcher(rule.matcher),
-                                tint = Palette.Accent,
+                                tint = Palette.accent,
                                 enabled = rule.enabled,
                                 onToggle = { model.saveCalendarRule(rule.copy(enabled = it)) },
                                 onOpen = { calendarForm = Editing(rule, profile.id) },
@@ -231,20 +283,20 @@ fun ScheduleScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = Dsn.CardPad, vertical = 14.dp),
+                                    .padding(horizontal = Dsn.CardPad, vertical = Space.l),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Text(
                                     "No automated schedules yet",
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Palette.Text,
+                                    style = Type.meta,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Palette.text,
                                 )
-                                Gap(4.dp)
+                                Gap(Space.xs)
                                 Text(
                                     "Add a recurring window or sync with your calendar.",
-                                    fontSize = 12.sp,
-                                    color = Palette.Muted,
+                                    style = Type.meta,
+                                    color = Palette.muted,
                                     textAlign = TextAlign.Center,
                                 )
                             }
@@ -255,8 +307,8 @@ fun ScheduleScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = Dsn.CardPad, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                .padding(horizontal = Dsn.CardPad, vertical = Space.m),
+                            horizontalArrangement = Arrangement.spacedBy(Space.m),
                         ) {
                             GhostButton("✏️ Edit Profile", Modifier.weight(1f)) {
                                 onEditProfile(profile.id)
@@ -267,13 +319,13 @@ fun ScheduleScreen(
                         }
                     }
                 }
-                Gap(14.dp)
+                Gap(Space.l)
             }
 
             GhostButton("+ Create another profile") {
                 onNewProfile()
             }
-            Gap(16.dp)
+            Gap(Space.l)
         }
     }
 
@@ -385,23 +437,23 @@ private fun TriggerRow(
             .padding(start = Dsn.CardPad, end = Dsn.CardPad, top = Dsn.CardPad, bottom = bottomPad)
             .alpha(if (enabled || !showSwitch) 1f else 0.55f),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {
-        val glyphTint = if (enabled) tint else Palette.Muted
+        val glyphTint = if (enabled) tint else Palette.muted
         Glyph(glyphTint, size = 38.dp) {
             Text(
                 title.take(1).uppercase(),
-                fontSize = 15.sp,
+                style = Type.body,
                 fontWeight = FontWeight.Bold,
                 color = glyphTint,
             )
         }
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+            Text(title, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.text)
             Text(
                 if (enabled || !showSwitch) note else "$note · paused",
-                fontSize = 12.5.sp,
-                color = Palette.Muted,
+                style = Type.meta,
+                color = Palette.muted,
             )
         }
         if (showSwitch) Switch(enabled, onToggle)
@@ -414,33 +466,32 @@ private fun CaughtEvent(title: String, whenIt: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 69.dp, end = Dsn.CardPad, bottom = 7.dp),
+            .padding(start = 69.dp, end = Dsn.CardPad, bottom = Space.s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         Box(
             modifier = Modifier
                 .weight(1f)
-                .clip(RoundedCornerShape(11.dp))
-                .background(Palette.Raised)
-                .padding(horizontal = 11.dp, vertical = 9.dp),
+                .border(Dsn.Border, Palette.line)
+                .background(Palette.raised)
+                .padding(horizontal = Space.m, vertical = Space.s),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 Text(
                     title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Palette.Text,
+                    style = Type.meta,
+                    color = Palette.text,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 if (whenIt.isNotEmpty()) {
-                    Text(whenIt, fontSize = 11.5.sp, color = Palette.Dim)
+                    Text(whenIt, style = Type.micro, color = Palette.dim)
                 }
             }
         }

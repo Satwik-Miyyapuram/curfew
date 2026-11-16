@@ -22,9 +22,7 @@ import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 
 /**
@@ -58,12 +56,11 @@ fun ChallengeDialog(
                     when (challenge) {
                         is Challenge.Typing -> Text(
                             challenge.passage,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontFamily = FontFamily.Serif,
+                            style = Type.body,
                         )
                         is Challenge.Math -> Text(
                             "${challenge.question} = ?",
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = Type.h2,
                             // "×" is read out as "x" or skipped entirely by some screen readers, which
                             // turns an arithmetic problem into a guess.
                             modifier = Modifier.semantics {
@@ -86,7 +83,7 @@ fun ChallengeDialog(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 12.dp)
+                            .padding(top = Space.m)
                             .semantics {
                                 contentDescription = when (challenge) {
                                     is Challenge.Typing -> "Type the passage here."

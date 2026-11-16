@@ -2,6 +2,7 @@ package dev.curfew.app.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -25,7 +32,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
@@ -51,9 +57,8 @@ fun HealthScreen(model: CurfewViewModel) {
             stringResource(
                 if (fine) R.string.health_can_enforce else R.string.health_cannot_enforce,
             ),
-            size = 26,
         )
-        Gap(8.dp)
+        Gap(Space.s)
         Text(
             if (fine) {
                 stringResource(R.string.health_all_in_place)
@@ -71,35 +76,33 @@ fun HealthScreen(model: CurfewViewModel) {
                     missingRequired.map { stringResource(it.grant.cost) }.joinToString(" "),
                 )
             },
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
+            style = Type.body,
             // The only coloured sentence on the screen, and only when it means something is not
             // happening right now.
-            color = if (fine) Palette.Muted else Palette.Bad,
+            color = if (fine) Palette.muted else Palette.bad,
         )
 
         if (state.restrictedSettings) {
-            Gap(16.dp)
+            Gap(Space.l)
             DCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Bad)
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    Text("!", style = Type.h3, color = Palette.bad)
                     Column {
                         Text(
                             stringResource(R.string.health_restricted_title),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
+                            style = Type.body,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.text,
                         )
                         Text(
                             RestrictedSettings.INSTRUCTIONS,
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            color = Palette.Muted,
-                            modifier = Modifier.padding(top = 6.dp),
+                            style = Type.meta,
+                            color = Palette.muted,
+                            modifier = Modifier.padding(top = Space.s),
                         )
                     }
                 }
-                Gap(12.dp)
+                Gap(Space.m)
                 GhostButton(text = stringResource(R.string.health_open_app_info)) {
                     context.startActivity(
                         RestrictedSettings.appInfoIntent(context)
@@ -109,9 +112,9 @@ fun HealthScreen(model: CurfewViewModel) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.health_every_permission))
-        Gap(10.dp)
+        Gap(Space.m)
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
@@ -134,25 +137,25 @@ fun HealthScreen(model: CurfewViewModel) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 17.dp, vertical = 15.dp)
+                        .padding(horizontal = Space.l, vertical = Space.l)
                         .semantics(mergeDescendants = true) { contentDescription = described },
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Text(
                             if (entry.granted) "✓" else "!",
-                            fontSize = 15.sp,
+                            style = Type.body,
                             fontWeight = FontWeight.Bold,
-                            color = if (entry.granted) Palette.Ok else Palette.Bad,
+                            color = if (entry.granted) Palette.ok else Palette.bad,
                             modifier = Modifier.size(18.dp),
                         )
                         Text(
                             name,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
+                            style = Type.body,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.text,
                             modifier = Modifier.weight(1f),
                         )
                         if (!entry.granted) {
@@ -166,28 +169,26 @@ fun HealthScreen(model: CurfewViewModel) {
                     }
                     Text(
                         why,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(top = 6.dp, start = 30.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(top = Space.s, start = Space.xxl),
                     )
                     if (!entry.granted) {
                         Text(
                             stringResource(R.string.health_without_it, without),
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp,
-                            color = Palette.Bad,
-                            modifier = Modifier.padding(top = 4.dp, start = 30.dp),
+                            style = Type.meta,
+                            color = Palette.bad,
+                            modifier = Modifier.padding(top = Space.xs, start = Space.xxl),
                         )
                     }
                 }
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         DCard(padding = 16.dp) {
-            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                Text("⛨", fontSize = 17.sp, color = Palette.Muted)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text("⛨", style = Type.h3, fontWeight = FontWeight.Normal, color = Palette.muted)
                 Text(
                     // Not "no internet permission at all": the manifest declares INTERNET, because
                     // LAN sync needs it, and a user can falsify that sentence in ten seconds in
@@ -196,15 +197,53 @@ fun HealthScreen(model: CurfewViewModel) {
                     // clause. The shared sentence is the honest one. See [Privacy].
                     Privacy.NO_SERVER + " Its database is encrypted with a key held by this " +
                         "device's keystore.",
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             }
         }
-        Gap(8.dp)
+        Gap(Space.s)
+
+        // -----------------------------------------------------------------------------------------
+        // Appearance, here as well as in Settings.
+        //
+        // This is the tab that is about the app itself rather than about the plan, and the theme is
+        // a property of the app — someone who has just been told how enforcement is going is in the
+        // right place to say "and make it dark". It lives in `Appearance` either way: these controls
+        // and the ones in Settings write the same value, so the two can never disagree.
+        // -----------------------------------------------------------------------------------------
+        Gap(Space.xl)
+        SectionLabel("How Curfew looks")
+        Gap(Space.m)
+        DCardFlush {
+            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+                SectionLabel("Theme")
+                Gap(Space.s)
+                ChoiceRow(
+                    options = listOf(
+                        Appearance.SYSTEM to "System",
+                        Appearance.LIGHT to "Paper",
+                        Appearance.DARK to "Dusk",
+                    ),
+                    chosen = Appearance.theme,
+                    onPick = { Appearance.setTheme(context, it) },
+                )
+            }
+            Rule()
+            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+                SectionLabel("Accent")
+                Gap(Space.s)
+                ChoiceRow(
+                    options = Accent.entries.map { it.id to it.label },
+                    chosen = Appearance.accent,
+                    onPick = { Appearance.setAccent(context, it) },
+                )
+            }
+        }
     }
 }
+
+
 
 /** The one action on a row: the system page for exactly this permission. */
 @Composable
@@ -212,12 +251,12 @@ private fun Grant(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(32.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Accent)
+            .border(Dsn.Border, Palette.line)
+            .background(Palette.accent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Allow", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+        Text("Allow", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.surface)
     }
 }

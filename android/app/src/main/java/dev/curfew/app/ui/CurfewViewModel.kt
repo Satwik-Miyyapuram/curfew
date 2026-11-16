@@ -245,6 +245,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     audit = runCatching { runtime.db.audit().recent(AUDIT_SHOWN) }
                         .getOrDefault(emptyList()),
                     stats = runCatching { runtime.stats(now = now) }.getOrDefault(Stats()),
+            usageShape = runCatching { runtime.usageShape(now = now) }
+                .getOrDefault(dev.curfew.app.data.UsageShape(emptyList(), List(24) { 0L }, dev.curfew.app.data.CurfewRuntime.Companion.STATS_DAYS)),
                     screenTime = runCatching { runtime.screenTimeComparison(now) }.getOrNull(),
                     grants = grantStates(getApplication()),
                     restrictedSettings = RestrictedSettings.isLikelyBlocking(getApplication()),
@@ -593,6 +595,32 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun startTimer(profile: String, seconds: Int, locks: List<Lock> = emptyList()) {
         viewModelScope.launch {
+            // **A block cannot be started on top of another one.**
+            //
+            // It used to be allowed, and the core merged it: `Sessions::start` finds the running
+            // session for the profile and takes the union of the lock conditions with the *later*
+            // end time. That is a reasonable lattice join and a terrible experience — the screen
+            // looked identical whether or not something was running, so tapping Start read as
+            // "begin a new block" while silently adding a condition and pushing the finish line out,
+            // with no way to see that either had happened. Locks accumulating while the user thinks
+            // they are starting something new is the worst failure this app can have, because it is
+            // the one that teaches them not to trust the end time.
+            //
+            // Stated rather than silent, and it names what is running and until when, because "no"
+            // without a reason is what makes people fight a blocker.
+            val running = state.value.sessions.firstOrNull { it.profile == profile }
+            if (running != null) {
+                val label = state.value.profiles.firstOrNull { it.id == profile }?.name ?: profile
+                val endsAt = running.lock.endsAt
+                say(
+                    if (endsAt == null) {
+                        str(R.string.start_already_running_open_ended, label)
+                    } else {
+                        str(R.string.start_already_running, label, clockTime(endsAt))
+                    },
+                )
+                return@launch
+            }
             // Trusted, for the same reason the tick uses it: `endsAt` is minted from here, so a
             // clock moved *back* before starting would stretch a ninety-minute lock by however long
             // the lie lasted.
@@ -779,6 +807,25 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * where people give up and keep one profile that is wrong for both. This adds; it never
      * removes, so a copy can never quietly unblock something the target profile already had.
      */
+    /**
+     * Set the emergency ration: how many passes the rolling window allows, how long that window is,
+     * and the minimum gap between two uses.
+     *
+     * A read-modify-write of the plan file's `[emergency]` section, done in Kotlin rather than
+     * through the core — the app already owns this file, and a text edit leaves the user's own
+     * comments in place.
+     */
+    fun setEmergency(settings: dev.curfew.policy.EmergencySettings) {
+        viewModelScope.launch {
+            val edited = dev.curfew.policy.withEmergencySettings(
+                runtime.policy.configToml(),
+                settings,
+            )
+            runtime.setConfig(edited)
+                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+            refresh()
+        }
+    }
     fun copyBlocksFrom(source: String, target: String) {
         viewModelScope.launch {
             val apps = (blockedApps(target) + blockedApps(source)).distinct()
@@ -1010,6 +1057,8 @@ data class UiState(
     val audit: List<AuditRow> = emptyList(),
     /** Days blocked, streaks and totals over the last fortnight. */
     val stats: Stats = Stats(),
+    /** Projected from the usage log for the two charts on Insights. See [usageShape]. */
+    val usageShape: dev.curfew.app.data.UsageShape = dev.curfew.app.data.UsageShape(emptyList(), List(24) { 0L }, dev.curfew.app.data.CurfewRuntime.STATS_DAYS),
     /**
      * Screen time before Curfew against screen time now, when both are known.
      *

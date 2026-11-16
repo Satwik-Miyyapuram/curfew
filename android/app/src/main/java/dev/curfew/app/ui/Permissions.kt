@@ -16,7 +16,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
-import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.CurfewNotificationListener
 import dev.curfew.app.enforce.Detector
 import dev.curfew.app.enforce.EnforcementMode
@@ -110,22 +109,6 @@ enum class Grant(
         cost = R.string.perm_battery_unrestricted_cost,
         required = false,
     ),
-
-    /**
-     * Last on purpose, and genuinely optional.
-     *
-     * This is the scariest dialog in the wizard and it has a real cost outside Curfew: a great many
-     * banking and payment apps refuse to run on a device with any active device admin, and one that
-     * cost somebody their bank app would have taken more than it gave. The accessibility guard
-     * covers the same ground without that cost, so this is now the stronger-but-pricier option
-     * rather than the recommended one.
-     */
-    UninstallProtection(
-        title = R.string.perm_uninstall_protection_title,
-        because = R.string.perm_uninstall_protection_because,
-        cost = R.string.perm_uninstall_protection_cost,
-        required = false,
-    ),
     ;
 
     fun isGranted(context: Context): Boolean = when (this) {
@@ -146,7 +129,6 @@ enum class Grant(
         BatteryUnrestricted ->
             context.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(context.packageName)
-        UninstallProtection -> CurfewDeviceAdmin.isActive(context)
     }
 
     /**
@@ -202,7 +184,6 @@ enum class Grant(
             ),
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
         )
-        UninstallProtection -> listOfNotNull(CurfewDeviceAdmin.requestIntent(context))
         Notifications, Calendar -> emptyList()
     }
 

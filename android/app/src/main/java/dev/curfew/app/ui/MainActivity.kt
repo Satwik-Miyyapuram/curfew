@@ -50,7 +50,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -74,6 +73,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Appearance.attach(this)
+        Juice.attach(this)
         enableEdgeToEdge()
         // Opening the app is also the moment to make sure enforcement is up: a user who force-stops
         // Curfew and then opens it has re-armed it by doing so.
@@ -209,7 +210,7 @@ fun CurfewApp(
     // No Scaffold: the bar floats over the content rather than sitting in a slot below it, so a
     // list scrolls *under* glass instead of stopping dead at an opaque edge. Screens already end
     // their content with Dsn.BottomRoom, which is the space this leaves them.
-    Box(modifier = Modifier.fillMaxSize().background(Palette.Ink)) {
+    Box(modifier = Modifier.fillMaxSize().background(Palette.ground)) {
         NavHost(
             navController = navController,
             startDestination = Tab.Now.route,
@@ -306,7 +307,7 @@ private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modif
         kotlinx.coroutines.delay(2500)
         onDismiss()
     }
-    val tone = if (notice.bad) Palette.Bad else Palette.Ok
+    val tone = if (notice.bad) Palette.bad else Palette.ok
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -314,22 +315,22 @@ private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modif
             .background(tone.copy(alpha = 0.16f))
             .border(1.dp, tone.copy(alpha = 0.45f), RoundedCornerShape(Dsn.CtlRadius))
             .clickable(onClick = onDismiss)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .padding(horizontal = Space.l, vertical = Space.m)
             .semantics(mergeDescendants = true) {
                 // One sentence, and how to get rid of it. Without this a screen reader reads the text
                 // and gives no clue that the banner is tappable.
                 contentDescription = "${notice.text}. Tap to dismiss."
             },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
             if (notice.bad) "!" else "✓",
-            fontSize = 15.sp,
+            style = Type.body,
             fontWeight = FontWeight.Bold,
             color = tone,
         )
-        Text(notice.text, fontSize = 13.sp, lineHeight = 19.sp, color = Palette.Text)
+        Text(notice.text, style = Type.meta, color = Palette.text)
     }
 }
 
@@ -355,7 +356,7 @@ private fun GlassBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 14.dp, bottom = inset + 10.dp),
+            .padding(start = Space.l, end = Space.l, bottom = inset + Space.m),
     ) {
         Row(
             modifier = Modifier
@@ -369,7 +370,7 @@ private fun GlassBar(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                 ) {}
-                .padding(horizontal = 6.dp, vertical = 8.dp),
+                .padding(horizontal = Space.s, vertical = Space.s),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -402,17 +403,17 @@ private fun GlassBar(
 @Composable
 private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val lit by animateFloatAsState(if (selected) 1f else 0f, label = "tab")
-    val tint = lerp(Palette.Dim, Palette.Accent, lit)
+    val tint = lerp(Palette.dim, Palette.accent, lit)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.xxs),
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
             .minimumInteractiveComponentSize()
             .heightIn(min = Dsn.MinTouch)
             .widthIn(min = Dsn.MinTouch)
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = Space.m, vertical = Space.xs)
             .semantics(mergeDescendants = true) {
                 contentDescription = if (selected) tab.label + ", selected" else tab.label
             },
@@ -421,18 +422,18 @@ private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
             modifier = Modifier
                 .size(30.dp)
                 .clip(RoundedCornerShape(11.dp))
-                .background(Palette.Accent.copy(alpha = 0.14f * lit)),
+                .background(Palette.accent.copy(alpha = 0.14f * lit)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
         }
         Text(
             tab.short,
-            fontSize = 10.sp,
+            style = Type.micro,
+            fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = tint,
         )
     }

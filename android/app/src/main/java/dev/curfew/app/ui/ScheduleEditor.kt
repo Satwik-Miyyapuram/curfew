@@ -19,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.ChallengeKind
@@ -131,8 +130,8 @@ internal fun describePadding(beforeSeconds: Int, afterSeconds: Int): String? {
 @Composable
 private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose: (String) -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         profiles.forEach { profile ->
             Pill(profile.name, selected = profile.id == chosen, onClick = { onChoose(profile.id) })
@@ -144,8 +143,8 @@ private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose:
 @Composable
 private fun LockPicker(chosen: List<Lock>, onChange: (List<Lock>) -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         OFFERED_LOCKS.forEach { (label, lock) ->
             Pill(label, selected = lock in chosen, onClick = {
@@ -232,17 +231,17 @@ internal fun WeeklyDialog(
 
         SheetSection("Days") {
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 DAY_PRESETS.forEach { (label, preset) ->
                     Pill(label, selected = days.sorted() == preset, onClick = { days = preset })
                 }
             }
-            Gap(10.dp)
+            Gap(Space.m)
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 DAY_NAMES.forEachIndexed { index, name ->
                     Pill(name, selected = index in days, onClick = {
@@ -254,7 +253,7 @@ internal fun WeeklyDialog(
         }
 
         SheetSection("When") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 ValueField("From", start, bad = startMinutes == null, modifier = Modifier.weight(1f)) {
                     start = it
                 }
@@ -356,11 +355,11 @@ internal fun CalendarDialog(
 
         SheetSection("Which events") {
             TextField("Title contains", title, placeholder = "*focus*") { title = it }
-            Gap(10.dp)
+            Gap(Space.m)
             if (availableCalendars.isNotEmpty()) {
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     availableCalendars.forEach { calName ->
                         Pill(
@@ -372,16 +371,16 @@ internal fun CalendarDialog(
                         )
                     }
                 }
-                Gap(8.dp)
+                Gap(Space.s)
             }
             TextField("Calendar", calendar, placeholder = "Work") { calendar = it }
-            Gap(10.dp)
+            Gap(Space.m)
             TextField("Location", location, placeholder = "Anywhere") { location = it }
             SheetNote(
                 "Leave a field empty to ignore it. A star matches anything, so *focus* catches any " +
                     "event with the word focus in it.",
             )
-            Gap(14.dp)
+            Gap(Space.l)
             DRow(
                 title = "Only events marked busy",
                 note = "Ignores the ones you are merely invited to.",
@@ -392,7 +391,7 @@ internal fun CalendarDialog(
         SheetSection("Padding") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 listOf(0, 5, 10, 15).forEach { mins ->
                     val selected = before == mins.toString() && after == mins.toString()
@@ -407,8 +406,8 @@ internal fun CalendarDialog(
                     )
                 }
             }
-            Gap(10.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Gap(Space.m)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 ValueField(
                     "Start early",
                     before,

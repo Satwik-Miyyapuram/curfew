@@ -29,10 +29,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.Action
 import dev.curfew.policy.ChallengeKind
@@ -91,31 +89,31 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
     val mine = state.calendarRules.filter { it.profile == profileId }
     val fromCalendar = mine.isNotEmpty()
 
-    val tint = Palette.ProfileColours[
+    val tint = Palette.profileColours[
         state.profiles.indexOfFirst { it.id == profileId }
-            .coerceAtLeast(0) % Palette.ProfileColours.size,
+            .coerceAtLeast(0) % Palette.profileColours.size,
     ]
 
     Screen(spacing = 0.dp) {
         BackRow(if (existing == null) "New profile" else existing.name, onDone)
 
         if (existing == null) {
-            Gap(10.dp)
-            Title("What should we call this one?", size = 26)
-            Gap(6.dp)
+            Gap(Space.m)
+            Title("What should we call this one?")
+            Gap(Space.s)
             Sub("A name you would say out loud. You can change it whenever.")
         }
 
-        Gap(20.dp)
+        Gap(Space.xl)
         NameField(name, tint) { name = it }
 
         if (existing == null) {
-            Gap(20.dp)
+            Gap(Space.xl)
             SectionLabel("Or start from a preset")
-            Gap(10.dp)
+            Gap(Space.m)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 PRESETS.forEach { (emoji, value) ->
                     Pill("$emoji $value", selected = name == value, onClick = { name = value })
@@ -126,7 +124,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // ==========================================
         // SECTION: WHAT IT BLOCKS (Primary section)
         // ==========================================
-        Gap(24.dp)
+        Gap(Space.xl)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -135,12 +133,12 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             SectionLabel("What it blocks")
             Text(
                 blocksLine(appCount, siteCount),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (appCount + siteCount > 0) Palette.Accent else Palette.Dim,
+                style = Type.meta,
+                fontWeight = FontWeight.Bold,
+                color = if (appCount + siteCount > 0) Palette.accent else Palette.dim,
             )
         }
-        Gap(10.dp)
+        Gap(Space.m)
 
         var newWebDomain by remember { mutableStateOf("") }
 
@@ -153,60 +151,58 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             ) {
                 Text(
                     "Blocked Apps ($appCount)",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Palette.Text,
+                    style = Type.body,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.text,
                 )
                 if (appCount > 0) {
                     Text(
                         "Tap ✕ to remove",
-                        fontSize = 11.5.sp,
-                        color = Palette.Dim,
+                        style = Type.micro,
+                        color = Palette.dim,
                     )
                 }
             }
 
             if (blockedApps.isNotEmpty()) {
-                Gap(8.dp)
+                Gap(Space.s)
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     blockedApps.forEach { pkg ->
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Palette.Raised)
-                                .border(1.dp, Palette.Line, RoundedCornerShape(999.dp))
-                                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                .background(Palette.raised)
+                                .border(Dsn.Border, Palette.line)
+                                .padding(start = Space.s, end = Space.xs, top = Space.xs, bottom = Space.xs),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
                             AppIcon(pkg, Modifier.size(18.dp).clip(CircleShape))
                             Text(
                                 appLabel(context, pkg),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.meta,
+                                fontWeight = FontWeight.Bold,
+                                color = Palette.text,
                             )
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(Palette.Line)
+                                    .background(Palette.line)
                                     .clickable {
                                         model.deleteRule(profileId, Target.AppPackage(pkg))
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("✕", fontSize = 10.sp, color = Palette.Muted)
+                                Text("✕", style = Type.micro, color = Palette.muted)
                             }
                         }
                     }
                 }
             }
 
-            Gap(10.dp)
+            Gap(Space.m)
             GhostButton("📱 Choose Apps to Block") {
                 if (name.isBlank()) {
                     model.say("Give it a name first.")
@@ -216,9 +212,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 }
             }
 
-            Gap(14.dp)
+            Gap(Space.l)
             Rule()
-            Gap(14.dp)
+            Gap(Space.l)
 
             // Blocked Websites Section (Managed directly inline)
             Row(
@@ -228,63 +224,61 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             ) {
                 Text(
                     "Blocked Websites ($siteCount)",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Palette.Text,
+                    style = Type.body,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.text,
                 )
                 if (siteCount > 0) {
                     Text(
                         "Tap ✕ to remove",
-                        fontSize = 11.5.sp,
-                        color = Palette.Dim,
+                        style = Type.micro,
+                        color = Palette.dim,
                     )
                 }
             }
 
             if (blockedRules.isNotEmpty()) {
-                Gap(8.dp)
+                Gap(Space.s)
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     blockedRules.forEach { rule ->
                         Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Palette.Raised)
-                                .border(1.dp, Palette.Line, RoundedCornerShape(999.dp))
-                                .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                .background(Palette.raised)
+                                .border(Dsn.Border, Palette.line)
+                                .padding(start = Space.s, end = Space.xs, top = Space.xs, bottom = Space.xs),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
-                            Text("🌐", fontSize = 11.sp)
+                            Text("🌐", style = Type.micro)
                             Text(
                                 rule.target.label(),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.meta,
+                                fontWeight = FontWeight.Bold,
+                                color = Palette.text,
                             )
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(Palette.Line)
+                                    .background(Palette.line)
                                     .clickable {
                                         model.deleteRule(profileId, rule.target)
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("✕", fontSize = 10.sp, color = Palette.Muted)
+                                Text("✕", style = Type.micro, color = Palette.muted)
                             }
                         }
                     }
                 }
             }
 
-            Gap(10.dp)
+            Gap(Space.m)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -292,28 +286,24 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         .weight(1f)
                         .height(42.dp)
                         .clip(RoundedCornerShape(Dsn.CtlRadius))
-                        .background(Palette.Raised)
-                        .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
-                        .padding(horizontal = 12.dp),
+                        .background(Palette.raised)
+                        .border(Dsn.Border, Palette.line)
+                        .padding(horizontal = Space.m),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     if (newWebDomain.isEmpty()) {
                         Text(
                             "Add domain (e.g. reddit.com)",
-                            fontSize = 13.sp,
-                            color = Palette.Dim,
+                            style = Type.meta,
+                            color = Palette.dim,
                         )
                     }
                     BasicTextField(
                         value = newWebDomain,
                         onValueChange = { newWebDomain = it },
                         singleLine = true,
-                        textStyle = TextStyle(
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Palette.Text,
-                        ),
-                        cursorBrush = SolidColor(Palette.Accent),
+                        textStyle = Type.meta.copy(color = Palette.text),
+                        cursorBrush = SolidColor(Palette.accent),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -322,8 +312,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     modifier = Modifier
                         .height(42.dp)
                         .clip(RoundedCornerShape(Dsn.CtlRadius))
-                        .background(Palette.Raised)
-                        .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
+                        .background(Palette.raised)
+                        .border(Dsn.Border, Palette.line)
                         .clickable {
                             val domain = newWebDomain.trim().lowercase()
                                 .removePrefix("https://")
@@ -339,14 +329,14 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                                 }
                             }
                         }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = Space.l),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         "Add",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Accent,
+                        style = Type.meta,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.accent,
                     )
                 }
             }
@@ -355,69 +345,69 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // ==========================================
         // SECTION: WHEN IT RUNS (Togglable Automation)
         // ==========================================
-        Gap(26.dp)
-        Title("When should it run?", size = 20)
-        Gap(6.dp)
+        Gap(Space.xl)
+        Title("When should it run?", style = Type.h2)
+        Gap(Space.s)
         Sub("Toggle the ways you want this profile to activate. Profiles can also be started manually at any time.")
-        Gap(12.dp)
+        Gap(Space.m)
 
         // 1. Manual / On Demand Card
         DCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(Palette.Ok.copy(alpha = 0.14f)),
+                        
+                        .background(Palette.ok.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("⏱️", fontSize = 17.sp)
+                    Text("⏱️", style = Type.h3, fontWeight = FontWeight.Normal)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "On Demand Timer",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                     )
                     Text(
                         "Available on Now tab and quick settings",
-                        fontSize = 12.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(top = 2.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(top = Space.xxs),
                     )
                 }
-                Pill("Ready ✓", selected = false, tint = Palette.Ok)
+                Pill("Ready ✓", selected = false, tint = Palette.ok)
             }
         }
 
         // 2. Weekly Schedule Card (TOGGLABLE)
-        Gap(12.dp)
+        Gap(Space.m)
         DCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(Palette.Accent.copy(alpha = 0.14f)),
+                        
+                        .background(Palette.accent.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("🔁", fontSize = 17.sp)
+                    Text("🔁", style = Type.h3, fontWeight = FontWeight.Normal)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "Weekly Schedule",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                     )
                     Text(
                         if (windows.isNotEmpty()) {
@@ -425,9 +415,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         } else {
                             "Off · Set specific hours and days"
                         },
-                        fontSize = 12.sp,
-                        color = if (windows.isNotEmpty()) Palette.Ok else Palette.Muted,
-                        modifier = Modifier.padding(top = 2.dp),
+                        style = Type.meta,
+                        color = if (windows.isNotEmpty()) Palette.ok else Palette.muted,
+                        modifier = Modifier.padding(top = Space.xxs),
                     )
                 }
                 Switch(
@@ -458,16 +448,16 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             // Expanded windows list
             if (windows.isNotEmpty()) {
                 windows.forEach { window ->
-                    Gap(12.dp)
+                    Gap(Space.m)
                     Rule()
-                    Gap(12.dp)
+                    Gap(Space.m)
                     WindowContent(
                         window = window,
                         onChange = { model.saveWeekly(it) },
                         onRemove = { model.deleteWeekly(window.id) },
                     )
                 }
-                Gap(12.dp)
+                Gap(Space.m)
                 GhostButton("+ Add another window") {
                     if (name.isBlank()) {
                         model.say("Give it a name first.")
@@ -496,34 +486,34 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
             else -> "${mine.size} events start it."
         }
-        Gap(12.dp)
+        Gap(Space.m)
         DCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(Palette.Ok.copy(alpha = 0.14f)),
+                        
+                        .background(Palette.ok.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("📅", fontSize = 17.sp)
+                    Text("📅", style = Type.h3, fontWeight = FontWeight.Normal)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "Calendar Events",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                     )
                     Text(
                         if (fromCalendar) calendarExample else "Off · Does not sync with calendar",
-                        fontSize = 12.sp,
-                        color = if (fromCalendar) Palette.Ok else Palette.Muted,
-                        modifier = Modifier.padding(top = 2.dp),
+                        style = Type.meta,
+                        color = if (fromCalendar) Palette.ok else Palette.muted,
+                        modifier = Modifier.padding(top = Space.xxs),
                     )
                 }
                 Switch(
@@ -542,9 +532,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
 
             if (fromCalendar) {
-                Gap(10.dp)
+                Gap(Space.m)
                 Rule()
-                Gap(10.dp)
+                Gap(Space.m)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -552,35 +542,35 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Configure calendar events", fontSize = 13.sp, color = Palette.Accent)
-                    Text("›", fontSize = 18.sp, color = Palette.Accent, fontWeight = FontWeight.Bold)
+                    Text("Configure calendar events", style = Type.meta, color = Palette.accent)
+                    Text("›", style = Type.h3, color = Palette.accent)
                 }
             }
         }
 
         // 4. Daily Limit Card (TOGGLABLE)
-        Gap(12.dp)
+        Gap(Space.m)
         DCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(Palette.Bad.copy(alpha = 0.14f)),
+                        
+                        .background(Palette.bad.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("⏳", fontSize = 17.sp)
+                    Text("⏳", style = Type.h3, fontWeight = FontWeight.Normal)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
                         "Daily Screen-Time Limit",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                     )
                     Text(
                         if (budgeted) {
@@ -588,9 +578,9 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         } else {
                             "Off · Total block when active"
                         },
-                        fontSize = 12.sp,
-                        color = if (budgeted) Palette.Accent else Palette.Muted,
-                        modifier = Modifier.padding(top = 2.dp),
+                        style = Type.meta,
+                        color = if (budgeted) Palette.accent else Palette.muted,
+                        modifier = Modifier.padding(top = Space.xxs),
                     )
                 }
                 Switch(
@@ -620,14 +610,14 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
 
             if (budgeted) {
-                Gap(12.dp)
+                Gap(Space.m)
                 Rule()
-                Gap(10.dp)
-                Text("Daily allowance before locking:", fontSize = 12.sp, color = Palette.Muted)
-                Gap(8.dp)
+                Gap(Space.m)
+                Text("Daily allowance before locking:", style = Type.meta, color = Palette.muted)
+                Gap(Space.s)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     listOf(15, 30, 60, 120).forEach { mins ->
                         val selected = (budgetSeconds ?: 0) / 60 == mins
@@ -652,21 +642,20 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // ==========================================
         // SUMMARY NOTE & ACTIONS
         // ==========================================
-        Gap(16.dp)
+        Gap(Space.l)
         Text(
             "Any toggled trigger that turns on activates the profile. While active, all selected apps and websites are blocked.",
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-            color = Palette.Dim,
+            style = Type.meta,
+            color = Palette.dim,
         )
 
-        Gap(20.dp)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Gap(Space.xl)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             if (existing != null) {
                 GhostButton(
                     text = "Delete",
                     modifier = Modifier.weight(1f),
-                    colour = Palette.Bad,
+                    colour = Palette.bad,
                 ) { confirmingDelete = true }
             }
             PrimaryButton(
@@ -741,27 +730,23 @@ private fun NameField(
             .fillMaxWidth()
             .height(58.dp)
             .clip(RoundedCornerShape(Dsn.CardRadius))
-            .background(Palette.Surface)
+            .background(Palette.surface)
             .border(
                 1.dp,
-                if (value.isBlank()) Palette.Line else tint,
+                if (value.isBlank()) Palette.line else tint,
                 RoundedCornerShape(Dsn.CardRadius),
             )
             .padding(horizontal = Dsn.CardPad),
         contentAlignment = Alignment.CenterStart,
     ) {
         if (value.isEmpty()) {
-            Text("Name it", fontSize = 19.sp, color = Palette.Dim)
+            Text("Name it", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
         }
         BasicTextField(
             value = value,
             onValueChange = onChange,
             singleLine = true,
-            textStyle = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Palette.Text,
-            ),
+            textStyle = Type.h2.copy(fontWeight = FontWeight.Bold, color = Palette.text),
             cursorBrush = SolidColor(tint),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -804,7 +789,7 @@ private fun WindowContent(
     onRemove: () -> Unit,
 ) {
     Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             DAYS.forEachIndexed { index, letter ->
                 // Monday is 1 in the config, and Sunday is 7 — the ISO numbering the core uses,
                 // kept out of the user's way.
@@ -813,8 +798,7 @@ private fun WindowContent(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (on) Palette.Accent else Palette.Raised)
+                        .background(if (on) Palette.accent else Palette.raised)
                         .clickable {
                             val days = if (on) window.days - day else window.days + day
                             onChange(window.copy(days = days.sorted()))
@@ -823,31 +807,31 @@ private fun WindowContent(
                 ) {
                     Text(
                         letter,
+                        style = Type.meta,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = if (on) Palette.Ink else Palette.Muted,
+                        color = if (on) Palette.ground else Palette.muted,
                     )
                 }
             }
         }
 
-        Gap(14.dp)
+        Gap(Space.l)
         Rule()
-        Gap(14.dp)
+        Gap(Space.l)
 
         MinuteRow("Starts", window.startMinute) { onChange(window.copy(startMinute = it)) }
-        Gap(10.dp)
+        Gap(Space.m)
         MinuteRow("Ends", window.endMinute) { onChange(window.copy(endMinute = it)) }
 
-        Gap(14.dp)
+        Gap(Space.l)
         Rule()
-        Gap(14.dp)
+        Gap(Space.l)
 
         SectionLabel("How hard is it to get out")
-        Gap(9.dp)
+        Gap(Space.s)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             strengths().forEach { (label, lock) ->
                 Pill(
@@ -870,15 +854,15 @@ private fun WindowContent(
             else -> null
         }
         if (note != null) {
-            Gap(6.dp)
-            Text(note, fontSize = 12.sp, color = Palette.Muted, lineHeight = 16.sp)
+            Gap(Space.s)
+            Text(note, style = Type.meta, color = Palette.muted)
         }
 
-        Gap(14.dp)
+        Gap(Space.l)
         Text(
             "Remove this window",
-            fontSize = 13.sp,
-            color = Palette.Bad,
+            style = Type.meta,
+            color = Palette.bad,
             modifier = Modifier.clickable(onClick = onRemove),
         )
     }
@@ -900,25 +884,25 @@ private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, fontSize = 15.sp, color = Palette.Text, modifier = Modifier.weight(1f))
+        Text(label, style = Type.body, color = Palette.text, modifier = Modifier.weight(1f))
         // The stepper from the canvas: a raised tray holding minus, the value, and an accented
         // plus. The tray is what makes the two glyphs read as one control rather than two buttons.
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(11.dp))
-                .background(Palette.Raised)
-                .padding(3.dp),
+                
+                .background(Palette.raised)
+                .padding(Dsn.Border),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs),
         ) {
             Nudge("−", "fifteen minutes earlier", accent = false) {
                 onChange(((minute - 15) + 24 * 60) % (24 * 60))
             }
             Text(
                 clock(minute),
-                fontSize = 14.sp,
+                style = Type.body,
                 fontWeight = FontWeight.Bold,
-                color = Palette.Text,
+                color = Palette.text,
                 modifier = Modifier.width(62.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
@@ -949,16 +933,15 @@ private fun Nudge(glyph: String, description: String, accent: Boolean, onClick: 
     Box(
         modifier = Modifier
             .size(30.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (accent) Palette.Accent else androidx.compose.ui.graphics.Color.Transparent)
+            
+            .background(if (accent) Palette.accent else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClickLabel = description, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             glyph,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (accent) Palette.Ink else Palette.Muted,
+            style = Type.h3,
+            color = if (accent) Palette.ground else Palette.muted,
         )
     }
 }
@@ -994,8 +977,8 @@ fun BudgetSheet(model: CurfewViewModel, profileId: String, onDone: () -> Unit) {
             onDone()
         },
     ) {
-        Gap(14.dp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Gap(Space.l)
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             listOf(15, 30, 60, 120).forEach { option ->
                 Pill(
                     text = spellDuration(option),

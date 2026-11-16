@@ -5,44 +5,29 @@
 # of this file is the number the project quotes, so a stale line is a lie.
 #
 # Regenerate: ./gradlew :app:testDebugUnitTest -Dcurfew.updateCopyAllowlist=true
-AppPickerScreen.kt|* - YouTube*
-AppPickerScreen.kt|*://*/watch*
-AppPickerScreen.kt|Address
-AppPickerScreen.kt|Address
 AppPickerScreen.kt|Address, pattern or word…
 AppPickerScreen.kt|Allowed
-AppPickerScreen.kt|Block
 AppPickerScreen.kt|Block a site or word
+AppPickerScreen.kt|Block it
 AppPickerScreen.kt|Blocked
 AppPickerScreen.kt|Blocked by this profile
 AppPickerScreen.kt|Blocking belongs to a profile — a named set of apps and sites. Make one on the 
-AppPickerScreen.kt|Blocks anything whose address or title contains the word.
-AppPickerScreen.kt|Blocks the site and everything under it.
-AppPickerScreen.kt|Cancel
-AppPickerScreen.kt|Cancel
 AppPickerScreen.kt|Copy from
 AppPickerScreen.kt|Copy from:
 AppPickerScreen.kt|Copy them
 AppPickerScreen.kt|Copy them
 AppPickerScreen.kt|Done
 AppPickerScreen.kt|Done
-AppPickerScreen.kt|Matches the title of a window, on the PC.
-AppPickerScreen.kt|Matches whole addresses; * stands for any run of characters.
 AppPickerScreen.kt|Nothing has been changed, and this screen will work again once the config 
 AppPickerScreen.kt|Nothing to block yet
 AppPickerScreen.kt|Nothing yet. A site blocks it and everything under it; a word blocks 
 AppPickerScreen.kt|Plan tab and it will appear here.
 AppPickerScreen.kt|Search your apps
 AppPickerScreen.kt|Select Apps to Block
-AppPickerScreen.kt|Site
-AppPickerScreen.kt|Site
-AppPickerScreen.kt|Word
-AppPickerScreen.kt|Word
 AppPickerScreen.kt|Your plan could not be read, so Curfew cannot show what this profile blocks. 
 AppPickerScreen.kt|already running.
 AppPickerScreen.kt|anything whose address or title contains it.
 AppPickerScreen.kt|can be read.\n\n
-AppPickerScreen.kt|get added here. Nothing already blocked is removed.
 BlockActivity.kt| else 
 BlockActivity.kt|No emergency pass right now
 BlockActivity.kt|Not now
@@ -85,7 +70,31 @@ Challenge.kt|Type this out to end the session.
 ChallengeDialog.kt|End the session
 ChallengeDialog.kt|Keep going
 CurfewViewModel.kt|Configuration imported.
+Design.kt|)} are 
+Design.kt|1 hour
+Design.kt|Ask to end in 24 hours
+Design.kt|Ask to end in 24 hours
 Design.kt|Cancel
+Design.kt|Drag down to close
+Design.kt|End now
+Design.kt|End now
+Design.kt|Ending this affects every app the profile blocks, not only this one.
+Design.kt|No windows yet. A rule you add below is drawn here, so you can see the week at a glance.
+Design.kt|OFF
+Design.kt|ON
+Design.kt|Pause
+Design.kt|Pause this
+Design.kt|Pause this
+Design.kt|Present a tag
+Design.kt|Present a tag
+Design.kt|This is the length you are deciding to stop for. Curfew does not put the block 
+Design.kt|Type the answer here.
+Design.kt|YOUR ANSWER
+Design.kt|back afterwards — there is no timer that turns one off and on again — so you 
+Design.kt|choose when to start again, or let its schedule do it.
+Design.kt|e.g. 42
+Design.kt|shaded in cyan, for the events Curfew can see today. The chart shows a 
+Design.kt|week, so each one is drawn on the weekday it falls on.
 DevicesScreen.kt|Add a device
 DevicesScreen.kt|Cancel
 DevicesScreen.kt|Compare this with what your other device shows for it.
@@ -143,13 +152,15 @@ DevicesScreen.kt|this device — cancel.
 DevicesScreen.kt|what the other device left.
 DevicesScreen.kt|will end here when the lock is satisfied here.
 HealthScreen.kt| Its database is encrypted with a key held by this 
+HealthScreen.kt|Accent
 HealthScreen.kt|Allow
+HealthScreen.kt|How Curfew looks
+HealthScreen.kt|Theme
 HealthScreen.kt|device's keystore.
 NowScreen.kt| days in a row
 NowScreen.kt| this week
 NowScreen.kt|1 peer
 NowScreen.kt|Another of your devices has a session only this one can end.
-NowScreen.kt|Ask for it
 NowScreen.kt|Ask to end in 24 hours
 NowScreen.kt|Blocking now
 NowScreen.kt|Check the schedules now
@@ -184,12 +195,9 @@ NowScreen.kt|The clock jumped forward
 NowScreen.kt|The clock moved backwards
 NowScreen.kt|The hours a block buys are counted here, so you can see what the no was for. 
 NowScreen.kt|This fills in once a block has run.
-NowScreen.kt|This is the way out of a lock nothing here can end. It cannot be taken back, and 
 NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
 NowScreen.kt|Ticks on time
 NowScreen.kt|Upcoming · next 24h
-NowScreen.kt|Use an emergency pass?
-NowScreen.kt|Use one
 NowScreen.kt|Waiting on you
 NowScreen.kt|You chose \"ask me first\" for this one, so this is the asking. Nothing else 
 NowScreen.kt|Your other device is holding a session that only this one can end. Saying yes 
@@ -265,64 +273,95 @@ ScheduleScreen.kt|Remove
 ScheduleScreen.kt|Remove
 ScheduleScreen.kt|Remove this schedule?
 ScheduleScreen.kt|Remove this trigger
+ScheduleScreen.kt|Week at a glance
 ScheduleScreen.kt|✏️ Edit Profile
+SettingsScreen.kt|Accent
+SettingsScreen.kt|An emergency pass ends any lock immediately, including the strongest one. 
+SettingsScreen.kt|Appearance
+SettingsScreen.kt|Appearance
 SettingsScreen.kt|Config copied to clipboard.
 SettingsScreen.kt|Config exported to file.
 SettingsScreen.kt|Config file & backup
 SettingsScreen.kt|Copy to clipboard
 SettingsScreen.kt|Curfew can enforce
+SettingsScreen.kt|Curfew follows your phone's own display size, so a larger system font makes 
 SettingsScreen.kt|Devices
 SettingsScreen.kt|Devices
 SettingsScreen.kt|Done
+SettingsScreen.kt|Done
+SettingsScreen.kt|Everything here is stored on this phone. Nothing is sent anywhere.
 SettingsScreen.kt|Export config
 SettingsScreen.kt|Export or import your curfew.toml configuration file.
 SettingsScreen.kt|Fix
+SettingsScreen.kt|Gap between uses
+SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file
 SettingsScreen.kt|Is Curfew working
 SettingsScreen.kt|No other device paired yet.
+SettingsScreen.kt|Orange still means a block is running, green still means live, red still 
+SettingsScreen.kt|Orange still means a block is running, green still means live, red still 
 SettingsScreen.kt|Paired, but not listening right now.
+SettingsScreen.kt|Passes a week
 SettingsScreen.kt|Settings
+SettingsScreen.kt|Spending one is written into your history and they cannot be given back.
 SettingsScreen.kt|Sync now
 SettingsScreen.kt|Sync now
 SettingsScreen.kt|Syncing
 SettingsScreen.kt|Syncing is not set up on this device.
 SettingsScreen.kt|That file could not be read.
 SettingsScreen.kt|That file could not be written.
+SettingsScreen.kt|The accent colours the primary action and the selected tab, and nothing else. 
+SettingsScreen.kt|The accent colours the primary action and the selected tab, and nothing else. 
+SettingsScreen.kt|The core refuses a zero gap when passes are on, because two uses in a row 
+SettingsScreen.kt|The emergency hatch is off. A lock you cannot end early then has no 
 SettingsScreen.kt|The rest of Curfew
+SettingsScreen.kt|Theme
 SettingsScreen.kt|Time and opens, per app, for as long as Curfew has been watching.
 SettingsScreen.kt|Where your time went
 SettingsScreen.kt|Your calendar
 SettingsScreen.kt|Your config could not be read, so there is nothing to export. Nothing was written.
 SettingsScreen.kt|Your other devices
 SettingsScreen.kt|earshot. Blocks follow you between them.
+SettingsScreen.kt|every screen here larger too. There is no second setting to keep in step.
+SettingsScreen.kt|means refused.
+SettingsScreen.kt|means refused.
+SettingsScreen.kt|way out except its own end time and the last-resort release.
+SettingsScreen.kt|would make the ration a formality rather than a limit.
+TimerScreen.kt|1 · How hard should this be to leave?
+TimerScreen.kt|2 · How long?
+TimerScreen.kt|3 · What does it switch off?
+TimerScreen.kt|Choose a different profile
 TimerScreen.kt|Curfew can only replace a blocked app if it is allowed to see which app is 
 TimerScreen.kt|Curfew cannot ask for one that does not exist, and a lock nothing can open 
+TimerScreen.kt|Done
 TimerScreen.kt|Fingerprint or PIN is not offered, because this phone has no screen lock set. 
 TimerScreen.kt|Go back
 TimerScreen.kt|Go back
-TimerScreen.kt|If you change your mind
-TimerScreen.kt|Nothing ends this early except an emergency pass. It runs until 
 TimerScreen.kt|One switch first
 TimerScreen.kt|Start it
 TimerScreen.kt|Start without it
+TimerScreen.kt|This profile is already blocked
 TimerScreen.kt|Turn it on
+TimerScreen.kt|Which profile?
 TimerScreen.kt|You have not set up anything to block yet. Make a profile on the Plan tab 
-TimerScreen.kt|accident on a dial, so this is the check. Start it?
 TimerScreen.kt|come back. Or start it now, and nothing will be blocked until the switch 
 TimerScreen.kt|drag the ring, or pick one
 TimerScreen.kt|first — a timer needs to know what it is switching off.
 TimerScreen.kt|in front.\n\n
 TimerScreen.kt|is on.
-TimerScreen.kt|tap to use another profile
+TimerScreen.kt|tap to switch between your 2 profiles
 TimerScreen.kt|would hold you until it ran out.
 TimerScreen.kt|your only profile
 UsageScreen.kt| else 
 UsageScreen.kt|Before Curfew
 UsageScreen.kt|Export CSV
 UsageScreen.kt|Export JSON
+UsageScreen.kt|Insights
 UsageScreen.kt|Kept on this device for 30 days, then deleted.
 UsageScreen.kt|No days in a row yet.
 UsageScreen.kt|Nothing counted yet. Time is only measured for targets a budget or a launch 
+UsageScreen.kt|Nothing has been measured yet, so there is nothing to rank. This fills in for the 
+UsageScreen.kt|Nothing recorded in any hour yet.
 UsageScreen.kt|Now
 UsageScreen.kt|One day in a row.
 UsageScreen.kt|Screen time, a day
@@ -331,10 +370,13 @@ UsageScreen.kt|The before-and-after goes here. It needs Usage access, because bo
 UsageScreen.kt|Today
 UsageScreen.kt|Today has not finished, so it does not count against you yet.
 UsageScreen.kt|What Curfew did
-UsageScreen.kt|Where your time went
+UsageScreen.kt|What it costs you
+UsageScreen.kt|When you lose time
 UsageScreen.kt|are Android's own screen-time figures rather than anything Curfew 
 UsageScreen.kt|counts. Grant it on Health and this fills in.
+UsageScreen.kt|launch limit or an allowance has something to measure.
 UsageScreen.kt|limit actually covers — Curfew does not keep a record of everything you 
 UsageScreen.kt|now, so it cannot say anything on day one.
 UsageScreen.kt|showing — it compares an average day before Curfew with an average day 
+UsageScreen.kt|targets a rule actually covers.
 UsageScreen.kt|you started.

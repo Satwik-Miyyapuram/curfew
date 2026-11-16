@@ -39,13 +39,11 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
@@ -193,28 +191,27 @@ internal fun CalendarList(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         item {
             Column {
-                Gap(14.dp)
-                Title(heading, size = 24)
+                Gap(Space.l)
+                Title(heading)
             }
         }
 
         if (state.loading) {
-            item { Text("Reading your calendar…", fontSize = 14.sp, color = Palette.Muted) }
+            item { Text("Reading your calendar…", style = Type.body, color = Palette.muted) }
             return@LazyColumn
         }
 
         if (!state.calendarGranted) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     Text(
                         "Curfew cannot see your calendar yet, so no meeting can start a block.",
-                        fontSize = 14.sp,
-                        lineHeight = 21.sp,
-                        color = Palette.Muted,
+                        style = Type.body,
+                        color = Palette.muted,
                     )
                     PrimaryButton("Allow calendar access") {
                         requestRuntimePermission(context, Manifest.permission.READ_CALENDAR)
@@ -239,7 +236,7 @@ internal fun CalendarList(
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     Pill(
                         text = "All (${state.calendarEvents.size})",
@@ -271,29 +268,29 @@ internal fun CalendarList(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Palette.Accent.copy(alpha = 0.15f)),
+                                
+                                .background(Palette.accent.copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("📅", fontSize = 16.sp)
+                            Text("📅", style = Type.h3, fontWeight = FontWeight.Normal)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 "All “$cal” events",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.body,
+                                fontWeight = FontWeight.Bold,
+                                color = Palette.text,
                             )
                             Text(
                                 if (coversCalendar) "Active · Blocks during every event"
                                 else "Block during every event on this calendar",
-                                fontSize = 12.sp,
-                                color = if (coversCalendar) Palette.Ok else Palette.Muted,
+                                style = Type.meta,
+                                color = if (coversCalendar) Palette.ok else Palette.muted,
                             )
                         }
                         if (onToggleWholeCalendar != null) {
@@ -315,9 +312,8 @@ internal fun CalendarList(
                         "Nothing in the next day and a half. Curfew only reads a narrow window " +
                             "around now, because that is all a rule can act on."
                     },
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                    color = if (failure != null) Palette.Bad else Palette.Muted,
+                    style = Type.body,
+                    color = if (failure != null) Palette.bad else Palette.muted,
                 )
             }
         } else if (filteredEvents.isEmpty()) {
@@ -325,8 +321,8 @@ internal fun CalendarList(
                 Text(
                     if (selectedCalendar != null) "No events on “$selectedCalendar” match “$query”."
                     else "No event matches “$query”.",
-                    fontSize = 14.sp,
-                    color = Palette.Muted,
+                    style = Type.body,
+                    color = Palette.muted,
                 )
             }
         }
@@ -335,7 +331,7 @@ internal fun CalendarList(
         items(rows(filteredEvents, state.now), key = { it.key }) { row ->
             when (row) {
                 is CalendarRow.Day -> Column {
-                    Gap(6.dp)
+                    Gap(Space.s)
                     Box(Modifier.semantics { heading() }) { SectionLabel(row.label) }
                 }
 
@@ -362,9 +358,8 @@ internal fun CalendarList(
                 Text(
                     "Add a profile on the Plan tab first — a calendar rule has to say which one " +
                         "it runs.",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = Palette.Dim,
+                    style = Type.meta,
+                    color = Palette.dim,
                 )
             }
         }
@@ -381,41 +376,41 @@ private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -
             .fillMaxWidth()
             .height(46.dp)
             .clip(RoundedCornerShape(Dsn.CtlRadius))
-            .background(Palette.Surface)
-            .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius))
-            .padding(horizontal = 14.dp),
+            .background(Palette.surface)
+            .border(Dsn.Border, Palette.line)
+            .padding(horizontal = Space.l),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
     ) {
-        Text("⌕", fontSize = 17.sp, color = Palette.Muted)
+        Text("⌕", style = Type.h3, fontWeight = FontWeight.Normal, color = Palette.muted)
         Box(Modifier.weight(1f)) {
             BasicTextField(
                 value = query,
                 onValueChange = onChange,
                 singleLine = true,
-                textStyle = TextStyle(fontSize = 14.5.sp, color = Palette.Text),
-                cursorBrush = SolidColor(Palette.Accent),
+                textStyle = Type.body.copy(color = Palette.text),
+                cursorBrush = SolidColor(Palette.accent),
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = "Search your calendar events" },
             )
             if (query.isEmpty()) {
-                Text("Search events by title or location", fontSize = 14.sp, color = Palette.Dim)
+                Text("Search events by title or location", style = Type.body, color = Palette.dim)
             }
         }
         if (query.isNotBlank()) {
             Box(
                 modifier = Modifier
                     .size(24.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Palette.Raised)
+                    
+                    .background(Palette.raised)
                     .clickable { onChange("") },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("✕", fontSize = 11.sp, color = Palette.Muted)
+                Text("✕", style = Type.micro, color = Palette.muted)
             }
         } else if (total > 0) {
-            Text("$kept of $total", fontSize = 12.sp, color = Palette.Dim)
+            Text("$kept of $total", style = Type.meta, color = Palette.dim)
         }
     }
 }
@@ -437,61 +432,60 @@ private fun EventCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Dsn.CardRadius))
-            .background(if (tinted) Palette.Accent.copy(alpha = 0.07f) else Palette.Surface)
+            .background(if (tinted) Palette.accent.copy(alpha = 0.07f) else Palette.surface)
             .border(
                 1.dp,
-                if (tinted) Palette.Accent.copy(alpha = 0.45f) else Palette.Line,
+                if (tinted) Palette.accent.copy(alpha = 0.45f) else Palette.line,
                 RoundedCornerShape(Dsn.CardRadius),
             )
             .clickable(enabled = canBlock, onClick = onBlock)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = Space.l, vertical = Space.l),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
             verticalAlignment = Alignment.Top,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
                     marked(event.title.ifBlank { "(untitled)" }, highlight),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    lineHeight = 20.sp,
-                    color = Palette.Text,
+                    style = Type.body,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.text,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Gap(4.dp)
+                Gap(Space.xs)
                 // Calendar name & location
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     if (event.calendar.isNotBlank()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(Space.xs),
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Palette.Accent),
+                                    
+                                    .background(Palette.accent),
                             )
-                            Text(event.calendar, fontSize = 12.sp, color = Palette.Dim)
+                            Text(event.calendar, style = Type.meta, color = Palette.dim)
                         }
                     }
                     if (event.location.isNotBlank()) {
                         Text(
                             "📍 " + event.location,
-                            fontSize = 12.sp,
-                            color = Palette.Dim,
+                            style = Type.meta,
+                            color = Palette.dim,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                     if (!event.busy) {
-                        Text("(free)", fontSize = 11.5.sp, color = Palette.Dim)
+                        Text("(free)", style = Type.micro, color = Palette.dim)
                     }
                 }
             }
@@ -499,56 +493,56 @@ private fun EventCard(
             // Time & Duration column
             Column(horizontalAlignment = Alignment.End) {
                 if (event.allDay) {
-                    Text("All day", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Palette.Muted)
+                    Text("All day", style = Type.meta, color = Palette.muted)
                 } else {
-                    Text(clockTime(event.start), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Palette.Text)
+                    Text(clockTime(event.start), style = Type.meta, color = Palette.text)
                     val diff = (event.end - event.start).toInt().coerceAtLeast(0)
                     if (diff > 0) {
-                        Text(duration(diff), fontSize = 11.5.sp, color = Palette.Dim)
+                        Text(duration(diff), style = Type.micro, color = Palette.dim)
                     }
                 }
             }
         }
 
-        Gap(12.dp)
+        Gap(Space.m)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (targetProfileName != null) {
                 // Profile sheet view: clear status and untoggle
                 if (isBlockedForTarget) {
-                    Pill("✓ Blocks $targetProfileName", tint = Palette.Accent)
+                    Pill("✓ Blocks $targetProfileName", tint = Palette.accent)
                     Spacer(Modifier.weight(1f))
-                    Text("Tap to remove", fontSize = 12.sp, color = Palette.Dim)
+                    Text("Tap to remove", style = Type.meta, color = Palette.dim)
                 } else {
-                    Text("Not blocked", fontSize = 12.5.sp, color = Palette.Dim, modifier = Modifier.weight(1f))
-                    Pill("+ Block", tint = Palette.Accent)
+                    Text("Not blocked", style = Type.meta, color = Palette.dim, modifier = Modifier.weight(1f))
+                    Pill("+ Block", tint = Palette.accent)
                 }
             } else {
                 // General Events tab view
                 if (blockedBy.isNotEmpty()) {
                     FlowRow(
                         modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
+                        verticalArrangement = Arrangement.spacedBy(Space.s),
                     ) {
-                        blockedBy.forEach { profile -> Pill("Blocks $profile", tint = Palette.Accent) }
+                        blockedBy.forEach { profile -> Pill("Blocks $profile", tint = Palette.accent) }
                     }
                     Text(
                         if (blockedBy.size > 1) "Manage (${blockedBy.size}) ›" else "Manage ›",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Accent,
+                        style = Type.meta,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.accent,
                     )
                 } else {
-                    Text("Nothing blocked", fontSize = 12.5.sp, color = Palette.Dim, modifier = Modifier.weight(1f))
+                    Text("Nothing blocked", style = Type.meta, color = Palette.dim, modifier = Modifier.weight(1f))
                     Text(
                         "Block this",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (canBlock) Palette.Accent else Palette.Dim,
+                        style = Type.meta,
+                        fontWeight = FontWeight.Bold,
+                        color = if (canBlock) Palette.accent else Palette.dim,
                     )
                 }
             }
@@ -565,7 +559,7 @@ private fun marked(title: String, needle: String): AnnotatedString {
     if (at < 0) return AnnotatedString(title)
     return buildAnnotatedString {
         append(title.substring(0, at))
-        withStyle(SpanStyle(background = Palette.Accent.copy(alpha = 0.3f))) {
+        withStyle(SpanStyle(background = Palette.accent.copy(alpha = 0.3f))) {
             append(title.substring(at, at + needle.length))
         }
         append(title.substring(at + needle.length))
@@ -637,7 +631,7 @@ fun CalendarPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Palette.Ink),
+                .background(Palette.ground),
         ) {
             Box(Modifier.padding(horizontal = Dsn.Gutter)) {
                 BackRow("Events for $profileName", onDone)
@@ -724,15 +718,15 @@ internal fun EventSchedulesSheet(
         confirmEnabled = true,
         onConfirm = onDismiss,
     ) {
-        Gap(14.dp)
+        Gap(Space.l)
         Text(
             "Profiles blocking this event:",
-            fontSize = 14.sp,
-            color = Palette.Muted,
+            style = Type.body,
+            color = Palette.muted,
         )
-        Gap(10.dp)
+        Gap(Space.m)
 
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
             matchingRules.forEach { rule ->
                 val profileName = names[rule.profile] ?: rule.profile
                 val padBefore = rule.padBeforeSeconds / 60
@@ -748,21 +742,20 @@ internal fun EventSchedulesSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = Dsn.CardPad, vertical = 12.dp),
+                            .padding(horizontal = Dsn.CardPad, vertical = Space.m),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 profileName,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.h3,
+                                color = Palette.text,
                             )
                             Text(
                                 bufferText,
-                                fontSize = 13.sp,
-                                color = Palette.Muted,
+                                style = Type.meta,
+                                color = Palette.muted,
                             )
                         }
                         Switch(
@@ -774,8 +767,8 @@ internal fun EventSchedulesSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = Dsn.CardPad, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(horizontal = Dsn.CardPad, vertical = Space.s),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         GhostButton(
                             text = "Edit rule",
@@ -785,14 +778,14 @@ internal fun EventSchedulesSheet(
                         GhostButton(
                             text = "Remove",
                             modifier = Modifier.weight(1f),
-                            colour = Palette.Bad,
+                            colour = Palette.bad,
                             onClick = { onRemoveRule(rule) },
                         )
                     }
                 }
             }
 
-            Gap(4.dp)
+            Gap(Space.xs)
             GhostButton(
                 text = "+ Block another profile",
                 onClick = onAddRuleForEvent,

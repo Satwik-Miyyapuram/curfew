@@ -24,6 +24,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -39,7 +46,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
@@ -60,6 +66,8 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var showConfig by remember { mutableStateOf(false) }
+    // The appearance sheet, opened by the Theme and Accent rows in the list below.
+    var showAppearance by remember { mutableStateOf(false) }
 
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -93,13 +101,66 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val blocking = state.grants.count { it.grant.required && !it.granted }
 
     Screen(spacing = 0.dp) {
-        Gap(14.dp)
-        Title("Settings", size = 24)
-        Gap(16.dp)
+        Gap(Space.l)
+        Title("Settings")
+        Gap(Space.s)
+        Sub("Everything here is stored on this phone. Nothing is sent anywhere.")
+        Gap(Space.l)
 
-        Gap(18.dp)
+        // ---------------------------------------------------------------------------------------
+        // Appearance.
+        //
+        // `docs/design.md` section 5.11 lists a Theme setting and an Accent setting, and until now
+        // there was neither: `CurfewTheme` read `isSystemInDarkTheme()` and nothing else, so the
+        // paper palette the design document treats as the default was reachable only by changing a
+        // system setting. The plumbing existed — `Appearance` stores it and `CurfewTheme` reads it —
+        // and there was no control anywhere that wrote it, which is a setting in name only.
+        // ---------------------------------------------------------------------------------------
+        Gap(Space.l)
+        SectionLabel("Appearance")
+        Gap(Space.m)
+        DCardFlush {
+            SettingRow("Theme") {
+                ChoiceRow(
+                    options = listOf(
+                        Appearance.SYSTEM to "System",
+                        Appearance.LIGHT to "Paper",
+                        Appearance.DARK to "Dusk",
+                    ),
+                    chosen = Appearance.theme,
+                    onPick = { Appearance.setTheme(context, it) },
+                )
+            }
+            Rule()
+            SettingRow("Accent") {
+                ChoiceRow(
+                    options = Accent.entries.map { it.id to it.label },
+                    chosen = Appearance.accent,
+                    onPick = { Appearance.setAccent(context, it) },
+                )
+                Gap(Space.s)
+                Text(
+                    "The accent colours the primary action and the selected tab, and nothing else. " +
+                        "Orange still means a block is running, green still means live, red still " +
+                        "means refused.",
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+            Rule()
+            SettingRow("Text size") {
+                Text(
+                    "Curfew follows your phone's own display size, so a larger system font makes " +
+                        "every screen here larger too. There is no second setting to keep in step.",
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+        }
+
+        Gap(Space.l)
         SectionLabel("Curfew can enforce")
-        Gap(10.dp)
+        Gap(Space.m)
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
@@ -116,21 +177,20 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 17.dp, vertical = 15.dp)
+                        .padding(horizontal = Space.l, vertical = Space.l)
                         .semantics(mergeDescendants = true) { contentDescription = described },
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
                     Mark(entry.granted)
                     Column(Modifier.weight(1f)) {
-                        Text(name, fontSize = 15.sp, color = Palette.Text)
+                        Text(name, style = Type.body, color = Palette.text)
                         if (!entry.granted) {
                             Text(
                                 cost,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
-                                color = Palette.Muted,
-                                modifier = Modifier.padding(top = 2.dp),
+                                style = Type.meta,
+                                color = Palette.muted,
+                                modifier = Modifier.padding(top = Space.xxs),
                             )
                         }
                     }
@@ -148,9 +208,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel("Syncing")
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 18.dp) {
             // Syncing used to be visible only on the Devices screen, one tap further in and reachable
             // only once a device was paired: a user whose blocks were following them between two
@@ -175,28 +235,27 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         "${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in " +
                             "earshot. Blocks follow you between them."
                 },
-                fontSize = 14.sp,
-                lineHeight = 21.sp,
+                style = Type.body,
                 // The same correction as DevicesScreen: amber for *not* listening was backwards, and
                 // the neutral sentence read as "a block is running". See the note there.
-                color = if (state.sync.running) Palette.Ok else Palette.Muted,
+                color = if (state.sync.running) Palette.ok else Palette.muted,
             )
             state.sync.error?.let { problem ->
-                Gap(6.dp)
-                Text(problem, fontSize = 13.sp, lineHeight = 20.sp, color = Palette.Bad)
+                Gap(Space.s)
+                Text(problem, style = Type.meta, color = Palette.bad)
             }
             if (state.sync.available) {
-                Gap(12.dp)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Gap(Space.m)
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     GhostButton(text = "Sync now", onClick = model::syncNow)
                     GhostButton(text = "Devices") { onOpen(Routes.DEVICES) }
                 }
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.settings_accessibility_mode))
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 18.dp) {
             // The choice the accessibility grant hides inside it, given its own section because it is
             // the one permission where the *kind* of access matters more than whether it is held.
@@ -216,39 +275,69 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             val detector = Grant.detector(context)
             val chosen = Grant.chosenMode(context)
 
+            // Said before the buttons, because it is the thing that confuses people: Android's own
+            // list shows two Curfew rows and they are one choice at two levels.
+            Text(
+                stringResource(R.string.settings_accessibility_one_setting),
+                style = Type.meta,
+                color = Palette.muted,
+            )
+            Gap(Space.m)
+
             ModeStatus(detector)
-            Gap(14.dp)
-            ModePicker(chosen) { mode ->
+            Gap(Space.l)
+            // The only setting here, and it is a switch rather than a choice between two things.
+            WebsiteSwitch(
+                on = detector != Detector.Poller,
+                enabled = detector != Detector.Poller,
+            ) { wantsSites ->
                 // Remembered *and* acted on: remembering keeps the next screen agreeing with this one
-                // while the user is still in Settings, and the settings intent is what changes which
-                // service the system runs. The poller needs neither — it is what happens when this is
-                // turned off, which is why turning it off is a legitimate answer rather than a failure.
+                // while the user is still in Settings, and the settings page is what changes which
+                // service the system runs.
+                // There is one service now, so turning the switch on is turning precise blocking on.
+                // The switch itself stays because the copy around it — what precise blocking adds,
+                // and what it costs — is the thing a user needs to read before granting it.
+                val mode = EnforcementMode.PRECISE
                 EnforcementMode.remember(context, mode)
                 Watchers.rememberAccessibilityWanted(context, wanted = true)
                 openGrantPage(context, Grant.Accessibility)
             }
-            Gap(10.dp)
+            if (detector == Detector.Poller) {
+                Gap(Space.s)
+                Text(
+                    stringResource(R.string.settings_accessibility_needs_turning_on),
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+            Gap(Space.m)
             // The unified switch's "off". One tap, and blocking keeps working through the polling
-            // detector — it is only the precision, the site rules and the uninstall guard that go.
+            // detector — it is only the precision and the site rules that go.
             GhostButton(
                 text = stringResource(R.string.settings_use_no_special_access),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Watchers.rememberAccessibilityWanted(context, wanted = false)
-                // Nothing to open: the poller has no settings page. Turning the services *off* is what
-                // this asks for, and Android has no intent for that, so the user does it in Settings —
-                // which the copy says.
-                turnOffAccessibilityHint(context)
+                // The running reader can switch itself off, which is what lets a payment app run.
+                // When it cannot — not running, or a lock holds it — the user does it in Settings.
+                if (Watchers.turnOffReader(context)) {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.settings_use_no_special_access_done),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    turnOffAccessibilityHint(context)
+                }
             }
-            Gap(12.dp)
+            Gap(Space.m)
             // Said plainly, because a mode named "App blocking" reads as though the choice were about
             // *which* apps may be blocked. It is not: every version blocks every app the user picks.
             // What changes is how fast a block lands and whether Curfew may read an address bar.
             Text(
                 stringResource(R.string.perm_accessibility_mode_neither_blocks_apps),
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = Palette.Text,
+                style = Type.meta,
+                color = Palette.text,
             )
 
             // Having both services on is the worst of both worlds and worth saying out loud: the
@@ -258,7 +347,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 it.serviceClass() != detector.serviceClass() && Grant.isModeEnabled(context, it)
             }
             if (other != null) {
-                Gap(12.dp)
+                Gap(Space.m)
                 Notice(
                     text = stringResource(
                         R.string.perm_accessibility_mode_other_still_on,
@@ -277,7 +366,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 // right to complain: the shallow reading is the one a human makes too.
                 val chosenName = stringResource(chosen.label())
                 val runningName = stringResource(detector.label())
-                Gap(12.dp)
+                Gap(Space.m)
                 Notice(
                     text = stringResource(
                         R.string.perm_accessibility_mode_chosen_not_running,
@@ -288,7 +377,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
             }
 
-            Gap(14.dp)
+            Gap(Space.l)
             Rule()
             // The list itself, one tap away rather than summarised here: which apps are exempt is a
             // long list, and the only two reasons anyone comes to change it are a regional bank that
@@ -301,9 +390,101 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
+        // ---------------------------------------------------------------------------------------
+        // The emergency ration.
+        //
+        // This block exists because it did not. `[emergency]` in the plan file holds the only way
+        // out of a lock that the user themselves can reach, its default is `passes = 0`, and the
+        // core reads zero as "the hatch is off" — so on every install that never hand-edited the
+        // file the ration was empty for ever, the button that spends a pass was never drawn (it is
+        // only shown when one is available), and the only explanation on screen was a refusal
+        // sentence about a config field with no interface. A safety hatch with no handle.
+        //
+        // The values are written into the plan file, which the app already owns: read, modify,
+        // write, reload. See `withEmergencySettings` for why that is a text edit rather than a
+        // re-serialisation — in one line, the user's own comments survive.
+        // ---------------------------------------------------------------------------------------
+        Gap(Space.l)
+        SectionLabel("If you get locked out")
+        Gap(Space.m)
+        val ration = remember(state.configToml) {
+            runCatching { dev.curfew.policy.emergencySettings(state.configToml) }
+                .getOrDefault(dev.curfew.policy.EmergencySettings(0, 604800, 21600))
+        }
+        DCardFlush {
+            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+                // A local, because `passRefusal` is a delegated property riding on a `StateFlow`
+                // collection and Kotlin will not smart-cast it at the point of use.
+                val why = state.passRefusal
+                Text(
+                    when {
+                        ration.passes == 0 ->
+                            "The emergency hatch is off. A lock you cannot end early then has no " +
+                                "way out except its own end time and the last-resort release."
+                        why == null -> "${state.passesLeft} of ${ration.passes} left this week."
+                        else ->
+                            "${state.passesLeft} of ${ration.passes} left this week, and " +
+                                describePassRefusal(why, state.now)
+                                    .replaceFirstChar { it.lowercase() }
+                    },
+                    style = Type.meta,
+                    color = if (ration.passes == 0) Palette.warn else Palette.text,
+                )
+            }
+            Rule()
+            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+                SectionLabel("Passes a week")
+                Gap(Space.s)
+                ChoiceRow(
+                    options = listOf(
+                        "0" to "Off",
+                        "1" to "1",
+                        "2" to "2",
+                        "4" to "4",
+                        "7" to "7",
+                    ),
+                    chosen = ration.passes.toString(),
+                    onPick = { picks ->
+                        model.setEmergency(ration.copy(passes = picks.toInt()))
+                    },
+                )
+                Gap(Space.s)
+                Text(
+                    "An emergency pass ends any lock immediately, including the strongest one. " +
+                        "Spending one is written into your history and they cannot be given back.",
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+            Rule()
+            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+                SectionLabel("Gap between uses")
+                Gap(Space.s)
+                ChoiceRow(
+                    options = listOf(
+                        "3600" to "1h",
+                        "10800" to "3h",
+                        "21600" to "6h",
+                        "43200" to "12h",
+                        "86400" to "24h",
+                    ),
+                    chosen = ration.cooldownSeconds.toString(),
+                    onPick = { picks ->
+                        model.setEmergency(ration.copy(cooldownSeconds = picks.toLong()))
+                    },
+                )
+                Gap(Space.s)
+                Text(
+                    "The core refuses a zero gap when passes are on, because two uses in a row " +
+                        "would make the ration a formality rather than a limit.",
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+        }
         SectionLabel("The rest of Curfew")
-        Gap(10.dp)
+        Gap(Space.m)
         DCardFlush {
             Entry(
                 title = "Is Curfew working",
@@ -339,6 +520,28 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 warn = !state.calendarGranted,
             ) { onOpen(Routes.CALENDAR) }
             Rule()
+            // Theme and Accent as their own rows, beside the other things you can go and change.
+            //
+            // The Appearance card above has the controls in it, and that is where the choice is
+            // made. These rows are here because "Settings" is a list of what this app can be told,
+            // and two of the things it can be told — how it looks, and what colour its action is —
+            // were the only ones with no row. A section that exists but is not listed is a section
+            // people scroll past.
+            Entry(
+                title = "Theme",
+                note = when (Appearance.theme) {
+                    Appearance.LIGHT -> "Paper — the default."
+                    Appearance.DARK -> "Dusk."
+                    else -> "Following your phone."
+                },
+            ) { showAppearance = true }
+            Rule()
+            Entry(
+                title = "Accent",
+                note = Accent.of(Appearance.accent).label + ". Colours the action and the tab you " +
+                    "are on, and nothing that means a state.",
+            ) { showAppearance = true }
+            Rule()
             Entry(
                 title = "Where your time went",
                 note = "Time and opens, per app, for as long as Curfew has been watching.",
@@ -359,10 +562,10 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             ) { showConfig = true }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         DCard(padding = 16.dp) {
-            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                Text("⛨", fontSize = 17.sp, color = Palette.Muted)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text("⛨", style = Type.h3, fontWeight = FontWeight.Normal, color = Palette.muted)
                 Text(
                     // The true claim, and the same one Health shows: this sentence existed twice and
                     // one copy was false. Saying "no internet permission at all" was the earlier
@@ -370,13 +573,55 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     // and it is load-bearing, because this is the card a user reads to decide
                     // whether to trust a screen-watching app. See [Privacy].
                     Privacy.NO_SERVER,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             }
         }
-        Gap(8.dp)
+        Gap(Space.s)
+    }
+
+    // The appearance controls, in a sheet for the rows in the list.
+    //
+    // The same three controls the card above carries, because the rows in the list are a way *in*
+    // rather than a second place the setting lives: there is one value, in `Appearance`, and both
+    // surfaces write it.
+    if (showAppearance) {
+        DSheet(
+            title = "Appearance",
+            sub = "How Curfew looks. Stored on this phone.",
+            onDismiss = { showAppearance = false },
+            confirm = "Done",
+            confirmEnabled = true,
+            onConfirm = { showAppearance = false },
+        ) {
+            SheetSection("Theme") {
+                ChoiceRow(
+                    options = listOf(
+                        Appearance.SYSTEM to "System",
+                        Appearance.LIGHT to "Paper",
+                        Appearance.DARK to "Dusk",
+                    ),
+                    chosen = Appearance.theme,
+                    onPick = { Appearance.setTheme(context, it) },
+                )
+            }
+            SheetSection("Accent") {
+                ChoiceRow(
+                    options = Accent.entries.map { it.id to it.label },
+                    chosen = Appearance.accent,
+                    onPick = { Appearance.setAccent(context, it) },
+                )
+                Gap(Space.s)
+                Text(
+                    "The accent colours the primary action and the selected tab, and nothing else. " +
+                        "Orange still means a block is running, green still means live, red still " +
+                        "means refused.",
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+        }
     }
 
     if (showConfig) {
@@ -389,7 +634,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             onConfirm = { showConfig = false },
         ) {
             SheetSection("Backup & Restore") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     PrimaryButton("Export config", Modifier.weight(1f)) {
                         runCatching {
                             exportFile.launch("curfew.toml")
@@ -401,8 +646,8 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         }.onFailure { model.say(context.getString(R.string.file_read_failed)) }
                     }
                 }
-                Gap(8.dp)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Gap(Space.s)
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                     GhostButton("Copy to clipboard", Modifier.weight(1f)) {
                         if (state.configToml.isNotBlank()) {
                             clipboard.setText(AnnotatedString(state.configToml))
@@ -410,7 +655,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         }
                     }
                 }
-                Gap(10.dp)
+                Gap(Space.m)
                 SheetNote(
                     "Importing validates the config before applying. A session already running keeps running until its own lock expires.",
                 )
@@ -420,16 +665,14 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Palette.Raised)
-                            .padding(12.dp),
+                            .border(Dsn.Border, Palette.line)
+                            .background(Palette.raised)
+                            .padding(Space.m),
                     ) {
                         Text(
                             state.configToml,
-                            fontSize = 11.5.sp,
-                            lineHeight = 16.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            color = Palette.Text,
+                            style = Type.micro.mono,
+                            color = Palette.text,
                         )
                     }
                 }
@@ -443,9 +686,9 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
 private fun Mark(granted: Boolean) {
     Text(
         if (granted) "✓" else "!",
-        fontSize = 15.sp,
+        style = Type.body,
         fontWeight = FontWeight.Bold,
-        color = if (granted) Palette.Ok else Palette.Bad,
+        color = if (granted) Palette.ok else Palette.bad,
         modifier = Modifier.size(18.dp),
     )
 }
@@ -456,79 +699,69 @@ private fun ModeStatus(detector: Detector) {
     Column(Modifier.fillMaxWidth()) {
         Text(
             stringResource(R.string.settings_mode_running_label),
-            fontSize = 10.5.sp,
+            style = Type.micro,
             fontWeight = FontWeight.Bold,
-            color = Palette.Dim,
+            color = Palette.dim,
         )
-        Gap(3.dp)
+        Gap(Space.xxs)
         Text(
             stringResource(detector.label()),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = Type.h3,
             // The polling detector is not a failure and is not coloured as one: it is a real detector
             // the user may have chosen on purpose, because it needs no alarming permission.
-            color = Palette.Text,
+            color = Palette.text,
         )
-        Gap(2.dp)
+        Gap(Space.xxs)
         Text(
             stringResource(detector.note()),
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            color = Palette.Muted,
+            style = Type.meta,
+            color = Palette.muted,
         )
     }
 }
 
 /**
- * The two modes, as a segmented control rather than two buttons.
+ * The one extra that precise blocking can be given, as a switch rather than half of a pair.
  *
- * Two identical-looking buttons over a line of prose made it impossible to see which one was in force,
- * which is the only question this section exists to answer. One border, a shared baseline, and the
- * chosen half filled — so the selection is a shape rather than something to be read out of a sentence.
+ * This used to be a segmented control with two equal halves, and that is what made it read as two
+ * settings. They are not peers: app blocking is the feature, and reading a browser's address bar is
+ * an addition to it. So the addition is drawn as what it is — a labelled switch — and there is
+ * nothing to reconcile: turn precise blocking on and every app you pick is blocked; turn this on as
+ * well and sites are blocked too.
+ *
+ * The label, the state word, and the switch's own fill all carry the answer, because section 8
+ * requires status by word and shape and not by colour alone.
  */
 @Composable
-private fun ModePicker(chosen: EnforcementMode, onPick: (EnforcementMode) -> Unit) {
+private fun WebsiteSwitch(on: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val label = stringResource(R.string.settings_accessibility_website_rules)
+    val note = stringResource(R.string.settings_accessibility_website_rules_note)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Dsn.CtlRadius))
-            .background(Palette.Surface)
-            .border(1.dp, Palette.Line, RoundedCornerShape(Dsn.CtlRadius)),
+            .heightIn(min = Dsn.MinTouch)
+            .clickable(enabled = enabled) { onToggle(!on) }
+            .semantics(mergeDescendants = true) {
+                contentDescription = label + if (on) ", on" else ", off"
+            },
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(Space.m),
     ) {
-        EnforcementMode.entries.forEachIndexed { index, mode ->
-            if (index > 0) {
-                Box(
-                    Modifier
-                        .width(1.dp)
-                        .height(Dsn.MinTouch)
-                        .background(Palette.Line),
-                )
-            }
-            val selected = mode == chosen
-            // Resolved out here: `semantics` takes a non-composable lambda and `stringResource` is
-            // composable, so hoisting it is required rather than tidier.
-            val name = stringResource(mode.label())
-            val described = if (selected) "$name, selected" else name
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(Dsn.MinTouch)
-                    .background(if (selected) Palette.Accent.copy(alpha = 0.20f) else Color.Transparent)
-                    .clickable { onPick(mode) }
-                    // The label *and* the state, so a screen reader says which one is chosen instead of
-                    // reading two labels and leaving the listener to work it out.
-                    .semantics(mergeDescendants = true) { contentDescription = described },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    name,
-                    fontSize = 13.sp,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) Palette.Text else Palette.Muted,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                )
-            }
+        Column(Modifier.weight(1f)) {
+            Text(
+                label.uppercase(),
+                style = Type.button,
+                color = if (enabled) Palette.text else Palette.dim,
+            )
+            Text(
+                note,
+                style = Type.meta,
+                color = if (enabled) Palette.muted else Palette.dim,
+                modifier = Modifier.padding(top = Space.xs),
+            )
+        }
+        Box(Modifier.padding(top = Space.xxs)) {
+            Switch(on = on, onChange = { if (enabled) onToggle(it) })
         }
     }
 }
@@ -536,11 +769,11 @@ private fun ModePicker(chosen: EnforcementMode, onPick: (EnforcementMode) -> Uni
 /** A sentence worth interrupting the page for. Distinct from body text by shape, not only by colour. */
 @Composable
 private fun Notice(text: String, tone: NoticeTone) {
-    val edge = if (tone == NoticeTone.Warning) Palette.Live else Palette.Muted
+    val edge = if (tone == NoticeTone.Warning) Palette.live else Palette.muted
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            
             .background(edge.copy(alpha = 0.10f)),
     ) {
         // A bar rather than a tinted card, so the kind is legible without colour: the shape says
@@ -548,10 +781,9 @@ private fun Notice(text: String, tone: NoticeTone) {
         Box(Modifier.width(3.dp).height(Dsn.MinTouch).background(edge))
         Text(
             text,
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            color = Palette.Text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            style = Type.meta,
+            color = Palette.text,
+            modifier = Modifier.padding(horizontal = Space.m, vertical = Space.m),
         )
     }
 }
@@ -560,38 +792,33 @@ private enum class NoticeTone { Warning, Info }
 
 /** The resource naming this mode, in one place so a call site cannot pick the wrong pairing. */
 private fun EnforcementMode.label(): Int = when (this) {
-    EnforcementMode.APP_ONLY -> R.string.perm_accessibility_mode_app_only
-    EnforcementMode.APP_AND_URL -> R.string.perm_accessibility_mode_app_and_url
+    EnforcementMode.PRECISE -> R.string.perm_accessibility_mode_app_and_url
 }
 
 /** The resource naming a detector, paired with [Detector.note]. */
 private fun Detector.label(): Int = when (this) {
-    Detector.Tracker -> R.string.perm_accessibility_mode_app_only
     Detector.Reader -> R.string.perm_accessibility_mode_app_and_url
     Detector.Poller -> R.string.settings_detector_poller
 }
 
 /** The resource saying what a detector costs. */
 private fun Detector.note(): Int = when (this) {
-    Detector.Tracker -> R.string.perm_accessibility_mode_app_only_note
     Detector.Reader -> R.string.perm_accessibility_mode_app_and_url_note
     Detector.Poller -> R.string.settings_detector_poller_note
 }
 
 /** The mode a detector corresponds to, for comparing a choice against what is running. */
 private fun Detector.mode(): EnforcementMode? = when (this) {
-    Detector.Tracker -> EnforcementMode.APP_ONLY
-    Detector.Reader -> EnforcementMode.APP_AND_URL
+    Detector.Reader -> EnforcementMode.PRECISE
     Detector.Poller -> null
 }
 
 /**
- * Say where the switch is, since we cannot flip it.
+ * Say where the switch is, when the reader could not flip it itself.
  *
- * There is no intent that turns an accessibility service *off* — `ACTION_ACCESSIBILITY_SETTINGS`
- * opens the list, and the only API that can change a component's enabled state needs a permission
- * this app does not hold and should not ask for. So the honest answer is to say the path and open the
- * list, rather than to leave a toggle that appears to do nothing.
+ * `disableSelf` works only from the running service, and is refused while a lock runs. Otherwise
+ * there is no intent that turns an accessibility service *off* — `ACTION_ACCESSIBILITY_SETTINGS`
+ * opens the list — so the honest answer is to say the path and open the list.
  */
 private fun turnOffAccessibilityHint(context: android.content.Context) {
     android.widget.Toast.makeText(
@@ -607,13 +834,13 @@ private fun Fix(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(32.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Accent)
+            
+            .background(Palette.accent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Fix", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+        Text("Fix", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.surface)
     }
 }
 
@@ -623,20 +850,33 @@ private fun Entry(title: String, note: String, warn: Boolean = false, onClick: (
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 17.dp, vertical = 15.dp),
+            .padding(horizontal = Space.l, vertical = Space.l),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+            Text(title, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.text)
             Text(
                 note,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
+                style = Type.meta,
                 // A missing permission is coloured, and nothing else on this screen is. It is the
                 // only line here that means something is currently not happening.
-                color = if (warn) Palette.Bad else Palette.Muted,
+                color = if (warn) Palette.bad else Palette.muted,
             )
         }
-        Text("›", fontSize = 20.sp, color = Palette.Dim)
+        Text("›", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
+    }
+}
+
+/**
+ * One labelled row of the appearance card: a name, then whatever sets it.
+ *
+ * Not [DRow], which puts its note *under* a title; an appearance row is a heading and a control.
+ */
+@Composable
+private fun SettingRow(label: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.l)) {
+        SectionLabel(label)
+        Gap(Space.s)
+        content()
     }
 }

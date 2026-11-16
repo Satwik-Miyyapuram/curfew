@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
@@ -47,6 +46,8 @@ import dev.curfew.policy.PassRefusal
 import dev.curfew.policy.Refusal
 import dev.curfew.policy.Session
 import dev.curfew.policy.Stats
+import androidx.compose.ui.res.stringResource
+import dev.curfew.app.R
 
 /**
  * What is running right now, and the only place a session can be ended.
@@ -129,24 +130,24 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         }
     }
 
-    fun end(session: Session) {
-        // A confirmation the user asked to be shown, shown. `Lock.Confirm` was never branched on
-        // anywhere in the UI, so it went to the core with an empty satisfied set, the core refused
-        // because the condition was unmet, and the refusal dialog offered nothing that could meet
-        // it. "One confirmation, so it is never an accident" — the default strength on the Timer
-        // screen, and the lock behind a seeded weeknight window — was in fact a lock with no exit.
-        val needsConfirm = session.lock.conditions.any { it is Lock.Confirm }
-        if (needsConfirm) {
-            confirmingEnd = session
-            return
-        }
-        val challenge = session.lock.conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
-        if (challenge == null) {
-            finish(session, emptyList())
-        } else {
-            pending = PendingEnd(session, challenge, Challenge.generate(challenge.challenge))
+    /**
+     * Take the next step towards ending [session], given what the user has already met here.
+     * The order lives in [challengeStep]: confirm first, then the challenge, then the core.
+     */
+    fun advance(session: Session, satisfied: List<Lock>) {
+        when (val step = challengeStep(session.lock.conditions, satisfied, posed = null)) {
+            ChallengeStep.AskConfirm -> confirmingEnd = session
+            is ChallengeStep.PoseChallenge -> pending = PendingEnd(session, satisfied, step.challenge)
+            ChallengeStep.End -> finish(session, satisfied)
         }
     }
+
+    // A confirmation the user asked to be shown, shown. `Lock.Confirm` was never branched on
+    // anywhere in the UI, so it went to the core with an empty satisfied set, the core refused
+    // because the condition was unmet, and the refusal dialog offered nothing that could meet
+    // it. "One confirmation, so it is never an accident" — the default strength on the Timer
+    // screen, and the lock behind a seeded weeknight window — was in fact a lock with no exit.
+    fun end(session: Session) = advance(session, emptyList())
 
     val live = state.sessions.firstOrNull()
     val liveName = live?.let { session -> named(session.profile) }
@@ -155,8 +156,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         if (live != null) {
             // Amber is reserved for this: a block is running right now. It appears above the
             // heading because the state of the phone is the first thing this screen is for.
-            Pill("Blocking now", tint = Palette.Live)
-            Gap(14.dp)
+            Pill("Blocking now", tint = Palette.live)
+            Gap(Space.l)
             Title(liveName.orEmpty())
             Sub(describeSource(live.source))
         } else {
@@ -176,7 +177,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Column(
                 Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.l),
             ) {
                 if (live != null) {
                     val endsAt = live.lock.endsAt
@@ -188,8 +189,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                             DialNumber(endsAt?.let { countdown(it, state.now) } ?: "—")
                             Text(
                                 endsAt?.let { "left · ends ${clockOf(it)}" } ?: "no end time",
-                                fontSize = 14.sp,
-                                color = Palette.Muted,
+                                style = Type.body,
+                                color = Palette.muted,
                             )
                         }
                     }
@@ -197,15 +198,14 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                     Dial(fraction = 0f, diameter = 186.dp, stroke = 10.dp) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
-                            Text("Next up", fontSize = 15.sp, color = Palette.Muted)
+                            Text("Next up", style = Type.body, color = Palette.muted)
                             Text(
                                 nextStart(state.weekly, state.now) ?: "—",
-                                fontSize = 34.sp,
+                                style = Type.display,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = (-1).sp,
-                                color = Palette.Text,
+                                color = Palette.text,
                             )
                             Text(
                                 nextNote(
@@ -213,8 +213,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                                     state.profiles.associate { it.id to it.name },
                                     state.now,
                                 ),
-                                fontSize = 13.sp,
-                                color = Palette.Dim,
+                                style = Type.meta,
+                                color = Palette.dim,
                             )
                         }
                     }
@@ -223,7 +223,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             }
         }
 
-        Gap(14.dp)
+        Gap(Space.l)
         GivenBackCard(stats = state.stats, detailed = true)
 
         // F-2: say what was written on this device's behalf, once.
@@ -239,7 +239,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         // so this needs no shared constant and cannot disagree with the config.
         val seedRow = state.audit.firstOrNull()?.takeIf { it.kind == "profile.seeded" }
         if (seedRow != null && live == null) {
-            Gap(14.dp)
+            Gap(Space.l)
             val starter = state.profiles.firstOrNull { it.id == seedRow.detail }
             if (starter != null) {
                 // Labels resolved here rather than in the pure function: this needs a Context, and
@@ -248,9 +248,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 DCard(padding = 16.dp) {
                     Text(
                         describeSeed(starter.name, labels),
-                        fontSize = 14.sp,
-                        lineHeight = 21.sp,
-                        color = Palette.Text,
+                        style = Type.body,
+                        color = Palette.text,
                     )
                     // F-48's other half: the privacy claim, at the moment the question arises.
                     //
@@ -263,29 +262,28 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                     // of anyone reasonable is what that thing sends, and answering it one screen
                     // later is answering it too late. The card retires with the notice, so Now does
                     // not carry a permanent privacy banner.
-                    Gap(8.dp)
+                    Gap(Space.s)
                     Text(
                         Privacy.NO_SERVER,
-                        fontSize = 13.sp,
-                        lineHeight = 20.sp,
-                        color = Palette.Muted,
+                        style = Type.meta,
+                        color = Palette.muted,
                     )
                 }
             }
         }
 
         state.downtime?.let { downtime ->
-            Gap(14.dp)
+            Gap(Space.l)
             DowntimeBanner(downtime = downtime, onDismiss = model::dismissDowntime)
         }
 
         state.clockTamper?.let { tamper ->
-            Gap(14.dp)
+            Gap(Space.l)
             ClockTamperBanner(tamper = tamper, onDismiss = model::dismissClockTamper)
         }
 
         state.sessions.forEach { session ->
-            Gap(14.dp)
+            Gap(Space.l)
             SessionCard(
                 session = session,
                 name = named(session.profile),
@@ -302,21 +300,21 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         // Sessions another device is waiting on this one for. Usually not in the list above: the
         // lock is over there, and this device is only the key.
         if (state.releasable.isNotEmpty()) {
-            Gap(14.dp)
+            Gap(Space.l)
             ReleaseCard(sessions = state.releasable, onRelease = { confirmingRelease = it })
         }
 
         if (state.sessions.isEmpty()) {
-            Gap(14.dp)
-            GhostButton("Check the schedules now", colour = Palette.Muted, onClick = model::reconcileNow)
+            Gap(Space.l)
+            GhostButton("Check the schedules now", colour = Palette.muted, onClick = model::reconcileNow)
         }
 
         // What is coming, in order. Four at most: enough to answer "what happens next" without
         // turning a calm screen into a control panel.
         run {
-            Gap(20.dp)
+            Gap(Space.xl)
             SectionLabel("Upcoming · next 24h")
-            Gap(10.dp)
+            Gap(Space.m)
             val soon = state.upcoming
                 .filter { it.start > state.now }
                 .sortedBy { it.start }
@@ -325,8 +323,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 if (soon.isEmpty()) {
                     Text(
                         "Nothing scheduled in the next day.",
-                        fontSize = 13.sp,
-                        color = Palette.Muted,
+                        style = Type.meta,
+                        color = Palette.muted,
                         modifier = Modifier.padding(Dsn.CardPad),
                     )
                 }
@@ -337,40 +335,40 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                            .padding(horizontal = Space.l, vertical = Space.m),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
                                 name,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Palette.Text,
+                                style = Type.body,
+                                fontWeight = FontWeight.Bold,
+                                color = Palette.text,
                             )
                             Text(
                                 describeSource(activation.source),
-                                fontSize = 12.sp,
-                                color = Palette.Dim,
+                                style = Type.meta,
+                                color = Palette.dim,
                             )
                         }
                         Text(
                             "${clockOf(activation.start)}–${clockOf(activation.end)}",
-                            fontSize = 13.sp,
-                            color = Palette.Muted,
+                            style = Type.meta,
+                            color = Palette.muted,
                         )
                     }
                 }
             }
 
-            Gap(12.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Gap(Space.m)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 Pill(
                     if (state.downtime == null) "Ticks on time" else "Missed a stretch",
                     // Bad, not amber. A stretch Curfew missed is a bad thing that already happened —
                     // which is what Bad is for — where amber would say a block is running, the
                     // opposite of what this pill reports.
-                    tint = if (state.downtime == null) Palette.Ok else Palette.Bad,
+                    tint = if (state.downtime == null) Palette.ok else Palette.bad,
                 )
                 Pill(
                     when (state.sync.active.size) {
@@ -399,18 +397,17 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 // check that a dialog was shown — so it is named here and nowhere else. That is
                 // exactly the kind of claim `claimable` exists to allow, and exactly the kind it must
                 // not be widened beyond.
-                finish(chosen, listOf(Lock.Confirm))
+                advance(chosen, listOf(Lock.Confirm))
             },
         )
     }
 
     confirmingPass?.let { session ->
         DConfirm(
-            title = "Use an emergency pass?",
-            body = "This ends ${named(session.profile)} now. It counts against your ration on " +
-                "every paired device, it is written into your history, and it cannot be given back.",
+            title = stringResource(R.string.confirm_pass_title),
+            body = stringResource(R.string.confirm_pass_body, named(session.profile)),
             dismiss = "Keep it",
-            confirm = "Use one",
+            confirm = stringResource(R.string.confirm_pass_confirm),
             // Scarce, recorded, and shared with every paired device — the app's one genuinely
             // irreversible action, so the emphasis goes on keeping it.
             destructive = true,
@@ -425,11 +422,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
 
     confirmingDelayed?.let { session ->
         DConfirm(
-            title = "Ask to end ${named(session.profile)} in 24 hours?",
-            body = "This is the way out of a lock nothing here can end. It cannot be taken back, and " +
-                "it cannot be asked for twice, so the landing time is now and stays where it is.",
+            title = stringResource(R.string.confirm_release_title, named(session.profile)),
+            body = stringResource(R.string.confirm_release_body),
             dismiss = "Not yet",
-            confirm = "Ask for it",
+            confirm = stringResource(R.string.confirm_release_confirm),
             destructive = true,
             onDismiss = { confirmingDelayed = null },
             onConfirm = {
@@ -474,7 +470,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         ChallengeDialog(
             challenge = p.challenge,
             onDismiss = { pending = null },
-            onSatisfied = { finish(p.session, listOf(p.lock)) },
+            onSatisfied = { advance(p.session, p.satisfied + p.lock) },
         )
     }
 
@@ -513,11 +509,10 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
         Text(
             if (today > 0) "${duration(today)} away from the phone today"
             else "Nothing blocked yet today",
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            color = Palette.Text,
+            style = Type.h3,
+            color = Palette.text,
         )
-        Gap(6.dp)
+        Gap(Space.s)
         Text(
             if (nothingYet) {
                 // The same shape as the Usage screen's best empty state: say what is being measured
@@ -536,17 +531,17 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
                     }
                 }
             },
-            fontSize = 14.sp,
-            color = if (nothingYet) Palette.Muted else Palette.Ok,
+            style = Type.body,
+            color = if (nothingYet) Palette.muted else Palette.ok,
         )
         // Not shown while everything is zero: "0 blocks kept, longest run 0 days." is a worse way to
         // say nothing than the sentence above it.
         if (detailed && !nothingYet) {
-            Gap(4.dp)
+            Gap(Space.xs)
             Text(
                 "${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.",
-                fontSize = 13.sp,
-                color = Palette.Dim,
+                style = Type.meta,
+                color = Palette.dim,
             )
         }
     }
@@ -569,24 +564,24 @@ private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp)
+            .padding(top = Space.m)
             .semantics { contentDescription = describeDowntime(downtime) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Space.l)) {
             Text(
                 if (downtime.backwards) "The clock moved backwards" else "Curfew was not running",
-                style = MaterialTheme.typography.titleMedium,
+                style = Type.h3,
             )
             Text(
                 describeDowntime(downtime),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
+                style = Type.meta,
+                modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) {
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
                 Text("Got it")
             }
         }
@@ -605,24 +600,24 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp)
+            .padding(top = Space.m)
             .semantics { contentDescription = describeClockTamper(tamper) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Space.l)) {
             Text(
                 if (tamper.forward) "The clock jumped forward" else "The clock jumped backwards",
-                style = MaterialTheme.typography.titleMedium,
+                style = Type.h3,
             )
             Text(
                 describeClockTamper(tamper),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
+                style = Type.meta,
+                modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = 8.dp)) {
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
                 Text("Got it")
             }
         }
@@ -643,7 +638,7 @@ private fun SessionCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Palette.Surface),
+        colors = CardDefaults.cardColors(containerColor = Palette.surface),
     ) {
         Column(
             modifier = Modifier
@@ -653,52 +648,50 @@ private fun SessionCard(
                 // so the colour means one thing everywhere.
                 .background(
                     Brush.linearGradient(
-                        0f to Palette.Live.copy(alpha = 0.16f),
-                        0.45f to Palette.Live.copy(alpha = 0.04f),
-                        1f to Palette.Surface,
+                        0f to Palette.live.copy(alpha = 0.16f),
+                        0.45f to Palette.live.copy(alpha = 0.04f),
+                        1f to Palette.surface,
                     ),
                 )
-                .padding(16.dp),
+                .padding(Space.l),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp),
-                modifier = Modifier.padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+                modifier = Modifier.padding(bottom = Space.s),
             ) {
                 Box(
                     Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(Palette.Live)
-                        .border(4.dp, Palette.Live.copy(alpha = 0.18f), CircleShape),
+                        .background(Palette.live)
+                        .border(4.dp, Palette.live.copy(alpha = 0.18f), CircleShape),
                 )
                 Text(
                     "ENFORCING",
-                    style = MaterialTheme.typography.labelSmall,
-                    letterSpacing = 1.4.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Palette.Live,
+                    style = Type.label,
+                    color = Palette.live,
                 )
             }
             Text(
                 // The name, never the id. Which profile is running is the user's own word for it.
                 name,
-                style = MaterialTheme.typography.titleLarge,
+                style = Type.h2,
                 modifier = Modifier.semantics { heading() },
             )
             Text(
                 describeSource(session.source),
-                style = MaterialTheme.typography.bodySmall,
-                color = Palette.Muted,
+                style = Type.meta,
+                color = Palette.muted,
             )
 
             session.lock.endsAt?.let { endsAt ->
                 Text(
                     "Ends ${relative(endsAt, now)} (${clockTime(endsAt)})",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Palette.Live,
+                    style = Type.h3,
+                    color = Palette.live,
                     modifier = Modifier
-                        .padding(top = 8.dp)
+                        .padding(top = Space.s)
                         // Screen readers should hear the whole sentence, not a bare clock time.
                         .semantics {
                             contentDescription =
@@ -711,8 +704,8 @@ private fun SessionCard(
                 Text(
                     "Locked: needs " +
                         session.lock.conditions.joinToString(", ") { describeLock(it) } + ".",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 8.dp),
+                    style = Type.meta,
+                    modifier = Modifier.padding(top = Space.s),
                 )
             }
 
@@ -727,8 +720,8 @@ private fun SessionCard(
             if (session.lock.isLocked && passesLeft == 0 && passRefusal != null) {
                 Text(
                     describePassRefusal(passRefusal, now),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
+                    style = Type.meta,
+                    modifier = Modifier.padding(top = Space.xs),
                 )
             }
 
@@ -739,22 +732,22 @@ private fun SessionCard(
                 Text(
                     "Restart this device, then come back and end it. Force-stopping Curfew or " +
                         "reopening it is not a restart.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 4.dp),
+                    style = Type.meta,
+                    modifier = Modifier.padding(top = Space.xs),
                 )
             }
 
             session.lock.delayedReleaseAt?.let { at ->
                 Text(
                     "A release you asked for lands ${relative(at, now)}.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 4.dp),
+                    style = Type.meta,
+                    modifier = Modifier.padding(top = Space.xs),
                 )
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = Space.m),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 // Several sessions can be on screen, so each button says which one it ends: a
                 // list of identical "End now" buttons is unusable with a screen reader.
@@ -836,22 +829,22 @@ private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
 @Composable
 private fun ReleaseCard(sessions: List<String>, onRelease: (String) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(Space.l)) {
             Text(
                 "Waiting on you",
-                style = MaterialTheme.typography.titleMedium,
+                style = Type.h3,
                 modifier = Modifier.semantics { heading() },
             )
             Text(
                 "Another of your devices has a session only this one can end.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
+                style = Type.meta,
+                modifier = Modifier.padding(top = Space.xs),
             )
             sessions.forEach { id ->
                 TextButton(
                     onClick = { onRelease(id) },
                     modifier = Modifier
-                        .padding(top = 8.dp)
+                        .padding(top = Space.s)
                         .semantics { contentDescription = "Let session $id out" },
                 ) { Text("Let $id out") }
             }
@@ -906,11 +899,10 @@ private fun TagDialog(
                 // tapping is doing nothing.
                 "This phone is not reading tags right now. Type what is on it instead."
             },
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
-            color = Palette.Muted,
+            style = Type.body,
+            color = Palette.muted,
         )
-        Gap(12.dp)
+        Gap(Space.m)
         OutlinedTextField(
             value = typed,
             onValueChange = { typed = it },
@@ -926,9 +918,12 @@ private fun TagDialog(
 /** An end that is waiting on the user to work through a challenge. */
 private data class PendingEnd(
     val session: Session,
-    val lock: Lock.Challenge,
+    val satisfied: List<Lock>,
     val challenge: Challenge,
-)
+) {
+    /** The condition this challenge meets. */
+    val lock: Lock.Challenge get() = session.lock.conditions.filterIsInstance<Lock.Challenge>().first()
+}
 
 /**
  * How much of a running block is left, as a fraction of the whole of it.
