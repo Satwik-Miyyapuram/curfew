@@ -146,6 +146,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     fun end(session: Session) = advance(session, emptyList())
 
     val live = state.sessions.firstOrNull()
+    // Calendar ids ("5721:1794906000") are the provider's row and instant; these are what to say instead.
+    val eventTitles = state.calendarEvents.associate { it.id to it.title }
     val liveName = live?.let { session -> named(session.profile) }
 
     Screen(spacing = 0.dp) {
@@ -155,7 +157,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Pill("Blocking now", tint = Palette.live)
             Gap(Space.l)
             Title(liveName.orEmpty())
-            Sub(describeSource(live.source))
+            Sub(describeSource(live.source, eventTitles))
         } else {
             Title("Nothing is blocked" + '\n' + "right now.")
             Sub(
@@ -197,18 +199,23 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                             verticalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
                             Text("Next up", style = Type.body, color = Palette.muted)
+                            // The core's own next activation first: it knows calendar rules and which
+                            // days a window runs, where the weekly guess below knows neither, and the
+                            // dial said "nothing scheduled" above a list with a block in it.
+                            val soonest = state.upcoming.filter { it.start > state.now }.minByOrNull { it.start }
                             Text(
-                                nextStart(state.weekly, state.now) ?: "—",
+                                soonest?.let { clockOf(it.start) } ?: nextStart(state.weekly, state.now) ?: "—",
                                 style = Type.display,
                                 fontWeight = FontWeight.Bold,
                                 color = Palette.text,
                             )
                             Text(
-                                nextNote(
-                                    state.weekly,
-                                    state.profiles.associate { it.id to it.name },
-                                    state.now,
-                                ),
+                                soonest?.let { "${named(it.profile)} · ${duration((it.end - it.start).toInt())}" }
+                                    ?: nextNote(
+                                        state.weekly,
+                                        state.profiles.associate { it.id to it.name },
+                                        state.now,
+                                    ),
                                 style = Type.meta,
                                 color = Palette.dim,
                             )
@@ -283,6 +290,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             SessionCard(
                 session = session,
                 name = named(session.profile),
+                source = describeSource(session.source, eventTitles),
                 now = state.now,
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
@@ -342,11 +350,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                                 fontWeight = FontWeight.Bold,
                                 color = Palette.text,
                             )
-                            Text(
-                                describeSource(activation.source),
-                                style = Type.meta,
-                                color = Palette.dim,
-                            )
+                            // A rule named after its profile would only say the name twice.
+                            describeSource(activation.source, eventTitles)
+                                .takeIf { it != name }
+                                ?.let { Text(it, style = Type.meta, color = Palette.dim) }
                         }
                         Text(
                             "${clockOf(activation.start)}–${clockOf(activation.end)}",
@@ -534,8 +541,10 @@ private fun GivenBackCard(stats: Stats, detailed: Boolean) {
         // say nothing than the sentence above it.
         if (detailed && !nothingYet) {
             Gap(Space.xs)
+            val blocks = count(stats.totalSessions, "block")
+            val days = count(stats.longestStreak, "day")
             Text(
-                "${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.",
+                "$blocks kept, longest run $days.",
                 style = Type.meta,
                 color = Palette.dim,
             )
@@ -624,6 +633,7 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
 private fun SessionCard(
     session: Session,
     name: String,
+    source: String,
     now: Long,
     passesLeft: Int,
     passRefusal: PassRefusal?,
@@ -659,7 +669,7 @@ private fun SessionCard(
                 modifier = Modifier.semantics { heading() },
             )
             Text(
-                describeSource(session.source),
+                source,
                 style = Type.meta,
                 color = Palette.muted,
             )

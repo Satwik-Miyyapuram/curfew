@@ -201,7 +201,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             }
 
             Gap(Space.m)
-            GhostButton("📱 Choose Apps to Block") {
+            GhostButton("Choose Apps to Block") {
                 if (name.isBlank()) {
                     model.say("Give it a name first.")
                 } else {

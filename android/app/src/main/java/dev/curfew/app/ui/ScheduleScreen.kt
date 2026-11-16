@@ -309,7 +309,7 @@ fun ScheduleScreen(
                                 .padding(horizontal = Dsn.CardPad, vertical = Space.m),
                             horizontalArrangement = Arrangement.spacedBy(Space.m),
                         ) {
-                            GhostButton("✏️ Edit Profile", Modifier.weight(1f)) {
+                            GhostButton("Edit Profile", Modifier.weight(1f)) {
                                 onEditProfile(profile.id)
                             }
                             GhostButton("+ Window", Modifier.weight(1f)) {

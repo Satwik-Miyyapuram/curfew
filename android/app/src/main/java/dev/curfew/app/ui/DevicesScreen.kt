@@ -100,9 +100,10 @@ fun DevicesScreen(model: CurfewViewModel) {
 
         if (sync.stillLocked.isNotEmpty()) {
             item {
+                val ended = count(sync.stillLocked.size, "block")
                 Notice(
                     title = "Still blocking here",
-                    body = "Another device says ${sync.stillLocked.size} block(s) ended, but the " +
+                    body = "Another device says $ended ended, but the " +
                         "lock you chose is still live on this device, so it keeps blocking. It " +
                         "will end here when the lock is satisfied here.",
                     tint = Palette.live,

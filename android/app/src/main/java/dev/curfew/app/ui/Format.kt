@@ -259,10 +259,10 @@ fun describePassRefusal(refusal: PassRefusal, now: Long): String = when (refusal
 }
 
 /** Where a running session came from, so nothing appears to have started by itself. */
-fun describeSource(source: SessionSource): String = when (source) {
+fun describeSource(source: SessionSource, titles: Map<String, String> = emptyMap()): String = when (source) {
     is SessionSource.Manual -> "started by you"
     is SessionSource.Weekly -> "from the ${source.schedule} schedule"
-    is SessionSource.Calendar -> "from the calendar: ${source.event}"
+    is SessionSource.Calendar -> "from the calendar: ${titles[source.event] ?: source.event}"
 }
 
 /**

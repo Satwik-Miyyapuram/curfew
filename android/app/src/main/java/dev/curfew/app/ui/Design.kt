@@ -2,6 +2,7 @@ package dev.curfew.app.ui
 
 import android.os.Build
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
@@ -1497,8 +1498,8 @@ fun DSheet(
  *
  * Some phones (seen on a Samsung) lay a full-width Compose dialog out below the status bar but
  * still a whole display tall, so its bottom edge — and the Done button pinned to it — falls off
- * the screen. Clearing the window's own inset fitting puts it at exactly the display; the content
- * then keeps clear of the bars with the real insets.
+ * the screen. Clearing the window's own inset fitting, and letting it into the cutout, puts it at
+ * exactly the display; the content then keeps clear of the bars with the real insets.
  */
 @Composable
 fun FullScreenDialogWindow() {
@@ -1506,7 +1507,12 @@ fun FullScreenDialogWindow() {
     SideEffect {
         window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.attributes = window.attributes.apply { fitInsetsTypes = 0 }
+            window.attributes = window.attributes.apply {
+                fitInsetsTypes = 0
+                // Without this a camera cutout in the status bar still pushes the window's top
+                // edge down, while its content stays a display tall.
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
         }
     }
 }
@@ -2010,19 +2016,20 @@ fun WeekAtAGlance(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LegendSwatch(bandColour, "A weekly window")
-                LegendSwatch(spillColour, "The morning half")
+                LegendSwatch(spillColour, "Past midnight")
                 LegendSwatch(calColour, "A calendar block")
             }
             if (calendarBlocks.isNotEmpty()) {
                 Gap(Space.s)
-                // Say what the cyan band is made of, and what it cannot know. The chart carries no
+                // Say what the calendar band is made of, and what it cannot know. The chart carries no
                 // date, so a meeting repeats across the week here — which is the right thing for a
                 // planner and the wrong thing to leave unsaid.
                 val names = calendarBlocks.flatMap { it.profileNames }.distinct().sorted()
+                val blocks = count(calendarBlocks.size, "calendar block")
+                val from = names.joinToString(", ")
                 Text(
-                    "${calendarBlocks.size} calendar block(s) from ${names.joinToString(", ")} are " +
-                        "shaded in cyan, for the events Curfew can see today. The chart shows a " +
-                        "week, so each one is drawn on the weekday it falls on.",
+                    "$blocks from $from, for the events Curfew can see today. The chart shows a " +
+                        "week, so each one sits on the weekday it falls on.",
                     style = Type.micro,
                     color = Palette.dim,
                 )

@@ -43,7 +43,7 @@ ChallengeDialog.kt|What is ${challenge.question.replace(
 ChallengeDialog.kt|What is ${challenge.question.replace(
 Design.kt|$option min
 Design.kt|$ringLabel. ${durationWords(live.roundToInt())}.
-Design.kt|${calendarBlocks.size} calendar block(s) from ${names.joinToString(
+Design.kt|$blocks from $from, for the events Curfew can see today. The chart shows a 
 Design.kt|${challenge.question} = ?
 Design.kt|Ask to end $name in 24 hours
 Design.kt|Ask to end $name in 24 hours
@@ -63,8 +63,8 @@ Design.kt|What is ${challenge.question.replace(
 DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what it 
 DevicesScreen.kt|$problem\n\nBlocking is unaffected. Curfew keeps enforcing what it 
 DevicesScreen.kt|${sync.nearby.size} of your devices in earshot.
-DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
-DevicesScreen.kt|Another device says ${sync.stillLocked.size} block(s) ended, but the 
+DevicesScreen.kt|Another device says $ended ended, but the 
+DevicesScreen.kt|Another device says $ended ended, but the 
 DevicesScreen.kt|Stop listening to $name?
 MainActivity.kt|$said. Tap to dismiss.
 NowScreen.kt|$name ends ${relative(endsAt, now)}
@@ -73,7 +73,8 @@ NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
 NowScreen.kt|${duration(today)} away from the phone today
 NowScreen.kt|${state.audit.size} logged
 NowScreen.kt|${state.sync.active.size} peers
-NowScreen.kt|${stats.totalSessions} blocks kept, longest run ${stats.longestStreak} days.
+NowScreen.kt|$blocks kept, longest run $days.
+NowScreen.kt|${named(it.profile)} · ${duration((it.end - it.start).toInt())}
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
 NowScreen.kt|Ask to end $name in 24 hours
 NowScreen.kt|Emergency pass ($passesLeft)

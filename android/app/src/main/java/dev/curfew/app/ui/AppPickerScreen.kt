@@ -517,7 +517,7 @@ private fun othersHold(
     return "$head ${other.name} blocks ${count(a, "app")} and ${count(s, "site")}$more."
 }
 
-private fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
+internal fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
 
 private fun nameOf(state: UiState, id: String?): String =
     state.profiles.firstOrNull { it.id == id }?.name ?: "this profile"

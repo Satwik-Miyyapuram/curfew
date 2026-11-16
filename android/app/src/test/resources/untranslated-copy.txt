@@ -70,7 +70,6 @@ Challenge.kt|Type this out to end the session.
 ChallengeDialog.kt|End the session
 ChallengeDialog.kt|Keep going
 CurfewViewModel.kt|Configuration imported.
-Design.kt|)} are 
 Design.kt|1 hour
 Design.kt|Ask to end in 24 hours
 Design.kt|Ask to end in 24 hours
@@ -91,8 +90,7 @@ Design.kt|YOUR ANSWER
 Design.kt|back afterwards — there is no timer that turns one off and on again — so you 
 Design.kt|choose when to start again, or let its schedule do it.
 Design.kt|e.g. 42
-Design.kt|shaded in cyan, for the events Curfew can see today. The chart shows a 
-Design.kt|week, so each one is drawn on the weekday it falls on.
+Design.kt|week, so each one sits on the weekday it falls on.
 DevicesScreen.kt|Add a device
 DevicesScreen.kt|Cancel
 DevicesScreen.kt|Compare this with what your other device shows for it.
@@ -245,7 +243,7 @@ ProfileEditScreen.kt|Weekly Schedule
 ProfileEditScreen.kt|What it blocks
 ProfileEditScreen.kt|What should we call this one?
 ProfileEditScreen.kt|When should it run?
-ProfileEditScreen.kt|📱 Choose Apps to Block
+ProfileEditScreen.kt|Choose Apps to Block
 ScheduleEditor.kt|*focus*
 ScheduleEditor.kt|Anywhere
 ScheduleEditor.kt|Ignores the ones you are merely invited to.
@@ -272,7 +270,7 @@ ScheduleScreen.kt|Remove
 ScheduleScreen.kt|Remove this schedule?
 ScheduleScreen.kt|Remove this trigger
 ScheduleScreen.kt|Week at a glance
-ScheduleScreen.kt|✏️ Edit Profile
+ScheduleScreen.kt|Edit Profile
 SettingsScreen.kt|Accent
 SettingsScreen.kt|An emergency pass ends any lock immediately, including the strongest one. 
 SettingsScreen.kt|Appearance
