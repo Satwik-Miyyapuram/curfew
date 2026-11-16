@@ -268,9 +268,10 @@ class EnforcementService : Service() {
                 EnforcementCadence.enforcementWorkDue(active) &&
                     !Watchers.anyEnabled(this)
             ) {
-                poller.sample(now)?.let {
-                    enforcer(this).onObservation(it, now)
-                }
+                // Null is "nothing to enforce in front" (Curfew itself, or an app that was left), and
+                // the enforcer has to hear it, or its tick keeps blocking the app that was left.
+                val seen = poller.sample(now)
+                if (seen != null) enforcer(this).onObservation(seen, now) else enforcer(this).onIdle(now)
             }
             delay(expected)
         }

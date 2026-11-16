@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -192,8 +195,9 @@ class BlockActivity : ComponentActivity() {
             reason: dev.curfew.policy.BlockReason,
             profileName: String = reason.profile,
         ): String = when (reason) {
-            is dev.curfew.policy.BlockReason.Blocked ->
-                "This is blocked while $profileName is running."
+            // [reasonLine] already names the profile and its end; saying "while X is running" again
+            // read as a stutter.
+            is dev.curfew.policy.BlockReason.Blocked -> "This is on its block list."
             is dev.curfew.policy.BlockReason.NotAllowlisted ->
                 "$profileName only allows a few apps, and this is not one of them."
             is dev.curfew.policy.BlockReason.BudgetExhausted ->
@@ -327,15 +331,9 @@ private fun BlockScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // A square plate with a 3px ink edge and a hard offset, which is the app's own material.
-        // The circle-radius badge it replaces was the last soft shape on this screen.
-        Box(
-            modifier = Modifier
-                .size(96.dp)
-                .plate(fill = Palette.raised, offset = Dsn.ShadowControl),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("🔒", style = Type.display, fontWeight = FontWeight.Normal)
+        // The same solid tile every other glyph in the app sits on, in the colour of a running block.
+        dev.curfew.app.ui.Glyph(Palette.live, size = 96.dp) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = Palette.surface, modifier = Modifier.size(48.dp))
         }
 
         Spacer(Modifier.height(Space.xxl))
@@ -489,21 +487,24 @@ private fun BlockScreen(
             )
         }
 
-        Spacer(Modifier.height(Space.m))
-        Text(
-            if (passes > 0) {
-                "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
-            } else if (passRefusal != null) {
-                // The sentence names what is missing and, where there is one, when it comes back.
-                // A blocked screen is the worst place in the app to be vague.
-                dev.curfew.app.ui.describePassRefusal(passRefusal, now)
-            } else {
-                "No emergency pass right now"
-            },
-            style = Type.meta,
-            color = Palette.dim,
-            textAlign = TextAlign.Center,
-        )
+        // Only a lock needs a way past it. With End now on screen, pass talk is noise.
+        if (lock.isLocked) {
+            Spacer(Modifier.height(Space.m))
+            Text(
+                if (passes > 0) {
+                    "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
+                } else if (passRefusal != null) {
+                    // The sentence names what is missing and, where there is one, when it comes back.
+                    // A blocked screen is the worst place in the app to be vague.
+                    dev.curfew.app.ui.describePassRefusal(passRefusal, now)
+                } else {
+                    "No emergency pass right now"
+                },
+                style = Type.meta,
+                color = Palette.dim,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

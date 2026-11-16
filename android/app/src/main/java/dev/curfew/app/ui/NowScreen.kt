@@ -27,9 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.foundation.background
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.unit.dp
@@ -649,21 +647,22 @@ private fun SessionCard(
         colors = CardDefaults.cardColors(containerColor = Palette.surface),
     ) {
         Column(
-            modifier = Modifier
-                // A running block is the one state in this app that should look like something is
-                // happening. A flat card with a coloured edge said it the way a table row says it;
-                // the amber it warms towards is the same amber the notification and the tile use,
-                // so the colour means one thing everywhere.
-                .background(
-                    Brush.linearGradient(
-                        0f to Palette.live.copy(alpha = 0.16f),
-                        0.45f to Palette.live.copy(alpha = 0.04f),
-                        1f to Palette.surface,
-                    ),
-                )
-                .padding(Space.l),
+            // Flat like every other card: the Enforcing tag and the ring above already say it is live.
+            modifier = Modifier.padding(Space.l),
         ) {
-            Pill("Enforcing", tint = Palette.live, modifier = Modifier.padding(bottom = Space.s))
+            // Read every composition (the countdown ticks), so granting the switch flips it back.
+            val blocking = Grant.canBlockApps(LocalContext.current)
+            if (blocking) {
+                Pill("Enforcing", tint = Palette.live, modifier = Modifier.padding(bottom = Space.s))
+            } else {
+                Pill(stringResource(R.string.now_not_blocking), tint = Palette.bad, modifier = Modifier.padding(bottom = Space.s))
+                Text(
+                    stringResource(R.string.now_not_blocking_why),
+                    style = Type.meta,
+                    color = Palette.bad,
+                    modifier = Modifier.padding(bottom = Space.s),
+                )
+            }
             Text(
                 // The name, never the id. Which profile is running is the user's own word for it.
                 name,

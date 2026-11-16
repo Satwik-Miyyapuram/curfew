@@ -252,6 +252,18 @@ enum class Grant(
 
         /** Asked in one place, in [UsageStatsPoller], so the API-level branch exists only once. */
         fun hasUsageAccess(context: Context): Boolean = UsageStatsPoller.hasPermission(context)
+
+        /**
+         * Whether a blocked app can actually be replaced by the block screen.
+         *
+         * Usage access alone sees the app but cannot cover it: from Android 10 the system refuses a
+         * background activity start (logged as `BAL_BLOCK`) unless the app may draw over others.
+         * Measured on a Samsung, Android 14: usage access only, the blocked app stayed open; with the
+         * overlay grant added, the block screen replaced it. The accessibility service is exempt.
+         */
+        fun canBlockApps(context: Context): Boolean =
+            Accessibility.isGranted(context) ||
+                (UsageAccess.isGranted(context) && Overlay.isGranted(context))
     }
 }
 

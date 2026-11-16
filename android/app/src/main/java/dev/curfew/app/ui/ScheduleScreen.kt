@@ -58,8 +58,6 @@ fun ScheduleScreen(
     var removing by remember { mutableStateOf<Removal?>(null) }
     var removingProfile by remember { mutableStateOf<ProfileName?>(null) }
 
-    // Which profile is picking meetings, if any.
-    var picking by remember { mutableStateOf<ProfileName?>(null) }
 
     var expandedProfileIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(state.profiles) {
@@ -144,8 +142,6 @@ fun ScheduleScreen(
                     )
                 }
             }
-            // A weekly meeting, or two rules catching one event, is one shape on a week chart.
-            .distinct()
         SectionLabel("Week at a glance")
         Gap(Space.m)
         DCard(modifier = Modifier.landIn(from = 12f)) {
@@ -328,15 +324,6 @@ fun ScheduleScreen(
             }
             Gap(Space.l)
         }
-    }
-
-    picking?.let { profile ->
-        CalendarPickerSheet(
-            model = model,
-            profileId = profile.id,
-            profileName = profile.name,
-            onDone = { picking = null },
-        )
     }
 
     removingProfile?.let { profile ->

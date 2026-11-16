@@ -270,14 +270,8 @@ internal fun CalendarList(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                
-                                .background(Palette.accent.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("📅", style = Type.h3, fontWeight = FontWeight.Normal)
+                        Glyph(Palette.accent, size = 36.dp) {
+                            Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(

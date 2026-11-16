@@ -138,7 +138,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     // still applies on this route.
     LifecycleResumeEffect(pending) {
         val id = pending
-        if (id != null && Grant.Accessibility.isGranted(context)) {
+        if (id != null && Grant.canBlockApps(context)) {
             pending = null
             begin(id)
         }
@@ -377,7 +377,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 // block starts, so that is where it is asked for. Asking on first launch instead
                 // taught people to tap through a wizard; not asking at all let someone start a
                 // block that then quietly enforced nothing, which is worse than either.
-                if (!Grant.Accessibility.isGranted(context)) {
+                if (!Grant.canBlockApps(context)) {
                     pending = id
                     return@PrimaryButton
                 }
@@ -531,9 +531,7 @@ internal fun spellDuration(minutes: Int): String = when {
 /** [now] is the ticking clock from state, so the shown end time moves while the screen is open. */
 private fun endsAt(now: Long, minutes: Int): String {
     val seconds = if (now > 0) now else System.currentTimeMillis() / 1000
-    val time = java.time.Instant.ofEpochSecond(seconds).atZone(java.time.ZoneId.systemDefault())
-        .toLocalTime().plusMinutes(minutes.toLong())
-    return "%02d:%02d".format(time.hour, time.minute)
+    return clockTime(seconds + minutes * 60L)
 }
 
 /**

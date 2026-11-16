@@ -353,14 +353,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        
-                        .background(Palette.ok.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("⏱️", style = Type.h3, fontWeight = FontWeight.Normal)
+                Glyph(Palette.accent) {
+                    Text("T", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -388,14 +382,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        
-                        .background(Palette.accent.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("🔁", style = Type.h3, fontWeight = FontWeight.Normal)
+                Glyph(Palette.accent) {
+                    Text("W", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -488,14 +476,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        
-                        .background(Palette.ok.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("📅", style = Type.h3, fontWeight = FontWeight.Normal)
+                Glyph(Palette.accent) {
+                    Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -551,14 +533,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        
-                        .background(Palette.bad.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("⏳", style = Type.h3, fontWeight = FontWeight.Normal)
+                Glyph(Palette.accent) {
+                    Text("L", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(

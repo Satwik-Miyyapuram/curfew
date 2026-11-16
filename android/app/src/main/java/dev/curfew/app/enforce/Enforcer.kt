@@ -115,6 +115,10 @@ class Enforcer(
             observation is Observation.App &&
             (observation.`package` == selfPackage || observation.`package` in neverBlocked)
         ) {
+            // Leaving the blocked app for one of these is still leaving it: without the stop, the
+            // tick kept re-blocking the app the user had already left, every five seconds, over
+            // the home screen and over Curfew itself.
+            stop(now)
             actions.allow("app:${observation.`package`}")
             return
         }

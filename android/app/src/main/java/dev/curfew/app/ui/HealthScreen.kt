@@ -48,7 +48,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun HealthScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val missingRequired = state.grants.filter { it.grant.required && !it.granted }
+    // No single grant is required, but some pair is: see [Grant.canBlockApps]. Without one, the
+    // missing half of the usage-access route is what to name, since that route has no side effects.
+    val missingRequired = state.grants.filter { !it.granted }.filter {
+        it.grant.required ||
+            (!Grant.canBlockApps(context) && it.grant in listOf(Grant.UsageAccess, Grant.Overlay))
+    }
     val fine = missingRequired.isEmpty()
 
     Screen(spacing = 0.dp) {
