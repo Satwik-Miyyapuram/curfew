@@ -4,7 +4,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -164,8 +163,7 @@ fun UsageScreen(model: CurfewViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
-                            .background(Palette.raised)
-                            .border(Dsn.Border, Palette.line),
+                            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
                     ) {
                         Box(
                             modifier = Modifier
@@ -301,8 +299,7 @@ private fun DayBars(stats: Stats) {
                         // A day with a session but almost no time still gets a visible mark: it
                         // counted towards the streak, so it should be on the chart.
                         .fillMaxHeight(if (day.sessions > 0) maxOf(fraction, 0.06f) else 0.02f)
-                        .background(if (day.sessions > 0) Palette.accent else Palette.line)
-                        .border(Dsn.Border, Palette.line),
+                        .background(if (day.sessions > 0) Palette.accent else Palette.line, RoundedCornerShape(Dsn.CtlRadius)),
                 )
             }
         }
@@ -473,8 +470,7 @@ private fun HourHeatmap(shape: dev.curfew.app.data.UsageShape) {
                         Modifier
                             .fillMaxWidth()
                             .height((66f * share).dp.coerceAtLeast(if (seconds > 0) 3.dp else 1.dp))
-                            .background(if (seconds > 0) Palette.accent else Palette.raised)
-                            .border(Dsn.Border, Palette.line),
+                            .background(if (seconds > 0) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
                     )
                 }
             }
@@ -557,8 +553,7 @@ private fun TargetLeaderboard(shape: dev.curfew.app.data.UsageShape) {
                         Modifier
                             .fillMaxWidth(seconds.toFloat() / worst)
                             .height(6.dp)
-                            .background(Palette.accent)
-                            .border(Dsn.Border, Palette.line),
+                            .background(Palette.accent, RoundedCornerShape(Dsn.CtlRadius)),
                     )
                 }
                 Text(

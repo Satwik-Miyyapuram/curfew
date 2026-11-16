@@ -80,8 +80,6 @@ Design.kt|End now
 Design.kt|End now
 Design.kt|Ending this affects every app the profile blocks, not only this one.
 Design.kt|No windows yet. A rule you add below is drawn here, so you can see the week at a glance.
-Design.kt|OFF
-Design.kt|ON
 Design.kt|Pause
 Design.kt|Pause this
 Design.kt|Pause this
@@ -167,7 +165,7 @@ NowScreen.kt|Check the schedules now
 NowScreen.kt|Confirm it is you.
 NowScreen.kt|Curfew is watching your schedule. It will start one when its time comes.
 NowScreen.kt|Curfew was not running
-NowScreen.kt|ENFORCING
+NowScreen.kt|Enforcing
 NowScreen.kt|End it
 NowScreen.kt|End now
 NowScreen.kt|Got it

@@ -3,7 +3,6 @@ package dev.curfew.app.ui
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -377,7 +376,6 @@ private fun Notice(
             .padding(bottom = Space.m)
             .clip(RoundedCornerShape(Dsn.CardRadius))
             .background(tint.copy(alpha = 0.08f))
-            .border(Dsn.Border, tint)
             .padding(Dsn.CardPad)
             .semantics(mergeDescendants = true) {},
     ) {

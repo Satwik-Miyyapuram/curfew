@@ -76,7 +76,7 @@ object UntranslatedCopy {
     /** Composables and helpers whose first positional argument is shown to a person. */
     private val textCalls = listOf(
         "Text", "Sub", "Title", "SectionLabel", "Pill", "Tap", "GhostButton", "PrimaryButton",
-        "DialNumber", "say", "note", "Notice", "SearchField", "ExportPill", "PrimaryButton",
+        "DialNumber", "say", "fail", "note", "Notice", "SearchField", "ExportPill", "PrimaryButton",
     )
 
     /**

@@ -70,15 +70,15 @@ import androidx.core.view.WindowCompat
 
 /** The light theme: neutral greys and near-black ink. `docs/design.md` §3.2, and the default. */
 val Paper = Brutal(
-    ground = Color(0xFFFAFAFA),
+    ground = Color(0xFFEFEFF2),
     surface = Color(0xFFFFFFFF),
-    raised = Color(0xFFF4F4F5),
-    selected = Color(0xFFE4E4E7),
+    raised = Color(0xFFE6E6EA),
+    selected = Color(0xFFD8D8DE),
     line = Color(0xFF18181B),
     text = Color(0xFF09090B),
     muted = Color(0xFF52525B),
     dim = Color(0xFF71717A),
-    accent = Color(0xFF4F46E5),
+    accent = Color(0xFF8A6A00),
     live = Color(0xFFFF6A2B),
     ok = Color(0xFF12874A),
     warn = Color(0xFFE0A100),
@@ -87,24 +87,20 @@ val Paper = Brutal(
 )
 
 /**
- * The dark theme: the same relationships over a pure black ground, with neutral (untinted) greys.
- *
- * The border colour is *lighter* than the ground and *dimmer* than the text, which is the one
- * relationship that inverts rather than darkens. A border drawn in the text colour at night would be
- * a grid of bright lines around every card — loud, and the opposite of what the light theme does
- * with the same rule, where ink borders on paper are the whole point. Dark mode's equivalent gesture
- * is an edge just above the surface it encloses, so a card reads as a pane rather than as a window.
+ * The dark theme, for AMOLED: ground and cards are both pure black, so a card is grouping and
+ * spacing rather than a grey slab. Only controls get a tone, a near-black one, so what can be tapped
+ * still reads as a block without the screen turning grey.
  */
 val Dusk = Brutal(
     ground = Color(0xFF000000),
-    surface = Color(0xFF0A0A0A),
-    raised = Color(0xFF161616),
-    selected = Color(0xFF262626),
+    surface = Color(0xFF000000),
+    raised = Color(0xFF141416),
+    selected = Color(0xFF232327),
     line = Color(0xFF333333),
     text = Color(0xFFFAFAFA),
     muted = Color(0xFFA3A3A3),
     dim = Color(0xFF8A8A8A),
-    accent = Color(0xFF818CF8),
+    accent = Color(0xFFFFD60A),
     live = Color(0xFFFF8A4D),
     ok = Color(0xFF4FC183),
     warn = Color(0xFFE8B33A),

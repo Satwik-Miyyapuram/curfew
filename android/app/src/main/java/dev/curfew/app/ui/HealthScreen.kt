@@ -2,7 +2,6 @@ package dev.curfew.app.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -251,8 +250,7 @@ private fun Grant(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(32.dp)
-            .border(Dsn.Border, Palette.line)
-            .background(Palette.accent)
+            .background(Palette.accent, RoundedCornerShape(Dsn.CtlRadius))
             .clickable(onClick = onClick)
             .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,

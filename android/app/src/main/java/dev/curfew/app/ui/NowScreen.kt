@@ -28,14 +28,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -581,7 +577,7 @@ private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
                 style = Type.meta,
                 modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
+            TextButton(shape = Capsule, onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
                 Text("Got it")
             }
         }
@@ -617,7 +613,7 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
                 style = Type.meta,
                 modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
+            TextButton(shape = Capsule, onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
                 Text("Got it")
             }
         }
@@ -655,24 +651,7 @@ private fun SessionCard(
                 )
                 .padding(Space.l),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-                modifier = Modifier.padding(bottom = Space.s),
-            ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Palette.live)
-                        .border(4.dp, Palette.live.copy(alpha = 0.18f), CircleShape),
-                )
-                Text(
-                    "ENFORCING",
-                    style = Type.label,
-                    color = Palette.live,
-                )
-            }
+            Pill("Enforcing", tint = Palette.live, modifier = Modifier.padding(bottom = Space.s))
             Text(
                 // The name, never the id. Which profile is running is the user's own word for it.
                 name,
@@ -752,6 +731,7 @@ private fun SessionCard(
                 // Several sessions can be on screen, so each button says which one it ends: a
                 // list of identical "End now" buttons is unusable with a screen reader.
                 Button(
+                    shape = Capsule,
                     onClick = onEnd,
                     modifier = Modifier.semantics {
                         contentDescription = "End $name now"
@@ -761,6 +741,7 @@ private fun SessionCard(
                 // become a way to move the landing time closer.
                 if (session.lock.isLocked && session.lock.delayedReleaseAt == null) {
                     TextButton(
+                        shape = Capsule,
                         onClick = onRelease,
                         modifier = Modifier.semantics {
                             contentDescription = "Ask to end $name in 24 hours"
@@ -774,6 +755,7 @@ private fun SessionCard(
                 // an invitation to hunt for a tag that would open nothing.
                 if (session.lock.conditions.any { it is Lock.Token }) {
                     TextButton(
+                        shape = Capsule,
                         onClick = onPresentTag,
                         modifier = Modifier.semantics {
                             contentDescription = "Present a tag for $name"
@@ -782,6 +764,7 @@ private fun SessionCard(
                 }
                 if (session.lock.isLocked && passesLeft > 0) {
                     TextButton(
+                        shape = Capsule,
                         onClick = onEmergency,
                         modifier = Modifier.semantics {
                             contentDescription =
@@ -842,6 +825,7 @@ private fun ReleaseCard(sessions: List<String>, onRelease: (String) -> Unit) {
             )
             sessions.forEach { id ->
                 TextButton(
+                    shape = Capsule,
                     onClick = { onRelease(id) },
                     modifier = Modifier
                         .padding(top = Space.s)

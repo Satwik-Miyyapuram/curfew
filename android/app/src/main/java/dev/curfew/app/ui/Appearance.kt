@@ -109,11 +109,12 @@ object Appearance {
  * the same thing Dusk does with every other token.
  */
 enum class Accent(val id: String, val label: String, val light: Color, val dark: Color) {
-    Brand("brand", "Indigo", Color(0xFF4F46E5), Color(0xFF818CF8)),
-    // Blue-black, not the text colour: an accent that matches the text cannot mark anything.
-    Ink("ink", "Ink", Color(0xFF233A6B), Color(0xFFAFC2EE)),
-    Teal("teal", "Teal", Color(0xFF0B6E80), Color(0xFF3BB8CE)),
-    Rose("rose", "Rose", Color(0xFFC21F49), Color(0xFFFF667E)),
+    // Candy colours, for a flat black-and-paper app that needs one loud thing. The ids are the
+    // stored setting and stay put; only the names and colours changed.
+    Brand("brand", "Lemon", Color(0xFF8A6A00), Color(0xFFFFD60A)),
+    Ink("ink", "Sky", Color(0xFF1D5FD1), Color(0xFF6CB4FF)),
+    Teal("teal", "Mint", Color(0xFF0A7F55), Color(0xFF3DE0A0)),
+    Rose("rose", "Bubblegum", Color(0xFFC2185B), Color(0xFFFF7AC6)),
     ;
 
     companion object {

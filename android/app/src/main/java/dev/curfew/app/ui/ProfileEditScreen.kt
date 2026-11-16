@@ -1,7 +1,6 @@
 package dev.curfew.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -173,8 +172,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     blockedApps.forEach { pkg ->
                         Row(
                             modifier = Modifier
-                                .background(Palette.raised)
-                                .border(Dsn.Border, Palette.line)
+                                .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                                 .padding(start = Space.s, end = Space.xs, top = Space.xs, bottom = Space.xs),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -189,8 +187,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .background(Palette.raised)
-                                    .border(Dsn.Border, Palette.line)
+                                    .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                                     .clickable {
                                         model.deleteRule(profileId, Target.AppPackage(pkg))
                                     },
@@ -247,8 +244,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     blockedRules.forEach { rule ->
                         Row(
                             modifier = Modifier
-                                .background(Palette.raised)
-                                .border(Dsn.Border, Palette.line)
+                                .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                                 .padding(start = Space.s, end = Space.xs, top = Space.xs, bottom = Space.xs),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -263,8 +259,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .background(Palette.raised)
-                                    .border(Dsn.Border, Palette.line)
+                                    .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                                     .clickable {
                                         model.deleteRule(profileId, rule.target)
                                     },
@@ -289,7 +284,6 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         .height(42.dp)
                         .clip(RoundedCornerShape(Dsn.CtlRadius))
                         .background(Palette.raised)
-                        .border(Dsn.Border, Palette.line)
                         .padding(horizontal = Space.m),
                     contentAlignment = Alignment.CenterStart,
                 ) {
@@ -315,7 +309,6 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         .height(42.dp)
                         .clip(RoundedCornerShape(Dsn.CtlRadius))
                         .background(Palette.raised)
-                        .border(Dsn.Border, Palette.line)
                         .clickable {
                             val domain = newWebDomain.trim().lowercase()
                                 .removePrefix("https://")
@@ -732,12 +725,7 @@ private fun NameField(
             .fillMaxWidth()
             .height(58.dp)
             .clip(RoundedCornerShape(Dsn.CardRadius))
-            .background(Palette.surface)
-            .border(
-                1.dp,
-                if (value.isBlank()) Palette.line else tint,
-                RoundedCornerShape(Dsn.CardRadius),
-            )
+            .background(if (value.isBlank()) Palette.surface else tint.copy(alpha = 0.16f))
             .padding(horizontal = Dsn.CardPad),
         contentAlignment = Alignment.CenterStart,
     ) {

@@ -8,7 +8,7 @@
    Curfew desktop — neo-brutalist visual system (docs/design.md §3)
 
    Square corners unless something is genuinely circular (the time setter, a status dot, the
-   countdown ring). 3px ink borders. No shadows. Flat, high-contrast colour
+   countdown ring). No borders, no shadows: blocks are told apart by flat steps of tone. Flat, high-contrast colour
    blocks. No gradients, no blur, no glass, no pills.
 
    Every colour below is a semantic token: screens never name a raw colour, they name a meaning
@@ -18,13 +18,13 @@
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   /* --- colour (docs/design.md §3.2) --- */
-  --bg:#FAFAFA; --panel:#FFFFFF; --raise:#F4F4F5; --raise2:#E4E4E7;
+  --bg:#EFEFF2; --panel:#FFFFFF; --raise:#E6E6EA; --raise2:#D8D8DE;
   --line:#18181B; --ink:#09090B; --mut:#52525B; --dim:#71717A;
-  --brand:#4F46E5; --run:#FF6A2B; --ok:#12874A; --warn:#E0A100; --bad:#E02B45; --cal:#0B8FA8;
+  --brand:#8A6A00; --run:#FF6A2B; --ok:#12874A; --warn:#E0A100; --bad:#E02B45; --cal:#0B8FA8;
 
   /* Tints are the only permitted mixing: flat colour at low alpha over the paper background. No
      gradients are built from them; they exist so a status block can be a colour without shouting. */
-  --brand-t:rgba(79,70,229,.14); --run-t:rgba(255,106,43,.16); --ok-t:rgba(18,135,74,.14);
+  --brand-t:rgba(138,106,0,.14); --run-t:rgba(255,106,43,.16); --ok-t:rgba(18,135,74,.14);
   --warn-t:rgba(224,161,0,.18); --bad-t:rgba(224,43,69,.14); --cal-t:rgba(11,143,168,.14);
 
   /* Ink on a filled block, chosen per fill for 4.5:1 (WCAG AA). Dark reads on the light fills
@@ -40,7 +40,7 @@
   --track-w:700; --track-w2:650;
 
   /* --- geometry (docs/design.md §3.4) --- */
-  --bw:3px; --sh-hero:none; --sh-ctl:none;
+  --bw:0px; --sh-hero:none; --sh-ctl:none;
   --pad:16px; --row-y:12px; --ctl-h:38px; --gap:var(--sp-l);
 
   --grid:24px;              /* paper grid pitch */
@@ -49,12 +49,13 @@
   --scrim:rgba(17,17,16,.62);
 }
 /* Dark theme: the same semantic relationships, pure black surfaces and near-white ink
-   (docs/design.md §3.2). Not a second language — only the token block changes. */
+   (docs/design.md §3.2). Page and panels are both #000 for AMOLED; only controls (`raise`) get a
+   near-black tone. Not a second language — only the token block changes. */
 html[data-theme="dark"]{
-  --bg:#000000; --panel:#0A0A0A; --raise:#161616; --raise2:#262626;
+  --bg:#000000; --panel:#000000; --raise:#141416; --raise2:#232327;
   --line:#333333; --ink:#FAFAFA; --mut:#A3A3A3; --dim:#8A8A8A;
-  --brand:#818CF8; --run:#FF8A52; --ok:#4FCB86; --warn:#F0BE3C; --bad:#FF7183; --cal:#4FC4DA;
-  --brand-t:rgba(129,140,248,.20); --run-t:rgba(255,138,82,.20); --ok-t:rgba(79,203,134,.18);
+  --brand:#FFD60A; --run:#FF8A52; --ok:#4FCB86; --warn:#F0BE3C; --bad:#FF7183; --cal:#4FC4DA;
+  --brand-t:rgba(255,214,10,.20); --run-t:rgba(255,138,82,.20); --ok-t:rgba(79,203,134,.18);
   --warn-t:rgba(240,190,60,.20); --bad-t:rgba(255,113,131,.20); --cal-t:rgba(79,196,218,.20);
   --on-accent:#111110; --on-brand:#111110; --on-bad:#111110;
   --grid-ink:rgba(250,250,250,.05); --grid-ink-2:rgba(250,250,250,.09); --scrim:rgba(0,0,0,.72);
@@ -78,6 +79,7 @@ html[data-scale="115"]{font-size:115%}
 html[data-scale="130"]{font-size:130%}
 /* High contrast: pure black on pure white, heavier rules. */
 html[data-contrast="high"]{--grid-ink:transparent;--grid-ink-2:transparent;--scrim:rgba(17,17,16,.86)}
+html[data-contrast="high"]{--bw:3px}
 html[data-contrast="high"][data-theme="light"]{--bg:#FFFFFF;--panel:#FFFFFF;--raise:#F0F0F0;--ink:#000000;--line:#000000;--mut:#333333;--dim:#444444}
 html[data-contrast="high"][data-theme="dark"]{--bg:#000000;--panel:#0A0A0A;--raise:#141414;--line:#FFFFFF;--ink:#FFFFFF;--mut:#DDDDDD;--dim:#BBBBBB}
 /* Reduced motion (§8): only the transitions this page owns are switched off. */
@@ -151,7 +153,7 @@ b,strong{font-weight:750}
   box-shadow:var(--sh-ctl)}
 .nav .ic{width:18px;text-align:center;font-family:var(--fmono);font-size:var(--meta);font-weight:700}
 .nav .cnt{margin-left:auto;font-family:var(--fmono);font-size:var(--micro);font-weight:700;
-  border:2px solid var(--line);padding:0 var(--sp-xs);background:var(--panel);color:var(--ink)}
+  border:var(--bw) solid var(--line);padding:0 var(--sp-xs);background:var(--panel);color:var(--ink)}
 .nav.on .cnt{background:var(--panel);color:var(--ink)}
 .side .grow{flex:1}
 
@@ -177,13 +179,13 @@ b,strong{font-weight:750}
 .card{background:var(--panel);border:var(--bw) solid var(--line);padding:var(--pad)}
 .card.hero{box-shadow:var(--sh-hero)}
 .flush{background:var(--panel);border:var(--bw) solid var(--line)}
-.flush>*+*{border-top:2px solid var(--line)}
+.flush>*+*{border-top:3px solid var(--bg)}
 .row{display:flex;align-items:center;gap:var(--sp-m);padding:var(--row-y) var(--pad);flex-wrap:wrap}
 .row.tight{padding:var(--sp-s) var(--sp-m)}
 .row .grow{flex:1;min-width:0}
 .dark{background:var(--ink);color:var(--bg);border-color:var(--line)}
 .dark .lbl{color:var(--bg);opacity:.7}
-.tag{display:inline-flex;align-items:center;gap:var(--sp-s);height:26px;padding:0 var(--sp-s);border:2px solid var(--line);
+.tag{display:inline-flex;align-items:center;gap:var(--sp-s);height:26px;padding:0 var(--sp-s);border:var(--bw) solid var(--line);
   background:var(--raise);font-family:var(--fmono);font-size:var(--micro);font-weight:700;
   letter-spacing:.5px;text-transform:uppercase;color:var(--ink);white-space:nowrap}
 .tag.brand{background:var(--brand);color:var(--on-brand)}
@@ -194,10 +196,10 @@ b,strong{font-weight:750}
 .tag.cal{background:var(--cal);color:var(--on-accent)}
 .tag.ghost{background:transparent;color:var(--mut);border-color:var(--line)}
 .tag.solid{background:var(--ink);color:var(--bg)}
-.dot{width:11px;height:11px;border:2px solid var(--line);border-radius:50%;background:var(--dim);flex:none}
+.dot{width:11px;height:11px;border:var(--bw) solid var(--line);border-radius:50%;background:var(--dim);flex:none}
 .dot.run{background:var(--run)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}
 .dot.bad{background:var(--bad)}.dot.cal{background:var(--cal)}.dot.brand{background:var(--brand)}
-.shape-sq{width:12px;height:12px;border:2px solid var(--line);background:var(--dim);flex:none}
+.shape-sq{width:12px;height:12px;border:var(--bw) solid var(--line);background:var(--dim);flex:none}
 /* Status is never colour alone (§8): these carry a glyph as well as a fill. */
 .glyph{font-family:var(--fmono);font-weight:700;font-size:var(--meta);line-height:1}
 
@@ -222,7 +224,7 @@ b,strong{font-weight:750}
 .linkbtn{background:none;border:none;padding:0;font:inherit;font-size:var(--meta);color:var(--brand);
   text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-weight:650}
 .linkbtn:hover{color:var(--ink)}
-input,select,textarea{font-family:var(--f);font-size:var(--body);color:var(--ink);background:var(--panel);
+input,select,textarea{font-family:var(--f);font-size:var(--body);color:var(--ink);background:var(--raise);
   border:var(--bw) solid var(--line);min-height:var(--ctl-h);padding:0 var(--sp-m);width:100%;user-select:text}
 input[type="checkbox"]{min-height:0;width:22px;height:22px;flex:none;accent-color:var(--brand);
   border:var(--bw) solid var(--line);cursor:pointer}
@@ -239,18 +241,18 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .warn-msg{font-size:var(--meta);color:var(--warn);font-weight:650}
 
 /* Segmented choice — square, not pills. */
-.seg{display:inline-flex;border:var(--bw) solid var(--line);background:var(--panel)}
-.seg>button{min-height:32px;padding:0 var(--sp-m);border:none;border-right:2px solid var(--line);
+.seg{display:inline-flex;border:var(--bw) solid var(--line);background:var(--raise)}
+.seg>button{min-height:32px;padding:0 var(--sp-m);border:none;border-right:var(--bw) solid var(--line);
   background:var(--panel);color:var(--mut);font-family:var(--f);font-size:var(--meta);font-weight:700;
   text-transform:uppercase;letter-spacing:.4px;cursor:pointer}
 .seg>button:last-child{border-right:none}
-.seg>button:hover{background:var(--raise)}
+.seg>button:hover{background:var(--raise2)}
 .seg>button[aria-pressed="true"]{background:var(--brand);color:var(--on-brand)}
 
 /* Toggle switch: a square track with a square knob, because nothing here is a pill. */
 .sw{display:inline-flex;align-items:center;gap:var(--sp-m);cursor:pointer;background:none;border:none;
   font:inherit;color:inherit;padding:0;text-align:left}
-.sw .track{width:52px;height:28px;border:var(--bw) solid var(--line);background:var(--raise);flex:none;
+.sw .track{width:52px;height:28px;border:var(--bw) solid var(--line);background:var(--raise2);flex:none;
   position:relative}
 .sw .knob{position:absolute;top:0;left:0;width:22px;height:100%;background:var(--line)}
 .sw[aria-pressed="true"] .track{background:var(--ok)}
@@ -296,9 +298,9 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 /* The one rule that keeps the chart from eating the page: every day column clips its own bands, so a
    mis-signed span can never paint over the controls below the chart (docs/design.md §7.4–§7.6). */
 .daycol{position:relative;height:288px;overflow:hidden;border:var(--bw) solid var(--line);
-  background:var(--panel)}
-.daycol .hourline{position:absolute;left:0;right:0;height:1px;background:var(--raise2)}
-.band{position:absolute;left:2px;right:2px;overflow:hidden;border:2px solid var(--line);
+  background:var(--raise)}
+.daycol .hourline{position:absolute;left:0;right:0;height:1px;background:var(--panel)}
+.band{position:absolute;left:2px;right:2px;overflow:hidden;border:var(--bw) solid var(--line);
   background:var(--brand-t);padding:1px var(--sp-xs);font-family:var(--fmono);font-size:var(--micro);font-weight:700;
   color:var(--ink);cursor:pointer;white-space:nowrap;text-overflow:ellipsis}
 .band.cal{background:var(--cal-t)}
@@ -306,14 +308,14 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .band.faded{opacity:.45}
 .daycol .nowline{position:absolute;left:0;right:0;height:3px;background:var(--run);z-index:3}
 .daycol .nowline::before{content:"";position:absolute;left:-3px;top:-3px;width:9px;height:9px;
-  background:var(--run);border:2px solid var(--line);border-radius:50%}
+  background:var(--run);border:var(--bw) solid var(--line);border-radius:50%}
 .weeklegend{display:flex;gap:var(--sp-l);flex-wrap:wrap;margin-top:var(--sp-m)}
 
 /* ------------------------------------------------------------------ timeline + scrubber */
-.timeline{position:relative;height:58px;border:var(--bw) solid var(--line);background:var(--panel);overflow:hidden}
+.timeline{position:relative;height:58px;border:var(--bw) solid var(--line);background:var(--raise);overflow:hidden}
 .timeline .tl-label{position:absolute;top:2px;font-family:var(--fmono);font-size:var(--micro);color:var(--dim);
   transform:translateX(-50%)}
-.timeline .tl-band{position:absolute;top:20px;height:26px;border:2px solid var(--line);background:var(--brand-t)}
+.timeline .tl-band{position:absolute;top:20px;height:26px;border:var(--bw) solid var(--line);background:var(--brand-t)}
 .timeline .tl-band.run{background:var(--run-t)}
 .timeline .tl-band.cal{background:var(--cal-t)}
 .timeline .tl-now{position:absolute;top:0;bottom:0;width:3px;background:var(--run)}
@@ -324,10 +326,10 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 /* ------------------------------------------------------------------ bars + heatmap */
 .bars{display:flex;align-items:flex-end;gap:var(--sp-xs);height:140px}
 .bars .barcol{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:var(--sp-xs)}
-.bars .bar{width:100%;max-width:30px;background:var(--run);border:2px solid var(--line)}
+.bars .bar{width:100%;max-width:30px;background:var(--run);border:var(--bw) solid var(--line)}
 .bars .bar.empty{background:var(--raise2)}
 .heat{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:var(--sp-xxs)}
-.heat .cell{aspect-ratio:1;border:2px solid var(--line);background:var(--panel)}
+.heat .cell{aspect-ratio:1;border:var(--bw) solid var(--line);background:var(--raise)}
 .heat .cell.on{background:var(--run)}
 .heat .cell.mid{background:var(--warn)}
 .heat .cell.low{background:var(--brand-t)}
@@ -335,7 +337,7 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .leader .row{justify-content:space-between}
 
 /* ------------------------------------------------------------------ meters */
-.meter{height:20px;border:var(--bw) solid var(--line);background:var(--panel);position:relative;overflow:hidden}
+.meter{height:20px;border:var(--bw) solid var(--line);background:var(--raise);position:relative;overflow:hidden}
 .meter>span{display:block;height:100%;background:var(--brand)}
 .meter.run>span{background:var(--run)}
 .meter .mtext{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -349,7 +351,7 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .sheet h2{font-size:var(--h2)}
 .sheethead{display:flex;align-items:flex-start;gap:var(--sp-m);margin-bottom:var(--sp-l)}
 .sheetfoot{display:flex;gap:var(--sp-m);justify-content:flex-end;flex-wrap:wrap;margin-top:var(--sp-l);
-  padding-top:var(--sp-l);border-top:2px solid var(--line)}
+  padding-top:var(--sp-l);border-top:var(--bw) solid var(--line)}
 .scrim[data-wide] .sheet{width:min(920px,96vw)}
 .toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;display:flex;
   flex-direction:column;gap:var(--sp-s);z-index:80;width:min(560px,92vw);pointer-events:none}
@@ -363,12 +365,12 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .palette .pl-input{font-size:var(--h3);min-height:52px;font-weight:650}
 .pl-list{max-height:52vh;overflow-y:auto;border:var(--bw) solid var(--line);margin-top:var(--sp-m)}
 .pl-item{display:flex;align-items:center;gap:var(--sp-m);padding:var(--sp-m) var(--sp-m);cursor:pointer;background:var(--panel);
-  border-bottom:2px solid var(--line);width:100%;text-align:left;font:inherit;color:var(--ink);border-left:none;border-right:none;border-top:none}
+  border-bottom:3px solid var(--bg);width:100%;text-align:left;font:inherit;color:var(--ink);border-left:none;border-right:none;border-top:none}
 .pl-item:last-child{border-bottom:none}
 .pl-item:hover{background:var(--raise)}
 .pl-item[aria-selected="true"]{background:var(--brand);color:var(--on-brand)}
 .pl-item[aria-selected="true"] .meta{color:var(--on-brand);opacity:.85}
-.pl-kbd{font-family:var(--fmono);font-size:var(--micro);border:2px solid var(--line);padding:1px var(--sp-xs);
+.pl-kbd{font-family:var(--fmono);font-size:var(--micro);border:var(--bw) solid var(--line);padding:1px var(--sp-xs);
   background:var(--raise);color:var(--ink)}
 .pl-group{font-family:var(--fmono);font-size:var(--micro);font-weight:700;letter-spacing:1.2px;
   text-transform:uppercase;color:var(--dim);padding:var(--sp-s) var(--sp-m) var(--sp-xs);background:var(--raise)}
@@ -376,7 +378,7 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 /* ------------------------------------------------------------------ receipt (dial §6.4) */
 .receipt{border:var(--bw) solid var(--line);background:var(--panel);box-shadow:var(--sh-ctl)}
 .receipt .rrow{display:flex;gap:var(--sp-m);justify-content:space-between;padding:var(--sp-s) var(--sp-m);
-  border-bottom:2px dashed var(--line)}
+  border-bottom:3px solid var(--bg)}
 .receipt .rrow:last-child{border-bottom:none}
 .receipt .rk{font-family:var(--fmono);font-size:var(--micro);letter-spacing:1.2px;text-transform:uppercase;color:var(--dim)}
 .receipt .rv{font-family:var(--fmono);font-weight:700;text-align:right}
@@ -384,7 +386,7 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 /* ------------------------------------------------------------------ empty / state blocks */
 .empty{border:var(--bw) dashed var(--line);background:var(--panel);padding:var(--sp-xl) var(--sp-xl);text-align:center}
 .empty .display{margin:var(--sp-s) 0 var(--sp-s)}
-.skel{background:var(--raise);border:2px solid var(--line);height:16px;margin:var(--sp-s) 0}
+.skel{background:var(--raise);border:var(--bw) solid var(--line);height:16px;margin:var(--sp-s) 0}
 .skel.w60{width:60%}.skel.w40{width:40%}.skel.w80{width:80%}
 .alert{border:var(--bw) solid var(--line);border-left:12px solid var(--warn);background:var(--panel);padding:var(--pad)}
 .alert.bad{border-left-color:var(--bad)}
@@ -407,7 +409,7 @@ pre.doc{font-family:var(--fmono);font-size:var(--meta);line-height:1.5;backgroun
 .qr i{aspect-ratio:1;background:var(--line)}
 .code6{font-family:var(--fmono);font-size:var(--display);font-weight:800;letter-spacing:5px;user-select:text}
 .taplist{display:flex;flex-direction:column;gap:var(--sp-s)}
-.step{border:2px solid var(--line);background:var(--raise);padding:var(--sp-s) var(--sp-m);font-size:var(--meta)}
+.step{border:var(--bw) solid var(--line);background:var(--raise);padding:var(--sp-s) var(--sp-m);font-size:var(--meta)}
 .step.on{background:var(--brand-t);font-weight:700}
 .step .n{font-family:var(--fmono);font-weight:800;margin-right:var(--sp-s)}
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);
@@ -415,7 +417,7 @@ pre.doc{font-family:var(--fmono);font-size:var(--meta);line-height:1.5;backgroun
 .scrollx{overflow-x:auto}
 .chip-list{display:flex;flex-wrap:wrap;gap:var(--sp-s)}
 .mono.strong{font-weight:700}
-hr.rule{border:none;border-top:3px solid var(--line);margin:var(--sp-xl) 0}
+hr.rule{border:none;border-top:3px solid var(--bg);margin:var(--sp-xl) 0}
 </style>
 </head>
 <body>
@@ -2043,7 +2045,7 @@ function weekGridEditor(start, end, wrap) {
       row += `<button class="cell${on ? " on" : ""}" data-act="grid-cell" data-hour="${hour}"
         aria-pressed="${on}" title="${esc(DAYS[day] + " " + hhmm(hour * 60))}"
         aria-label="${esc(DAYS_LONG[day] + " " + hhmm(hour * 60) + (on ? ", inside the window" : ", outside the window"))}"
-        style="border:2px solid var(--line);background:${on ? "var(--brand)" : "var(--panel)"};cursor:pointer;min-height:18px"></button>`;
+        style="border:var(--bw) solid var(--line);background:${on ? "var(--brand)" : "var(--panel)"};cursor:pointer;min-height:18px"></button>`;
     }
     rows.push(`<div class="heatrow"><span class="mono" style="width:40px;flex:none;font-size:var(--micro)">${esc(DAYS[day])}</span>
       <span class="grow" style="display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:var(--sp-xxs)">${row}</span></div>`);
@@ -3466,7 +3468,7 @@ function pagePlanFile() {
     <div class="stack">
       ${sec("The enforced path", `<div class="card">
         <div class="lbl">This exact file, and no other</div>
-        <div class="mono" style="margin-top:var(--sp-s);padding:var(--sp-m);border:2px solid var(--line);background:var(--raise);overflow-wrap:anywhere"
+        <div class="mono" style="margin-top:var(--sp-s);padding:var(--sp-m);border:var(--bw) solid var(--line);background:var(--raise);overflow-wrap:anywhere"
           tabindex="0" role="textbox" aria-readonly="true">${esc(path)}</div>
         <div class="strip" style="margin-top:var(--sp-m)">
           ${btn("Copy the path", "copy-path", null, "quiet sm")}
@@ -3521,11 +3523,11 @@ function mappingCard() {
   ];
   return `<div class="flush scrollx"><table style="width:100%;border-collapse:collapse;font-size:var(--meta)">
     <thead><tr>${["What you see", "Where it lives in the file", "What it means"]
-      .map((h) => `<th style="text-align:left;padding:var(--sp-s) var(--sp-m);border-bottom:3px solid var(--line);font-family:var(--fmono);font-size:var(--micro);letter-spacing:1.2px;text-transform:uppercase">${esc(h)}</th>`).join("")}</tr></thead>
+      .map((h) => `<th style="text-align:left;padding:var(--sp-s) var(--sp-m);border-bottom:3px solid var(--bg);font-family:var(--fmono);font-size:var(--micro);letter-spacing:1.2px;text-transform:uppercase">${esc(h)}</th>`).join("")}</tr></thead>
     <tbody>${rows.map((r) => `<tr>
-      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:2px solid var(--line);vertical-align:top">${esc(r[0])}</td>
-      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:2px solid var(--line);vertical-align:top" class="mono">${esc(r[1])}</td>
-      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:2px solid var(--line);vertical-align:top;color:var(--mut)">${esc(r[2])}</td>
+      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:3px solid var(--bg);vertical-align:top">${esc(r[0])}</td>
+      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:3px solid var(--bg);vertical-align:top" class="mono">${esc(r[1])}</td>
+      <td style="padding:var(--sp-s) var(--sp-m);border-bottom:3px solid var(--bg);vertical-align:top;color:var(--mut)">${esc(r[2])}</td>
     </tr>`).join("")}</tbody></table></div>`;
 }
 function importCard(p) {

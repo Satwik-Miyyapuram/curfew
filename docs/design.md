@@ -46,8 +46,7 @@ Use neo-brutalism with a restrained product interface rather than a decorative c
 Required visual traits:
 
 - Square corners by default.
-- Thick 3px black or ink-colored borders.
-- No shadows. Surfaces are told apart by border and fill alone.
+- No borders and no shadows. Surfaces are told apart by flat steps of tone alone.
 - High-contrast flat color blocks.
 - Heavy, uppercase headings and labels.
 - Mono text for times, technical values and labels.
@@ -65,22 +64,22 @@ Light theme defaults:
 
 | Token | Value | Meaning |
 |---|---|---|
-| `bg` | `#FAFAFA` | page background |
+| `bg` | `#EFEFF2` | page background, and the seam between rows |
 | `panel` | `#FFFFFF` | main surface |
-| `raise` | `#F4F4F5` | secondary surface |
-| `raise2` | `#E4E4E7` | selected or raised surface |
-| `line` | `#18181B` | borders |
+| `raise` | `#E6E6EA` | controls and fields on a panel |
+| `raise2` | `#D8D8DE` | selected or raised surface |
+| `line` | `#18181B` | grips, chart marks, high-contrast outlines |
 | `ink` | `#09090B` | primary text |
 | `mut` | `#52525B` | supporting text |
 | `dim` | `#71717A` | hints and low priority metadata |
-| `brand` | `#4F46E5` | the one accent: primary action and navigation, white text on it |
+| `brand` | `#8A6A00` | the one accent (lemon; `#FFD60A` in dark): primary action, navigation, section markers |
 | `run` | `#FF6A2B` | active/running block |
 | `ok` | `#12874A` | live or successful |
 | `warn` | `#E0A100` | degraded or needs attention |
 | `bad` | `#E02B45` | refused, dangerous or destructive |
 | `cal` | `#0B8FA8` | calendar-derived state |
 
-Dark theme should preserve the same semantic relationships. Use pure black and untinted greys (`#000000` bg, `#0A0A0A` panel, `#161616` raised), `#333333` borders, `#FAFAFA` ink, `#A3A3A3` muted and `#818CF8` brand. Do not make dark mode a separate visual language.
+Dark theme should preserve the same semantic relationships. Use pure black for AMOLED: `#000000` bg *and* panel, so a card is grouping and spacing rather than a grey slab; only controls take a tone (`#141416` raised, `#232327` raise2). `#333333` line, `#FAFAFA` ink, `#A3A3A3` muted and `#FFD60A` brand, with near-black ink on it. Android offers the alternative accents Sky, Mint and Bubblegum; tinted tags and glyphs are solid blocks of their colour with page-coloured ink, never washes. Do not make dark mode a separate visual language.
 
 ### 3.3 Typography
 
@@ -123,8 +122,10 @@ Component sizes (button heights, touch targets, borders) are not spacing and kee
 
 ### 3.4 Borders, Shadows and Radius
 
-- Card border: 3px.
-- Control border: 3px.
+- No borders on cards or controls. Depth is one step of tone: `bg` → `panel` → `raise` → `raise2`.
+- A control sitting on a panel uses `raise`, never `panel`, so it stays visible without an edge.
+- Rows inside a list are separated by a 3px seam of `bg` showing through, not a drawn rule.
+- High-contrast mode is the one exception: it restores 3px outlines for legibility.
 - No shadows anywhere, hero, modal or control.
 - Pressed state: scale down slightly; nothing moves.
 - Default radius: 0.

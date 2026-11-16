@@ -1,8 +1,15 @@
 package dev.curfew.app.ui
 
+import android.os.Build
+import android.view.ViewGroup
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -112,14 +120,15 @@ object Dsn {
     val Gutter = Space.l
 
     /**
-     * Nothing is round.
-     *
-     * `docs/design.md` §3.4: *"Default radius: 0."* Kept as named zero values rather than deleted,
-     * so a call site reading `RoundedCornerShape(Dsn.CtlRadius)` keeps compiling and keeps meaning
-     * "the control shape".
+     * Nothing is round, and nothing is outlined: a block is told apart from the ground by a flat step
+     * in tone. `docs/design.md` §3.4. Kept as named zeros so `RoundedCornerShape(Dsn.CtlRadius)`
+     * keeps meaning "the control shape".
      */
     val CardRadius = 0.dp
     val CtlRadius = 0.dp
+
+    /** The slab of ground left between rows of a flush card, in place of a drawn rule. */
+    val Seam = 3.dp
 
     /** Card padding, and the tighter variant list rows use. */
     val CardPad = Space.l
@@ -138,8 +147,8 @@ object Dsn {
      */
     val MinTouch = 48.dp
 
-    /** §3.4: card and control borders are 3px. */
-    val Border = 3.dp
+    /** §3.4: there are no borders. Zero rather than deleted, so a stray use draws nothing. */
+    val Border = 0.dp
 
     /** A hairline rule *inside* a card, where 3px would read as a divider between cards. */
     val Hairline = 1.dp
@@ -320,11 +329,12 @@ fun Modifier.hardShadow(
 }
 
 /**
- * The app's one surface: a plate with a 3px ink edge and a hard offset shadow.
+ * The app's one surface: a square slab of one flat tone, with no edge and no shadow.
  *
- * Applied to this Modifier so the shadow is reserved on the leading edge and the plate's own
- * content is inset from it. See [hardShadow] for why the room is reserved rather than overflowed.
+ * Depth is a step in tone (ground, surface, raised), never a line. [border], [offset] and [width]
+ * are kept so existing call sites compile; they no longer draw anything.
  */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun Modifier.plate(
     fill: Color = Palette.surface,
@@ -333,59 +343,9 @@ fun Modifier.plate(
     width: Dp = Dsn.Border,
     shape: Shape = RoundedCornerShape(Dsn.CardRadius),
 ): Modifier = this
-    // Nothing a plate draws may leave its own box.
-    //
-    // `drawBehind` does not clip, so a child that measures wider than its parent — a row of
-    // weighted cells, a filled bar stretched to a fraction — can paint past the plate's own edge
-    // and the plate then looks like its end has been cut off or run into the margin. Clipping here
-    // makes the plate's bounds the truth regardless of what it is wrapping, which is the property a
-    // surface is supposed to have.
+    // Clipped so nothing a plate wraps can paint past its own edge.
     .clip(shape)
-    .drawBehind {
-    val d = offset.toPx()
-    val w = width.toPx()
-    val radius = Dsn.CardRadius.toPx()
-    // The face: everything except the two shadowed bands.
-    val faceW = (size.width - d).coerceAtLeast(0f)
-    val faceH = (size.height - d).coerceAtLeast(0f)
-    if (d > 0f) {
-        // **The shadow has to reach past the face, and it did not.**
-        //
-        // This was drawn at `(d, d)` with a size of `faceW × faceH`, which puts its bottom-right
-        // corner exactly on the box's bottom-right corner — so the opaque face, drawn next, covered
-        // it completely, and no plate in the app had a visible drop shadow at all.
-        // `docs/design.md` 3.4 asks for a hard `3px 3px 0`; what it got was a flat rectangle. That
-        // is also why the bottom bar looked wrong: with no shadow it was a plain white slab whose
-        // edge just stopped, and the extra band the old geometry reserved on the trailing side had
-        // nothing drawn in it.
-        //
-        // Drawn at `(d, d)` with the box's *full* width and height instead, so the strip between the
-        // face's edge and the box's edge on the right and bottom is live shadow — three or eight
-        // pixels of solid ink that nothing is painted over. The top-left is covered by the face,
-        // which is exactly where a down-and-right shadow should be hidden.
-        drawRoundRect(
-            color = border,
-            topLeft = Offset(d, d),
-            size = Size(size.width, size.height),
-            cornerRadius = CornerRadius(radius, radius),
-        )
-    }
-    drawRoundRect(
-        color = border,
-        topLeft = Offset.Zero,
-        size = Size(faceW, faceH),
-        cornerRadius = CornerRadius(radius, radius),
-    )
-    drawRoundRect(
-        color = fill,
-        topLeft = Offset(w, w),
-        size = Size(
-            (faceW - w * 2).coerceAtLeast(0f),
-            (faceH - w * 2).coerceAtLeast(0f),
-        ),
-        cornerRadius = CornerRadius(radius, radius),
-    )
-}
+    .background(fill)
 
 /**
  * The app's elevated surface, kept under its old name.
@@ -398,7 +358,7 @@ fun Modifier.plate(
  */
 @Composable
 fun Modifier.glass(
-    shape: Shape = RoundedCornerShape(0.dp),
+    shape: Shape = RoundedCornerShape(Dsn.CardRadius),
     ground: Color = Palette.surface,
     elevation: Dp = Dsn.ShadowControl,
 ): Modifier = this.plate(fill = ground, offset = elevation, shape = shape)
@@ -459,18 +419,23 @@ fun Sub(text: String) {
 }
 
 /**
- * A section label: micro 11sp, black, wide tracking, uppercase.
+ * A section label: micro 11sp, black, wide tracking, uppercase, behind a small accent square.
  *
  * Small enough to read as furniture rather than as content, which is the whole job: it names the
- * group under it without competing with it.
+ * group under it without competing with it. The square is the one bit of colour, so a long screen
+ * reads as a run of marked sections rather than as grey text.
  */
 @Composable
 fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        style = Type.label,
-        color = Palette.dim,
-    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(Palette.accent))
+        Text(
+            text.uppercase(),
+            style = Type.label,
+            color = Palette.muted,
+            modifier = Modifier.padding(start = Space.s),
+        )
+    }
 }
 
 /**
@@ -498,7 +463,7 @@ fun Mono(
     )
 }
 
-/** A card: filled, 3px ink edge, square, with a hard offset shadow. */
+/** A card: one flat block of tone, square, no edge, no shadow. */
 @Composable
 fun DCard(
     modifier: Modifier = Modifier,
@@ -531,23 +496,25 @@ fun DCardFlush(
     )
 }
 
-/** The rule between rows inside a flush card. */
+/** The shape of every tappable pill, button and toggle: square, like everything else. */
+val Capsule = RoundedCornerShape(Dsn.CtlRadius)
+
+/** The gap between rows inside a flush card: a slab of the control tone, since in Dusk ground and card are both black. */
 @Composable
 fun Rule() {
-    Box(Modifier.fillMaxWidth().height(Dsn.Border).background(Palette.line))
+    Box(Modifier.fillMaxWidth().height(Dsn.Seam).background(Palette.raised))
 }
 
 /** A hairline, for use inside something that is not a card outline. */
 @Composable
 fun Hairline() {
-    Box(Modifier.fillMaxWidth().height(Dsn.Hairline).background(Palette.dim))
+    Box(Modifier.fillMaxWidth().height(Dsn.Hairline).background(Palette.raised))
 }
 
 /**
  * A small piece of state, or a small choice — drawn as a square tag.
  *
- * §3.1 rules out *"floating pills"* and §3.4 sets radius 0, so the vocabulary is kept and only the
- * silhouette changed. [selected] fills it with the accent, which in this app means *touchable* and
+ * [selected] fills it with the accent, which in this app means *touchable* and
  * nothing else — a tag that is only reporting a fact ("18 apps") is never selected.
  */
 @Composable
@@ -558,14 +525,15 @@ fun Pill(
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    // A tinted tag is a solid block of its colour, not a wash of it: a state worth colouring is
+    // worth reading from across the room.
     val background = when {
         selected -> Palette.accent
-        tint != null -> tint.copy(alpha = 0.16f)
+        tint != null -> tint
         else -> Palette.raised
     }
     val foreground = when {
-        selected -> Palette.surface
-        tint != null -> tint
+        selected || tint != null -> Palette.surface
         else -> Palette.muted
     }
     Box(
@@ -573,13 +541,12 @@ fun Pill(
             // A tappable tag gets the full touch height around it; the drawn tag stays small.
             .then(
                 if (onClick != null) {
-                    Modifier.clickable(onClick = onClick).heightIn(min = Dsn.MinTouch).wrapContentHeight()
+                    Modifier.heightIn(min = Dsn.MinTouch).wrapContentHeight().clip(Capsule).clickable(onClick = onClick)
                 } else {
                     Modifier
                 },
             )
-            .background(background)
-            .border(Dsn.Border, if (selected || tint != null) foreground else Palette.line)
+            .background(background, Capsule)
             .padding(horizontal = Space.m, vertical = Space.s),
         contentAlignment = Alignment.Center,
     ) {
@@ -627,10 +594,7 @@ fun PrimaryButton(
                 scaleX = bounce
                 scaleY = bounce
             }
-            .plate(
-                fill = fill,
-                offset = if (pressed || !enabled) 0.dp else Dsn.ShadowControl,
-            )
+            .plate(fill = fill, shape = Capsule)
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
@@ -668,7 +632,7 @@ fun GhostButton(
                 scaleX = bounce
                 scaleY = bounce
             }
-            .plate(fill = Palette.surface, offset = if (enabled) Dsn.ShadowControl else 0.dp)
+            .plate(fill = Palette.raised, shape = Capsule)
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
@@ -690,10 +654,9 @@ fun GhostButton(
 }
 
 /**
- * The square that stands in front of a row.
+ * The square that stands in front of a row: a solid block of the row's colour.
  *
- * A tint at 16% rather than a solid fill, so a list of six reads as one list with six subjects
- * rather than as six coloured buttons.
+ * Its content is drawn in [Palette.surface], which reads on every tint in both themes.
  */
 @Composable
 fun Glyph(
@@ -704,8 +667,7 @@ fun Glyph(
     Box(
         modifier = Modifier
             .size(size)
-            .background(tint.copy(alpha = 0.16f))
-            .border(Dsn.Border, tint),
+            .background(tint, RoundedCornerShape(Dsn.CtlRadius)),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -736,17 +698,12 @@ fun DRow(
 }
 
 /**
- * The toggle on a plan row.
+ * The toggle on a plan row: a square track with a square knob that slides across.
  *
- * The drawn switch is 56×28dp — square along its track, with a square knob, because a rounded
- * toggle would be the only soft thing on a screen of drawn rectangles. The word `ON`/`OFF` inside
- * it is the point of §8's *"status conveyed by word, shape and colour, not colour alone"*: this
- * control states whether a rule is armed in a word, so a reader who cannot tell the accent from the
- * ground can still read it.
+ * The state is also announced in words through semantics, so it never rests on colour alone (§8).
  */
 @Composable
 fun Switch(on: Boolean, onChange: (Boolean) -> Unit) {
-    val densityScale = androidx.compose.ui.platform.LocalDensity.current.density
     Box(
         modifier = Modifier
             .minimumInteractiveComponentSize()
@@ -760,32 +717,23 @@ fun Switch(on: Boolean, onChange: (Boolean) -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(width = 56.dp, height = 28.dp)
-                .background(if (on) Palette.accent else Palette.raised)
-                .border(Dsn.Border, Palette.line),
+                .size(width = 52.dp, height = 30.dp)
+                .background(if (on) Palette.accent else Palette.selected, Capsule),
         ) {
-            Text(
-                if (on) "ON" else "OFF",
-                style = Type.label,
-                color = if (on) Palette.surface else Palette.dim,
-                modifier = Modifier
-                    .align(if (on) Alignment.CenterStart else Alignment.CenterEnd)
-                    .padding(horizontal = Space.s),
-            )
             // The knob *travels* rather than jumping to the other side: a toggle that teleports is a
             // toggle whose state you have to re-read, and one that slides tells you what it just did.
-            val knob by animateFloatAsState(
-                targetValue = if (on) 1f else 0f,
+            val knob by animateDpAsState(
+                targetValue = if (on) 22.dp else 0.dp,
                 animationSpec = Juice.snap(),
                 label = "knob",
             )
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
-                    .padding(start = Space.xxs)
-                    .offset { IntOffset(((56 - 24) * knob * densityScale).toInt(), 0) }
-                    .size(18.dp)
-                    .background(if (on) Palette.surface else Palette.line),
+                    .padding(start = 3.dp)
+                    .offset(x = knob)
+                    .size(24.dp)
+                    .background(if (on) Palette.surface else Palette.muted),
             )
         }
     }
@@ -1384,8 +1332,7 @@ fun WeekGrid(
                         .height(height)
                         .padding(horizontal = 1.dp)
                         .clip(RoundedCornerShape(0.dp))
-                        .background(if (on) Palette.raised else Palette.surface)
-                        .border(1.dp, Palette.line)
+                        .background(if (on) Palette.selected else Palette.raised)
                         .pointerInput(index, startMin, endMin, overnight) {
                             detectDragGestures(
                                 onDragStart = { at ->
@@ -1434,8 +1381,7 @@ fun WeekGrid(
                         .weight(1f)
                         .padding(horizontal = 1.dp)
                         .height(Dsn.MinTouch)
-                        .background(if (on) Palette.accent else Palette.surface)
-                        .border(Dsn.Border, Palette.line)
+                        .background(if (on) Palette.accent else Palette.surface, RoundedCornerShape(Dsn.CtlRadius))
                         .clickable { onDayToggle?.invoke(index) }
                         .semantics {
                             selected = on
@@ -1481,8 +1427,7 @@ private fun WeekBand(
             .fillMaxWidth()
             .offset(y = height * topFraction.coerceIn(0f, 1f))
             .height(height * fraction.coerceAtLeast(4f / 1440f))
-            .background(colour)
-            .border(1.dp, Palette.line),
+            .background(colour),
     )
 }
 
@@ -1494,8 +1439,7 @@ private fun MiniAction(label: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .heightIn(min = Dsn.MinTouch)
             .wrapContentHeight()
-            .background(Palette.surface)
-            .border(Dsn.Hairline, Palette.dim)
+            .background(Palette.raised)
             .padding(horizontal = Space.s, vertical = Space.xs),
     ) {
         Text(
@@ -1549,6 +1493,25 @@ fun DSheet(
 }
 
 /**
+ * Makes the dialog it is called from exactly the size of the display.
+ *
+ * Some phones (seen on a Samsung) lay a full-width Compose dialog out below the status bar but
+ * still a whole display tall, so its bottom edge — and the Done button pinned to it — falls off
+ * the screen. Clearing the window's own inset fitting puts it at exactly the display; the content
+ * then keeps clear of the bars with the real insets.
+ */
+@Composable
+fun FullScreenDialogWindow() {
+    val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: return
+    SideEffect {
+        window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.attributes = window.attributes.apply { fitInsetsTypes = 0 }
+        }
+    }
+}
+
+/**
  * The chrome every sheet is made of: the scrim, the pane, the grip, the title, the body and a row of
  * buttons.
  *
@@ -1567,15 +1530,23 @@ private fun SheetFrame(
 ) {
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            // Otherwise the window reports no insets, and the padding meant to keep the content
+            // above the gesture bar is zero.
+            decorFitsSystemWindows = false,
+        ),
     ) {
+        FullScreenDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .sheetDragToDismiss(onDismiss)
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = Space.m)
                 .padding(bottom = Space.l)
-                .plate(fill = Palette.surface, offset = Dsn.ShadowHero)
+                .plate(fill = Palette.surface)
                 .padding(horizontal = Dsn.Gutter)
                 .padding(top = Space.m, bottom = Space.l),
         ) {
@@ -1698,8 +1669,7 @@ fun ValueField(
 ) {
     Column(
         modifier = modifier
-            .background(Palette.raised)
-            .border(Dsn.Border, if (bad) Palette.bad else Palette.line)
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
             .padding(horizontal = Space.m, vertical = Space.m),
     ) {
         Text(
@@ -1746,8 +1716,7 @@ fun TextField(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Palette.raised)
-            .border(Dsn.Border, Palette.line)
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
             .padding(horizontal = Space.m, vertical = Space.m),
     ) {
         Text(
@@ -1891,9 +1860,8 @@ fun WeekAtAGlance(
     val bandColour = Palette.accent
     val spillColour = Palette.accent.copy(alpha = 0.35f)
     val calColour = Palette.cal
-    val cellFill = Palette.surface
-    val ink = Palette.line
-    val gridInk = Palette.raised
+    val cellFill = Palette.raised
+    val gridInk = Palette.surface
     val labelTone = Palette.dim
 
     Column(modifier.fillMaxWidth()) {
@@ -1918,8 +1886,7 @@ fun WeekAtAGlance(
                         .height(height)
                         .padding(horizontal = 1.dp)
                         .clip(RoundedCornerShape(0.dp))
-                        .background(cellFill)
-                        .border(1.dp, ink),
+                        .background(cellFill),
                 ) {
                     Canvas(Modifier.fillMaxSize()) {
                         // The day's own grid, so the chart reads as a measurement rather than as a
@@ -2071,7 +2038,7 @@ private fun LegendSwatch(colour: Color, label: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
-        Box(Modifier.size(10.dp).background(colour).border(1.dp, Palette.line))
+        Box(Modifier.size(10.dp).background(colour))
         Text(label, style = Type.micro, color = Palette.muted)
     }
 }
@@ -2231,8 +2198,7 @@ fun ChoiceRow(
                     style = Type.label,
                     color = if (on) Palette.surface else Palette.text,
                     modifier = Modifier
-                        .background(if (on) Palette.accent else Palette.surface)
-                        .border(Dsn.Border, Palette.line)
+                        .background(if (on) Palette.accent else Palette.surface, RoundedCornerShape(Dsn.CtlRadius))
                         .padding(horizontal = Space.m, vertical = Space.s),
                 )
             }
@@ -2320,8 +2286,7 @@ fun PausePuzzleSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Palette.raised)
-                    .border(Dsn.Border, Palette.line)
+                    .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                     .padding(horizontal = Space.m, vertical = Space.m),
             ) {
                 Text(

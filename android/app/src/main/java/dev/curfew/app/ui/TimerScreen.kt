@@ -2,7 +2,6 @@ package dev.curfew.app.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -188,8 +187,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                     Box(
                         Modifier
                             .size(20.dp)
-                            .background(if (strength == option) Palette.accent else Palette.raised)
-                            .border(Dsn.Border, Palette.line),
+                            .background(if (strength == option) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (strength == option) {
@@ -330,7 +328,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                             chosenProfile?.name?.take(1)?.uppercase().orEmpty(),
                             style = Type.body,
                             fontWeight = FontWeight.Black,
-                            color = tint,
+                            color = Palette.surface,
                         )
                     }
                     Column(Modifier.weight(1f)) {
@@ -473,14 +471,14 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(shape = Capsule, onClick = {
                     confirming = null
                     model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
                     onDone()
                 }) { Text("Start it") }
             },
             dismissButton = {
-                TextButton(onClick = { confirming = null }) { Text("Go back") }
+                TextButton(shape = Capsule, onClick = { confirming = null }) { Text("Go back") }
             },
         )
     }
@@ -499,7 +497,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(shape = Capsule, onClick = {
                     // `pending` is deliberately NOT cleared here. It is what the resume effect
                     // watches, and clearing it was the whole bug: the user was sent to Settings and
                     // the timer they had configured was forgotten in the same breath.
@@ -513,7 +511,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 // Left in on purpose. A blocker that refuses to start until a permission is
                 // granted is a blocker people uninstall; one that starts, and says plainly that
                 // it is not enforcing, is one they come back to and fix.
-                TextButton(onClick = {
+                TextButton(shape = Capsule, onClick = {
                     pending = null
                     begin(id)
                 }) { Text("Start without it") }
@@ -553,8 +551,8 @@ fun BackRow(title: String, onBack: () -> Unit) {
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .border(Dsn.Border, Palette.line)
+                .size(Dsn.MinTouch)
+                .background(Palette.raised)
                 .clickable(onClickLabel = "Go back", onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {

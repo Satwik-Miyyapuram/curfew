@@ -6,7 +6,6 @@
 package dev.curfew.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -202,7 +201,7 @@ fun ScheduleScreen(
                             Text(
                                 profile.name.take(1).uppercase(),
                                 style = Type.h3,
-                                color = tint,
+                                color = Palette.surface,
                             )
                         }
                         Column(Modifier.weight(1f)) {
@@ -445,7 +444,7 @@ private fun TriggerRow(
                 title.take(1).uppercase(),
                 style = Type.body,
                 fontWeight = FontWeight.Bold,
-                color = glyphTint,
+                color = Palette.surface,
             )
         }
         Column(Modifier.weight(1f)) {
@@ -473,8 +472,7 @@ private fun CaughtEvent(title: String, whenIt: String) {
         Box(
             modifier = Modifier
                 .weight(1f)
-                .border(Dsn.Border, Palette.line)
-                .background(Palette.raised)
+                .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                 .padding(horizontal = Space.m, vertical = Space.s),
         ) {
             Row(

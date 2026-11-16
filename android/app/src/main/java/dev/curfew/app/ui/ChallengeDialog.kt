@@ -94,9 +94,9 @@ fun ChallengeDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = onSatisfied, enabled = satisfied) { Text("End the session") }
+                TextButton(shape = Capsule, onClick = onSatisfied, enabled = satisfied) { Text("End the session") }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Keep going") } },
+            dismissButton = { TextButton(shape = Capsule, onClick = onDismiss) { Text("Keep going") } },
         )
     }
 }

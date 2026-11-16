@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,7 +90,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
         }.onSuccess {
             model.note("Config exported to file.")
-        }.onFailure { model.say("That file could not be written.") }
+        }.onFailure { model.fail("That file could not be written.", it) }
     }
 
     // Two counts, because the card above lists every permission and this line summarises that
@@ -638,12 +637,12 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     PrimaryButton("Export config", Modifier.weight(1f)) {
                         runCatching {
                             exportFile.launch("curfew.toml")
-                        }.onFailure { model.say(context.getString(R.string.file_write_failed)) }
+                        }.onFailure { model.fail(context.getString(R.string.file_write_failed), it) }
                     }
                     GhostButton("Import file", Modifier.weight(1f)) {
                         runCatching {
                             importFile.launch(arrayOf("*/*", "text/plain", "text/x-toml", "application/octet-stream"))
-                        }.onFailure { model.say(context.getString(R.string.file_read_failed)) }
+                        }.onFailure { model.fail(context.getString(R.string.file_read_failed), it) }
                     }
                 }
                 Gap(Space.s)
@@ -665,8 +664,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(Dsn.Border, Palette.line)
-                            .background(Palette.raised)
+                            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
                             .padding(Space.m),
                     ) {
                         Text(

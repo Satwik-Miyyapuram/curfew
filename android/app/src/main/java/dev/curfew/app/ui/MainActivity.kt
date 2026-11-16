@@ -5,7 +5,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -296,40 +295,57 @@ fun CurfewApp(
  * Colour follows [Notice.bad] rather than one alarming red, because this surface carries both "That
  * could not be saved" and "Paired." — showing a success as an error is its own kind of lie.
  *
- * Tap to dismiss, and it does not time out on its own. A sentence that disappears before it is read
- * is worse than one that stays slightly too long, and nothing here is a decision the user can miss by
- * being slow.
+ * A success goes by itself after a moment. A failure stays until it is tapped away: a reason that
+ * disappears before it is read is worse than one that stays slightly too long, and it used to vanish
+ * after two and a half seconds whatever it said.
+ *
+ * Drawn as a solid block of its colour with the reason under the headline, so it cannot be mistaken
+ * for part of the page beneath it.
  */
 @Composable
-private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
-    androidx.compose.runtime.LaunchedEffect(notice) {
-        kotlinx.coroutines.delay(2500)
-        onDismiss()
+internal fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    if (!notice.bad) {
+        androidx.compose.runtime.LaunchedEffect(notice) {
+            kotlinx.coroutines.delay(2500)
+            onDismiss()
+        }
     }
     val tone = if (notice.bad) Palette.bad else Palette.ok
+    val said = listOfNotNull(notice.text, notice.detail).joinToString(". ")
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Dsn.CtlRadius))
-            .background(tone.copy(alpha = 0.16f))
-            .border(1.dp, tone.copy(alpha = 0.45f), RoundedCornerShape(Dsn.CtlRadius))
+            .background(tone)
             .clickable(onClick = onDismiss)
             .padding(horizontal = Space.l, vertical = Space.m)
             .semantics(mergeDescendants = true) {
                 // One sentence, and how to get rid of it. Without this a screen reader reads the text
                 // and gives no clue that the banner is tappable.
-                contentDescription = "${notice.text}. Tap to dismiss."
+                contentDescription = "$said. Tap to dismiss."
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         Text(
             if (notice.bad) "!" else "✓",
-            style = Type.body,
-            fontWeight = FontWeight.Bold,
-            color = tone,
+            style = Type.h3,
+            fontWeight = FontWeight.Black,
+            color = Palette.surface,
         )
-        Text(notice.text, style = Type.meta, color = Palette.text)
+        Column(Modifier.weight(1f)) {
+            Text(notice.text, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.surface)
+            notice.detail?.let { reason ->
+                Text(
+                    reason,
+                    style = Type.meta,
+                    color = Palette.surface,
+                    maxLines = 4,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (notice.bad) Text("✕", style = Type.body, fontWeight = FontWeight.Bold, color = Palette.surface)
     }
 }
 
@@ -360,7 +376,6 @@ private fun NavBar(
                 indication = null,
             ) {},
     ) {
-        Box(Modifier.fillMaxWidth().height(Dsn.Border).background(Palette.line))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Tab.entries.forEach { tab -> NavTab(tab, isSelected(tab)) { onPick(tab.route) } }
         }

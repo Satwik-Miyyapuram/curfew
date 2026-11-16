@@ -2,7 +2,6 @@ package dev.curfew.app.ui
 
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +19,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.window.Dialog
@@ -347,7 +348,7 @@ fun AppPickerScreen(
                         // A [Glyph], which is the app's square tinted marker with a 3px edge. It was
                         // a hand-rolled 11dp-radius box that matched nothing else on screen.
                         Glyph(tint = Palette.accent, size = 36.dp) {
-                            Text(glyphFor(rule.target), style = Type.body, color = Palette.accent)
+                            Text(glyphFor(rule.target), style = Type.body, color = Palette.surface)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -437,8 +438,7 @@ private fun PaneTabs(pane: Pane, apps: Int, sites: Int, onChange: (Pane) -> Unit
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Palette.raised)
-            .border(Dsn.Border, Palette.line)
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
             .padding(Space.xs),
         horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
@@ -485,8 +485,7 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(Dsn.MinTouch)
-            .background(Palette.raised)
-            .border(Dsn.Border, Palette.line)
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
             .padding(horizontal = Space.m),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -726,8 +725,9 @@ fun AppPickerSheet(
 
     Dialog(
         onDismissRequest = onDone,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        FullScreenDialogWindow()
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
@@ -735,14 +735,14 @@ fun AppPickerSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.92f)
+                    .fillMaxHeight(0.95f)
                     .sheetDragToDismiss(onDone)
-                    .glass(
-                        shape = RoundedCornerShape(0.dp),
-                        ground = Palette.raised,
-                    )
+                    .glass(ground = Palette.surface)
+                    // The pane runs under the gesture bar; its content, and so the Done button, does not.
+                    .navigationBarsPadding()
+                    .imePadding()
                     .padding(horizontal = Dsn.Gutter)
-                    .padding(top = Space.s, bottom = Space.l),
+                    .padding(top = Space.s, bottom = Space.m),
             ) {
                 Box(
                     modifier = Modifier
@@ -790,10 +790,10 @@ fun AppPickerSheet(
                     }
                 }
 
-                Gap(Space.m)
+                Gap(Space.s)
                 SearchField(value = query, onChange = { query = it })
 
-                Gap(Space.m)
+                Gap(Space.s)
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
@@ -808,12 +808,12 @@ fun AppPickerSheet(
                         onClick = { filter = AppFilter.All },
                     )
                     Pill(
-                        text = "Blocked (${blocked.size})",
+                        text = "Blocked (${localBlocked.size})",
                         selected = filter == AppFilter.Blocked,
                         onClick = { filter = AppFilter.Blocked },
                     )
                     Pill(
-                        text = "Allowed (${(apps.size - blocked.size).coerceAtLeast(0)})",
+                        text = "Allowed (${(apps.size - localBlocked.size).coerceAtLeast(0)})",
                         selected = filter == AppFilter.Allowed,
                         onClick = { filter = AppFilter.Allowed },
                     )
@@ -823,7 +823,7 @@ fun AppPickerSheet(
                 // below and all still blockable — hiding them is what made a user conclude the app
                 // was broken.
                 if (readProtectedCount > 0) {
-                    Gap(Space.m)
+                    Gap(Space.s)
                     Text(
                         stringResource(R.string.picker_sensitive_note),
                         style = Type.micro,
@@ -831,7 +831,7 @@ fun AppPickerSheet(
                     )
                 }
 
-                Gap(Space.m)
+                Gap(Space.s)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -865,18 +865,20 @@ fun AppPickerSheet(
                             ) { index, app ->
                                 if (index > 0) Rule()
                                 val on = app.packageName in localBlocked
+                                // Local and immediate, from the row and the switch alike. The write
+                                // follows on a delay; see `localBlocked` above for why this is not the
+                                // model call.
+                                val toggle = {
+                                    localBlocked =
+                                        if (on) localBlocked - app.packageName
+                                        else localBlocked + app.packageName
+                                    pendingWrite = true
+                                }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            // Local and immediate. The write follows on a delay; see
-                                            // `localBlocked` above for why this is not the model call.
-                                            localBlocked =
-                                                if (on) localBlocked - app.packageName
-                                                else localBlocked + app.packageName
-                                            pendingWrite = true
-                                        }
-                                        .padding(horizontal = Space.l, vertical = Space.m)
+                                        .clickable(onClick = toggle)
+                                        .padding(start = Space.l, end = Space.s, top = Space.xs, bottom = Space.xs)
                                         .semantics(mergeDescendants = true) {
                                             contentDescription = if (on) "${app.label}, blocked" else "${app.label}, allowed"
                                         },
@@ -898,24 +900,30 @@ fun AppPickerSheet(
                                             color = if (on) Palette.accent else Palette.dim,
                                         )
                                     }
-                                    Switch(
-                                        on = on,
-                                        onChange = { wanted ->
-                                            val next = if (wanted) blocked + app.packageName else blocked - app.packageName
-                                            model.setBlockedApps(profileId, next.toList())
-                                        },
-                                    )
+                                    Switch(on = on, onChange = { toggle() })
                                 }
                             }
                         }
                     }
                 }
 
-                Gap(Space.l)
+                Gap(Space.m)
                 PrimaryButton(
                     text = "Done",
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onDone,
+                )
+            }
+            // The app's own banner is drawn under this dialog's window, so a failure from in here
+            // (saving the list, copying another profile's) would otherwise be reported to no one.
+            state.message?.let { notice ->
+                MessageBanner(
+                    notice,
+                    model::dismissMessage,
+                    Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = Dsn.Gutter)
+                        .padding(bottom = 88.dp),
                 )
             }
         }

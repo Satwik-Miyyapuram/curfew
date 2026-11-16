@@ -210,8 +210,7 @@ fun BoxScope.Burst(
                 .align(Alignment.Center)
                 .offset { IntOffset(dx.toInt(), dy.toInt()) }
                 .size(size)
-                .background(if (i % 3 == 0) Palette.line else colour)
-                .border(1.dp, Palette.line)
+                .background(if (i % 3 == 0) Palette.text else colour)
                 .graphicsLayer { alpha = (1f - t).coerceIn(0f, 1f) },
         )
     }

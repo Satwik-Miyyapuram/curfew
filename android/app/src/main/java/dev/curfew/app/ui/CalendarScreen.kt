@@ -1,8 +1,8 @@
 package dev.curfew.app.ui
 
+import androidx.compose.foundation.layout.systemBarsPadding
 import android.Manifest
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -377,7 +377,6 @@ private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -
             .height(46.dp)
             .clip(RoundedCornerShape(Dsn.CtlRadius))
             .background(Palette.surface)
-            .border(Dsn.Border, Palette.line)
             .padding(horizontal = Space.l),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.m),
@@ -432,12 +431,7 @@ private fun EventCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Dsn.CardRadius))
-            .background(if (tinted) Palette.accent.copy(alpha = 0.07f) else Palette.surface)
-            .border(
-                1.dp,
-                if (tinted) Palette.accent.copy(alpha = 0.45f) else Palette.line,
-                RoundedCornerShape(Dsn.CardRadius),
-            )
+            .background(if (tinted) Palette.accent.copy(alpha = 0.16f) else Palette.surface)
             .clickable(enabled = canBlock, onClick = onBlock)
             .padding(horizontal = Space.l, vertical = Space.l),
     ) {
@@ -626,12 +620,20 @@ fun CalendarPickerSheet(
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDone,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            // Otherwise the window reports no insets, and the padding meant to keep the content
+            // above the gesture bar is zero.
+            decorFitsSystemWindows = false,
+        ),
     ) {
+        FullScreenDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Palette.ground),
+                .background(Palette.ground)
+                // Full screen, so it keeps clear of the status bar and the gesture bar itself.
+                .systemBarsPadding(),
         ) {
             Box(Modifier.padding(horizontal = Dsn.Gutter)) {
                 BackRow("Events for $profileName", onDone)

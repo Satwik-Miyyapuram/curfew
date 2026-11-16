@@ -312,7 +312,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 pending = null
                 _state.update { it.copy(sync = it.sync.copy(offering = Offer(json, ""))) }
             }
-            .onFailure { say(it.message ?: str(R.string.invite_failed)) }
+            .onFailure { fail(str(R.string.invite_failed), it) }
     }
 
     /**
@@ -360,7 +360,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(sync = it.sync.copy(offering = null)) }
                     note(str(R.string.paired))
                 }
-                .onFailure { say(it.message ?: str(R.string.pairing_failed)) }
+                .onFailure { fail(str(R.string.pairing_failed), it) }
             refresh()
         }
     }
@@ -387,7 +387,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     hub.refreshPeers()
                     note(str(R.string.device_ignored))
                 }
-                .onFailure { say(it.message ?: str(R.string.device_remove_failed)) }
+                .onFailure { fail(str(R.string.device_remove_failed), it) }
             refresh()
         }
     }
@@ -416,7 +416,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     note(plural(R.plurals.took_in_updates, pass.accepted, pass.written))
                     runtime.syncPass()
                 }
-                .onFailure { say(it.message ?: str(R.string.folder_failed)) }
+                .onFailure { fail(str(R.string.folder_failed), it) }
             refresh()
         }
     }
@@ -564,7 +564,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveConfig(toml: String) {
         viewModelScope.launch {
             runtime.setConfig(toml)
-                .onFailure { say(it.message ?: str(R.string.config_load_failed)) }
+                .onFailure { fail(str(R.string.config_load_failed), it) }
             refresh()
         }
     }
@@ -635,7 +635,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 lock = LockSet(conditions = locks, endsAt = now + seconds),
             )
             runCatching { runtime.startSession(session) }
-                .onFailure { say(it.message ?: str(R.string.start_failed)) }
+                .onFailure { fail(str(R.string.start_failed), it) }
             refresh()
         }
     }
@@ -643,7 +643,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveProfile(id: String, name: String, description: String = "") {
         viewModelScope.launch {
             runtime.saveProfile(id, name, description)
-                .onFailure { say(it.message ?: str(R.string.profile_save_failed)) }
+                .onFailure { fail(str(R.string.profile_save_failed), it) }
             refresh()
         }
     }
@@ -659,7 +659,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.saveProfile(id, name)
                 .mapCatching { runtime.saveWeekly(window).getOrThrow() }
-                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
+                .onFailure { fail(str(R.string.window_save_failed), it) }
             refresh()
         }
     }
@@ -682,7 +682,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // The core's message names the schedules still pointing at it, which is exactly
                 // what the user needs in order to fix it.
-                .onFailure { say(it.message ?: str(R.string.profile_remove_failed)) }
+                .onFailure { fail(str(R.string.profile_remove_failed), it) }
             refresh()
         }
     }
@@ -690,7 +690,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveWeekly(window: WeeklySchedule) {
         viewModelScope.launch {
             runtime.saveWeekly(window)
-                .onFailure { say(it.message ?: str(R.string.window_save_failed)) }
+                .onFailure { fail(str(R.string.window_save_failed), it) }
             refresh()
         }
     }
@@ -701,7 +701,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             // started a session does not end the session.
             runtime.deleteWeekly(id)
                 .onSuccess { note(str(R.string.removed)) }
-                .onFailure { say(it.message ?: str(R.string.window_remove_failed)) }
+                .onFailure { fail(str(R.string.window_remove_failed), it) }
             refresh()
         }
     }
@@ -709,7 +709,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCalendarRule(rule: CalendarSchedule) {
         viewModelScope.launch {
             runtime.saveCalendarRule(rule)
-                .onFailure { say(it.message ?: str(R.string.rule_save_failed)) }
+                .onFailure { fail(str(R.string.rule_save_failed), it) }
             refresh()
         }
     }
@@ -718,7 +718,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.deleteCalendarRule(id)
                 .onSuccess { note(str(R.string.removed)) }
-                .onFailure { say(it.message ?: str(R.string.rule_remove_failed)) }
+                .onFailure { fail(str(R.string.rule_remove_failed), it) }
             refresh()
         }
     }
@@ -732,7 +732,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
     fun saveRule(profile: String, rule: Rule) {
         viewModelScope.launch {
             runtime.saveRule(profile, rule)
-                .onFailure { say(it.message ?: str(R.string.block_failed)) }
+                .onFailure { fail(str(R.string.block_failed), it) }
             refresh()
         }
     }
@@ -741,7 +741,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.deleteRule(profile, target)
                 .onSuccess { note(str(R.string.removed)) }
-                .onFailure { say(it.message ?: str(R.string.unblock_failed)) }
+                .onFailure { fail(str(R.string.unblock_failed), it) }
             refresh()
         }
     }
@@ -763,9 +763,8 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val text = runCatching {
                 if (asCsv) runtime.statsCsv() else Json.encodeToString(Stats.serializer(), state.value.stats)
-            }.getOrNull()
-            if (text == null) {
-                say(str(R.string.stats_failed))
+            }.getOrElse {
+                fail(str(R.string.stats_failed), it)
                 return@launch
             }
             runCatching {
@@ -773,7 +772,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     it.write(text.toByteArray())
                 }
             }
-                .onFailure { say(str(R.string.file_write_failed)) }
+                .onFailure { fail(str(R.string.file_write_failed), it) }
         }
     }
 
@@ -792,9 +791,9 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), profile, packages)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+                        .onFailure { fail(str(R.string.change_save_failed), it) }
                 }
-                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+                .onFailure { fail(str(R.string.change_save_failed), it) }
             refresh()
         }
     }
@@ -822,7 +821,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 settings,
             )
             runtime.setConfig(edited)
-                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+                .onFailure { fail(str(R.string.change_save_failed), it) }
             refresh()
         }
     }
@@ -832,15 +831,15 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
             Policy.setBlockedApps(runtime.policy.configToml(), target, apps)
                 .onSuccess { toml ->
                     runtime.setConfig(toml)
-                        .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+                        .onFailure { fail(str(R.string.change_save_failed), it) }
                 }
-                .onFailure { say(it.message ?: str(R.string.change_save_failed)) }
+                .onFailure { fail(str(R.string.change_save_failed), it) }
             // Everything that is not an app package — domains, urls, keywords — one at a time,
             // because those go through the ordinary rule path rather than the picker's.
             val had = rulesBeyondApps(target).map { it.target }.toSet()
             rulesBeyondApps(source).filterNot { had.contains(it.target) }.forEach { rule ->
                 runtime.saveRule(target, rule)
-                    .onFailure { say(it.message ?: str(R.string.block_failed)) }
+                    .onFailure { fail(str(R.string.block_failed), it) }
             }
             refresh()
         }
@@ -931,7 +930,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runtime.setConfig(toml)
                 .onSuccess { note("Configuration imported.") }
-                .onFailure { say(it.message ?: str(R.string.config_load_failed)) }
+                .onFailure { fail(str(R.string.config_load_failed), it) }
             refresh()
         }
     }
@@ -950,6 +949,18 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Put one sentence in front of the user. Public so a screen can report a failed file read. */
     fun say(message: String) = _state.update { it.copy(message = Notice(message, bad = true)) }
+
+    /**
+     * A failed action: what did not happen, in the app's words, and then the reason it was given.
+     *
+     * Both, because either alone is a bad error. The reason by itself — a refusal from the core, an
+     * I/O error — does not say which tap it belongs to, and the app's sentence by itself ("That could
+     * not be saved.") hides the one thing the user needs to fix it.
+     */
+    fun fail(what: String, cause: Throwable) = _state.update {
+        val reason = cause.message?.trim()?.takeIf { m -> m.isNotEmpty() && m != what }
+        it.copy(message = Notice(what, bad = true, detail = reason))
+    }
 
     /**
      * The same surface, for something that went *right*.
@@ -996,7 +1007,7 @@ data class EventRule(val schedule: String, val profile: String)
  * value, because there are only two things to say about a finished action — it worked, or it did not
  * — and a "warning" tier no call site uses would be a category waiting to be invented wrongly.
  */
-data class Notice(val text: String, val bad: Boolean)
+data class Notice(val text: String, val bad: Boolean, val detail: String? = null)
 
 data class UiState(
     val now: Long = 0,
