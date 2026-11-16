@@ -32,11 +32,12 @@ receive a session started on the PC until it is back on the same LAN.
 the device to enroll, anything that cannot be undone by uninstalling with effort.
 **In, as the top rung:**
 - Android: AccessibilityService + overlay, UsageStats fallback, local VpnService DNS filter,
-  NotificationListener, and **Device Admin** (not device owner) to require deactivation before
-  uninstall — gated by the active lock. Note: sideloaded apps may be restricted from being granted
-  Accessibility/Device Admin on Android 16+, so the setup wizard must detect and explain this.
-- Windows: SYSTEM service + watchdog pair, service ACL'd against stop/delete, uninstaller refuses
-  during a locked block, integrity-signed config, clock-rollback detection, re-lock on boot.
+  NotificationListener. ~~Device Admin to require deactivation before uninstall~~ — removed
+  2026-11-16 (GAPS G2): a plain uninstall is always the way out on Android, during a lock too.
+  Note: sideloaded apps may be restricted from being granted Accessibility on Android 16+, so the
+  setup wizard must detect and explain this.
+- Windows: SYSTEM service + watchdog pair, service ACL'd against stop/delete, ~~uninstaller refuses
+  during a locked block~~ (removed 2026-11-16, GAPS G2: uninstalling always works), integrity-signed config, clock-rollback detection, re-lock on boot.
 - Locks: password, typing/math challenge, timer, restart-required, NFC/QR token, peer-release,
   emergency passes with quota + cooldown.
 Honest framing in the docs: a determined user with admin rights and time can always get out. We

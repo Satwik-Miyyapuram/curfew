@@ -7,8 +7,10 @@ No accounts, no servers, no telemetry.
 
 1. **No server.** Devices talk to each other directly. Any relay is optional, self-hostable, and
    only ever sees ciphertext.
-2. **A lock is a promise.** Once a session is locked, no code path — UI, sync, uninstall, clock
-   change, peer device — may shorten it except the unlock conditions the user chose.
+2. **A lock is a promise.** Once a session is locked, no code path — UI, sync, clock change, peer
+   device — may shorten it except the unlock conditions the user chose. The one exit kept open on
+   purpose is a plain uninstall on Android: Curfew is never a device admin and never blocks Settings
+   or the installer, so a lock gone wrong can always be left the ordinary way (GAPS G2).
 3. **Degrade, never die.** Every enforcement mechanism has a fallback (accessibility revoked ->
    usage-stats polling -> VPN filter). Losing one permission weakens blocking; it
    never disables the app.
@@ -38,7 +40,7 @@ No accounts, no servers, no telemetry.
    |  - UsageStats poller  |                         |  - lock screen / Frozen mode |
    |  - local VpnService   |                         |  - tamper watchdog           |
    |  - NotificationListener|                        +--------------+---------------+
-   |  - DeviceAdmin (opt)  |                                        | IPC (named pipe)
+   |                       |                                        | IPC (named pipe)
    |  - CalendarContract   |                         +--------------v---------------+
    |  - WorkManager sync   |                         |  Desktop UI (tray + window)  |
    +-----------------------+                         +--------------+---------------+
@@ -172,8 +174,9 @@ Keystore / Windows DPAPI.
 
 ## 8. Threat model (the user is the adversary, willingly)
 
-In scope: impulsive bypasses — kill the process, uninstall, edit hosts, change the clock, unpair a
-device, use another browser, boot into safe mode (detect + re-lock on next boot).
+In scope: impulsive bypasses — kill the process, edit hosts, change the clock, unpair a device, use
+another browser, boot into safe mode (detect + re-lock on next boot). Uninstalling on Android is
+deliberately out: it is the always-available way out, not a bypass to defend against.
 Out of scope: a determined attacker with admin rights and time. Documented honestly rather than
 pretended away; strictness is a ladder the user picks, and "hardcore mode" (device owner + Windows
 service ACLs) is the top rung.

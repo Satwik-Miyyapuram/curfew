@@ -171,10 +171,9 @@ Curfew never shows a wall of prose with an "App info" button. In order of prefer
 4. **App info** as the fallback that always resolves, so a missing OEM page can never crash the one
    screen whose job is to fix permissions.
 
-Each row says, in one sentence, what stops working without it. **Uninstall protection (device
-admin)** is the sole explained-at-length exception, because it is the only one with a cost outside
-Curfew — many banking apps refuse to run alongside any device admin — and it is never recommended,
-only offered.
+Each row says, in one sentence, what stops working without it. There is no uninstall protection to
+offer: Curfew is never a device admin, and Settings and the uninstaller are never blocked, so a
+plain uninstall is always the way out of any lock.
 
 **Sideloaded installs** hit Android's "Restricted setting" wall: the accessibility switch is greyed
 out with no explanation. Curfew detects the likely case and spells out the menu path, because the
