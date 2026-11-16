@@ -288,7 +288,7 @@ SettingsScreen.kt|Done
 SettingsScreen.kt|Everything here is stored on this phone. Nothing is sent anywhere.
 SettingsScreen.kt|Export config
 SettingsScreen.kt|Export or import your curfew.toml configuration file.
-SettingsScreen.kt|Fix
+SettingsScreen.kt|FIX
 SettingsScreen.kt|Gap between uses
 SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file

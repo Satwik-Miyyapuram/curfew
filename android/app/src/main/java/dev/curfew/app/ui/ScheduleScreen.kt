@@ -144,6 +144,8 @@ fun ScheduleScreen(
                     )
                 }
             }
+            // A weekly meeting, or two rules catching one event, is one shape on a week chart.
+            .distinct()
         SectionLabel("Week at a glance")
         Gap(Space.m)
         DCard(modifier = Modifier.landIn(from = 12f)) {

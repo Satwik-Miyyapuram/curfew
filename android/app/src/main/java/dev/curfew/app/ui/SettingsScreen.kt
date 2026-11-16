@@ -831,14 +831,14 @@ private fun turnOffAccessibilityHint(context: android.content.Context) {
 private fun Fix(onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .height(32.dp)
-            
-            .background(Palette.accent)
+            // The old 32dp chip was smaller than a thumb; MinTouch is the size every other target uses.
+            .heightIn(min = Dsn.MinTouch)
+            .plate(fill = Palette.accent, shape = Capsule)
             .clickable(onClick = onClick)
             .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Fix", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.surface)
+        Text("FIX", style = Type.button, color = Palette.surface)
     }
 }
 

@@ -43,7 +43,7 @@ ChallengeDialog.kt|What is ${challenge.question.replace(
 ChallengeDialog.kt|What is ${challenge.question.replace(
 Design.kt|$option min
 Design.kt|$ringLabel. ${durationWords(live.roundToInt())}.
-Design.kt|$blocks from $from, for the events Curfew can see today. The chart shows a 
+Design.kt|$blocks from $from, from the events Curfew can see. The chart shows a 
 Design.kt|${challenge.question} = ?
 Design.kt|Ask to end $name in 24 hours
 Design.kt|Ask to end $name in 24 hours

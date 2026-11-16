@@ -319,8 +319,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Gap(Space.xl)
             SectionLabel("Upcoming · next 24h")
             Gap(Space.m)
+            // The preview window is 36 hours, so without the cap a daily event showed twice with
+            // the same times and no day, under a label promising the next 24.
             val soon = state.upcoming
-                .filter { it.start > state.now }
+                .filter { it.start > state.now && it.start < state.now + 24 * 3600 }
                 .sortedBy { it.start }
                 .take(4)
             DCardFlush {

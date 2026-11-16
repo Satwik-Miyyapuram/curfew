@@ -2028,7 +2028,7 @@ fun WeekAtAGlance(
                 val blocks = count(calendarBlocks.size, "calendar block")
                 val from = names.joinToString(", ")
                 Text(
-                    "$blocks from $from, for the events Curfew can see today. The chart shows a " +
+                    "$blocks from $from, from the events Curfew can see. The chart shows a " +
                         "week, so each one sits on the weekday it falls on.",
                     style = Type.micro,
                     color = Palette.dim,
