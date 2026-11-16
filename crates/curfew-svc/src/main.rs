@@ -77,7 +77,7 @@ curfew — distraction blocking that keeps its promises
   curfew extension-host            spoken by the browser, not by people
 
   curfew install                   register the Windows service (needs an admin prompt)
-  curfew uninstall                 remove it (refused while a lock is held)
+  curfew uninstall                 remove it, and end anything running
 ";
 
 /// The sentence refusing a removal, or `None` when there is nothing to refuse.
@@ -121,8 +121,8 @@ fn main() {
         // The session keeps its own copy of what it blocks, so the lock is not weakened and this is not a
         // bypass: it is that the user is not told, and `README.md` says *"a lock is a promise — nothing
         // shortens it except the conditions you chose"*. Somebody who reads that and runs
-        // `curfew remove <the window blocking me>` believes they have stopped it. The honest answer is the
-        // one the uninstaller gives: not while it is holding you.
+        // `curfew remove <the window blocking me>` believes they have stopped it. The honest answer is
+        // not while it is holding you; uninstalling Curfew is the way out.
         //
         // Asked over the pipe, like the `Reload` below. A service that is not running makes this a no-op,
         // which is the config-first workflow the module doc describes — preparing a file to copy
@@ -988,66 +988,35 @@ fn install() -> i32 {
 
 #[cfg(windows)]
 fn uninstall() -> i32 {
-    // The refusal that makes uninstalling not be a bypass. It is checked against the service's own
-    // state rather than a flag on disk, and the delayed release still works while it stands — so
-    // this is friction with an exit, not a trap (GAPS D1).
+    // Always allowed, during a lock too (GAPS G2). It used to refuse while a lock was running, and
+    // a blocker that cannot be removed is the one that gets a machine reinstalled. The lock is the
+    // friction; removing the whole program is the way out, and a deliberate, visible one.
     //
-    // It used to fail open on the one case that matters. The old shape was "refuse if the service
-    // answered *and* listed a running session", and every other outcome fell through to
-    // `service::uninstall()` — including `Err`, which is what asking a *stopped* service returns.
-    // Since the installer stops the service before it runs this, and stopping was itself obeyed,
-    // "stop Curfew, then uninstall" removed a running lock's enforcement entirely. So the answer is
-    // now the other way round: uninstall needs a positive "nothing is running", from two witnesses.
-    let running = match runner::ask(&Request::Status) {
-        Ok(Response::Status(status)) => !status.running.is_empty(),
-        // Unreachable: stopped, crashed, or wedged. Any of those is a reason to refuse, not a
-        // reason to proceed, because the service is the only thing that knows what is running.
-        Ok(_) | Err(_) => true,
-    };
-    // …and the state file directly, which is the witness the watchdog uses and the one thing left
-    // when the service is not answering at all. An unreadable state counts as locked.
-    let state_says_locked = crate::watchdog::locks_running(&curfew_win::state::default_path());
-
-    if refused_uninstall(running, state_says_locked) {
-        println!(
-            "Curfew is not going to uninstall itself while a lock is running — that is what you \
-             asked it for.\n\
-             The session ends on its own, or `curfew release <id>` starts the 24-hour release, \
-             after which this will work.\n\
-             If Curfew has already been removed from your config, `curfew status` will say what it \
-             can still see."
-        );
-        return 1;
-    }
+    // The marker first, so the service accepts the stop and the watchdog stands down. Its write is
+    // not checked: without administrator rights the service delete below fails and says so, and
+    // with no Curfew directory there is no lock for the marker to lift.
+    let state_path = state::default_path();
+    let marker = crate::watchdog::leaving_marker(&state_path);
+    let _ = std::fs::write(&marker, b"");
     match service::uninstall() {
         Ok(()) => {
             let _ = hosts::clear(&runner::hosts_path());
             // And the resolvers, from whatever the service left behind. An uninstall that leaves a
             // machine pointing at a proxy that is gone has broken the internet on its way out.
             curfew_win::dns::give_back_remembered(&runner::dns_record());
+            // Last, so a reinstall starts with nothing running rather than resuming the lock.
+            state::forget(&state_path);
+            let _ = std::fs::remove_file(&marker);
             println!("Curfew is uninstalled and the hosts file has been given back.");
             0
         }
         Err(e) => {
+            // The service is still there, so its locks still hold.
+            let _ = std::fs::remove_file(&marker);
             crate::warn!("could not remove the service ({e}). Try an administrator prompt.");
             1
         }
     }
-}
-
-/// Whether the uninstall guard should refuse, given its two witnesses.
-///
-/// Pulled out of [`uninstall`] so the decision can be tested without a service, a pipe or an
-/// administrator prompt — because the decision is where the bug was, and the bug was a default.
-/// The old code refused only on one specific answer and let *everything else* through, so
-/// "unreachable" and "answered something unexpected" both meant "go ahead and uninstall".
-///
-/// Written as "refuse unless both witnesses positively agree there is nothing running" so that a
-/// future reader adding a third witness cannot accidentally widen the hole again: every argument
-/// added here defaults to refusing.
-#[cfg(windows)]
-fn refused_uninstall(service_says_running: bool, state_says_locked: bool) -> bool {
-    service_says_running || state_says_locked
 }
 
 #[cfg(not(windows))]
@@ -1060,34 +1029,6 @@ fn install() -> i32 {
 fn uninstall() -> i32 {
     crate::note!("services are a Windows thing");
     1
-}
-
-#[cfg(all(test, windows))]
-mod uninstall_guard_tests {
-    use super::refused_uninstall;
-
-    /// The regression guard. Before this, an unreachable service meant "nothing is running, go
-    /// ahead" — and since the installer stops the service before it runs `curfew.exe uninstall`,
-    /// that turned "stop Curfew, then uninstall" into a way out of a live lock.
-    #[test]
-    fn an_unreachable_service_refuses_rather_than_permits() {
-        // The call site passes `true` for an unreachable service; this pins the shape so a future
-        // refactor that reintroduces a default-allow arm has to delete a test that says why.
-        assert!(refused_uninstall(true, false), "an unreachable service allowed an uninstall");
-        assert!(refused_uninstall(true, true));
-    }
-
-    #[test]
-    fn a_running_session_refuses() {
-        assert!(refused_uninstall(true, false));
-        assert!(refused_uninstall(false, true), "the state file was ignored");
-        assert!(refused_uninstall(true, true));
-    }
-
-    #[test]
-    fn both_witnesses_agreeing_on_nothing_running_is_the_only_way_through() {
-        assert!(!refused_uninstall(false, false), "an ordinary uninstall was refused");
-    }
 }
 
 #[cfg(test)]

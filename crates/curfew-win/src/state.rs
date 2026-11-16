@@ -102,6 +102,17 @@ pub fn witness_of(path: &Path) -> PathBuf {
     path.with_extension("locked")
 }
 
+/// Remove the state, its backup and its witness.
+///
+/// What the uninstaller does last, so a reinstall starts with nothing running instead of resuming a
+/// lock the user removed Curfew to end. Each removal is best-effort: a file that is already gone is
+/// the goal, not a failure.
+pub fn forget(path: &Path) {
+    for file in [path.to_path_buf(), backup_of(path), witness_of(path)] {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
 /// Note, out of band, whether a lock was running. Called from [`save`].
 fn write_witness(path: &Path, locks_running: bool) -> io::Result<()> {
     let witness = witness_of(path);

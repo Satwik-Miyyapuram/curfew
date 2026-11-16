@@ -3,7 +3,8 @@
 //! Two things here are load-bearing rather than boilerplate. The service is configured to restart
 //! itself after a failure, so `taskkill` buys a few seconds rather than an evening. And it refuses
 //! to stop while a lock is held — the control manager is told the stop failed, which is true, and
-//! the enforcement loop carries on.
+//! the enforcement loop carries on. The one stop it always accepts is the uninstaller's, which
+//! says so with [`crate::watchdog::leaving_marker`].
 //!
 //! That second one used to be a comment describing behaviour the code did not have: the handler set
 //! the loop's stop flag and returned `NoError` for *both* `Stop` and `Shutdown`, whatever was
@@ -33,6 +34,9 @@ pub const NAME: &str = "Curfew";
 /// because the `windows-sys` feature set this crate enables does not export it, and a wrong number
 /// here would be reported by the SCM as some unrelated failure.
 const ERROR_SERVICE_CANNOT_ACCEPT_CTRL: u32 = 1061;
+
+/// `ERROR_SERVICE_DOES_NOT_EXIST` (winerror.h, 1060).
+const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
 
 windows_service::define_windows_service!(ffi_service_main, service_main);
 
@@ -79,6 +83,8 @@ fn run() -> windows_service::Result<()> {
             // An unreadable state file counts as locked — `locks_running` answers `true` for
             // `Loaded::Lost` — because "the state is gone" is exactly what someone deleting their
             // way out of a lock would arrange, and a refusal here costs an honest user one reboot.
+            // While the uninstaller's marker exists `locks_running` answers `false`, so removing
+            // Curfew always works.
             ServiceControl::Stop => {
                 if crate::watchdog::locks_running(&state_path) {
                     ServiceControlHandlerResult::Other(ERROR_SERVICE_CANNOT_ACCEPT_CTRL)
@@ -304,12 +310,29 @@ fn revoke_firewall_rules() {
 
 pub fn uninstall() -> windows_service::Result<()> {
     let manager = manager(ServiceManagerAccess::CONNECT)?;
-    let service = manager.open_service(
+    let service = match manager.open_service(
         NAME,
         ServiceAccess::STOP | ServiceAccess::DELETE | ServiceAccess::QUERY_STATUS,
-    )?;
+    ) {
+        Ok(service) => service,
+        // Already gone: removed by hand, or a half-finished earlier uninstall. That is the goal, and
+        // failing here would make the installer roll back an uninstall that has nothing left to do.
+        Err(e) if raw_error(&e) == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
+            revoke_firewall_rules();
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
     if service.query_status()?.current_state != ServiceState::Stopped {
         service.stop()?;
+        // Waited for, briefly, so the service's last pass cannot write the hosts file after the
+        // uninstaller has given it back.
+        for _ in 0..50 {
+            if service.query_status()?.current_state == ServiceState::Stopped {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
     // Before the delete, because after it there is nothing left to be sure of: an uninstall that
     // leaves a firewall rule behind has left a hole named after a program that is gone.

@@ -80,17 +80,15 @@ Settings > Apps > Installed apps > Curfew, if you used the installer. Or, either
 
        curfew uninstall
 
-This is refused while a lock is running, and that refusal is the product working. If you are
-locked and you want out, start the way out and wait for it:
+This always works, during a lock too: it ends anything running, gives back the hosts file and
+the DNS settings, and leaves nothing behind that would resume the lock after a reinstall. No lock
+is worth a computer you cannot get out of.
+
+If you want to keep Curfew and only end one lock, start its way out and wait for it:
 
        curfew release <session-id>
 
-The release takes 24 hours. Nothing shortens it — not reinstalling Windows, not deleting the
-files, not the developer. That is the promise you made to yourself when you started the block,
-and Curfew keeping it when you no longer want it kept is the only reason it is worth running.
-
-If the machine is genuinely unusable and you need out now, you can still sign in with your
-Windows password wherever a block offers a credential unlock, if the profile allowed one.
+The release takes 24 hours, and nothing but uninstalling shortens it.
 
 
 Your antivirus may object
