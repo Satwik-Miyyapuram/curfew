@@ -47,7 +47,7 @@ Required visual traits:
 
 - Square corners by default.
 - Thick 3px black or ink-colored borders.
-- Hard offset shadows with no blur.
+- No shadows. Surfaces are told apart by border and fill alone.
 - High-contrast flat color blocks.
 - Heavy, uppercase headings and labels.
 - Mono text for times, technical values and labels.
@@ -65,22 +65,22 @@ Light theme defaults:
 
 | Token | Value | Meaning |
 |---|---|---|
-| `bg` | `#F2EEE1` | paper background |
+| `bg` | `#FAFAFA` | page background |
 | `panel` | `#FFFFFF` | main surface |
-| `raise` | `#E9E4D5` | secondary surface |
-| `raise2` | `#DCD5C2` | selected or raised surface |
-| `line` | `#111110` | borders and ink |
-| `ink` | `#111110` | primary text |
-| `mut` | `#55524A` | supporting text |
-| `dim` | `#7B776C` | hints and low priority metadata |
-| `brand` | `#4D5DFF` | primary action and navigation |
+| `raise` | `#F4F4F5` | secondary surface |
+| `raise2` | `#E4E4E7` | selected or raised surface |
+| `line` | `#18181B` | borders |
+| `ink` | `#09090B` | primary text |
+| `mut` | `#52525B` | supporting text |
+| `dim` | `#71717A` | hints and low priority metadata |
+| `brand` | `#4F46E5` | the one accent: primary action and navigation, white text on it |
 | `run` | `#FF6A2B` | active/running block |
 | `ok` | `#12874A` | live or successful |
 | `warn` | `#E0A100` | degraded or needs attention |
 | `bad` | `#E02B45` | refused, dangerous or destructive |
 | `cal` | `#0B8FA8` | calendar-derived state |
 
-Dark theme should preserve the same semantic relationships. Use warm near-black surfaces and paper-colored borders. Do not make dark mode a separate visual language.
+Dark theme should preserve the same semantic relationships. Use pure black and untinted greys (`#000000` bg, `#0A0A0A` panel, `#161616` raised), `#333333` borders, `#FAFAFA` ink, `#A3A3A3` muted and `#818CF8` brand. Do not make dark mode a separate visual language.
 
 ### 3.3 Typography
 
@@ -125,9 +125,8 @@ Component sizes (button heights, touch targets, borders) are not spacing and kee
 
 - Card border: 3px.
 - Control border: 3px.
-- Strong hero or modal shadow: `8px 8px 0 ink`.
-- Small control shadow: `3px 3px 0 ink`.
-- Pressed state: translate 2px to 3px down/right and remove shadow.
+- No shadows anywhere, hero, modal or control.
+- Pressed state: scale down slightly; nothing moves.
 - Default radius: 0.
 - Circular controls: true circles only.
 

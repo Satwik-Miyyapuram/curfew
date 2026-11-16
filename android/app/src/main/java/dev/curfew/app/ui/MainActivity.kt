@@ -12,16 +12,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,7 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -207,9 +207,8 @@ fun CurfewApp(
         }
     }
 
-    // No Scaffold: the bar floats over the content rather than sitting in a slot below it, so a
-    // list scrolls *under* glass instead of stopping dead at an opaque edge. Screens already end
-    // their content with Dsn.BottomRoom, which is the space this leaves them.
+    // No Scaffold: the bar is drawn over the bottom of the content rather than in a slot below it.
+    // Screens end their content with Dsn.BottomRoom, which is the space this leaves them.
     Box(modifier = Modifier.fillMaxSize().background(Palette.ground)) {
         NavHost(
             navController = navController,
@@ -256,7 +255,7 @@ fun CurfewApp(
             current?.hierarchy?.any { it.route == tab.route } == true
         }
         if (onATab) {
-            GlassBar(
+            NavBar(
                 isSelected = { tab -> current?.hierarchy?.any { it.route == tab.route } == true },
                 onPick = { go(it) },
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -275,12 +274,12 @@ fun CurfewApp(
             MessageBanner(
                 notice = notice,
                 onDismiss = model::dismissMessage,
-                // Above the nav bar rather than under it: the bar floats over the content, so a
-                // banner at the very bottom would be behind glass.
+                // Above the nav bar rather than under it: the bar is drawn over the content, so a
+                // banner at the very bottom would be hidden by it.
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(horizontal = Dsn.Gutter, vertical = if (onATab) 128.dp else 16.dp),
+                    .padding(horizontal = Dsn.Gutter, vertical = if (onATab) 80.dp else 16.dp),
             )
         }
     }
@@ -337,104 +336,76 @@ private fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modif
 /**
  * The one piece of furniture in the app, and the only thing always on screen.
  *
- * It is a floating slab rather than a bar welded to the bottom edge: lifted off the edge, rounded
- * on every corner, translucent enough that content moving underneath shows through it, with a
- * hairline top edge catching a little light and a shadow underneath doing the rest. That pair —
- * lit edge, shaded belly — is the whole trick: it reads as a pane of etched glass laid over the
- * page, which is the depth the app was missing when it was flat cards on a flat ground.
+ * A full-width bar welded to the bottom edge: the surface colour, a single rule along its top, and
+ * nothing else. It once floated as a plate with a hard shadow, and a floating slab is one more thing
+ * on screen competing with the page; a bar that is simply where the page ends is not.
  *
- * Drawn by hand rather than taken from Material, because a Material bottom bar is opaque by
- * construction and makes the app look like every other app on the phone.
+ * Drawn by hand rather than taken from Material, because a Material bottom bar makes the app look
+ * like every other app on the phone.
  */
 @Composable
-private fun GlassBar(
+private fun NavBar(
     isSelected: (Tab) -> Boolean,
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val inset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = Space.l, end = Space.l, bottom = inset + Space.m),
+            .background(Palette.surface)
+            // Swallows taps between tabs, so they never land on the list scrolled beneath the bar.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {},
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                // The app's one elevated surface, defined in `Design.kt` with the block screen and the
-                // sheets. The two layers — a translucent ground so the page shows through, a top-down
-                // sheen so the slab has a lit edge rather than one flat tone — were written out here
-                // and again on the block screen, and had already drifted apart.
-                .glass(RoundedCornerShape(26.dp), elevation = 22.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) {}
-                .padding(horizontal = Space.s, vertical = Space.s),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Tab.entries.forEach { tab -> GlassTab(tab, isSelected(tab)) { onPick(tab.route) } }
+        Box(Modifier.fillMaxWidth().height(Dsn.Border).background(Palette.line))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Tab.entries.forEach { tab -> NavTab(tab, isSelected(tab)) { onPick(tab.route) } }
         }
+        Box(Modifier.height(inset))
     }
 }
 
 /**
- * One tab. The icon lights up rather than a pill sliding in behind it.
+ * One tab: an icon over an uppercase label, and an accent underline when it is the current one.
  *
- * The hit area is pinned to [MIN_TOUCH] and the press feedback is back. Both were wrong, in opposite
- * directions from what the review assumed:
- *
- * * It was **not** too small. The clickable spans the icon box plus padding plus the label, so it
- *   measured roughly 50×55dp — comfortably over Material's 48dp, and the review's "roughly 38dp",
- *   which counted the icon and the padding but not the label or the gap, was a miscount. What was
- *   wrong is that the size was an *accident* of the label's line height: at 10sp it clears 48dp, and
- *   a smaller label style or a shorter one would quietly take the most-touched control in the app
- *   below the floor. It is now a stated minimum rather than a coincidence.
- * * It had **no press feedback at all**. `indication = null` was the only such suppression in the
- *   app, and it was there to stop Material's sliding pill, which is not what a ripple is. Every other
- *   clickable on this screen — `Switch`, `GhostButton`, the row bodies — shows a ripple. The nav, the
- *   control every user touches every session, showed nothing, so a tap that registered and a tap that
- *   missed felt identical.
- *
- * `minimumInteractiveComponentSize` is the enforcement rather than a comment: it is Material's own
- * guarantee that the *touch* target is at least 48dp while the visual size stays whatever was drawn.
+ * Each tab takes an equal share of the width, so the whole bar is touchable rather than four islands,
+ * and the label is [Palette.muted] rather than [Palette.dim] when unselected so it stays readable.
+ * `minimumInteractiveComponentSize` keeps the touch target at least 48dp whatever is drawn.
  */
 @Composable
-private fun GlassTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.NavTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val lit by animateFloatAsState(if (selected) 1f else 0f, label = "tab")
-    val tint = lerp(Palette.dim, Palette.accent, lit)
+    val tint = lerp(Palette.muted, Palette.accent, lit)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(Space.xxs),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
         modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
+            .weight(1f)
             .clickable(onClick = onClick)
             .minimumInteractiveComponentSize()
-            .heightIn(min = Dsn.MinTouch)
-            .widthIn(min = Dsn.MinTouch)
-            .padding(horizontal = Space.m, vertical = Space.xs)
+            .padding(top = Space.m, bottom = Space.s)
             .semantics(mergeDescendants = true) {
                 contentDescription = if (selected) tab.label + ", selected" else tab.label
             },
     ) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(Palette.accent.copy(alpha = 0.14f * lit)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
-        }
+        Icon(tab.icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         Text(
-            tab.short,
+            tab.short.uppercase(),
             style = Type.micro,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
             color = tint,
+        )
+        Box(
+            Modifier
+                .width(24.dp)
+                .height(3.dp)
+                .background(Palette.accent.copy(alpha = lit)),
         )
     }
 }

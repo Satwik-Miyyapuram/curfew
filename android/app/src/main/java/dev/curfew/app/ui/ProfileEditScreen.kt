@@ -189,13 +189,14 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .background(Palette.line)
+                                    .background(Palette.raised)
+                                    .border(Dsn.Border, Palette.line)
                                     .clickable {
                                         model.deleteRule(profileId, Target.AppPackage(pkg))
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("✕", style = Type.micro, color = Palette.muted)
+                                Text("✕", style = Type.micro, color = Palette.text)
                             }
                         }
                     }
@@ -262,13 +263,14 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                             Box(
                                 modifier = Modifier
                                     .size(20.dp)
-                                    .background(Palette.line)
+                                    .background(Palette.raised)
+                                    .border(Dsn.Border, Palette.line)
                                     .clickable {
                                         model.deleteRule(profileId, rule.target)
                                     },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("✕", style = Type.micro, color = Palette.muted)
+                                Text("✕", style = Type.micro, color = Palette.text)
                             }
                         }
                     }

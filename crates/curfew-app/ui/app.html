@@ -8,7 +8,7 @@
    Curfew desktop — neo-brutalist visual system (docs/design.md §3)
 
    Square corners unless something is genuinely circular (the time setter, a status dot, the
-   countdown ring). 3px ink borders. Hard offset shadows with no blur. Flat, high-contrast colour
+   countdown ring). 3px ink borders. No shadows. Flat, high-contrast colour
    blocks. No gradients, no blur, no glass, no pills.
 
    Every colour below is a semantic token: screens never name a raw colour, they name a meaning
@@ -18,13 +18,13 @@
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   /* --- colour (docs/design.md §3.2) --- */
-  --bg:#F2EEE1; --panel:#FFFFFF; --raise:#E9E4D5; --raise2:#DCD5C2;
-  --line:#111110; --ink:#111110; --mut:#55524A; --dim:#7B776C;
-  --brand:#4D5DFF; --run:#FF6A2B; --ok:#12874A; --warn:#E0A100; --bad:#E02B45; --cal:#0B8FA8;
+  --bg:#FAFAFA; --panel:#FFFFFF; --raise:#F4F4F5; --raise2:#E4E4E7;
+  --line:#18181B; --ink:#09090B; --mut:#52525B; --dim:#71717A;
+  --brand:#4F46E5; --run:#FF6A2B; --ok:#12874A; --warn:#E0A100; --bad:#E02B45; --cal:#0B8FA8;
 
   /* Tints are the only permitted mixing: flat colour at low alpha over the paper background. No
      gradients are built from them; they exist so a status block can be a colour without shouting. */
-  --brand-t:rgba(77,93,255,.14); --run-t:rgba(255,106,43,.16); --ok-t:rgba(18,135,74,.14);
+  --brand-t:rgba(79,70,229,.14); --run-t:rgba(255,106,43,.16); --ok-t:rgba(18,135,74,.14);
   --warn-t:rgba(224,161,0,.18); --bad-t:rgba(224,43,69,.14); --cal-t:rgba(11,143,168,.14);
 
   /* Ink on a filled block, chosen per fill for 4.5:1 (WCAG AA). Dark reads on the light fills
@@ -40,7 +40,7 @@
   --track-w:700; --track-w2:650;
 
   /* --- geometry (docs/design.md §3.4) --- */
-  --bw:3px; --sh-hero:8px 8px 0 var(--line); --sh-ctl:3px 3px 0 var(--line);
+  --bw:3px; --sh-hero:none; --sh-ctl:none;
   --pad:16px; --row-y:12px; --ctl-h:38px; --gap:var(--sp-l);
 
   --grid:24px;              /* paper grid pitch */
@@ -48,16 +48,16 @@
   --grid-ink-2:rgba(17,17,16,.10);
   --scrim:rgba(17,17,16,.62);
 }
-/* Dark theme: the same semantic relationships, warm near-black surfaces and paper-coloured ink
+/* Dark theme: the same semantic relationships, pure black surfaces and near-white ink
    (docs/design.md §3.2). Not a second language — only the token block changes. */
 html[data-theme="dark"]{
-  --bg:#16150F; --panel:#211F18; --raise:#2B2921; --raise2:#3A372C;
-  --line:#F0EAD8; --ink:#F4EFE0; --mut:#B7B0A0; --dim:#928B7C;
-  --brand:#8E9BFF; --run:#FF8A52; --ok:#4FCB86; --warn:#F0BE3C; --bad:#FF7183; --cal:#4FC4DA;
-  --brand-t:rgba(142,155,255,.20); --run-t:rgba(255,138,82,.20); --ok-t:rgba(79,203,134,.18);
+  --bg:#000000; --panel:#0A0A0A; --raise:#161616; --raise2:#262626;
+  --line:#333333; --ink:#FAFAFA; --mut:#A3A3A3; --dim:#8A8A8A;
+  --brand:#818CF8; --run:#FF8A52; --ok:#4FCB86; --warn:#F0BE3C; --bad:#FF7183; --cal:#4FC4DA;
+  --brand-t:rgba(129,140,248,.20); --run-t:rgba(255,138,82,.20); --ok-t:rgba(79,203,134,.18);
   --warn-t:rgba(240,190,60,.20); --bad-t:rgba(255,113,131,.20); --cal-t:rgba(79,196,218,.20);
   --on-accent:#111110; --on-brand:#111110; --on-bad:#111110;
-  --grid-ink:rgba(244,239,224,.05); --grid-ink-2:rgba(244,239,224,.09); --scrim:rgba(0,0,0,.72);
+  --grid-ink:rgba(250,250,250,.05); --grid-ink-2:rgba(250,250,250,.09); --scrim:rgba(0,0,0,.72);
 }
 /* Accent settings. `brand` is the design default; the alternatives recolour only the *navigation and
    primary action* token, never a state colour — `run`, `ok`, `warn` and `bad` always mean the same
@@ -206,20 +206,19 @@ b,strong{font-weight:750}
   color:var(--on-brand);font-family:var(--f);font-size:var(--body);font-weight:700;
   text-transform:uppercase;letter-spacing:.4px;display:inline-flex;align-items:center;justify-content:center;
   gap:var(--sp-s);cursor:pointer;box-shadow:var(--sh-ctl);transition:transform .06s linear}
-.btn:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--line)}
-.btn:active{transform:translate(3px,3px);box-shadow:none}
+.btn:hover{filter:brightness(1.08)}
+.btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;transform:none}
 .btn.ghost{background:var(--panel);color:var(--ink)}
 .btn.quiet{background:var(--raise);color:var(--ink)}
 .btn.danger{background:var(--bad);color:var(--on-bad)}
 .btn.run{background:var(--run);color:var(--on-accent)}
 .btn.ok{background:var(--ok);color:var(--on-brand)}
-.btn.sm{min-height:30px;padding:0 var(--sp-m);font-size:var(--meta);box-shadow:2px 2px 0 var(--line)}
-.btn.sm:hover{box-shadow:3px 3px 0 var(--line)}
+.btn.sm{min-height:30px;padding:0 var(--sp-m);font-size:var(--meta)}
 .btn.wide{width:100%}
 .btn[aria-busy="true"]{cursor:progress}
 .btn[aria-busy="true"]::after{content:"…";font-family:var(--fmono)}
-.btn.err{border-color:var(--bad);box-shadow:3px 3px 0 var(--bad)}
+.btn.err{border-color:var(--bad)}
 .linkbtn{background:none;border:none;padding:0;font:inherit;font-size:var(--meta);color:var(--brand);
   text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-weight:650}
 .linkbtn:hover{color:var(--ink)}
@@ -3662,7 +3661,7 @@ function pageSettings() {
           <button data-act="mock-desktop" aria-pressed="${s.mock === "desktop"}">Desktop</button>
           <button data-act="mock-phone" aria-pressed="${s.mock === "phone"}">Phone</button>
         </div>`, "This document is the desktop mock. Choosing Phone shows the Android layout as a notice here rather than pretending to be it."))}
-      ${sec("Appearance", settingCard("Theme", "Light paper and dark paper. The dark theme keeps the same meanings, with warm near-black surfaces.",
+      ${sec("Appearance", settingCard("Theme", "Light paper and dark paper. The dark theme keeps the same meanings, on pure black.",
         `<div class="seg" role="group" aria-label="Theme">
           <button data-act="set" data-key="theme" data-value="light" aria-pressed="${s.theme === "light"}">Light</button>
           <button data-act="set" data-key="theme" data-value="dark" aria-pressed="${s.theme === "dark"}">Dark</button>

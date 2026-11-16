@@ -1,5 +1,6 @@
 package dev.curfew.app.ui
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
@@ -13,8 +14,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 
 /**
  * The app's colours, and the reasons there are so few of them.
@@ -46,13 +49,13 @@ import androidx.compose.ui.unit.dp
  *
  * ## Two palettes, and why they are the same palette
  *
- * `docs/design.md` §3.2 fixes the light values exactly — warm paper, black ink — and that is the
- * document's default, so [Paper] is what a fresh install gets. [Dusk] is the same palette with the
+ * `docs/design.md` §3.2 fixes the light values exactly — neutral greys, near-black ink, one indigo
+ * accent — and that is the default, so [Paper] is what a fresh install gets. [Dusk] is the same palette with the
  * ground and the ink swapped, because this is an app people open at night to be told no and a sheet
  * of white paper at 23:00 is its own small hostility.
  *
  * §3.2 also says *"Do not make dark mode a separate visual language."* So every relationship is
- * preserved: the ground stays warm and near-neutral, the ink stays a single near-white, borders are
+ * preserved: the ground stays a neutral grey, the ink stays a single near-white, borders are
  * still drawn in the ink colour, and the accents keep their exact jobs. Only two things change —
  * the ground goes dark and the text goes light — so a screenshot of one theme is recognisably the
  * other.
@@ -65,17 +68,17 @@ import androidx.compose.ui.unit.dp
  * the ones written after today.
  */
 
-/** The light theme: warm paper and black ink. `docs/design.md` §3.2, and the design's default. */
+/** The light theme: neutral greys and near-black ink. `docs/design.md` §3.2, and the default. */
 val Paper = Brutal(
-    ground = Color(0xFFF2EEE1),
+    ground = Color(0xFFFAFAFA),
     surface = Color(0xFFFFFFFF),
-    raised = Color(0xFFE9E4D5),
-    selected = Color(0xFFDCD5C2),
-    line = Color(0xFF111110),
-    text = Color(0xFF111110),
-    muted = Color(0xFF55524A),
-    dim = Color(0xFF7B776C),
-    accent = Color(0xFF4D5DFF),
+    raised = Color(0xFFF4F4F5),
+    selected = Color(0xFFE4E4E7),
+    line = Color(0xFF18181B),
+    text = Color(0xFF09090B),
+    muted = Color(0xFF52525B),
+    dim = Color(0xFF71717A),
+    accent = Color(0xFF4F46E5),
     live = Color(0xFFFF6A2B),
     ok = Color(0xFF12874A),
     warn = Color(0xFFE0A100),
@@ -84,7 +87,7 @@ val Paper = Brutal(
 )
 
 /**
- * The dark theme: the same relationships over a warm near-black ground.
+ * The dark theme: the same relationships over a pure black ground, with neutral (untinted) greys.
  *
  * The border colour is *lighter* than the ground and *dimmer* than the text, which is the one
  * relationship that inverts rather than darkens. A border drawn in the text colour at night would be
@@ -93,15 +96,15 @@ val Paper = Brutal(
  * is an edge just above the surface it encloses, so a card reads as a pane rather than as a window.
  */
 val Dusk = Brutal(
-    ground = Color(0xFF15130F),
-    surface = Color(0xFF1E1B16),
-    raised = Color(0xFF272319),
-    selected = Color(0xFF383225),
-    line = Color(0xFF8E8674),
-    text = Color(0xFFF2EEE1),
-    muted = Color(0xFFB4AC9B),
-    dim = Color(0xFF8A8375),
-    accent = Color(0xFF8B95FF),
+    ground = Color(0xFF000000),
+    surface = Color(0xFF0A0A0A),
+    raised = Color(0xFF161616),
+    selected = Color(0xFF262626),
+    line = Color(0xFF333333),
+    text = Color(0xFFFAFAFA),
+    muted = Color(0xFFA3A3A3),
+    dim = Color(0xFF8A8A8A),
+    accent = Color(0xFF818CF8),
     live = Color(0xFFFF8A4D),
     ok = Color(0xFF4FC183),
     warn = Color(0xFFE8B33A),
@@ -327,6 +330,18 @@ fun CurfewTheme(
     // after the composition is committed, so the write lands and the readers that subscribed to it
     // recompose once.
     SideEffect { Palette.adopt(palette) }
+    // The status and navigation bar icons follow the app's theme, not the system's. Edge-to-edge
+    // picks them from the system setting, so Paper on a phone set to dark drew white icons on a
+    // near-white ground, and the clock and battery vanished.
+    val view = LocalView.current
+    SideEffect {
+        (view.context as? Activity)?.window?.let { window ->
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
     CompositionLocalProvider(localPalette provides palette) {
         MaterialTheme(
             colorScheme = schemeOf(palette, dark),

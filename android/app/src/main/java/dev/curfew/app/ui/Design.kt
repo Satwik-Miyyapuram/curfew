@@ -145,18 +145,14 @@ object Dsn {
     val Hairline = 1.dp
 
     /**
-     * The hard offset shadow, and the only elevation in the app.
-     *
-     * §3.4 gives two: `8px 8px 0 ink` on a hero or a modal, `3px 3px 0 ink` on a small control.
-     * There is **no blur anywhere**, which is the whole point — a blurred shadow is depth, and this
-     * design has no depth, it has a sheet of paper with a slightly larger sheet of black paper
-     * behind it.
+     * The offset shadow, which is now none at all: the design is flat, and a surface is told apart
+     * by its border and fill alone. Both stay as names so every plate keeps one switch.
      */
-    val ShadowHero = 8.dp
-    val ShadowControl = 3.dp
+    val ShadowHero = 0.dp
+    val ShadowControl = 0.dp
 
-    /** How far a pressed control travels, per §3.4. */
-    val Press = 2.dp
+    /** How far a pressed control travels. Zero: with no shadow to sink into, a press only scales. */
+    val Press = 0.dp
 
     /** A circular handle's hit area, per §6.1: at least 44px even when the handle is smaller. */
     val HandleHit = 44.dp
@@ -1438,7 +1434,7 @@ fun WeekGrid(
                         .weight(1f)
                         .padding(horizontal = 1.dp)
                         .height(Dsn.MinTouch)
-                        .background(if (on) Palette.line else Palette.surface)
+                        .background(if (on) Palette.accent else Palette.surface)
                         .border(Dsn.Border, Palette.line)
                         .clickable { onDayToggle?.invoke(index) }
                         .semantics {
@@ -2235,7 +2231,7 @@ fun ChoiceRow(
                     style = Type.label,
                     color = if (on) Palette.surface else Palette.text,
                     modifier = Modifier
-                        .background(if (on) Palette.line else Palette.surface)
+                        .background(if (on) Palette.accent else Palette.surface)
                         .border(Dsn.Border, Palette.line)
                         .padding(horizontal = Space.m, vertical = Space.s),
                 )
