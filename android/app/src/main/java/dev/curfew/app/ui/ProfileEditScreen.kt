@@ -28,9 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.curfew.app.R
 import dev.curfew.policy.Action
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
@@ -40,6 +42,9 @@ import dev.curfew.policy.WeeklySchedule
 import dev.curfew.policy.label
 
 private val DAYS = listOf("M", "T", "W", "T", "F", "S", "S")
+
+/** A host name with at least one dot: "reddit.com", "m.youtube.com"; not "not a domain". */
+private val HOST = Regex("""([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}""")
 
 /** Starting points, as the canvas spells them: an emoji and a word, not a template menu. */
 private val PRESETS = listOf(
@@ -140,6 +145,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         Gap(Space.m)
 
         var newWebDomain by remember { mutableStateOf("") }
+        val notADomain = stringResource(R.string.profile_not_a_domain)
 
         DCard {
             // Blocked Apps Section
@@ -310,12 +316,15 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         .clip(RoundedCornerShape(Dsn.CtlRadius))
                         .background(Palette.raised)
                         .clickable {
+                            // A pasted link keeps only its host: "reddit.com/r/x" blocks reddit.com.
                             val domain = newWebDomain.trim().lowercase()
                                 .removePrefix("https://")
                                 .removePrefix("http://")
-                                .trimEnd('/')
+                                .substringBefore('/')
                             if (domain.isNotBlank()) {
-                                if (name.isBlank()) {
+                                if (!HOST.matches(domain)) {
+                                    model.say(notADomain)
+                                } else if (name.isBlank()) {
                                     model.say("Give it a name first.")
                                 } else {
                                     model.saveProfile(profileId, name.trim())

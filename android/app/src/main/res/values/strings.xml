@@ -43,6 +43,7 @@
     <string name="perm_overlay_because">Without Precise blocking, this is what lets the block screen open over a blocked app. Android refuses it otherwise.</string>
     <string name="perm_overlay_cost">Without Precise blocking as well, blocked apps stay open.</string>
     <string name="now_not_blocking">Not blocking</string>
+    <string name="profile_not_a_domain">That isn\'t a website. Type one like reddit.com.</string>
     <string name="now_not_blocking_why">Apps stay open until Curfew can cover them. Settings has the switch.</string>
     <string name="perm_notifications_title">Notifications</string>
     <string name="perm_notifications_because">The ongoing notification is how you can always tell that enforcement is running.</string>

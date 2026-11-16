@@ -17,10 +17,12 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -274,10 +276,11 @@ fun CurfewApp(
                 notice = notice,
                 onDismiss = model::dismissMessage,
                 // Above the nav bar rather than under it: the bar is drawn over the content, so a
-                // banner at the very bottom would be hidden by it.
+                // banner at the very bottom would be hidden by it. Above the keyboard too: a
+                // complaint about what was just typed is useless behind the thing it was typed on.
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                     .padding(horizontal = Dsn.Gutter, vertical = if (onATab) 80.dp else 16.dp),
             )
         }
