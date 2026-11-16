@@ -36,6 +36,11 @@ class Enforcer(
      * a context so this class stays free of Android types; empty in a test that does not care.
      */
     private val selfPackage: String = "",
+    /**
+     * Packages enforcement never points at, whatever the rules say: the ways out of a lock. See
+     * [ESCAPE_ROUTES]. Empty in a test that does not care.
+     */
+    private val neverBlocked: Set<String> = emptySet(),
 ) {
     /** What the enforcer is allowed to do to the world outside it. */
     interface Actions {
@@ -104,7 +109,12 @@ class Enforcer(
         // block screen over the settings that would let the user fix it, and the block screen's own
         // relaunch keeps it there. The lock is still a promise: nothing here ends a session, it
         // only refuses to point the enforcement at the one app that has to stay reachable.
-        if (observation is Observation.App && observation.`package` == selfPackage) {
+        // The same holds for Settings, the uninstaller, the dialer and the home screen: blocking any
+        // of them is how a blocker becomes a lockout, and this is the one check both detectors share.
+        if (
+            observation is Observation.App &&
+            (observation.`package` == selfPackage || observation.`package` in neverBlocked)
+        ) {
             actions.allow("app:${observation.`package`}")
             return
         }
@@ -224,5 +234,34 @@ class Enforcer(
         is Observation.FileOpen -> "file:${observation.path}"
         is Observation.Notification -> null
         Observation.Idle -> null
+    }
+
+    companion object {
+        /**
+         * The apps a user needs to get out: Settings and every screen that can uninstall Curfew or
+         * turn its access off, the dialer for an emergency call, and the home screen. Never blocked,
+         * on either detector, so a rule broad enough to catch them can never trap anyone.
+         */
+        val ESCAPE_ROUTES: Set<String> = ScreenWatcher.DEFAULT_LAUNCHERS + setOf(
+            // Settings and the package installers, plus the vendor apps that own the uninstall flow
+            // on Xiaomi, Samsung, Oppo, Huawei and Vivo, where the stock installer is never seen.
+            "com.android.settings",
+            "com.android.packageinstaller",
+            "com.google.android.packageinstaller",
+            "com.android.systemui",
+            "com.miui.securitycenter",
+            "com.miui.packageinstaller",
+            "com.samsung.android.lool",
+            "com.coloros.safecenter",
+            "com.oppo.safe",
+            "com.huawei.systemmanager",
+            "com.vivo.permissionmanager",
+            "com.android.phone",
+            "com.android.dialer",
+            "com.google.android.dialer",
+            "com.samsung.android.dialer",
+            "com.android.emergency",
+            "com.google.android.apps.safetyhub",
+        )
     }
 }

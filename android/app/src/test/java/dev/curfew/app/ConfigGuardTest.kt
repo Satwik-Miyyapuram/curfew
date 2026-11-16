@@ -59,7 +59,7 @@ class ConfigGuardTest {
         kind = "block"
     """.trimIndent()
 
-    private fun store(contents: String, mode: EnforcementMode = EnforcementMode.APP_AND_URL): ConfigStore {
+    private fun store(contents: String, mode: EnforcementMode = EnforcementMode.PRECISE): ConfigStore {
         val file = File.createTempFile("curfew-guard", ".toml").apply { deleteOnExit() }
         file.writeText(contents)
         return ConfigStore(file = file, mode = { mode })
@@ -94,28 +94,36 @@ class ConfigGuardTest {
     }
 
     /**
-     * The one thing the guard does refuse: a URL rule while the app-only detector is running, because
-     * a detector that may not read a window cannot enforce one and a rule that silently does nothing
-     * is the failure this whole pass was about.
+     * A url rule is loaded, and **nothing is dropped**.
+     *
+     * This replaces `a url rule is refused in app-only mode and the reason is recorded`. That test
+     * asserted the opposite of what is true, because the mode it described was removed: there was a
+     * second accessibility service that could not read a window, and in that mode a url rule was
+     * dropped and the drop recorded so a screen could explain the gap. The service bought no
+     * compatibility with banking apps, so it is gone, and with it every case where a rule the user
+     * wrote is silently unenforceable. `droppedRules` stays because the filter is still the right
+     * shape for a service that may one day have less capability than the plan assumes — it is simply
+     * empty now, and empty is what this pins.
      */
     @Test
-    fun `a url rule is refused in app-only mode and the reason is recorded`() {
-        val store = store(realShapedConfig + urlRule, EnforcementMode.APP_ONLY)
+    fun `a url rule loads and nothing is dropped`() {
+        val store = store(realShapedConfig + urlRule, EnforcementMode.PRECISE)
 
-        assertFalse("a url rule loaded where no window can be read", store.read().contains("example.invalid"))
         assertTrue(
-            "the dropped rules were not recorded, so no screen can explain the gap",
-            store.droppedRules().isNotEmpty(),
+            "a url rule did not load even though the only service can read a window",
+            store.read().contains("example.invalid"),
         )
-        // The file is not rewritten: the edit stays the user's and becomes enforceable on a mode change.
-        assertTrue(store.readRaw().contains("example.invalid"))
+        assertTrue(
+            "a rule was dropped, so some screen will report a gap that does not exist",
+            store.droppedRules().isEmpty(),
+        )
     }
 
     /** And the same rule is fine in the mode that can read a window. */
     @Test
     fun `a url rule loads in app-and-url mode`() {
         assertTrue(
-            store(realShapedConfig + urlRule, EnforcementMode.APP_AND_URL).read().contains("example.invalid"),
+            store(realShapedConfig + urlRule, EnforcementMode.PRECISE).read().contains("example.invalid"),
         )
     }
 
@@ -127,7 +135,7 @@ class ConfigGuardTest {
     @Test
     fun `a domain rule survives app-only mode`() {
         assertTrue(
-            store(realShapedConfig + domainRule, EnforcementMode.APP_ONLY).read().contains("reddit.com"),
+            store(realShapedConfig + domainRule, EnforcementMode.PRECISE).read().contains("reddit.com"),
         )
     }
 

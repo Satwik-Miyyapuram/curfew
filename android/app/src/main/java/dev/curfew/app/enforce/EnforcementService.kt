@@ -354,6 +354,7 @@ class EnforcementService : Service() {
                     context.curfew,
                     AndroidActions(context.applicationContext),
                     context.packageName,
+                    Enforcer.ESCAPE_ROUTES,
                 ).also { shared = it }
             }
     }

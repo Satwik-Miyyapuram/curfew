@@ -83,7 +83,7 @@ class AppPickerContentsTest {
         // The picker's own inputs, in the order it applies them.
         val runtime: CurfewRuntime = TestRuntime.create(
             configToml = profile,
-            mode = EnforcementMode.APP_AND_URL,
+            mode = EnforcementMode.PRECISE,
         )
         val blockedSet = runtime.rules("deep-work")
             .mapNotNull { (it.target as? dev.curfew.policy.Target.AppPackage)?.`package` }

@@ -98,7 +98,7 @@ class ConfigGuardInputsTest {
         """.trimIndent()
         val runtime: CurfewRuntime = TestRuntime.create(
             configToml = config,
-            mode = EnforcementMode.APP_AND_URL,
+            mode = EnforcementMode.PRECISE,
         )
 
         val loaded = runtime.config.read()
@@ -144,7 +144,7 @@ class ConfigGuardInputsTest {
                 [profiles.rules.action]
                 kind = "block"
             """.trimIndent(),
-            mode = EnforcementMode.APP_AND_URL,
+            mode = EnforcementMode.PRECISE,
         ).config.read()
 
         assertTrue(Policy.check(loaded).isSuccess)

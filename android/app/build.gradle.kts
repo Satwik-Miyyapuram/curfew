@@ -6,6 +6,18 @@ plugins {
 }
 
 android {
+    // Windows shell metadata is not a resource.
+    //
+    // Google Drive Desktop writes a `desktop.ini` into every folder it syncs, and this project
+    // lives in a synced folder. The resource merger walks `res/` and refuses any file that is not
+    // `.xml` or `.png`, so a Drive sync silently breaks the build with an error about a file
+    // nobody wrote and nobody can find by reading the code. Excluded here so the failure cannot
+    // come back the next time Drive decides to touch a folder.
+    androidResources {
+        ignoreAssetsPatterns.add("desktop.ini")
+        ignoreAssetsPatterns.add("*.ini")
+        ignoreAssetsPatterns.add("Thumbs.db")
+    }
     namespace = "dev.curfew.app"
     compileSdk = 35
 
@@ -141,6 +153,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)

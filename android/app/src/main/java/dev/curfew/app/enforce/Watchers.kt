@@ -9,75 +9,53 @@ import android.view.accessibility.AccessibilityEvent
 import dev.curfew.policy.Observation
 
 /**
- * How Curfew is allowed to learn what is in front, and what that costs.
+ * How Curfew learns what is in front.
  *
- * **This is a choice the user makes, because it cannot be made for them.** Android applies
- * `canRetrieveWindowContent` per *service*, not per package. A service that can read any window is
- * treated as one that does, and payment and banking apps refuse to start on that basis alone —
- * Google Pay says the device's accessibility settings could allow another app to see the screen, and
- * the only way to stop it saying that is to not run a service holding the capability at all.
+ * **There was a choice here, and it was removed because it bought nothing.** Android applies
+ * `canRetrieveWindowContent` per *service*, not per package, so a service that can read any window
+ * is treated as one that does — and the reasoning was that a second service holding
+ * `canRetrieveWindowContent="false"` would be one no payment or banking app could object to, while
+ * giving up URL rules. A fresh install was offered that one.
  *
- * So there are two services and the app runs exactly one of them:
+ * The argument was sound and the payoff was imaginary. Banking and payment apps refuse to run with
+ * the capability-free service enabled just the same, because what they detect is an accessibility
+ * service being *active*, not what it is permitted to read. So the second declaration bought no
+ * compatibility at all and cost a choice the user had to reason about — and, worse, cost the
+ * every site rule for anyone who took the offer.
  *
- *  - [APP_ONLY] — [ForegroundTracker]. `canRetrieveWindowContent="false"`. Blocks apps from the
- *    window-state event alone, touches no node tree, and no banking app can object to it. What it
- *    gives up: no URL, site or keyword rules, and **no uninstall guard** — the guard reads a window
- *    to find out whether it is looking at Curfew's own removal screen, which is precisely the
- *    capability this mode does not have. Device admin is the remaining way to resist uninstall, and
- *    it is the option that costs banking apps instead; the wizard says so rather than picking.
- *
- *  - [APP_AND_URL] — [UrlReaderService]. Reads a known browser's address bar by view id, and runs the
- *    uninstall guard. What it costs: the banking-app warning above, avoidable only by not holding the
- *    capability. What survives anyway: payment, banking and credential apps are still never read —
- *    see [SensitiveApps] — so the warning is about the capability, not about anything Curfew
- *    actually does with a bank's screen.
- *
- * The two modes share every decision about what an event *means*; only the node access differs. See
- * [ScreenWatcher].
+ * What is left is the single service that can do everything, and there is no longer a mode with
+ * capability missing from it. See [UrlReaderService], and `ScreenWatcher` for the fact that payment,
+ * banking and credential apps are still never read.
  */
 enum class EnforcementMode {
-    APP_ONLY,
-    APP_AND_URL,
+    /**
+     * The only mode. Kept as a named value rather than deleted, because `ConfigStore` filters the
+     * plan by what the running service can enforce and that filter has to be explicit rather than
+     * implied by there being no other option.
+     */
+    PRECISE,
     ;
 
-    /** Whether this mode reads window content at all. False for the mode that cannot. */
-    val readsWindowContent: Boolean get() = this == APP_AND_URL
+    /** Always true now: the one service reads windows, which is what makes site rules work. */
+    val readsWindowContent: Boolean get() = true
 
-    /** Whether this mode can run the uninstall guard, which needs a window to look at. */
-    val guardsUninstall: Boolean get() = readsWindowContent
-
-    /**
-     * The accessibility service component this mode runs.
-     *
-     * The two are mutually exclusive on purpose. Having both enabled is the worst of both worlds: the
-     * banking warning is present because one of them holds the capability, and nothing is gained that
-     * the other does not already do.
-     */
-    fun serviceClass(): Class<out AccessibilityService> = when (this) {
-        APP_ONLY -> ForegroundTracker::class.java
-        APP_AND_URL -> UrlReaderService::class.java
-    }
+    /** The accessibility service component this mode runs. */
+    fun serviceClass(): Class<out AccessibilityService> = UrlReaderService::class.java
 
     companion object {
         /**
          * What is running now, from the system's own list of enabled services.
          *
          * Read from `Settings.Secure` rather than from a stored preference, because the preference is
-         * a request and this is the fact: a user can turn either service off from Settings at any
-         * moment, and what matters for every screen and every decision is which one is on. Null when
-         * neither is.
-         *
-         * [APP_AND_URL] wins when both are somehow on, because it is the one that can do everything —
-         * and the wizard's job at that point is to tell the user to turn the other one off.
+         * a request and this is the fact: the service can be turned off from Settings at any moment,
+         * and what matters for every screen and every decision is whether it is on. Null when it is
+         * not.
          */
-        fun current(context: Context): EnforcementMode? = when {
-            Watchers.isEnabled(context, APP_AND_URL) -> APP_AND_URL
-            Watchers.isEnabled(context, APP_ONLY) -> APP_ONLY
-            else -> null
-        }
+        fun current(context: Context): EnforcementMode? =
+            if (Watchers.isEnabled(context, PRECISE)) PRECISE else null
 
-        /** The mode a fresh install is offered: the one that costs nothing outside Curfew. */
-        val DEFAULT = APP_ONLY
+        /** The mode a fresh install is offered. There is one. */
+        val DEFAULT = PRECISE
 
         private const val PREFS = "curfew_enforcement"
         private const val KEY_MODE = "mode"
@@ -99,6 +77,9 @@ enum class EnforcementMode {
                 .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_MODE, null)
                 ?: return null
+            // APP_ONLY and APP_AND_URL were removed with the window-less tracker. Anyone who chose
+            // either asked for precise detection, which the URL reader now provides.
+            if (raw == "APP_ONLY" || raw == "APP_AND_URL") return PRECISE
             return runCatching { valueOf(raw) }.getOrNull()
         }
 
@@ -121,7 +102,6 @@ enum class EnforcementMode {
  * not a mode: it is what runs when no accessibility service is granted. Three states, then, and the
  * app only ever talked about the first two:
  *
- *  - [Tracker] — the accessibility service that reads no window. Precise, no banking warning.
  *  - [Reader] — the accessibility service that reads browser address bars. Precise, blocks sites, warns banks.
  *  - [Poller] — `UsageStatsManager`, needing only `PACKAGE_USAGE_STATS`. **This is app blocking with
  *    no accessibility at all**, and it is what `docs/ARCHITECTURE.md` has always claimed exists
@@ -135,7 +115,6 @@ enum class EnforcementMode {
  * it useless.
  */
 enum class Detector {
-    Tracker,
     Reader,
     Poller,
     ;
@@ -159,7 +138,6 @@ enum class Detector {
      * to handle "there is no page for this" instead of being handed one that does not exist.
      */
     fun serviceClass(): Class<out AccessibilityService>? = when (this) {
-        Tracker -> ForegroundTracker::class.java
         Reader -> UrlReaderService::class.java
         Poller -> null
     }
@@ -174,11 +152,8 @@ enum class Detector {
          * since the poller needs no component to be enabled — rather than returning null, because
          * something *is* always watching: `EnforcementService` runs either way.
          */
-        fun current(context: Context): Detector = when {
-            Watchers.isEnabled(context, EnforcementMode.APP_AND_URL) -> Reader
-            Watchers.isEnabled(context, EnforcementMode.APP_ONLY) -> Tracker
-            else -> Poller
-        }
+        fun current(context: Context): Detector =
+            if (Watchers.isEnabled(context, EnforcementMode.PRECISE)) Reader else Poller
 
         /** Whether any accessibility detector is running, as opposed to the poller. */
         fun accessibilityRunning(context: Context): Boolean =
@@ -292,9 +267,24 @@ object Watchers {
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
+    /**
+     * Switch the reader off from inside, so a payment app stops refusing to run beside it.
+     *
+     * `disableSelf` is the one change to the enabled list an app may make without a system
+     * permission, and only the running service can make it. Refused while a lock is held, so the
+     * one-tap way out is never easier than the deliberate one through Android's accessibility list. False when nothing was turned off: the
+     * reader is not running, or a lock holds it, and the caller sends the user to Settings instead.
+     */
+    fun turnOffReader(context: Context): Boolean {
+        if (LockFlag.isHeld(context)) return false
+        val running = reader ?: return false
+        running.disableSelf()
+        return true
+    }
+
     /** Whether either detector is on, which is what decides if the fallback poller is needed. */
     fun anyEnabled(context: Context): Boolean =
-        isEnabled(context, EnforcementMode.APP_ONLY) || isEnabled(context, EnforcementMode.APP_AND_URL)
+        isEnabled(context, EnforcementMode.PRECISE)
 
     /** The `package/class` spelling of the service one mode uses. */
     fun serviceName(context: Context, mode: EnforcementMode): String =
@@ -343,27 +333,13 @@ class ScreenWatcher(
     /** Called with each observation, once. The caller decides where it goes. */
     private val launch: (Observation) -> Unit,
 ) {
-    /**
-     * What the source of observations can read.
-     *
-     * The uninstall guard belongs to the *source* rather than to the watcher because it needs
-     * `rootInActiveWindow`, and only one of the two services has it. That is the honest shape of the
-     * trade-off in [EnforcementMode]: a mode without window content cannot watch for its own removal
-     * screen, and a guard that silently never fires would be worse than one that is absent and said
-     * to be absent.
-     */
+    /** What the source of observations can read. */
     interface ObservationSource {
         /** The browser URL bar text for [packageName], or null if there is none to read. */
         fun readUrl(packageName: String): String?
 
-        /** Whether a window belonging to [packageName] mentions Curfew. Not called unless [canReadWindows]. */
-        fun windowMentionsCurfew(packageName: String): Boolean
-
-        /** Whether this source can answer [windowMentionsCurfew] at all. */
+        /** Whether this source can read a window at all. */
         val canReadWindows: Boolean
-
-        /** Do whatever a fired guard does: press Back, and explain why. */
-        fun onGuardFired()
     }
 
     private var lastBrowserPackage: String? = null
@@ -379,12 +355,12 @@ class ScreenWatcher(
     private var lastEmittedKey: String? = null
 
     /**
-     * The packages Curfew never blocks: its own screens, the system UI and the launcher.
+     * The packages Curfew never blocks: its own screens and [Enforcer.ESCAPE_ROUTES].
      *
      * Blocking any of them is how a blocker makes a phone unusable, which the design forbids outright.
      */
     private val neverBlocked: Set<String> =
-        setOf(context.packageName, "com.android.systemui") + DEFAULT_LAUNCHERS
+        setOf(context.packageName) + Enforcer.ESCAPE_ROUTES
 
     /**
      * The sensitive list, read through [Watchers] rather than copied.
@@ -405,14 +381,8 @@ class ScreenWatcher(
             return
         }
 
-        // 1. The uninstall guard, before the exemptions — the screen that removes Curfew can be a
-        //    systemui window on several vendors, and the guard is safe there: it acts only while a
-        //    lock is held, only on a watched package, and only when the window mentions Curfew.
-        if (guard(packageName)) return
-
-        // 2. Sensitive apps, after the guard (a bank never uninstalls Curfew, so deferring costs
-        //    nothing) and before everything else. They stay blockable as apps, from the package name
-        //    alone, and are never read: no browser probe, no node walk, nothing.
+        // 1. Sensitive apps, before everything else. They stay blockable as apps, from the package
+        //    name alone, and are never read: no browser probe, no node walk, nothing.
         if (packageName in sensitive) {
             if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 emit(Observation.App(packageName))
@@ -420,7 +390,8 @@ class ScreenWatcher(
             return
         }
 
-        // 3. The never-block list, now that the guard has had its look.
+        // 2. The never-block list. Settings and the uninstaller are on it, so a plain uninstall
+        //    is always the way out of any lock: Curfew never stands in front of its own removal.
         if (packageName in neverBlocked) return
 
         val observation = classify(packageName, eventType) ?: return
@@ -500,24 +471,6 @@ class ScreenWatcher(
     }
 
     /**
-     * Hold Curfew's own Settings page and uninstall dialog shut while a lock runs.
-     *
-     * Returns true when it acted, so the caller does not also treat the screen as an app to decide
-     * about. Available only where window content is; see [ObservationSource].
-     */
-    private fun guard(packageName: String): Boolean {
-        if (!source.canReadWindows) return false
-        if (!UninstallGuard.isLockHeld(context)) return false
-        if (!UninstallGuard.watches(packageName)) return false
-        val mentions = source.windowMentionsCurfew(packageName)
-        if (!UninstallGuard.shouldIntervene(packageName, lockHeld = true, mentionsCurfew = mentions)) {
-            return false
-        }
-        source.onGuardFired()
-        return true
-    }
-
-    /**
      * Hand one observation on, once.
      *
      * The decision is made inside `Enforcer.onObservation` and nowhere else: this class decides what
@@ -563,7 +516,7 @@ class ScreenWatcher(
          * actually running; anything else falls through to being an app like any other, which is the
          * failure that costs least.
          */
-        private val DEFAULT_LAUNCHERS = setOf(
+        val DEFAULT_LAUNCHERS = setOf(
             "com.android.launcher",
             "com.android.launcher3",
             "com.google.android.apps.nexuslauncher",

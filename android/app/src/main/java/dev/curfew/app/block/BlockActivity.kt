@@ -22,11 +22,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +34,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import dev.curfew.app.ui.Type
+import dev.curfew.app.ui.Space
+import dev.curfew.app.ui.LockActions
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -49,7 +52,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.R
 import dev.curfew.app.curfew
@@ -57,6 +59,10 @@ import dev.curfew.app.enforce.Watchers
 import dev.curfew.app.ui.CurfewTheme
 import dev.curfew.app.ui.glass
 import dev.curfew.app.ui.Palette
+import dev.curfew.app.ui.Dsn
+import dev.curfew.app.ui.GhostButton
+import dev.curfew.app.ui.PrimaryButton
+import dev.curfew.app.ui.plate
 import kotlinx.coroutines.delay
 
 /**
@@ -71,6 +77,8 @@ class BlockActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        dev.curfew.app.ui.Appearance.attach(this)
+        dev.curfew.app.ui.Juice.attach(this)
         val target = intent.getStringExtra(EXTRA_TARGET).orEmpty()
         val profile = intent.getStringExtra(EXTRA_PROFILE).orEmpty()
         val explanation = intent.getStringExtra(EXTRA_EXPLANATION).orEmpty()
@@ -249,6 +257,56 @@ private fun BlockScreen(
     // `Format.describePassRefusal` is the one place that copy lives.
     val passRefusal = remember(lock) { runCatching { context.curfew.passRefusal() }.getOrNull() }
 
+    // The ways out, on the screen that is actually blocking them.
+    //
+    // **This reverses a deliberate earlier decision**, and the reversal is the point. The screen used
+    // to name the emergency pass without offering it, reasoning that a pass should be spent from
+    // inside Curfew rather than from the screen an annoyed thumb is already on. That reasoning was
+    // about one scarce resource and it generalised into a rule that left the only screen a person is
+    // genuinely stuck on with no way forward at all: "back to home" and a note about a pass they
+    // could not spend. The screen exists because somebody wanted the app; sending them away to find
+    // Curfew, navigate to the block and find it again is friction in the wrong place, and it never
+    // made the pass harder to spend — the puzzle does that, and the puzzle works here identically.
+    //
+    // Pause is deliberately absent on a locked session: see [LockActions]. What a lock permits is
+    // what this screen offers, and nothing more.
+    var busy by remember { mutableStateOf(false) }
+    var refusal by remember { mutableStateOf<String?>(null) }
+    var askingRelease by remember { mutableStateOf(false) }
+    var askingPass by remember { mutableStateOf(false) }
+    var pausing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // The screen holds a *merged* [LockSet], which carries conditions and end times but no id —
+    // ids belong to sessions. So the session this screen is about is found in the running list by
+    // profile, which is how the block screen was opened in the first place: the target was blocked
+    // because that profile is running.
+    //
+    // Read at the moment an action is taken rather than held in state, because a session can end
+    // while this screen is up — the countdown reaching zero is the common case — and a stale id
+    // would send `endSession` after a block that is already over.
+    fun runningIdNow(): String? = runCatching {
+        context.curfew.policy.sessions().running
+            .firstOrNull { it.profile.equals(profile, ignoreCase = true) }
+            ?.id
+    }.getOrNull()
+
+    /** Everything on this screen ends or releases through the runtime, then leaves. */
+    fun after(work: suspend () -> Unit) {
+        if (busy) return
+        busy = true
+        refusal = null
+        scope.launch {
+            runCatching { work() }
+                .onFailure {
+                    refusal = if (it is dev.curfew.policy.NoPass) {
+                        dev.curfew.app.ui.describePassRefusal(it.refusal, System.currentTimeMillis() / 1000)
+                    } else {
+                        it.message ?: "That did not work."
+                    }
+                }
+            busy = false
+        }
+    }
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
     LaunchedEffect(endsAt) {
         while (endsAt != null) {
@@ -260,79 +318,73 @@ private fun BlockScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            // Not flat ink: a ground that warms towards the amber the app uses for "running", so
-            // the block screen belongs to the same world as the dial that started it.
-            .background(
-                Brush.verticalGradient(
-                    listOf(Palette.Ink, Palette.Surface, Palette.Live.copy(alpha = 0.07f)),
-                ),
-            )
-            .padding(horizontal = 34.dp),
+            // Flat ground, not a gradient. `docs/design.md` section 3.1: *"No gradients, glass
+            // effects, soft shadows, floating pills or glossy surfaces."* The warmth this screen
+            // used to wash towards is carried by the run colour on the badge and the countdown
+            // instead, which is where it actually means something.
+            .background(Palette.ground)
+            .padding(horizontal = Space.xxl),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // A square plate with a 3px ink edge and a hard offset, which is the app's own material.
+        // The circle-radius badge it replaces was the last soft shape on this screen.
         Box(
             modifier = Modifier
                 .size(96.dp)
-                .clip(RoundedCornerShape(32.dp))
-                .background(Palette.Live.copy(alpha = 0.12f))
-                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(32.dp)),
+                .plate(fill = Palette.raised, offset = Dsn.ShadowControl),
             contentAlignment = Alignment.Center,
         ) {
-            Text("🔒", fontSize = 36.sp)
+            Text("🔒", style = Type.display, fontWeight = FontWeight.Normal)
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(Space.xxl))
         Text(
             "$name is blocked",
-            fontSize = 26.sp,
+            style = Type.h1,
             fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.5).sp,
-            color = Palette.Text,
+            color = Palette.text,
             textAlign = TextAlign.Center,
         )
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Space.m))
         Text(
             reasonLine(profile, explanation, endsAt),
-            fontSize = 15.sp,
-            lineHeight = 23.sp,
-            color = Palette.Muted,
+            style = Type.body,
+            color = Palette.muted,
             textAlign = TextAlign.Center,
         )
 
         if (endsAt != null) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(Space.m))
             Text(
                 countdown(endsAt - now),
-                fontSize = 44.sp,
+                style = Type.mega,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = (-1.5).sp,
-                color = Palette.Live,
+                color = Palette.live,
                 // The number changes every second; a screen reader is told the block and its end
                 // once, not sixty times a minute.
                 modifier = Modifier.semantics { contentDescription = "" },
             )
         }
 
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(Space.xxl))
         if (isWeb) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
+                    .plate(fill = Palette.raised, offset = Dsn.ShadowControl)
                     .clickable(onClick = onOpenNewTab),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     stringResource(R.string.block_open_new_tab),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Palette.Text,
+                    style = Type.h3,
+                    color = Palette.text,
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Space.m))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -342,9 +394,8 @@ private fun BlockScreen(
             ) {
                 Text(
                     stringResource(R.string.block_back_to_home),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = Palette.Muted,
+                    style = Type.body,
+                    color = Palette.muted,
                 )
             }
         } else {
@@ -352,20 +403,93 @@ private fun BlockScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
-                    .glass(RoundedCornerShape(16.dp), ground = Palette.Raised)
+                    .plate(fill = Palette.raised, offset = Dsn.ShadowControl)
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     stringResource(R.string.block_back_to_home),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Palette.Text,
+                    style = Type.h3,
+                    color = Palette.text,
                 )
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Space.xl))
+        LockActions(
+            name = name,
+            which = dev.curfew.app.ui.LockActionsWhen.LOCKED_SCREEN,
+            endsAt = endsAt,
+            now = now,
+            passesLeft = passes,
+            locked = lock.isLocked,
+            releaseAsked = lock.delayedReleaseAt != null,
+            // No tag reader here: the scanner lives in Curfew's own UI, and a button that opens
+            // nothing is worse than no button.
+            wantsTag = false,
+            // Null on a locked session, which is what makes the button disappear rather than lie.
+            // The pause is taken here, behind the same sum [PausePuzzleSheet] asks everywhere: the
+            // core has no pause primitive, so a pause ends the session and says so.
+            onPause = if (lock.isLocked) null else ({ pausing = true }),
+            onEnd = { after { runningIdNow()?.let { context.curfew.endSession(it) } } },
+            onRelease = { askingRelease = true },
+            onPresentTag = {},
+            onEmergency = { askingPass = true },
+        )
+
+        // The same two confirmations the Now screen asks, with the same words: both actions are
+        // irreversible, and the screen they are taken from does not change what they cost.
+        if (askingPass) {
+            dev.curfew.app.ui.DConfirm(
+                title = stringResource(R.string.confirm_pass_title),
+                body = stringResource(R.string.confirm_pass_body, profile),
+                dismiss = "Keep it",
+                confirm = stringResource(R.string.confirm_pass_confirm),
+                destructive = true,
+                onDismiss = { askingPass = false },
+                onConfirm = {
+                    askingPass = false
+                    after { runningIdNow()?.let { context.curfew.spendPass(it) } }
+                },
+            )
+        }
+        if (pausing) {
+            dev.curfew.app.ui.PausePuzzleSheet(
+                name = name,
+                now = now,
+                onDismiss = { pausing = false },
+                onPaused = { _, _ ->
+                    pausing = false
+                    after { runningIdNow()?.let { context.curfew.endSession(it) } }
+                },
+            )
+        }
+        if (askingRelease) {
+            dev.curfew.app.ui.DConfirm(
+                title = stringResource(R.string.confirm_release_title, profile),
+                body = stringResource(R.string.confirm_release_body),
+                dismiss = "Not yet",
+                confirm = stringResource(R.string.confirm_release_confirm),
+                destructive = true,
+                onDismiss = { askingRelease = false },
+                onConfirm = {
+                    askingRelease = false
+                    after { runningIdNow()?.let { context.curfew.requestRelease(it) } }
+                },
+            )
+        }
+
+        if (refusal != null) {
+            Spacer(Modifier.height(Space.m))
+            Text(
+                refusal.orEmpty(),
+                style = Type.meta,
+                color = Palette.bad,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(Modifier.height(Space.m))
         Text(
             if (passes > 0) {
                 "Emergency pass · ${if (passes == 1) "1 left" else "$passes left"} this month"
@@ -376,8 +500,8 @@ private fun BlockScreen(
             } else {
                 "No emergency pass right now"
             },
-            fontSize = 13.sp,
-            color = Palette.Dim,
+            style = Type.meta,
+            color = Palette.dim,
             textAlign = TextAlign.Center,
         )
     }
@@ -448,16 +572,16 @@ private fun DelayScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().padding(Space.xl),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Wait a moment", style = MaterialTheme.typography.headlineMedium)
+        Text("Wait a moment", style = Type.h1)
         Text(
             if (remaining > 0) "$remaining seconds" else "You can go ahead now.",
-            style = MaterialTheme.typography.bodyLarge,
+            style = Type.body,
             modifier = Modifier
-                .padding(top = 12.dp)
+                .padding(top = Space.m)
                 // A screen reader is told when the wait is over, and not once a second on the way
                 // there: `Polite` waits for a pause, and the description only changes at the end.
                 .semantics {
@@ -469,13 +593,16 @@ private fun DelayScreen(
                     }
                 },
         )
-        Button(
-            onClick = onProceed,
-            enabled = remaining <= 0,
-            modifier = Modifier.padding(top = 32.dp),
-        ) {
-            Text("Open $target")
+        Box(Modifier.fillMaxWidth().padding(top = Space.xxl)) {
+            PrimaryButton(
+                text = "Open $target",
+                enabled = remaining <= 0,
+                onClick = onProceed,
+            )
         }
-        TextButton(onClick = onGiveUp) { Text("Not now") }
+        Spacer(Modifier.height(Space.s))
+        Box(Modifier.fillMaxWidth()) {
+            GhostButton("Not now", Modifier.fillMaxWidth(), onClick = onGiveUp)
+        }
     }
 }

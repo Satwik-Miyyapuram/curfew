@@ -12,28 +12,29 @@ import kotlinx.coroutines.launch
  * The detector that can read a browser's address bar, and the one that costs something.
  *
  * `canRetrieveWindowContent="true"` in `res/xml/url_reader_config.xml`, and that bit is why this is a
- * separate service rather than a flag on [ForegroundTracker]. Android applies the privilege per
+ * separate declaration rather than a flag on one class. Android applies the privilege per
  * *service*, so a device running this one is a device where payment and banking apps are entitled to
  * refuse — Google Pay says the accessibility settings could let another app see the screen, which is
  * true, and no `packageNames` filter changes it, because the check is on the capability and not on
  * behaviour.
  *
- * **What is actually read, exactly.** Two things, and nothing else:
+ * **What is actually read, exactly.** One thing, and nothing else:
  *
- *  1. The address bar of a package on [BrowserUrlExtractor]'s curated list, by view id. Nothing else
+ *  - The address bar of a package on [BrowserUrlExtractor]'s curated list, by view id. Nothing else
  *     in the browser is looked at.
- *  2. A window belonging to [UninstallGuard.WATCHED] while a lock is running, to answer one question:
- *     does this window mention Curfew.
  *
  * And two things are never read, structurally rather than by review: a package in
  * [ScreenWatcher]'s never-block list, and a package on the sensitive list — payment, banking, wallet
- * and credential apps — which `ScreenWatcher` short-circuits before the guard and before any node
+ * and credential apps — which `ScreenWatcher` short-circuits before any node
  * access. So while this service does make banks warn, it never reads a bank, and the health screen
  * says exactly that rather than the flat claim that Curfew reads screens.
  *
- * This is the only service that can run the uninstall guard, because the guard needs a window. A user
- * who would rather not hold the capability at all runs [ForegroundTracker] and loses URL rules and
- * the guard; the wizard presents both and picks neither.
+ * **The only accessibility service.** There were two, on the argument that a second declaration with
+ * `canRetrieveWindowContent="false"` would be one no banking app could object to, at the price of URL
+ * rules. That was tested and the payoff turned out to be imaginary: banks
+ * refuse to run with the capability-free service enabled just the same, because what they detect is
+ * an accessibility service being *active*, not what it is permitted to read. So the second service
+ * was removed and this one does everything. See [EnforcementMode].
  */
 class UrlReaderService : AccessibilityService() {
 
@@ -108,10 +109,8 @@ class UrlReaderService : AccessibilityService() {
     /**
      * The source that may read a window, and the only one that may.
      *
-     * The two reads are the whole of it, and each is bounded: [readUrl] asks for one named view id in
-     * a package already known to be a browser, and [windowMentionsCurfew] walks at most
-     * `UninstallGuard.NODE_BUDGET` nodes of a window whose package is already known to be able to
-     * remove an app, while a lock is held.
+     * The one read is the whole of it, and it is bounded: [readUrl] asks for one named view id in a
+     * package already known to be a browser.
      */
     private inner class BrowserAndWindowAccess : ScreenWatcher.ObservationSource {
         override fun readUrl(packageName: String): String? {
@@ -123,35 +122,15 @@ class UrlReaderService : AccessibilityService() {
             }.getOrNull()
         }
 
-        override fun windowMentionsCurfew(packageName: String): Boolean = runCatching {
-            UninstallGuard.mentions(rootInActiveWindow, appLabel(), this@UrlReaderService.packageName)
-        }.getOrDefault(false)
-
         override val canReadWindows: Boolean = true
-
-        override fun onGuardFired() {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            // Said out loud, because a Back press that arrives with no explanation reads as the phone
-            // being broken rather than as the lock the user asked for.
-            android.widget.Toast
-                .makeText(
-                    this@UrlReaderService,
-                    UninstallGuard.EXPLANATION,
-                    android.widget.Toast.LENGTH_LONG,
-                )
-                .show()
-        }
     }
-
-    private fun appLabel(): String =
-        runCatching { applicationInfo.loadLabel(packageManager).toString() }.getOrDefault("Curfew")
 
     companion object {
         private const val TAG = "Curfew"
 
         /** Whether this detector is switched on, for the wizard and the health screen. */
         fun isEnabled(context: Context): Boolean =
-            Watchers.isEnabled(context, EnforcementMode.APP_AND_URL)
+            Watchers.isEnabled(context, EnforcementMode.PRECISE)
 
         fun settingsIntent(): Intent =
             Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
