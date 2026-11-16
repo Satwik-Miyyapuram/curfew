@@ -348,7 +348,7 @@ fun AppPickerScreen(
                         // A [Glyph], which is the app's square tinted marker with a 3px edge. It was
                         // a hand-rolled 11dp-radius box that matched nothing else on screen.
                         Glyph(tint = Palette.accent, size = 36.dp) {
-                            Text(glyphFor(rule.target), style = Type.body, color = Palette.surface)
+                            Text(glyphFor(rule.target), style = Type.body, color = Palette.onFill)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -396,7 +396,7 @@ fun AppPickerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
-                    Text("+", style = Type.h3, color = Palette.accent)
+                    Text("+", style = Type.h3, color = Palette.link)
                     Text(
                         "Address, pattern or word…",
                         style = Type.body.mono,
@@ -467,13 +467,13 @@ private fun PaneTab(
             label,
             style = Type.body,
             fontWeight = FontWeight.Bold,
-            color = if (selected) Palette.ground else Palette.muted,
+            color = if (selected) Palette.onFill else Palette.muted,
         )
         Text(
             count.toString(),
             style = Type.body,
             fontWeight = FontWeight.Bold,
-            color = if (selected) Palette.ground.copy(alpha = 0.62f) else Palette.dim,
+            color = if (selected) Palette.onFill.copy(alpha = 0.62f) else Palette.dim,
         )
     }
 }
@@ -494,7 +494,7 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
             onValueChange = onChange,
             singleLine = true,
             textStyle = Type.body.copy(color = Palette.text),
-            cursorBrush = SolidColor(Palette.accent),
+            cursorBrush = SolidColor(Palette.link),
             modifier = Modifier.fillMaxWidth(),
         )
         if (value.isEmpty()) {
@@ -897,7 +897,7 @@ fun AppPickerSheet(
                                         Text(
                                             if (on) "Blocked" else "Allowed",
                                             style = Type.micro,
-                                            color = if (on) Palette.accent else Palette.dim,
+                                            color = if (on) Palette.link else Palette.dim,
                                         )
                                     }
                                     Switch(on = on, onChange = { toggle() })

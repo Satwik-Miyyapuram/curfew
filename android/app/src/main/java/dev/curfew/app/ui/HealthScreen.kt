@@ -260,6 +260,6 @@ private fun Grant(onClick: () -> Unit) {
             .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Allow", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.surface)
+        Text("Allow", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.onFill)
     }
 }

@@ -68,22 +68,32 @@ import androidx.core.view.WindowCompat
  * the ones written after today.
  */
 
-/** The light theme: neutral greys and near-black ink. `docs/design.md` §3.2, and the default. */
+/**
+ * The light theme: warm paper, near-black ink, and fills as bright as [Dusk]'s.
+ * `docs/design.md` §3.2, and the default.
+ *
+ * Fills used to be dark (a mustard accent, a forest green) because white was drawn on them, and a
+ * dark fill is the only kind white reads on. That made the light theme the dull one. Ink on a fill
+ * is now [Brutal.onFill], near-black, so the fills can be loud; the accent drawn *as text* on white
+ * uses [Brutal.link], the deep shade that still reads there.
+ */
 val Paper = Brutal(
-    ground = Color(0xFFEFEFF2),
+    ground = Color(0xFFF4F1E8),
     surface = Color(0xFFFFFFFF),
-    raised = Color(0xFFE6E6EA),
-    selected = Color(0xFFD8D8DE),
+    raised = Color(0xFFEAE6DA),
+    selected = Color(0xFFDCD7C8),
     line = Color(0xFF18181B),
     text = Color(0xFF09090B),
     muted = Color(0xFF52525B),
     dim = Color(0xFF71717A),
-    accent = Color(0xFF8A6A00),
+    accent = Color(0xFFFFD60A),
+    link = Color(0xFF8A6A00),
+    onFill = Color(0xFF09090B),
     live = Color(0xFFFF6A2B),
-    ok = Color(0xFF12874A),
-    warn = Color(0xFFE0A100),
-    bad = Color(0xFFE02B45),
-    cal = Color(0xFF0B8FA8),
+    ok = Color(0xFF16A34A),
+    warn = Color(0xFFFFAA00),
+    bad = Color(0xFFF0283F),
+    cal = Color(0xFF12B5D3),
 )
 
 /**
@@ -101,6 +111,8 @@ val Dusk = Brutal(
     muted = Color(0xFFA3A3A3),
     dim = Color(0xFF8A8A8A),
     accent = Color(0xFFFFD60A),
+    link = Color(0xFFFFD60A),
+    onFill = Color(0xFF000000),
     live = Color(0xFFFF8A4D),
     ok = Color(0xFF4FC183),
     warn = Color(0xFFE8B33A),
@@ -134,6 +146,10 @@ class Brutal(
     val dim: Color,
     /** Primary action and navigation. */
     val accent: Color,
+    /** The accent as text, an icon or a cursor on the page; deeper than [accent] where that would not read. */
+    val link: Color,
+    /** Text and icons drawn on any solid colour fill: the accent, a status colour, a tinted tag. */
+    val onFill: Color,
     /** A block is running. Never used for anything else. */
     val live: Color,
     /** Live or successful. */
@@ -310,6 +326,8 @@ fun CurfewTheme(
         muted = base.muted,
         dim = base.dim,
         accent = if (dark) accent.dark else accent.light,
+        link = if (dark) accent.dark else accent.link,
+        onFill = base.onFill,
         live = base.live,
         ok = base.ok,
         warn = base.warn,

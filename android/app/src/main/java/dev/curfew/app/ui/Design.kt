@@ -71,6 +71,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -255,6 +256,12 @@ object Palette {
 
     /** `brand` — primary action and navigation. */
     val accent: Color get() = current.accent
+
+    /** `link` — the accent as text, an icon or a cursor on the page. */
+    val link: Color get() = current.link
+
+    /** `on` — text and icons drawn on any solid colour fill. */
+    val onFill: Color get() = current.onFill
 
     /** `run` — a block is running. Never used for anything else. */
     val live: Color get() = current.live
@@ -534,7 +541,7 @@ fun Pill(
         else -> Palette.raised
     }
     val foreground = when {
-        selected || tint != null -> Palette.surface
+        selected || tint != null -> Palette.onFill
         else -> Palette.muted
     }
     Box(
@@ -577,7 +584,7 @@ fun PrimaryButton(
     val pressed by interaction.collectIsPressedAsState()
     val bounce = pressBounce(interaction)
     val fill = if (enabled) colour else Palette.raised
-    val ink = if (enabled) Palette.surface else Palette.dim
+    val ink = if (enabled) Palette.onFill else Palette.dim
     val sink = if (pressed) Dsn.Press else 0.dp
     Box(
         modifier = modifier
@@ -657,7 +664,7 @@ fun GhostButton(
 /**
  * The square that stands in front of a row: a solid block of the row's colour.
  *
- * Its content is drawn in [Palette.surface], which reads on every tint in both themes.
+ * Its content is drawn in [Palette.onFill], which reads on every tint in both themes.
  */
 @Composable
 fun Glyph(
@@ -879,7 +886,9 @@ fun DragDial(
     // Read before the Canvas: this is the plain object, but keeping the reads at composable level
     // is what makes swapping it for a theme-aware accessor a one-line change later.
     val trackColour = Palette.line
-    val lapColour = colour.copy(alpha = 0.28f)
+    // Mixed against the page, not laid translucent over the black track: over the track it went
+    // a muddy olive in the light theme.
+    val lapColour = lerp(Palette.ground, colour, 0.45f)
     Box(
         Modifier
             .size(diameter)
@@ -1396,7 +1405,7 @@ fun WeekGrid(
                         label,
                         style = Type.meta,
                         fontWeight = FontWeight.Black,
-                        color = if (on) Palette.surface else Palette.text,
+                        color = if (on) Palette.onFill else Palette.text,
                     )
                 }
             }
@@ -1601,10 +1610,9 @@ private fun SheetFrame(
 /**
  * A decision: a sentence, and two buttons.
  *
- * `destructive` changes *which button is the prominent one*: the design styles the app's
- * destructive controls as a ghost button in the danger colour and puts the filled accent on the
- * action that is safe. That is why there is no "danger" fill — a solid red button invites the tap it
- * is warning about.
+ * [tone] colours the confirm button, and says what kind of decision this is before a word is read:
+ * the accent for an ordinary yes, [Palette.warn] for one that spends or gives up something (a pass,
+ * a lock), [Palette.bad] for one that deletes. Cancel is always the plain ghost beside it.
  */
 @Composable
 fun DConfirm(
@@ -1613,7 +1621,7 @@ fun DConfirm(
     body: String? = null,
     dismiss: String,
     confirm: String,
-    destructive: Boolean = false,
+    tone: Color = Palette.accent,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -1627,13 +1635,8 @@ fun DConfirm(
             }
         },
         buttons = {
-            if (destructive) {
-                Box(Modifier.weight(1f)) { PrimaryButton(dismiss, onClick = onDismiss) }
-                GhostButton(confirm, Modifier.weight(1f), colour = Palette.bad, onClick = onConfirm)
-            } else {
-                GhostButton(dismiss, Modifier.weight(1f), onClick = onDismiss)
-                Box(Modifier.weight(1f)) { PrimaryButton(confirm, onClick = onConfirm) }
-            }
+            GhostButton(dismiss, Modifier.weight(1f), onClick = onDismiss)
+            Box(Modifier.weight(1f)) { PrimaryButton(confirm, colour = tone, onClick = onConfirm) }
         },
     )
 }
@@ -1688,7 +1691,7 @@ fun ValueField(
             onValueChange = onChange,
             singleLine = true,
             textStyle = Type.h2.mono.copy(color = if (bad) Palette.bad else Palette.text),
-            cursorBrush = SolidColor(Palette.accent),
+            cursorBrush = SolidColor(Palette.link),
             modifier = Modifier.fillMaxWidth().padding(top = Space.xxs),
         )
     }
@@ -1739,7 +1742,7 @@ fun TextField(
                 onValueChange = onChange,
                 singleLine = true,
                 textStyle = Type.body.copy(color = Palette.text),
-                cursorBrush = SolidColor(Palette.accent),
+                cursorBrush = SolidColor(Palette.link),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -2203,7 +2206,7 @@ fun ChoiceRow(
                 Text(
                     label.uppercase(),
                     style = Type.label,
-                    color = if (on) Palette.surface else Palette.text,
+                    color = if (on) Palette.onFill else Palette.text,
                     modifier = Modifier
                         .background(if (on) Palette.accent else Palette.surface, RoundedCornerShape(Dsn.CtlRadius))
                         .padding(horizontal = Space.m, vertical = Space.s),
@@ -2314,7 +2317,7 @@ fun PausePuzzleSheet(
                             imeAction = ImeAction.Done,
                         ),
                         textStyle = Type.body.mono.copy(color = Palette.text),
-                        cursorBrush = SolidColor(Palette.accent),
+                        cursorBrush = SolidColor(Palette.link),
                         modifier = Modifier
                             .fillMaxWidth()
                             .semantics { contentDescription = "Type the answer here." },
@@ -2394,6 +2397,8 @@ fun LockActions(
     PrimaryButton(
         text = "End now",
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = "End $name now" },
+        // The warning colour: ending gives the block up, which is allowed but is not nothing.
+        colour = Palette.warn,
         onClick = onEnd,
     )
     // Only when there is no release already pending: asking twice must never become a way to move

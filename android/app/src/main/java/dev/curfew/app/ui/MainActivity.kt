@@ -334,21 +334,21 @@ internal fun MessageBanner(notice: Notice, onDismiss: () -> Unit, modifier: Modi
             if (notice.bad) "!" else "✓",
             style = Type.h3,
             fontWeight = FontWeight.Black,
-            color = Palette.surface,
+            color = Palette.onFill,
         )
         Column(Modifier.weight(1f)) {
-            Text(notice.text, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.surface)
+            Text(notice.text, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.onFill)
             notice.detail?.let { reason ->
                 Text(
                     reason,
                     style = Type.meta,
-                    color = Palette.surface,
+                    color = Palette.onFill,
                     maxLines = 4,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
         }
-        if (notice.bad) Text("✕", style = Type.body, fontWeight = FontWeight.Bold, color = Palette.surface)
+        if (notice.bad) Text("✕", style = Type.body, fontWeight = FontWeight.Bold, color = Palette.onFill)
     }
 }
 
@@ -396,7 +396,7 @@ private fun NavBar(
 @Composable
 private fun RowScope.NavTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val lit by animateFloatAsState(if (selected) 1f else 0f, label = "tab")
-    val tint = lerp(Palette.muted, Palette.accent, lit)
+    val tint = lerp(Palette.muted, Palette.link, lit)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Space.xs),

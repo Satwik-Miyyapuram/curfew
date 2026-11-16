@@ -91,7 +91,7 @@ fun ScheduleScreen(
                     .clickable(onClickLabel = "Add a profile", onClick = onNewProfile),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("+", style = Type.h2, fontWeight = FontWeight.Bold, color = Palette.surface)
+                Text("+", style = Type.h2, fontWeight = FontWeight.Bold, color = Palette.onFill)
             }
         }
 
@@ -199,7 +199,7 @@ fun ScheduleScreen(
                             Text(
                                 profile.name.take(1).uppercase(),
                                 style = Type.h3,
-                                color = Palette.surface,
+                                color = Palette.onFill,
                             )
                         }
                         Column(Modifier.weight(1f)) {
@@ -333,7 +333,7 @@ fun ScheduleScreen(
             body = "A session it has already started keeps running until its own lock lets it go.",
             dismiss = "Keep it",
             confirm = "Remove",
-            destructive = true,
+            tone = Palette.bad,
             onDismiss = { removingProfile = null },
             onConfirm = {
                 val chosen = profile
@@ -383,7 +383,7 @@ fun ScheduleScreen(
             body = "It will stop starting sessions. A session it has already started keeps running until its own lock lets it go. If you only want it off for a while, use the switch instead.",
             dismiss = "Keep it",
             confirm = "Remove",
-            destructive = true,
+            tone = Palette.bad,
             onDismiss = { removing = null },
             onConfirm = {
                 val chosen = target
@@ -433,7 +433,7 @@ private fun TriggerRow(
                 title.take(1).uppercase(),
                 style = Type.body,
                 fontWeight = FontWeight.Bold,
-                color = Palette.surface,
+                color = Palette.onFill,
             )
         }
         Column(Modifier.weight(1f)) {

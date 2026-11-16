@@ -271,7 +271,7 @@ internal fun CalendarList(
                         horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Glyph(Palette.accent, size = 36.dp) {
-                            Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
+                            Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.onFill)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -382,7 +382,7 @@ private fun SearchRow(query: String, kept: Int, total: Int, onChange: (String) -
                 onValueChange = onChange,
                 singleLine = true,
                 textStyle = Type.body.copy(color = Palette.text),
-                cursorBrush = SolidColor(Palette.accent),
+                cursorBrush = SolidColor(Palette.link),
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = "Search your calendar events" },
@@ -522,7 +522,7 @@ private fun EventCard(
                         if (blockedBy.size > 1) "Manage (${blockedBy.size}) ›" else "Manage ›",
                         style = Type.meta,
                         fontWeight = FontWeight.Bold,
-                        color = Palette.accent,
+                        color = Palette.link,
                     )
                 } else {
                     Text("Nothing blocked", style = Type.meta, color = Palette.dim, modifier = Modifier.weight(1f))
@@ -530,7 +530,7 @@ private fun EventCard(
                         "Block this",
                         style = Type.meta,
                         fontWeight = FontWeight.Bold,
-                        color = if (canBlock) Palette.accent else Palette.dim,
+                        color = if (canBlock) Palette.link else Palette.dim,
                     )
                 }
             }

@@ -139,7 +139,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 blocksLine(appCount, siteCount),
                 style = Type.meta,
                 fontWeight = FontWeight.Bold,
-                color = if (appCount + siteCount > 0) Palette.accent else Palette.dim,
+                color = if (appCount + siteCount > 0) Palette.link else Palette.dim,
             )
         }
         Gap(Space.m)
@@ -305,7 +305,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         onValueChange = { newWebDomain = it },
                         singleLine = true,
                         textStyle = Type.meta.copy(color = Palette.text),
-                        cursorBrush = SolidColor(Palette.accent),
+                        cursorBrush = SolidColor(Palette.link),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -340,7 +340,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                         "Add",
                         style = Type.meta,
                         fontWeight = FontWeight.Bold,
-                        color = Palette.accent,
+                        color = Palette.link,
                     )
                 }
             }
@@ -363,7 +363,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Glyph(Palette.accent) {
-                    Text("T", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
+                    Text("T", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.onFill)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -392,7 +392,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Glyph(Palette.accent) {
-                    Text("W", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
+                    Text("W", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.onFill)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -486,7 +486,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Glyph(Palette.accent) {
-                    Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
+                    Text("C", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.onFill)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -528,8 +528,8 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Configure calendar events", style = Type.meta, color = Palette.accent)
-                    Text("›", style = Type.h3, color = Palette.accent)
+                    Text("Configure calendar events", style = Type.meta, color = Palette.link)
+                    Text("›", style = Type.h3, color = Palette.link)
                 }
             }
         }
@@ -543,7 +543,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 Glyph(Palette.accent) {
-                    Text("L", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.surface)
+                    Text("L", style = Type.h3, fontWeight = FontWeight.Bold, color = Palette.onFill)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -559,7 +559,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
                             "Off · Total block when active"
                         },
                         style = Type.meta,
-                        color = if (budgeted) Palette.accent else Palette.muted,
+                        color = if (budgeted) Palette.link else Palette.muted,
                         modifier = Modifier.padding(top = Space.xxs),
                     )
                 }
@@ -681,7 +681,7 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
             body = "A session it has already started keeps running until its own lock lets it go.\n\nIf you only want it off for a while, turn it off from the schedule list instead — that is reversible.",
             dismiss = "Keep it",
             confirm = "Delete",
-            destructive = true,
+            tone = Palette.bad,
             onDismiss = { confirmingDelete = false },
             onConfirm = {
                 val target = existing.id
@@ -784,7 +784,7 @@ private fun WindowContent(
                         letter,
                         style = Type.meta,
                         fontWeight = FontWeight.Bold,
-                        color = if (on) Palette.ground else Palette.muted,
+                        color = if (on) Palette.onFill else Palette.muted,
                     )
                 }
             }
@@ -916,7 +916,7 @@ private fun Nudge(glyph: String, description: String, accent: Boolean, onClick: 
         Text(
             glyph,
             style = Type.h3,
-            color = if (accent) Palette.ground else Palette.muted,
+            color = if (accent) Palette.onFill else Palette.muted,
         )
     }
 }

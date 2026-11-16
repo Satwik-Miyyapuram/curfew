@@ -197,7 +197,7 @@ fun DevicesScreen(model: CurfewViewModel) {
                     )
                     Gap(Space.s)
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Tap("Copy code", Palette.accent) { clipboard.copy(offer.json) }
+                        Tap("Copy code", Palette.link) { clipboard.copy(offer.json) }
                         Tap("Cancel", Palette.muted, model::cancelPairing)
                     }
                     Gap(Space.m)
@@ -240,19 +240,19 @@ fun DevicesScreen(model: CurfewViewModel) {
                 Field("Code from the other device", typed) { typed = it }
                 Gap(Space.m)
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Tap("Paste", Palette.accent) {
+                    Tap("Paste", Palette.link) {
                         clipboard.getText()?.text?.let { typed = it.trim() }
                     }
                     Tap(
                         "It is showing a code",
-                        if (typed.isBlank()) Palette.dim else Palette.accent,
+                        if (typed.isBlank()) Palette.dim else Palette.link,
                     ) {
                         if (typed.isNotBlank()) {
                             model.answerPairing(typed)
                             typed = ""
                         }
                     }
-                    Tap("It answered mine", if (typed.isBlank()) Palette.dim else Palette.accent) {
+                    Tap("It answered mine", if (typed.isBlank()) Palette.dim else Palette.link) {
                         if (typed.isNotBlank()) {
                             model.readReply(typed)
                             typed = ""
@@ -277,7 +277,7 @@ fun DevicesScreen(model: CurfewViewModel) {
                 Gap(Space.m)
                 Field("Folder path", folder) { folder = it }
                 Gap(Space.m)
-                Tap("Exchange now", if (folder.isBlank()) Palette.dim else Palette.accent) {
+                Tap("Exchange now", if (folder.isBlank()) Palette.dim else Palette.link) {
                     if (folder.isNotBlank()) model.folderPass(folder)
                 }
             }
@@ -353,7 +353,7 @@ fun DevicesScreen(model: CurfewViewModel) {
             },
             dismiss = "Keep it",
             confirm = "Remove it",
-            destructive = true,
+            tone = Palette.bad,
             onDismiss = { removing = null },
             onConfirm = {
                 removing = null
@@ -440,7 +440,7 @@ private fun Field(hint: String, value: String, onChange: (String) -> Unit) {
             onValueChange = onChange,
             singleLine = true,
             textStyle = Type.body.copy(color = Palette.text),
-            cursorBrush = SolidColor(Palette.accent),
+            cursorBrush = SolidColor(Palette.link),
             modifier = Modifier.fillMaxWidth(),
         )
     }

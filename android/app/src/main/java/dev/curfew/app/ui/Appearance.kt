@@ -108,13 +108,15 @@ object Appearance {
  * near-black ground are not the same colour to a reader. The dark variants are lifted for contrast,
  * the same thing Dusk does with every other token.
  */
-enum class Accent(val id: String, val label: String, val light: Color, val dark: Color) {
+enum class Accent(val id: String, val label: String, val light: Color, val dark: Color, val link: Color) {
     // Candy colours, for a flat black-and-paper app that needs one loud thing. The ids are the
-    // stored setting and stay put; only the names and colours changed.
-    Brand("brand", "Lemon", Color(0xFF8A6A00), Color(0xFFFFD60A)),
-    Ink("ink", "Sky", Color(0xFF1D5FD1), Color(0xFF6CB4FF)),
-    Teal("teal", "Mint", Color(0xFF0A7F55), Color(0xFF3DE0A0)),
-    Rose("rose", "Bubblegum", Color(0xFFC2185B), Color(0xFFFF7AC6)),
+    // stored setting and stay put; only the names and colours changed. Fills carry near-black ink in
+    // both themes, so the light fill is as bright as the dark one; [link] is the deep shade for the
+    // accent drawn as text on white paper, where a bright fill colour would vanish.
+    Brand("brand", "Lemon", Color(0xFFFFD60A), Color(0xFFFFD60A), Color(0xFF8A6A00)),
+    Ink("ink", "Sky", Color(0xFF5AAEFF), Color(0xFF6CB4FF), Color(0xFF1D5FD1)),
+    Teal("teal", "Mint", Color(0xFF34D399), Color(0xFF3DE0A0), Color(0xFF0A7F55)),
+    Rose("rose", "Bubblegum", Color(0xFFFF7AC6), Color(0xFFFF7AC6), Color(0xFFC2185B)),
     ;
 
     companion object {

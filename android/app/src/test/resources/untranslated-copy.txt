@@ -336,7 +336,6 @@ TimerScreen.kt|Go back
 TimerScreen.kt|One switch first
 TimerScreen.kt|Start it
 TimerScreen.kt|Start without it
-TimerScreen.kt|This profile is already blocked
 TimerScreen.kt|Turn it on
 TimerScreen.kt|Which profile?
 TimerScreen.kt|You have not set up anything to block yet. Make a profile on the Plan tab 

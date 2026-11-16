@@ -333,7 +333,7 @@ private fun BlockScreen(
     ) {
         // The same solid tile every other glyph in the app sits on, in the colour of a running block.
         dev.curfew.app.ui.Glyph(Palette.live, size = 96.dp) {
-            Icon(Icons.Filled.Lock, contentDescription = null, tint = Palette.surface, modifier = Modifier.size(48.dp))
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = Palette.onFill, modifier = Modifier.size(48.dp))
         }
 
         Spacer(Modifier.height(Space.xxl))
@@ -443,7 +443,7 @@ private fun BlockScreen(
                 body = stringResource(R.string.confirm_pass_body, profile),
                 dismiss = "Keep it",
                 confirm = stringResource(R.string.confirm_pass_confirm),
-                destructive = true,
+                tone = Palette.warn,
                 onDismiss = { askingPass = false },
                 onConfirm = {
                     askingPass = false
@@ -468,7 +468,7 @@ private fun BlockScreen(
                 body = stringResource(R.string.confirm_release_body),
                 dismiss = "Not yet",
                 confirm = stringResource(R.string.confirm_release_confirm),
-                destructive = true,
+                tone = Palette.warn,
                 onDismiss = { askingRelease = false },
                 onConfirm = {
                     askingRelease = false

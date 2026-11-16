@@ -191,7 +191,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) {
                         if (strength == option) {
-                            Text("✓", style = Type.meta, color = Palette.surface)
+                            Text("✓", style = Type.meta, color = Palette.onFill)
                         }
                     }
                     Column(Modifier.weight(1f)) {
@@ -275,13 +275,19 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
         val alreadyRunning = state.sessions.firstOrNull { it.profile == chosen }
         if (alreadyRunning != null) {
             Gap(Space.l)
-            DCard(fill = Palette.warn.copy(alpha = 0.18f)) {
-                SectionLabel("This profile is already blocked")
+            // A warning is a solid block of the warning colour, the same as every other coloured state.
+            DCard(fill = Palette.warn) {
+                Text(
+                    stringResource(R.string.timer_already_blocked_title).uppercase(),
+                    style = Type.label,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.onFill,
+                )
                 Gap(Space.s)
                 Text(
                     stringResource(R.string.timer_already_blocked_body),
                     style = Type.body,
-                    color = Palette.text,
+                    color = Palette.onFill,
                 )
             }
         }
@@ -328,7 +334,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                             chosenProfile?.name?.take(1)?.uppercase().orEmpty(),
                             style = Type.body,
                             fontWeight = FontWeight.Black,
-                            color = Palette.surface,
+                            color = Palette.onFill,
                         )
                     }
                     Column(Modifier.weight(1f)) {
@@ -440,7 +446,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                                 if (on) "✓" else "·",
                                 style = Type.meta,
                                 fontWeight = FontWeight.Black,
-                                color = if (on) Palette.accent else Palette.dim,
+                                color = if (on) Palette.link else Palette.dim,
                             )
                             Text(
                                 option.name,

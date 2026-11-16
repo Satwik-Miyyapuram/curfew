@@ -392,6 +392,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 "is standing in the way.",
             dismiss = "Keep it running",
             confirm = "End it",
+            tone = Palette.warn,
             onDismiss = { confirmingEnd = null },
             onConfirm = {
                 val chosen = session
@@ -411,9 +412,8 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             body = stringResource(R.string.confirm_pass_body, named(session.profile)),
             dismiss = "Keep it",
             confirm = stringResource(R.string.confirm_pass_confirm),
-            // Scarce, recorded, and shared with every paired device — the app's one genuinely
-            // irreversible action, so the emphasis goes on keeping it.
-            destructive = true,
+            // Scarce, recorded, and shared with every paired device: a warning, not an ordinary yes.
+            tone = Palette.warn,
             onDismiss = { confirmingPass = null },
             onConfirm = {
                 val chosen = session
@@ -429,7 +429,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             body = stringResource(R.string.confirm_release_body),
             dismiss = "Not yet",
             confirm = stringResource(R.string.confirm_release_confirm),
-            destructive = true,
+            tone = Palette.warn,
             onDismiss = { confirmingDelayed = null },
             onConfirm = {
                 val chosen = session
@@ -447,7 +447,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 "back.",
             dismiss = "Not yet",
             confirm = "Let it out",
-            destructive = true,
+            tone = Palette.warn,
             onDismiss = { confirmingRelease = null },
             onConfirm = {
                 val chosen = id

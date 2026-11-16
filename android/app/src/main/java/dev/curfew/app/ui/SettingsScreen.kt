@@ -416,6 +416,10 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 // A local, because `passRefusal` is a delegated property riding on a `StateFlow`
                 // collection and Kotlin will not smart-cast it at the point of use.
                 val why = state.passRefusal
+                if (ration.passes == 0) {
+                    Pill(stringResource(R.string.settings_hatch_off), tint = Palette.warn)
+                    Gap(Space.s)
+                }
                 Text(
                     when {
                         ration.passes == 0 ->
@@ -428,7 +432,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                                     .replaceFirstChar { it.lowercase() }
                     },
                     style = Type.meta,
-                    color = if (ration.passes == 0) Palette.warn else Palette.text,
+                    color = Palette.text,
                 )
             }
             Rule()
@@ -838,7 +842,7 @@ private fun Fix(onClick: () -> Unit) {
             .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("FIX", style = Type.button, color = Palette.surface)
+        Text("FIX", style = Type.button, color = Palette.onFill)
     }
 }
 
