@@ -14,7 +14,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -381,15 +380,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     }
 
     confirmingEnd?.let { session ->
-        DConfirm(
-            title = "End ${named(session.profile)}?",
-            body = "You chose \"ask me first\" for this one, so this is the asking. Nothing else " +
-                "is standing in the way.",
-            dismiss = "Keep it running",
-            confirm = "End it",
-            tone = Palette.warn,
+        EndPuzzleSheet(
+            name = named(session.profile),
             onDismiss = { confirmingEnd = null },
-            onConfirm = {
+            onEnded = {
                 val chosen = session
                 confirmingEnd = null
                 // `Lock.Confirm` is a condition the caller is the only witness to — the core cannot
@@ -581,9 +575,8 @@ private fun DowntimeBanner(downtime: Downtime, onDismiss: () -> Unit) {
                 style = Type.meta,
                 modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(shape = Capsule, onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
-                Text("Got it")
-            }
+            Gap(Space.m)
+            GhostButton("Got it", onClick = onDismiss)
         }
     }
 }
@@ -617,9 +610,8 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
                 style = Type.meta,
                 modifier = Modifier.padding(top = Space.xs),
             )
-            TextButton(shape = Capsule, onClick = onDismiss, modifier = Modifier.padding(top = Space.s)) {
-                Text("Got it")
-            }
+            Gap(Space.m)
+            GhostButton("Got it", onClick = onDismiss)
         }
     }
 }
@@ -762,13 +754,11 @@ private fun ReleaseCard(sessions: List<String>, onRelease: (String) -> Unit) {
                 modifier = Modifier.padding(top = Space.xs),
             )
             sessions.forEach { id ->
-                TextButton(
-                    shape = Capsule,
-                    onClick = { onRelease(id) },
-                    modifier = Modifier
-                        .padding(top = Space.s)
-                        .semantics { contentDescription = "Let session $id out" },
-                ) { Text("Let $id out") }
+                Gap(Space.s)
+                GhostButton(
+                    "Let $id out",
+                    Modifier.semantics { contentDescription = "Let session $id out" },
+                ) { onRelease(id) }
             }
         }
     }

@@ -186,6 +186,9 @@ dependencies {
     // The desktop JNA jar: :policy exports the Android `.aar`, which carries no jnidispatch for the
     // host JVM, so a unit test that touches the Rust core would fail to link without this.
     testImplementation(libs.jna)
+    // Compose on Robolectric, for measuring the shared button components rather than trusting them.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.espresso.core)

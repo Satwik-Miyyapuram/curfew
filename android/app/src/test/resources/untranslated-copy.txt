@@ -29,12 +29,10 @@ AppPickerScreen.kt|already running.
 AppPickerScreen.kt|anything whose address or title contains it.
 AppPickerScreen.kt|can be read.\n\n
 BlockActivity.kt| else 
-BlockActivity.kt|End it
 BlockActivity.kt|No emergency pass right now
 BlockActivity.kt|Not now
 BlockActivity.kt|Wait a moment
 BlockActivity.kt|You can go ahead now.
-BlockActivity.kt|You chose \"ask me first\" for this one, so this is the asking. Ending it 
 BlockActivity.kt|} this month
 CalendarScreen.kt|(free)
 CalendarScreen.kt|(untitled)
@@ -67,14 +65,14 @@ CalendarScreen.kt|Which meetings should start it?
 CalendarScreen.kt|around now, because that is all a rule can act on.
 Challenge.kt|Answer this to end the session.
 Challenge.kt|Type this out to end the session.
-ChallengeDialog.kt|End the session
-ChallengeDialog.kt|Keep going
+ChallengeDialog.kt|End it
 CurfewViewModel.kt|Configuration imported.
 Design.kt|1 hour
 Design.kt|Ask to end in 24 hours
 Design.kt|Ask to end in 24 hours
 Design.kt|Cancel
 Design.kt|Drag down to close
+Design.kt|End it
 Design.kt|End now
 Design.kt|End now
 Design.kt|Ending this affects every app the profile blocks, not only this one.
@@ -155,7 +153,6 @@ NowScreen.kt|Another of your devices has a session only this one can end.
 NowScreen.kt|Blocking now
 NowScreen.kt|Confirm it is you.
 NowScreen.kt|Curfew was not running
-NowScreen.kt|End it
 NowScreen.kt|Got it
 NowScreen.kt|Got it
 NowScreen.kt|Hold the tag against the back of the phone, or type what is on it.
@@ -182,7 +179,6 @@ NowScreen.kt|This fills in once a block has run.
 NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
 NowScreen.kt|Upcoming · next 24h
 NowScreen.kt|Waiting on you
-NowScreen.kt|You chose \"ask me first\" for this one, so this is the asking. Nothing else 
 NowScreen.kt|Your other device is holding a session that only this one can end. Saying yes 
 NowScreen.kt|no end time
 NowScreen.kt|reopening it is not a restart.
@@ -273,19 +269,14 @@ TimerScreen.kt|Choose a different profile
 TimerScreen.kt|Curfew can only replace a blocked app if it is allowed to see which app is 
 TimerScreen.kt|Done
 TimerScreen.kt|Go back
-TimerScreen.kt|Go back
 TimerScreen.kt|Needs a screen lock.
 TimerScreen.kt|One switch first
 TimerScreen.kt|Start it
-TimerScreen.kt|Start without it
 TimerScreen.kt|Turn it on
 TimerScreen.kt|Which profile?
 TimerScreen.kt|You have not set up anything to block yet. Make a profile on the Plan tab 
-TimerScreen.kt|come back. Or start it now, and nothing will be blocked until the switch 
 TimerScreen.kt|drag the ring, or pick one
 TimerScreen.kt|first — a timer needs to know what it is switching off.
-TimerScreen.kt|in front.\n\n
-TimerScreen.kt|is on.
 TimerScreen.kt|tap to switch between your 2 profiles
 TimerScreen.kt|your only profile
 UsageScreen.kt| else 

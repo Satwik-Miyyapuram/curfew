@@ -23,7 +23,6 @@ AppPickerScreen.kt|Stop blocking ${rule.target.label()}
 BlockActivity.kt|$name is blocked
 BlockActivity.kt|$remaining seconds
 BlockActivity.kt|Emergency pass · ${if (passes == 1) 
-BlockActivity.kt|End $name?
 BlockActivity.kt|Open $target
 BlockActivity.kt|Open $target
 BlockActivity.kt|The wait is over. You can open $target.
@@ -51,6 +50,7 @@ Design.kt|Emergency pass ($passesLeft)
 Design.kt|Emergency pass ($passesLeft)
 Design.kt|End $name now
 Design.kt|End $name now
+Design.kt|End $name?
 Design.kt|Pause $name for a few minutes
 Design.kt|Pause $name for a few minutes
 Design.kt|Pause $name?
@@ -73,8 +73,8 @@ NowScreen.kt|${duration(today)} away from the phone today
 NowScreen.kt|${named(it.profile)} · ${duration((it.end - it.start).toInt())}
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
 NowScreen.kt|End ${named(session.profile)}
-NowScreen.kt|End ${named(session.profile)}?
 NowScreen.kt|Let $id out
+NowScreen.kt|Let session $id out
 NowScreen.kt|Let session $id out
 NowScreen.kt|The tag that ends $profile
 NowScreen.kt|left · ends ${clockOf(it)}
@@ -90,7 +90,6 @@ SettingsScreen.kt|${state.passesLeft} of ${ration.passes} left this week.
 TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
 TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
 TimerScreen.kt|That is ${spellDuration(minutes)}
-TimerScreen.kt|Turn it on and this ${spellDuration(minutes)} block starts the moment you 
 TimerScreen.kt|tap to choose from ${state.profiles.size} profiles
 UsageScreen.kt| · opened $opens times
 UsageScreen.kt|${comparison.baselineDays} days before you started.

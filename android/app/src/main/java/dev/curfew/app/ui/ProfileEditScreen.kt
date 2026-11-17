@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -622,17 +623,17 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // SUMMARY NOTE & ACTIONS
         // ==========================================
         Gap(Space.xl)
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+        ButtonRow {
             if (existing != null) {
                 GhostButton(
                     text = "Delete",
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                     colour = Palette.bad,
                 ) { confirmingDelete = true }
             }
             PrimaryButton(
                 text = "Save",
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).fillMaxHeight(),
             ) {
                 if (name.isBlank()) {
                     model.say("Give it a name first.")

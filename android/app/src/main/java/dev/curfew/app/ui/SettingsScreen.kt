@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -317,21 +318,21 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             onConfirm = { showConfig = false },
         ) {
             SheetSection("Backup & Restore") {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    PrimaryButton("Export config", Modifier.weight(1f)) {
+                ButtonRow {
+                    PrimaryButton("Export config", Modifier.weight(1f).fillMaxHeight()) {
                         runCatching {
                             exportFile.launch("curfew.toml")
                         }.onFailure { model.fail(context.getString(R.string.file_write_failed), it) }
                     }
-                    GhostButton("Import file", Modifier.weight(1f)) {
+                    GhostButton("Import file", Modifier.weight(1f).fillMaxHeight()) {
                         runCatching {
                             importFile.launch(arrayOf("*/*", "text/plain", "text/x-toml", "application/octet-stream"))
                         }.onFailure { model.fail(context.getString(R.string.file_read_failed), it) }
                     }
                 }
                 Gap(Space.s)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    GhostButton("Copy to clipboard", Modifier.weight(1f)) {
+                Row {
+                    GhostButton("Copy to clipboard") {
                         if (state.configToml.isNotBlank()) {
                             clipboard.setText(AnnotatedString(state.configToml))
                             model.note("Config copied to clipboard.")

@@ -37,8 +37,15 @@ class ChallengeStepTest {
     ) = challengeStep(conditions, satisfied, posed, Random(7))
 
     @Test
-    fun `nothing outstanding means end it`() {
-        assertEquals(ChallengeStep.End, step(emptyList()))
+    fun `an unlocked session is still asked before it ends`() {
+        // One tap ended a block with no locks, which is the reflex the app exists to interrupt.
+        val s = step(emptyList())
+        assertTrue("expected the ask, got $s", s is ChallengeStep.AskConfirm)
+    }
+
+    @Test
+    fun `an unlocked session ends once asked`() {
+        assertEquals(ChallengeStep.End, step(emptyList(), satisfied = listOf(confirm)))
     }
 
     @Test
@@ -97,6 +104,6 @@ class ChallengeStepTest {
         // A credential, a tag, a restart and a peer release are proved to the core by other routes.
         // Listing them changes nothing, and this pins that they do not send the screen into a
         // confirmation or a challenge it cannot complete.
-        assertEquals(ChallengeStep.End, step(listOf(Lock.DeviceCredential)))
+        assertEquals(ChallengeStep.End, step(listOf(Lock.DeviceCredential), satisfied = listOf(confirm)))
     }
 }

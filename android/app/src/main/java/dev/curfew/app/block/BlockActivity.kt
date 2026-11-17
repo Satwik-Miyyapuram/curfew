@@ -390,20 +390,7 @@ private fun BlockScreen(
 
         Spacer(Modifier.height(Space.xxl))
         if (isWeb) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .plate(fill = Palette.raised, offset = Dsn.ShadowControl)
-                    .clickable(onClick = onOpenNewTab),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.block_open_new_tab),
-                    style = Type.h3,
-                    color = Palette.text,
-                )
-            }
+            dev.curfew.app.ui.GhostButton(stringResource(R.string.block_open_new_tab), onClick = onOpenNewTab)
             Spacer(Modifier.height(Space.m))
             Box(
                 modifier = Modifier
@@ -419,20 +406,7 @@ private fun BlockScreen(
                 )
             }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .plate(fill = Palette.raised, offset = Dsn.ShadowControl)
-                    .clickable(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.block_back_to_home),
-                    style = Type.h3,
-                    color = Palette.text,
-                )
-            }
+            dev.curfew.app.ui.GhostButton(stringResource(R.string.block_back_to_home), onClick = onClose)
         }
 
         Spacer(Modifier.height(Space.xl))
@@ -475,15 +449,10 @@ private fun BlockScreen(
             )
         }
         if (confirmingEnd) {
-            dev.curfew.app.ui.DConfirm(
-                title = "End $name?",
-                body = "You chose \"ask me first\" for this one, so this is the asking. Ending it " +
-                    "stops every app it blocks, not only this one.",
-                dismiss = "Keep it running",
-                confirm = "End it",
-                tone = Palette.warn,
+            dev.curfew.app.ui.EndPuzzleSheet(
+                name = name,
                 onDismiss = { confirmingEnd = false },
-                onConfirm = {
+                onEnded = {
                     confirmingEnd = false
                     endStep(listOf(dev.curfew.policy.Lock.Confirm))
                 },

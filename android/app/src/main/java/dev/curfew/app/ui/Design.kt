@@ -53,6 +53,8 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.horizontalScroll
@@ -136,14 +138,19 @@ object Dsn {
     val CardPad = Space.l
     val RowPad = 14.dp
 
-    /** A primary button, and the shorter secondary one that sits under a card. */
+    /**
+     * Every button's height, primary and ghost alike.
+     *
+     * There used to be a shorter ghost height. Side by side in a sheet that made "Keep it running"
+     * visibly smaller than "End it", which reads as a mistake, not as hierarchy; colour already says
+     * which button is the main one.
+     */
     val ButtonHeight = 52.dp
-    val GhostHeight = 46.dp
 
     /**
      * The smallest a *touch* target may be, whatever it looks like.
      *
-     * §8's minimum, and the one this app's own buttons already meet at 52 and 46dp. It is separate
+     * §8's minimum, and the one this app's own buttons already meet at 52dp. It is separate
      * from visual size on purpose: a 44×26dp toggle and a 36dp day circle are the right *look* and
      * the wrong *hit area*, and Material's `minimumInteractiveComponentSize` holds both at once.
      */
@@ -635,7 +642,7 @@ fun GhostButton(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = Dsn.GhostHeight)
+            .heightIn(min = Dsn.ButtonHeight)
             .graphicsLayer {
                 scaleX = bounce
                 scaleY = bounce
@@ -656,7 +663,7 @@ fun GhostButton(
             // swallowing the tap.
             color = if (enabled) colour else Palette.dim,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = Space.m, vertical = Space.s),
+            modifier = Modifier.padding(horizontal = Space.m, vertical = Space.m),
         )
     }
 }
@@ -1486,6 +1493,7 @@ fun DSheet(
     confirm: String,
     confirmEnabled: Boolean,
     onConfirm: () -> Unit,
+    tone: Color = Palette.accent,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     SheetFrame(
@@ -1494,10 +1502,14 @@ fun DSheet(
         onDismiss = onDismiss,
         content = content,
         buttons = {
-            GhostButton("Cancel", Modifier.weight(1f), onClick = onDismiss)
-            Box(Modifier.weight(1f)) {
-                PrimaryButton(confirm, enabled = confirmEnabled, onClick = onConfirm)
-            }
+            GhostButton("Cancel", Modifier.weight(1f).fillMaxHeight(), onClick = onDismiss)
+            PrimaryButton(
+                confirm,
+                Modifier.weight(1f).fillMaxHeight(),
+                enabled = confirmEnabled,
+                colour = tone,
+                onClick = onConfirm,
+            )
         },
     )
 }
@@ -1602,9 +1614,25 @@ private fun SheetFrame(
                 content()
             }
             Gap(Space.l)
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) { buttons() }
+            ButtonRow(buttons)
         }
     }
+}
+
+/**
+ * Buttons side by side, every one the height of the tallest.
+ *
+ * Each button has the same minimum height, but a label that wraps makes its own button taller, and
+ * two buttons of different heights in one row look like a mistake. The row measures at its tallest
+ * child and each button fills it; give each `Modifier.weight(1f).fillMaxHeight()`.
+ */
+@Composable
+fun ButtonRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        content = content,
+    )
 }
 
 /**
@@ -1613,6 +1641,9 @@ private fun SheetFrame(
  * [tone] colours the confirm button, and says what kind of decision this is before a word is read:
  * the accent for an ordinary yes, [Palette.warn] for one that spends or gives up something (a pass,
  * a lock), [Palette.bad] for one that deletes. Cancel is always the plain ghost beside it.
+ *
+ * [onCancel] is the ghost button, when it does something other than backing out: a tap outside the
+ * sheet or Back always only dismisses.
  */
 @Composable
 fun DConfirm(
@@ -1624,6 +1655,7 @@ fun DConfirm(
     tone: Color = Palette.accent,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    onCancel: () -> Unit = onDismiss,
 ) {
     SheetFrame(
         title = title,
@@ -1635,8 +1667,8 @@ fun DConfirm(
             }
         },
         buttons = {
-            GhostButton(dismiss, Modifier.weight(1f), onClick = onDismiss)
-            Box(Modifier.weight(1f)) { PrimaryButton(confirm, colour = tone, onClick = onConfirm) }
+            GhostButton(dismiss, Modifier.weight(1f).fillMaxHeight(), onClick = onCancel)
+            PrimaryButton(confirm, Modifier.weight(1f).fillMaxHeight(), colour = tone, onClick = onConfirm)
         },
     )
 }
@@ -1649,7 +1681,7 @@ fun DNote(title: String, body: String, dismiss: String = "OK", onDismiss: () -> 
         sub = null,
         onDismiss = onDismiss,
         content = { Text(body, style = Type.body, color = Palette.muted) },
-        buttons = { Box(Modifier.weight(1f)) { PrimaryButton(dismiss, onClick = onDismiss) } },
+        buttons = { PrimaryButton(dismiss, Modifier.weight(1f), onClick = onDismiss) },
     )
 }
 
@@ -2267,51 +2299,89 @@ fun PausePuzzleSheet(
             )
         }
         SheetSection("One sum, so this is deliberate") {
-            Text(
-                "${challenge.question} = ?",
-                style = Type.h1.mono,
-                color = Palette.text,
-                modifier = Modifier.semantics {
-                    // "×" is read as "x" or skipped by some screen readers, which turns an
-                    // arithmetic problem into a guess.
-                    contentDescription = "What is ${challenge.question.replace("×", "times")}?"
-                },
-            )
-            Gap(Space.m)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
-                    .padding(horizontal = Space.m, vertical = Space.m),
-            ) {
-                Text(
-                    "YOUR ANSWER",
-                    style = Type.label,
-                    color = Palette.dim,
-                )
-                Box(Modifier.padding(top = Space.xxs)) {
-                    if (answer.isEmpty()) {
-                        Text("e.g. 42", style = Type.body, color = Palette.dim)
-                    }
-                    BasicTextField(
-                        value = answer,
-                        onValueChange = { answer = it },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done,
-                        ),
-                        textStyle = Type.body.mono.copy(color = Palette.text),
-                        cursorBrush = SolidColor(Palette.link),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics { contentDescription = "Type the answer here." },
-                    )
-                }
-            }
+            SumQuestion(challenge, answer, onAnswer = { answer = it })
         }
     }
 }
+
+/**
+ * Ending a session that only asked to be asked.
+ *
+ * A single "End it" tap was the whole of "ask me first", and one tap is what a thumb does without
+ * deciding anything. The same sum as [PausePuzzleSheet] makes it a decision without making it a
+ * lockout: anyone who means it is through in seconds.
+ */
+@Composable
+fun EndPuzzleSheet(
+    name: String,
+    onDismiss: () -> Unit,
+    onEnded: () -> Unit,
+) {
+    val challenge: Challenge.Math =
+        remember { Challenge.generate(ChallengeKind.MATH) as Challenge.Math }
+    var answer by remember { mutableStateOf("") }
+    DSheet(
+        title = "End $name?",
+        sub = "Ending it stops every app it blocks. Answer one sum to end it.",
+        onDismiss = onDismiss,
+        confirm = "End it",
+        confirmEnabled = Challenge.isSatisfied(challenge, answer),
+        onConfirm = onEnded,
+        tone = Palette.warn,
+    ) {
+        SheetSection("One sum, so this is deliberate") {
+            SumQuestion(challenge, answer, onAnswer = { answer = it })
+        }
+    }
+}
+
+/** The sum and the field its answer goes in, shared by every sheet that asks for one. */
+@Composable
+private fun ColumnScope.SumQuestion(challenge: Challenge.Math, answer: String, onAnswer: (String) -> Unit) {
+    Text(
+        "${challenge.question} = ?",
+        style = Type.h1.mono,
+        color = Palette.text,
+        modifier = Modifier.semantics {
+            // "×" is read as "x" or skipped by some screen readers, which turns an
+            // arithmetic problem into a guess.
+            contentDescription = "What is ${challenge.question.replace("×", "times")}?"
+        },
+    )
+    Gap(Space.m)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
+            .padding(horizontal = Space.m, vertical = Space.m),
+    ) {
+        Text(
+            "YOUR ANSWER",
+            style = Type.label,
+            color = Palette.dim,
+        )
+        Box(Modifier.padding(top = Space.xxs)) {
+            if (answer.isEmpty()) {
+                Text("e.g. 42", style = Type.body, color = Palette.dim)
+            }
+            BasicTextField(
+                value = answer,
+                onValueChange = onAnswer,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
+                textStyle = Type.body.mono.copy(color = Palette.text),
+                cursorBrush = SolidColor(Palette.link),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { contentDescription = "Type the answer here." },
+            )
+        }
+    }
+}
+
 /** Which of the ways out a screen shows, and why. */
 enum class LockActionsWhen {
     /** Everything a running session allows, in one screen: the Now tab. */

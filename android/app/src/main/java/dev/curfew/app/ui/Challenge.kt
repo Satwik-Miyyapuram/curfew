@@ -133,6 +133,8 @@ sealed interface ChallengeStep {
  *
  * Conditions this screen cannot witness — a credential, a tag, a restart, a peer release — are
  * ignored here, because they are proved to the core by other routes and listing them ends nothing.
+ * The screen answers [ChallengeStep.AskConfirm] with a sum and passes `Lock.Confirm` back as met;
+ * the core ignores a claimed condition the session does not have, so that is safe on any lock.
  */
 fun challengeStep(
     conditions: List<Lock>,
@@ -140,10 +142,14 @@ fun challengeStep(
     posed: Challenge?,
     random: Random = Random.Default,
 ): ChallengeStep {
-    if (conditions.any { it is Lock.Confirm } && satisfied.none { it is Lock.Confirm }) {
+    val challenge = conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
+    // Every End is asked, locked or not: a single tap ending a block was the reflex this app exists
+    // to interrupt. A session with a challenge of its own is asked by that challenge instead, unless
+    // it also asked for the confirm, in which case the small question still comes first.
+    val asks = challenge == null || conditions.any { it is Lock.Confirm }
+    if (asks && satisfied.none { it is Lock.Confirm }) {
         return ChallengeStep.AskConfirm
     }
-    val challenge = conditions.filterIsInstance<Lock.Challenge>().firstOrNull()
     if (challenge != null && satisfied.none { it is Lock.Challenge }) {
         return ChallengeStep.PoseChallenge(posed ?: Challenge.generate(challenge.challenge, random))
     }
@@ -154,6 +160,6 @@ fun challengeStep(
  *
  * `Lock.Confirm` alone ("ask me first") is a lock in the core's eyes, but any screen can meet it, so
  * treating it as a hard lock hid pause and offered a 24-hour wait and an emergency pass for a session
- * that one tap ends. A pause's sum is a stronger yes than the confirm, so it counts as one.
+ * that one sum ends. A pause's sum is a stronger yes than the confirm, so it counts as one.
  */
 fun needsMoreThanConfirm(conditions: List<Lock>): Boolean = conditions.any { it !is Lock.Confirm }

@@ -5,23 +5,11 @@
 # length of this file is the number the project quotes.
 #
 # Regenerate: CURFEW_UPDATE_MATERIAL_ALLOWLIST=true ./gradlew :app:testDebugUnitTest
-ChallengeDialog.kt|AlertDialog
-ChallengeDialog.kt|TextButton
-ChallengeDialog.kt|TextButton
 NowScreen.kt|Card
 NowScreen.kt|Card
 NowScreen.kt|Card
 NowScreen.kt|Card
-NowScreen.kt|TextButton
-NowScreen.kt|TextButton
-NowScreen.kt|TextButton
 NowScreen.kt|colorScheme
 NowScreen.kt|colorScheme
 NowScreen.kt|colorScheme
 NowScreen.kt|colorScheme
-TimerScreen.kt|AlertDialog
-TimerScreen.kt|AlertDialog
-TimerScreen.kt|TextButton
-TimerScreen.kt|TextButton
-TimerScreen.kt|TextButton
-TimerScreen.kt|TextButton

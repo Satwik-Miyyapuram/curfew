@@ -15,9 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -455,64 +453,52 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     }
 
     confirming?.let { id ->
-        AlertDialog(
-            onDismissRequest = { confirming = null },
-            title = { Text("That is ${spellDuration(minutes)}") },
-            text = {
-                val ends = endsAt(state.now, minutes)
-                Text(
-                    if (strength.lock == Lock.Timer) {
-                        stringResource(R.string.timer_confirm_timer, ends)
-                    } else {
-                        stringResource(R.string.timer_confirm_other, ends)
-                    },
-                )
+        val ends = endsAt(state.now, minutes)
+        DConfirm(
+            title = "That is ${spellDuration(minutes)}",
+            body = if (strength.lock == Lock.Timer) {
+                stringResource(R.string.timer_confirm_timer, ends)
+            } else {
+                stringResource(R.string.timer_confirm_other, ends)
             },
-            confirmButton = {
-                TextButton(shape = Capsule, onClick = {
-                    confirming = null
-                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-                    onDone()
-                }) { Text("Start it") }
-            },
-            dismissButton = {
-                TextButton(shape = Capsule, onClick = { confirming = null }) { Text("Go back") }
+            dismiss = "Go back",
+            confirm = "Start it",
+            onDismiss = { confirming = null },
+            onConfirm = {
+                confirming = null
+                model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+                onDone()
             },
         )
     }
 
     pending?.let { id ->
-        AlertDialog(
-            onDismissRequest = { pending = null },
-            title = { Text("One switch first") },
-            text = {
-                Text(
-                    "Curfew can only replace a blocked app if it is allowed to see which app is " +
-                        "in front.\n\n" +
-                        "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
-                        "come back. Or start it now, and nothing will be blocked until the switch " +
-                        "is on.",
-                )
+        DConfirm(
+            title = "One switch first",
+            body = "Curfew can only replace a blocked app if it is allowed to see which app is " +
+                "in front.\n\n" +
+                "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
+                "come back. Or start it now, and nothing will be blocked until the switch " +
+                "is on.",
+            dismiss = "Start without it",
+            confirm = "Turn it on",
+            onDismiss = { pending = null },
+            onConfirm = {
+                // `pending` is deliberately NOT cleared here. It is what the resume effect
+                // watches, and clearing it was the whole bug: the user was sent to Settings and
+                // the timer they had configured was forgotten in the same breath.
+                //
+                // And it goes through the shared path, which falls back to App info — this used to
+                // swallow the failure, so on a build without the page the tap did nothing at all.
+                openGrantPage(context, Grant.Accessibility)
             },
-            confirmButton = {
-                TextButton(shape = Capsule, onClick = {
-                    // `pending` is deliberately NOT cleared here. It is what the resume effect
-                    // watches, and clearing it was the whole bug: the user was sent to Settings and
-                    // the timer they had configured was forgotten in the same breath.
-                    //
-                    // And it goes through the shared path, which falls back to App info — this used to
-                    // swallow the failure, so on a build without the page the tap did nothing at all.
-                    openGrantPage(context, Grant.Accessibility)
-                }) { Text("Turn it on") }
-            },
-            dismissButton = {
-                // Left in on purpose. A blocker that refuses to start until a permission is
-                // granted is a blocker people uninstall; one that starts, and says plainly that
-                // it is not enforcing, is one they come back to and fix.
-                TextButton(shape = Capsule, onClick = {
-                    pending = null
-                    begin(id)
-                }) { Text("Start without it") }
+            // Left in on purpose. A blocker that refuses to start until a permission is
+            // granted is a blocker people uninstall; one that starts, and says plainly that
+            // it is not enforcing, is one they come back to and fix. Only this button starts
+            // it; a tap outside the sheet backs out.
+            onCancel = {
+                pending = null
+                begin(id)
             },
         )
     }

@@ -73,4 +73,22 @@ class EndFlowTest {
             assertFalse("${file.name} shows a raw failure message", Regex("""it\.message\s*\?:""").containsMatchIn(code))
         }
     }
+
+    /**
+     * End asks for a sum on every screen. A plain yes/no confirm ended a block on one more tap, which
+     * is no friction at all; this fails if a screen goes back to one.
+     */
+    @Test
+    fun `every screen that ends a session asks for the sum`() {
+        val root = File(UntranslatedCopy.moduleRoot, "src/main/java/dev/curfew/app")
+        val askers = root.walkTopDown()
+            .filter { it.extension == "kt" && Regex("""ChallengeStep\.AskConfirm\s*->""").containsMatchIn(it.readText()) }
+            .toList()
+        assertTrue("found no screen that asks before ending under $root", askers.isNotEmpty())
+        for (file in askers) {
+            val code = file.readText()
+            assertTrue("${file.name} asks to end without the sum", "EndPuzzleSheet(" in code)
+            assertFalse("${file.name} ends on a plain confirm", Regex("""confirm\s*=\s*"End it"""").containsMatchIn(code))
+        }
+    }
 }
