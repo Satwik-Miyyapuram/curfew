@@ -62,6 +62,7 @@ fun DevicesScreen(model: CurfewViewModel) {
     val clipboard = LocalClipboardManager.current
     var typed by remember { mutableStateOf("") }
     var folder by remember { mutableStateOf("") }
+    var moreWays by remember { mutableStateOf(false) }
 
     /**
      * The device whose removal is being confirmed — F-14.
@@ -69,22 +70,18 @@ fun DevicesScreen(model: CurfewViewModel) {
      * It was a `Tap` straight to `model.revokeDevice`, which made it the **only destructive action in
      * the app with no confirmation**. Removing a profile asks (`ProfileEditScreen`), spending a pass
      * asks, releasing a peer asks, and asking for the 24-hour release asks — all of them with the
-     * consequence named. This one did not, and it is the action that can leave a lock with no way out.
+     * consequence named. This one did not, and it is the action that can leave a lock running to its end (uninstall still ends it).
      */
     var removing by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = Dsn.Gutter),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item {
             Gap(Space.l)
             Title("Your devices")
             Gap(Space.s)
-            Sub(
-                "Curfew syncs directly between your own devices. There is no account and no " +
-                    "server: nothing here leaves the network you are on.",
-            )
+            Sub("Syncs straight between your own devices. No account, no server.")
             Gap(Space.l)
         }
 
@@ -144,8 +141,6 @@ fun DevicesScreen(model: CurfewViewModel) {
                     color = Palette.muted,
                 )
                 Gap(Space.m)
-                Text(sync.deviceId, style = Type.meta, color = Palette.dim)
-                Gap(Space.s)
                 Text(
                     if (sync.running) {
                         "Listening on this network. " +
@@ -172,12 +167,11 @@ fun DevicesScreen(model: CurfewViewModel) {
         item {
             val offer = sync.offering
             DCard {
-                SectionLabel("Add a device")
+                SectionLabel("Pair a device")
                 Gap(Space.m)
                 if (offer == null) {
                     Text(
-                        "Show a code here and read it on the other device, or paste the code the " +
-                            "other device is showing.",
+                        "Show a code on one device and read it on the other.",
                         style = Type.meta,
                         color = Palette.muted,
                     )
@@ -203,12 +197,13 @@ fun DevicesScreen(model: CurfewViewModel) {
                     Gap(Space.m)
                     if (offer.phrase.isBlank()) {
                         Text(
-                            "Read this on your other device. It will show you a code back, and " +
-                                "six digits — paste its code below to see the same six digits here.",
+                            "Read this on your other device, then paste the code it shows back below.",
                             style = Type.meta,
                             color = Palette.muted,
                         )
                     } else {
+                        SectionLabel("Check numbers match")
+                        Gap(Space.s)
                         Text(
                             offer.phrase,
                             style = Type.display.mono,
@@ -244,7 +239,7 @@ fun DevicesScreen(model: CurfewViewModel) {
                         clipboard.getText()?.text?.let { typed = it.trim() }
                     }
                     Tap(
-                        "It is showing a code",
+                        "Enter their code",
                         if (typed.isBlank()) Palette.dim else Palette.link,
                     ) {
                         if (typed.isNotBlank()) {
@@ -252,7 +247,7 @@ fun DevicesScreen(model: CurfewViewModel) {
                             typed = ""
                         }
                     }
-                    Tap("It answered mine", if (typed.isBlank()) Palette.dim else Palette.link) {
+                    Tap("Enter their reply", if (typed.isBlank()) Palette.dim else Palette.link) {
                         if (typed.isNotBlank()) {
                             model.readReply(typed)
                             typed = ""
@@ -264,22 +259,24 @@ fun DevicesScreen(model: CurfewViewModel) {
         }
 
         item {
-            DCard {
-                SectionLabel("Through a folder")
-                Gap(Space.m)
-                Text(
-                    "For devices that are never on the same network. Point both at one folder a " +
-                        "file-sync app keeps in step; Curfew leaves signed updates there and reads " +
-                        "what the other device left.",
-                    style = Type.meta,
-                    color = Palette.muted,
-                )
-                Gap(Space.m)
-                Field("Folder path", folder) { folder = it }
-                Gap(Space.m)
-                Tap("Exchange now", if (folder.isBlank()) Palette.dim else Palette.link) {
-                    if (folder.isNotBlank()) model.folderPass(folder)
+            if (moreWays) {
+                DCard {
+                    SectionLabel("Through a folder")
+                    Gap(Space.m)
+                    Text(
+                        "For devices that never share a network, via one synced folder.",
+                        style = Type.meta,
+                        color = Palette.muted,
+                    )
+                    Gap(Space.m)
+                    Field("Folder path", folder) { folder = it }
+                    Gap(Space.m)
+                    Tap("Exchange now", if (folder.isBlank()) Palette.dim else Palette.link) {
+                        if (folder.isNotBlank()) model.folderPass(folder)
+                    }
                 }
+            } else {
+                Tap("More ways to pair", Palette.link) { moreWays = true }
             }
             Gap(Space.l)
             SectionLabel(if (sync.peers.isEmpty()) "No devices paired yet" else "Paired")
@@ -287,14 +284,13 @@ fun DevicesScreen(model: CurfewViewModel) {
         }
 
         items(sync.peers, key = { it.id }) { peer ->
-            DCard(modifier = Modifier.padding(bottom = Space.s), padding = 16.dp) {
+            DCard(modifier = Modifier.padding(bottom = Space.s), padding = Space.l) {
                 Text(
-                    peer.identity.name,
+                    peer.identity.name.ifBlank { "Another device" },
                     style = Type.body,
                     fontWeight = FontWeight.Bold,
                     color = if (peer.isActive) Palette.text else Palette.dim,
                 )
-                Text(peer.id, style = Type.meta, color = Palette.dim)
                 Gap(Space.s)
                 Text(
                     when {
@@ -327,7 +323,7 @@ fun DevicesScreen(model: CurfewViewModel) {
     // The confirmation, which this action did not have — F-14.
     removing?.let { id ->
         val peer = sync.peers.firstOrNull { it.id == id }
-        val name = peer?.identity?.name ?: id
+        val name = peer?.identity?.name ?: "this device"
         // Named only when true. A lock that awaits this device loses its exit the moment it goes, and
         // that is the one consequence the old copy did not mention: it said removal "does not end any
         // block it started here", which is about blocks, not about ways out.
@@ -346,8 +342,8 @@ fun DevicesScreen(model: CurfewViewModel) {
                         },
                     )
                     append(
-                        "Removing it leaves that lock with no way out at all — not another device, not " +
-                            "a pass. Pair it again first if you still want the way out you built.",
+                        "Without it, that lock ends only when it runs to its end. Uninstalling Curfew " +
+                            "still ends it.",
                     )
                 }
             },

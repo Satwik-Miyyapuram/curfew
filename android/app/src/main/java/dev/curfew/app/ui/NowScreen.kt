@@ -163,9 +163,9 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             }
         }
 
-        Gap(if (live == null) 26.dp else 22.dp)
+        Gap(Space.xl)
 
-        DCard(padding = 22.dp) {
+        DCard(padding = Space.xl) {
             Column(
                 Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -242,7 +242,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 // Labels resolved here rather than in the pure function: this needs a Context, and
                 // the sentence is the part worth testing without one.
                 val labels = model.blockedApps(starter.id).map { appLabel(context, it) }
-                DCard(padding = 16.dp) {
+                DCard(padding = Dsn.CardPad) {
                     Text(
                         describeSeed(starter.name, labels),
                         style = Type.body,
@@ -284,7 +284,6 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             SessionCard(
                 session = session,
                 name = named(session.profile),
-                source = describeSource(session.source, eventTitles),
                 now = state.now,
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
@@ -300,11 +299,6 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
         if (state.releasable.isNotEmpty()) {
             Gap(Space.l)
             ReleaseCard(sessions = state.releasable, onRelease = { confirmingRelease = it })
-        }
-
-        if (state.sessions.isEmpty()) {
-            Gap(Space.l)
-            GhostButton("Refresh", colour = Palette.muted, onClick = model::reconcileNow)
         }
 
         // What is coming, in order. Four at most: enough to answer "what happens next" without
@@ -617,7 +611,6 @@ private fun ClockTamperBanner(tamper: ClockTamper, onDismiss: () -> Unit) {
 private fun SessionCard(
     session: Session,
     name: String,
-    source: String,
     now: Long,
     passesLeft: Int,
     passRefusal: PassRefusal?,
@@ -631,46 +624,19 @@ private fun SessionCard(
         colors = CardDefaults.cardColors(containerColor = Palette.surface),
     ) {
         Column(
-            // Flat like every other card: the Enforcing tag and the ring above already say it is live.
-            modifier = Modifier.padding(Space.l),
+            // The header and the dial already say what is running and when it ends, so this card
+            // carries only what is needed to act on it.
+            modifier = Modifier.padding(Dsn.CardPad),
         ) {
             // Read every composition (the countdown ticks), so granting the switch flips it back.
             val blocking = Grant.canBlockApps(LocalContext.current)
-            if (blocking) {
-                Pill("Enforcing", tint = Palette.live, modifier = Modifier.padding(bottom = Space.s))
-            } else {
+            if (!blocking) {
                 Pill(stringResource(R.string.now_not_blocking), tint = Palette.bad, modifier = Modifier.padding(bottom = Space.s))
                 Text(
                     stringResource(R.string.now_not_blocking_why),
                     style = Type.meta,
                     color = Palette.bad,
                     modifier = Modifier.padding(bottom = Space.s),
-                )
-            }
-            Text(
-                // The name, never the id. Which profile is running is the user's own word for it.
-                name,
-                style = Type.h2,
-                modifier = Modifier.semantics { heading() },
-            )
-            Text(
-                source,
-                style = Type.meta,
-                color = Palette.muted,
-            )
-
-            session.lock.endsAt?.let { endsAt ->
-                Text(
-                    "Ends ${relative(endsAt, now)} (${clockTime(endsAt)})",
-                    style = Type.h3,
-                    color = Palette.live,
-                    modifier = Modifier
-                        .padding(top = Space.s)
-                        // Screen readers should hear the whole sentence, not a bare clock time.
-                        .semantics {
-                            contentDescription =
-                                "$name ends ${relative(endsAt, now)}"
-                        },
                 )
             }
 

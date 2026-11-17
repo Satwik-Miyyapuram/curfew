@@ -39,7 +39,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import androidx.compose.ui.res.stringResource
 import dev.curfew.app.R
@@ -61,23 +60,6 @@ private const val MAX_MINUTES = 12 * 60
 private const val LONG_MINUTES = 4 * 60
 
 /**
- * How hard the user wants this particular block to be to escape.
- *
- * Asked here rather than buried in a profile, because the honest answer changes between a study
- * hour and an evening off, and a user who has to go and change a setting first will simply not
- * start the timer. [Lock.Timer] is the strong end: it means nothing ends this early except an
- * emergency pass.
- */
-private enum class Strength(val label: String, val note: String, val lock: Lock?) {
-    Open("I can stop it", "Ends the moment you tap stop.", null),
-    Confirm("Ask me first", "One confirmation, so it is never an accident.", Lock.Confirm),
-    Credential("Fingerprint or PIN", "Proves it is you, not a pocket.", Lock.DeviceCredential),
-    Math("Solve math", "A quick puzzle before it opens.", Lock.Challenge(ChallengeKind.MATH)),
-    Typing("Type it out", "A sentence to copy before it opens.", Lock.Challenge(ChallengeKind.TYPING)),
-    Locked("Until it ends", "Nothing ends this early. The 24-hour release is the way out.", Lock.Timer),
-}
-
-/**
  * Block something right now, for a while, because you decided to.
  *
  * Everything else in Curfew waits for the world to say when — a lecture in a calendar, a weeknight
@@ -95,7 +77,6 @@ private enum class Strength(val label: String, val note: String, val lock: Lock?
 fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     var minutes by remember { mutableIntStateOf(DEFAULT_MINUTES) }
-    var strength by remember { mutableStateOf(Strength.Confirm) }
     val context = LocalContext.current
     var profile by remember { mutableStateOf<String?>(null) }
     // The profile a tap asked to lock, held while the accessibility question is answered.
@@ -108,6 +89,15 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     // only one. A missing profile is the one thing this screen cannot invent.
     val chosen = profile ?: state.profiles.firstOrNull()?.id
     val chosenProfile = state.profiles.firstOrNull { it.id == chosen }
+
+    // The strength this block starts with is the profile's own, read from its first window, so the
+    // row below shows the answer the user already set. Tapping the row overrides it for this block
+    // only, and a choice the device cannot honour falls back to the middle option.
+    val profileStrength = state.weekly.firstOrNull { it.profile == chosen }?.let { Strength.of(it.locks.firstOrNull()) }
+    var picked by remember(chosen) { mutableStateOf<Strength?>(null) }
+    var strengthOpen by remember { mutableStateOf(false) }
+    fun canUse(option: Strength) = option != Strength.Credential || Auth.isAvailable(context)
+    val strength = (picked ?: profileStrength ?: Strength.Confirm).takeIf { canUse(it) } ?: Strength.Confirm
 
     // The one gate every route to "start this timer" goes through.
     //
@@ -147,80 +137,16 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
 
     Screen(spacing = 0.dp) {
         // ---------------------------------------------------------------------------------------
-        // The order is strength, then time, then what it switches off — `docs/design.md` 5.2.
+        // The order is time, then what it switches off, then how hard it is to leave.
         //
-        // This screen had it the other way round: the dial came first because it is the prettiest
-        // thing here, which put the hardest question last. By the time a reader met "how hard should
-        // this be to leave" they had already committed to a length. The dial is the nice part and it
-        // is still the centrepiece; it is just no longer the first thing asked.
+        // The dial comes first because the length is the one decision every block needs. Strength
+        // is usually already set by the profile, so it sits last as a single row that only opens
+        // when the user wants to change it.
         // ---------------------------------------------------------------------------------------
         BackRow("Start a block", onDone)
 
         Gap(Space.s)
-        SectionLabel("1 · How hard should this be to leave?")
-        Gap(Space.s)
-        // A strength the device cannot satisfy is not offered at all.
-        //
-        // `Lock.DeviceCredential` on a phone with no screen lock is **a lock with no exit**:
-        // `Auth.prove` reports `false` because there is no keyguard to raise, the core then refuses
-        // the end for an unmet condition, and the session runs to its end with the user unable to do
-        // anything about it. The choice was offered anyway, because the enum is a list of strengths
-        // and nothing connected it to whether the device could keep them. That is F-6 in the
-        // interaction review, and the reason it is worth a comment is that a silent omission here
-        // would be indistinguishable from a bug.
-        val satisfiable = Strength.entries.filter {
-            it != Strength.Credential || Auth.isAvailable(context)
-        }
-        DCardFlush {
-            satisfiable.forEachIndexed { index, option ->
-                if (index > 0) Rule()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = Dsn.MinTouch)
-                        .clickable { strength = option }
-                        .padding(Space.l),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.m),
-                ) {
-                    // A square mark, and the word beside it. Nothing round.
-                    Box(
-                        Modifier
-                            .size(20.dp)
-                            .background(if (strength == option) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (strength == option) {
-                            Text("✓", style = Type.meta, color = Palette.onFill)
-                        }
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            option.label.uppercase(),
-                            style = Type.button,
-                            color = Palette.text,
-                        )
-                        Text(option.note, style = Type.meta, color = Palette.muted)
-                    }
-                }
-            }
-            // Said out loud, next to where it would have been. A missing option with no explanation
-            // reads as a bug, and the user's next step — set a screen lock — is theirs to take.
-            if (satisfiable.size != Strength.entries.size) {
-                Rule()
-                Text(
-                    "Fingerprint or PIN is not offered, because this phone has no screen lock set. " +
-                        "Curfew cannot ask for one that does not exist, and a lock nothing can open " +
-                        "would hold you until it ran out.",
-                    style = Type.meta,
-                    color = Palette.muted,
-                    modifier = Modifier.padding(Space.l),
-                )
-            }
-        }
-
-        Gap(Space.xl)
-        SectionLabel("2 · How long?")
+        SectionLabel("1 · How long?")
         Gap(Space.s)
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             // Draggable, one turn to the hour: the stepper is for "a bit longer", the ring is for
@@ -293,7 +219,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
         }
 
         Gap(Space.xl)
-        SectionLabel("3 · What does it switch off?")
+        SectionLabel("2 · What does it switch off?")
         Gap(Space.s)
         if (state.profiles.isEmpty()) {
             DCard {
@@ -316,7 +242,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             // you find out by landing on them. The card still shows the current choice, because
             // that is the one thing the screen has to say at a glance; opening it now shows the
             // whole list.
-            DCard(padding = 15.dp) {
+            DCard(padding = Dsn.CardPad) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -361,7 +287,73 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             }
         }
 
-        Gap(Space.m)
+        Gap(Space.xl)
+        SectionLabel("3 · How hard to leave?")
+        Gap(Space.s)
+        DCardFlush {
+            // The answer in force, on one row. Tapping it opens the other options.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Dsn.MinTouch)
+                    .clickable(onClickLabel = "Change how hard to leave") { strengthOpen = !strengthOpen }
+                    .padding(Space.l),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(strength.label.uppercase(), style = Type.button, color = Palette.text)
+                    Text(strength.note, style = Type.meta, color = Palette.muted)
+                }
+                Text("›", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
+            }
+            if (strengthOpen) {
+                Strength.entries.filter { canUse(it) }.forEach { option ->
+                    Rule()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Dsn.MinTouch)
+                            .clickable {
+                                picked = option
+                                strengthOpen = false
+                            }
+                            .padding(Space.l),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
+                    ) {
+                        // A square mark, and the word beside it. Nothing round.
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .background(if (strength == option) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (strength == option) {
+                                Text("✓", style = Type.meta, color = Palette.onFill)
+                            }
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(option.label.uppercase(), style = Type.button, color = Palette.text)
+                            Text(option.note, style = Type.meta, color = Palette.muted)
+                        }
+                    }
+                }
+            }
+            // Said out loud, where the option would have been. A missing option with no explanation
+            // reads as a bug; the fix, a screen lock, is the user's to set.
+            if (!canUse(Strength.Credential)) {
+                Rule()
+                Text(
+                    "Needs a screen lock.",
+                    style = Type.meta,
+                    color = Palette.muted,
+                    modifier = Modifier.padding(Space.l),
+                )
+            }
+        }
+
+        Gap(Space.xl)
         // The commit, and the one place in the app that celebrates.
         //
         // This is the moment the user did something hard on purpose: they picked a strength, chose

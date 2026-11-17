@@ -352,7 +352,6 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         Gap(Space.xl)
         Title("When should it run?", style = Type.h2)
         Gap(Space.s)
-        Sub("Toggle the ways you want this profile to activate. Profiles can also be started manually at any time.")
         Gap(Space.m)
 
         // 1. Manual / On Demand Card
@@ -622,13 +621,6 @@ fun ProfileEditScreen(model: CurfewViewModel, id: String?, onDone: () -> Unit) {
         // ==========================================
         // SUMMARY NOTE & ACTIONS
         // ==========================================
-        Gap(Space.l)
-        Text(
-            "Any toggled trigger that turns on activates the profile. While active, all selected apps and websites are blocked.",
-            style = Type.meta,
-            color = Palette.dim,
-        )
-
         Gap(Space.xl)
         Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
             if (existing != null) {
@@ -802,35 +794,24 @@ private fun WindowContent(
         Rule()
         Gap(Space.l)
 
-        SectionLabel("How hard is it to get out")
+        SectionLabel("How hard to leave")
         Gap(Space.s)
+        val currentStrength = Strength.of(window.locks.firstOrNull())
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            strengths().forEach { (label, lock) ->
+            Strength.entries.forEach { option ->
                 Pill(
-                    label,
-                    selected = window.locks.firstOrNull() == lock,
-                    onClick = { onChange(window.copy(locks = listOfNotNull(lock))) },
+                    option.label,
+                    selected = currentStrength == option,
+                    onClick = { onChange(window.copy(locks = listOfNotNull(option.lock))) },
                 )
             }
         }
-        val currentLock = window.locks.firstOrNull()
-        val note = when (currentLock) {
-            null -> "Ends the moment you tap stop."
-            is Lock.Confirm -> "One confirmation, so it is never an accident."
-            is Lock.DeviceCredential -> "Proves it is you, not a pocket."
-            is Lock.Challenge -> when (currentLock.challenge) {
-                ChallengeKind.MATH -> "A quick puzzle before it opens."
-                ChallengeKind.TYPING -> "A sentence to copy before it opens."
-            }
-            is Lock.Timer -> "Nothing ends this early. The 24-hour release is the way out."
-            else -> null
-        }
-        if (note != null) {
+        currentStrength?.let {
             Gap(Space.s)
-            Text(note, style = Type.meta, color = Palette.muted)
+            Text(it.note, style = Type.meta, color = Palette.muted)
         }
 
         Gap(Space.l)
@@ -843,15 +824,26 @@ private fun WindowContent(
     }
 }
 
-/** The answers to "how hard should this be to escape", in order of how hard they are. */
-private fun strengths(): List<Pair<String, Lock?>> = listOf(
-    "I can stop it" to null,
-    "Ask me first" to Lock.Confirm,
-    "Fingerprint" to Lock.DeviceCredential,
-    "Solve math" to Lock.Challenge(ChallengeKind.MATH),
-    "Type it out" to Lock.Challenge(ChallengeKind.TYPING),
-    "Until it ends" to Lock.Timer,
-)
+/**
+ * How hard a block is to leave. The one definition, used by both the profile window editor and the
+ * Start screen, so the two can never disagree on a label or a note.
+ *
+ * [Locked] is the strong end: nothing ends it early except the 24-hour release. Uninstalling
+ * Curfew always ends a block, so it is never described as a block with no way out.
+ */
+internal enum class Strength(val label: String, val note: String, val lock: Lock?) {
+    Open("I can stop it", "Ends the moment you tap stop.", null),
+    Confirm("Ask me first", "One confirmation, so it is never an accident.", Lock.Confirm),
+    Credential("Fingerprint or PIN", "Proves it is you, not a pocket.", Lock.DeviceCredential),
+    Math("Solve math", "A quick puzzle before it opens.", Lock.Challenge(ChallengeKind.MATH)),
+    Typing("Type it out", "A sentence to copy before it opens.", Lock.Challenge(ChallengeKind.TYPING)),
+    Locked("Until it ends", "Nothing ends it early. Uninstalling Curfew always does.", Lock.Timer);
+
+    companion object {
+        /** The strength a lock list stands for; `null` (no lock) is [Open]. A lock no option names is `null`. */
+        fun of(lock: Lock?): Strength? = entries.firstOrNull { it.lock == lock }
+    }
+}
 
 @Composable
 private fun MinuteRow(label: String, minute: Int, onChange: (Int) -> Unit) {

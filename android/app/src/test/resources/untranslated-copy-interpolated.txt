@@ -66,11 +66,9 @@ DevicesScreen.kt|Another device says $ended ended, but the
 DevicesScreen.kt|Another device says $ended ended, but the 
 DevicesScreen.kt|Stop listening to $name?
 MainActivity.kt|$said. Tap to dismiss.
-NowScreen.kt|$name ends ${relative(endsAt, now)}
-NowScreen.kt|$name ends ${relative(endsAt, now)}
+NowScreen.kt|$blocks kept, longest run $days.
 NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
 NowScreen.kt|${duration(today)} away from the phone today
-NowScreen.kt|$blocks kept, longest run $days.
 NowScreen.kt|${named(it.profile)} · ${duration((it.end - it.start).toInt())}
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
 NowScreen.kt|Ask to end $name in 24 hours
@@ -78,7 +76,6 @@ NowScreen.kt|Emergency pass ($passesLeft)
 NowScreen.kt|End $name now
 NowScreen.kt|End ${named(session.profile)}
 NowScreen.kt|End ${named(session.profile)}?
-NowScreen.kt|Ends ${relative(endsAt, now)} (${clockTime(endsAt)})
 NowScreen.kt|Let $id out
 NowScreen.kt|Let session $id out
 NowScreen.kt|Present a tag for $name
@@ -92,12 +89,8 @@ ProfileEditScreen.kt|Blocked Apps ($appCount)
 ProfileEditScreen.kt|Blocked Websites ($siteCount)
 ProfileEditScreen.kt|Delete ${existing.name}?
 ScheduleEditor.kt|±${mins}m
-ScheduleScreen.kt|$note · paused
-ScheduleScreen.kt|Remove ${profile.name}?
 SettingsScreen.kt|${state.passesLeft} of ${ration.passes} left this week, and 
 SettingsScreen.kt|${state.passesLeft} of ${ration.passes} left this week.
-SettingsScreen.kt|${state.sync.active.size} device(s) paired. None in earshot right now.
-SettingsScreen.kt|${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in 
 TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
 TimerScreen.kt|Lock it in for ${spellDuration(minutes)}
 TimerScreen.kt|That is ${spellDuration(minutes)}

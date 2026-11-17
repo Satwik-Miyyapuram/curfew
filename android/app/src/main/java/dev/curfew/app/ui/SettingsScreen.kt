@@ -50,14 +50,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 /**
  * The one screen that is about the app rather than about the phone.
  *
- * It leads with the only question this screen really has to answer: **can Curfew actually enforce
- * anything right now**. That is a list of what it can do with a tick beside it, and a Fix button
- * beside anything it cannot — not a wall of permission names, and not something filed under an
- * advanced heading, because a permission Curfew is missing is a block that is not going to happen.
- *
- * Below that are the screens the tab bar has no room for. There is no beginner/expert switch: an
- * app that hides half of itself behind a mode makes the reader wonder what else it is hiding, and
- * every screen here is one tap away regardless.
+ * Appearance, the switch that makes blocking precise, the emergency passes, and links to every
+ * other screen. Whether Curfew can enforce anything is answered on the Health screen, which is one
+ * row away, so this screen does not repeat its permission list.
  */
 @Composable
 fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
@@ -91,7 +86,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         }.onFailure { model.fail("That file could not be written.", it) }
     }
 
-    // Two counts, because the card above lists every permission and this line summarises that
+    // Two counts, because the Health screen lists every permission and this line summarises that
     // same list: counting only the required ones said "one permission is missing" under a card
     // showing three red marks, and the reader believed the card.
     val missing = state.grants.count { !it.granted }
@@ -102,13 +97,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         Title("Settings")
 
         // ---------------------------------------------------------------------------------------
-        // Appearance.
-        //
-        // `docs/design.md` section 5.11 lists a Theme setting and an Accent setting, and until now
-        // there was neither: `CurfewTheme` read `isSystemInDarkTheme()` and nothing else, so the
-        // paper palette the design document treats as the default was reachable only by changing a
-        // system setting. The plumbing existed — `Appearance` stores it and `CurfewTheme` reads it —
-        // and there was no control anywhere that wrote it, which is a setting in name only.
+        // Appearance. `CurfewTheme` reads `Appearance`, and these controls are the only writers.
         // ---------------------------------------------------------------------------------------
         Gap(Space.l)
         SectionLabel("Appearance")
@@ -142,241 +131,42 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         }
 
         Gap(Space.l)
-        SectionLabel("Curfew can enforce")
-        Gap(Space.m)
-        DCardFlush {
-            state.grants.forEachIndexed { index, entry ->
-                if (index > 0) Rule()
-                // Resolved outside the semantics block, which is not a composable scope, and
-                // composed from resources with numbered arguments rather than concatenated — the
-                // same reason as on the health screen: a sentence built with `+` is English only.
-                val name = stringResource(entry.grant.title)
-                val cost = stringResource(entry.grant.cost)
-                val described = if (entry.granted) {
-                    context.getString(R.string.settings_grant_allowed, name)
-                } else {
-                    context.getString(R.string.settings_grant_refused, name, cost)
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Space.l, vertical = Space.l)
-                        .semantics(mergeDescendants = true) { contentDescription = described },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Space.m),
-                ) {
-                    GrantMark(entry.granted, entry.grant.required)
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = Type.body, color = Palette.text)
-                        if (!entry.granted) {
-                            Text(
-                                cost,
-                                style = Type.meta,
-                                color = Palette.muted,
-                                modifier = Modifier.padding(top = Space.xxs),
-                            )
-                        }
-                    }
-                    if (!entry.granted) {
-                        // The button goes straight to the system page for this one permission.
-                        // Sending the user to a Health screen to press a second button was the
-                        // longest way round to the only thing they came here to do.
-                        Fix {
-                            // Was a bare `startActivity`, which throws on a device whose OEM build
-                            // lacks the page — see `openGrantPage`. F-33.
-                            openGrantPage(context, entry.grant)
-                        }
-                    }
-                }
-            }
-        }
-
-        Gap(Space.l)
-        SectionLabel("Syncing")
-        Gap(Space.m)
-        DCard(padding = 18.dp) {
-            // Syncing used to be visible only on the Devices screen, one tap further in and reachable
-            // only once a device was paired: a user whose blocks were following them between two
-            // devices had no way of seeing that this was happening, or of making it happen now.
-            //
-            // This comment used to say "which Simple mode never reached". **There is no Simple mode.**
-            // It was designed in `docs/PLAN-mobile-polish.md` §4 and never built — the de-cluttering it
-            // was meant to achieve was done by shortening the nav bar for everyone instead. The reason
-            // above is unchanged and still true; only the mechanism named was fiction, which is the
-            // fifth time this codebase has had a comment describing something the code does not do.
-            //
-            // There is no "last synced" clock to show — devices talk when they are in earshot of each
-            // other, not on a schedule — so it says what is actually true at this moment instead.
-            Text(
-                when {
-                    !state.sync.available -> "Syncing is not set up on this device."
-                    state.sync.active.isEmpty() -> "No other device paired yet."
-                    !state.sync.running -> "Paired, but not listening right now."
-                    state.sync.nearby.isEmpty() ->
-                        "${state.sync.active.size} device(s) paired. None in earshot right now."
-                    else ->
-                        "${state.sync.nearby.size} of your ${state.sync.active.size} device(s) in " +
-                            "earshot. Blocks follow you between them."
-                },
-                style = Type.body,
-                // The same correction as DevicesScreen: amber for *not* listening was backwards, and
-                // the neutral sentence read as "a block is running". See the note there.
-                // Green only when devices are actually talking; "no device paired" is not a success.
-                color = if (state.sync.running && state.sync.nearby.isNotEmpty()) Palette.ok else Palette.muted,
-            )
-            state.sync.error?.let { problem ->
-                Gap(Space.s)
-                Text(problem, style = Type.meta, color = Palette.bad)
-            }
-            if (state.sync.available) {
-                Gap(Space.m)
-                GhostButton(text = "Sync now", onClick = model::syncNow)
-            }
-        }
-
-        Gap(Space.l)
         SectionLabel(stringResource(R.string.settings_accessibility_mode))
         Gap(Space.m)
-        DCard(padding = 18.dp) {
-            // The choice the accessibility grant hides inside it, given its own section because it is
-            // the one permission where the *kind* of access matters more than whether it is held.
-            //
-            // **What is running and what is chosen are different things, and this used to conflate
-            // them.** `chosenMode` is a remembered preference; `enforcementMode` is read from the
-            // system's own list of enabled services. A user who picked a mode and has not granted it
-            // yet — or who granted a different one in Settings — saw the preference reported as though
-            // it were the fact, which is the app lying about the user's own device. So the status
-            // shown is always what is *running*, the buttons are what is *chosen*, and a disagreement
-            // is stated rather than smoothed over.
-            // **What is detecting right now, which is the question this section exists to answer.**
-            // Three answers, not two: one of the two accessibility services, or the usage log, which
-            // needs no special access at all. The third is what makes "app blocking without
-            // accessibility" a real mode rather than something the architecture document claimed and
-            // the interface denied.
+        DCard {
+            // The switch is the only blocking control here. Which service is running, and the
+            // warnings about it, are on the Health screen under Advanced.
             val detector = Grant.detector(context)
-            val chosen = Grant.chosenMode(context)
-
-            ModeStatus(detector)
-            Gap(Space.l)
-            // The only setting here, and it is a switch rather than a choice between two things.
             WebsiteSwitch(
                 on = detector != Detector.Poller,
-                enabled = detector != Detector.Poller,
-            ) { wantsSites ->
-                // Remembered *and* acted on: remembering keeps the next screen agreeing with this one
-                // while the user is still in Settings, and the settings page is what changes which
-                // service the system runs.
-                // There is one service now, so turning the switch on is turning precise blocking on.
-                // The switch itself stays because the copy around it — what precise blocking adds,
-                // and what it costs — is the thing a user needs to read before granting it.
-                val mode = EnforcementMode.PRECISE
-                EnforcementMode.remember(context, mode)
+                // Always tappable: it only opens the system page, and off is exactly when it is needed.
+                enabled = true,
+            ) { _ ->
+                // Turning the switch on turns precise blocking on. The settings page is what changes
+                // which accessibility service the system runs, so that is where the user goes next.
+                EnforcementMode.remember(context, EnforcementMode.PRECISE)
                 Watchers.rememberAccessibilityWanted(context, wanted = true)
                 openGrantPage(context, Grant.Accessibility)
             }
-            if (detector == Detector.Poller) {
-                Gap(Space.s)
-                Text(
-                    stringResource(R.string.settings_accessibility_needs_turning_on),
-                    style = Type.meta,
-                    color = Palette.dim,
-                )
-            }
-            Gap(Space.m)
-            // The unified switch's "off". One tap, and blocking keeps working through the polling
-            // detector — it is only the precision and the site rules that go.
-            GhostButton(
-                text = stringResource(R.string.settings_use_no_special_access),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Watchers.rememberAccessibilityWanted(context, wanted = false)
-                // The running reader can switch itself off, which is what lets a payment app run.
-                // When it cannot — not running, or a lock holds it — the user does it in Settings.
-                if (Watchers.turnOffReader(context)) {
-                    android.widget.Toast.makeText(
-                        context,
-                        context.getString(R.string.settings_use_no_special_access_done),
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                } else {
-                    turnOffAccessibilityHint(context)
-                }
-            }
-
-            // Having both services on is the worst of both worlds and worth saying out loud: the
-            // banking warning is present because one of them holds the capability, and the other adds
-            // nothing that the reader does not already do.
-            val other = EnforcementMode.entries.firstOrNull {
-                it.serviceClass() != detector.serviceClass() && Grant.isModeEnabled(context, it)
-            }
-            if (other != null) {
-                Gap(Space.m)
-                Notice(
-                    text = stringResource(
-                        R.string.perm_accessibility_mode_other_still_on,
-                        stringResource(other.label()),
-                    ),
-                    tone = NoticeTone.Warning,
-                )
-            }
-
-            // Chosen but not what is detecting: said out loud rather than left as a button that looks
-            // selected over a device running something else. The poller makes this the ordinary case
-            // rather than an error, so it is a note and not a complaint.
-            if (detector != Detector.Poller && chosen != detector.mode()) {
-                // Resolved into names first. Two nested `stringResource` calls inside this one read as
-                // a single argument to the guard that checks format arity across the app, and it was
-                // right to complain: the shallow reading is the one a human makes too.
-                val chosenName = stringResource(chosen.label())
-                val runningName = stringResource(detector.label())
-                Gap(Space.m)
-                Notice(
-                    text = stringResource(
-                        R.string.perm_accessibility_mode_chosen_not_running,
-                        chosenName,
-                        runningName,
-                    ),
-                    tone = NoticeTone.Warning,
-                )
-            }
-
-            Gap(Space.l)
-            Rule()
-            // The list itself, one tap away rather than summarised here: which apps are exempt is a
-            // long list, and the only two reasons anyone comes to change it are a regional bank that
-            // is missing and an app wrongly caught by the label signal.
-            Entry(
-                title = stringResource(R.string.settings_sensitive_entry),
-                note = stringResource(R.string.settings_sensitive_entry_note),
-            ) {
-                onOpen(Routes.SENSITIVE_APPS)
-            }
+            Gap(Space.s)
+            Text(
+                stringResource(detector.label()),
+                style = Type.meta,
+                color = Palette.muted,
+            )
         }
 
         Gap(Space.l)
-        // ---------------------------------------------------------------------------------------
-        // The emergency ration.
-        //
-        // This block exists because it did not. `[emergency]` in the plan file holds the only way
-        // out of a lock that the user themselves can reach, its default is `passes = 0`, and the
-        // core reads zero as "the hatch is off" — so on every install that never hand-edited the
-        // file the ration was empty for ever, the button that spends a pass was never drawn (it is
-        // only shown when one is available), and the only explanation on screen was a refusal
-        // sentence about a config field with no interface. A safety hatch with no handle.
-        //
-        // The values are written into the plan file, which the app already owns: read, modify,
-        // write, reload. See `withEmergencySettings` for why that is a text edit rather than a
-        // re-serialisation — in one line, the user's own comments survive.
-        // ---------------------------------------------------------------------------------------
-        Gap(Space.l)
         SectionLabel("If you get locked out")
         Gap(Space.m)
+        // The emergency ration. It is written into the plan file, which the app already owns: read,
+        // modify, write, reload. See `withEmergencySettings`.
         val ration = remember(state.configToml) {
             runCatching { dev.curfew.policy.emergencySettings(state.configToml) }
                 .getOrDefault(dev.curfew.policy.EmergencySettings(0, 604800, 21600))
         }
         DCardFlush {
-            Column(Modifier.fillMaxWidth().padding(Space.l)) {
+            Column(Modifier.fillMaxWidth().padding(Dsn.CardPad)) {
                 // A local, because `passRefusal` is a delegated property riding on a `StateFlow`
                 // collection and Kotlin will not smart-cast it at the point of use.
                 val why = state.passRefusal
@@ -399,8 +189,8 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
             }
             Rule()
-            Column(Modifier.fillMaxWidth().padding(Space.l)) {
-                SectionLabel("Passes a week")
+            Column(Modifier.fillMaxWidth().padding(Dsn.CardPad)) {
+                SectionLabel("Emergency passes per week")
                 Gap(Space.s)
                 ChoiceRow(
                     options = listOf(
@@ -423,8 +213,8 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
             }
             Rule()
-            Column(Modifier.fillMaxWidth().padding(Space.l)) {
-                SectionLabel("Gap between uses")
+            Column(Modifier.fillMaxWidth().padding(Dsn.CardPad)) {
+                SectionLabel("Wait between passes")
                 Gap(Space.s)
                 ChoiceRow(
                     options = listOf(
@@ -441,6 +231,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
             }
         }
+
         Gap(Space.l)
         SectionLabel("The rest of Curfew")
         Gap(Space.m)
@@ -465,7 +256,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             ) { onOpen(Routes.HEALTH) }
             Rule()
             Entry(
-                title = "Your calendar",
+                title = "Calendar",
                 note = if (state.calendarGranted) {
                     "${state.calendarEvents.size} events, next 8 weeks."
                 } else {
@@ -480,13 +271,20 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             ) { onOpen(Routes.USAGE) }
             Rule()
             Entry(
-                title = "Your other devices",
+                title = "Devices",
                 note = if (state.sync.active.isEmpty()) {
                     "No other device paired yet."
                 } else {
                     "${state.sync.active.size} paired. Blocks follow you between them."
                 },
             ) { onOpen(Routes.DEVICES) }
+            Rule()
+            // Kept here rather than on Health: Health takes no navigation callback, and this row
+            // needs one.
+            Entry(
+                title = stringResource(R.string.settings_sensitive_entry),
+                note = stringResource(R.string.settings_sensitive_entry_note),
+            ) { onOpen(Routes.SENSITIVE_APPS) }
             Rule()
             Entry(
                 title = "Config file & backup",
@@ -495,15 +293,11 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         }
 
         Gap(Space.l)
-        DCard(padding = 16.dp) {
+        DCard {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 Text("⛨", style = Type.h3, fontWeight = FontWeight.Normal, color = Palette.muted)
                 Text(
-                    // The true claim, and the same one Health shows: this sentence existed twice and
-                    // one copy was false. Saying "no internet permission at all" was the earlier
-                    // version of the same mistake — the manifest declares INTERNET for LAN sync —
-                    // and it is load-bearing, because this is the card a user reads to decide
-                    // whether to trust a screen-watching app. See [Privacy].
+                    // The shared sentence, the same one Health shows. See [Privacy].
                     Privacy.NO_SERVER,
                     style = Type.meta,
                     color = Palette.muted,
@@ -545,9 +339,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     }
                 }
                 Gap(Space.m)
-                SheetNote(
-                    "Importing validates the config before applying. A session already running keeps running until its own lock expires.",
-                )
+                SheetNote("Import checks the file first. A running lock keeps its end time.")
             }
             if (state.configToml.isNotBlank()) {
                 SheetSection("Current configuration") {
@@ -591,9 +383,9 @@ internal fun GrantMark(granted: Boolean, required: Boolean) {
     )
 }
 
-/** What is detecting right now, and what that costs. */
+/** What is detecting right now, and what that costs. Shared with the Health screen. */
 @Composable
-private fun ModeStatus(detector: Detector) {
+internal fun ModeStatus(detector: Detector) {
     Column(Modifier.fillMaxWidth()) {
         Text(
             stringResource(R.string.settings_mode_running_label),
@@ -621,14 +413,10 @@ private fun ModeStatus(detector: Detector) {
 /**
  * The one extra that precise blocking can be given, as a switch rather than half of a pair.
  *
- * This used to be a segmented control with two equal halves, and that is what made it read as two
- * settings. They are not peers: app blocking is the feature, and reading a browser's address bar is
- * an addition to it. So the addition is drawn as what it is — a labelled switch — and there is
- * nothing to reconcile: turn precise blocking on and every app you pick is blocked; turn this on as
- * well and sites are blocked too.
- *
- * The label, the state word, and the switch's own fill all carry the answer, because section 8
- * requires status by word and shape and not by colour alone.
+ * App blocking is the feature, and reading a browser's address bar is an addition to it. So the
+ * addition is drawn as what it is, a labelled switch. The label, the state word, and the switch's
+ * own fill all carry the answer, because section 8 requires status by word and shape and not by
+ * colour alone.
  */
 @Composable
 private fun WebsiteSwitch(on: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
@@ -664,14 +452,13 @@ private fun WebsiteSwitch(on: Boolean, enabled: Boolean, onToggle: (Boolean) -> 
     }
 }
 
-/** A sentence worth interrupting the page for. Distinct from body text by shape, not only by colour. */
+/** A sentence worth interrupting the page for. Distinct from body text by shape, not only by colour. Shared with the Health screen. */
 @Composable
-private fun Notice(text: String, tone: NoticeTone) {
+internal fun Notice(text: String, tone: NoticeTone) {
     val edge = if (tone == NoticeTone.Warning) Palette.live else Palette.muted
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            
             .background(edge.copy(alpha = 0.10f)),
     ) {
         // A bar rather than a tinted card, so the kind is legible without colour: the shape says
@@ -686,27 +473,27 @@ private fun Notice(text: String, tone: NoticeTone) {
     }
 }
 
-private enum class NoticeTone { Warning, Info }
+internal enum class NoticeTone { Warning, Info }
 
 /** The resource naming this mode, in one place so a call site cannot pick the wrong pairing. */
-private fun EnforcementMode.label(): Int = when (this) {
+internal fun EnforcementMode.label(): Int = when (this) {
     EnforcementMode.PRECISE -> R.string.perm_accessibility_mode_app_and_url
 }
 
 /** The resource naming a detector, paired with [Detector.note]. */
-private fun Detector.label(): Int = when (this) {
+internal fun Detector.label(): Int = when (this) {
     Detector.Reader -> R.string.perm_accessibility_mode_app_and_url
     Detector.Poller -> R.string.settings_detector_poller
 }
 
 /** The resource saying what a detector costs. */
-private fun Detector.note(): Int = when (this) {
+internal fun Detector.note(): Int = when (this) {
     Detector.Reader -> R.string.perm_accessibility_mode_app_and_url_note
     Detector.Poller -> R.string.settings_detector_poller_note
 }
 
 /** The mode a detector corresponds to, for comparing a choice against what is running. */
-private fun Detector.mode(): EnforcementMode? = when (this) {
+internal fun Detector.mode(): EnforcementMode? = when (this) {
     Detector.Reader -> EnforcementMode.PRECISE
     Detector.Poller -> null
 }
@@ -718,28 +505,13 @@ private fun Detector.mode(): EnforcementMode? = when (this) {
  * there is no intent that turns an accessibility service *off* — `ACTION_ACCESSIBILITY_SETTINGS`
  * opens the list — so the honest answer is to say the path and open the list.
  */
-private fun turnOffAccessibilityHint(context: android.content.Context) {
+internal fun turnOffAccessibilityHint(context: android.content.Context) {
     android.widget.Toast.makeText(
         context,
         context.getString(R.string.settings_use_no_special_access_how),
         android.widget.Toast.LENGTH_LONG,
     ).show()
     openGrantPage(context, Grant.Accessibility)
-}
-
-@Composable
-private fun Fix(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            // The old 32dp chip was smaller than a thumb; MinTouch is the size every other target uses.
-            .heightIn(min = Dsn.MinTouch)
-            .plate(fill = Palette.accent, shape = Capsule)
-            .clickable(onClick = onClick)
-            .padding(horizontal = Space.l),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("FIX", style = Type.button, color = Palette.onFill)
-    }
 }
 
 @Composable
@@ -757,7 +529,7 @@ private fun Entry(title: String, note: String, tone: Color? = null, onClick: () 
                 // A problem is marked with a solid square of its colour, and the words stay ink:
                 // amber text on white does not read.
                 if (tone != null) {
-                    Box(Modifier.padding(top = 5.dp).size(8.dp).background(tone))
+                    Box(Modifier.padding(top = Space.xs).size(Space.s).background(tone))
                 }
                 Text(
                     note,

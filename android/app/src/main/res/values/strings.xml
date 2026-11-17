@@ -101,11 +101,12 @@
     <string name="device_remove_failed">That device could not be removed.</string>
     <string name="up_to_date">Up to date.</string>
     <string name="folder_failed">That folder could not be used.</string>
+    <string name="edit_profile_named">Edit %1$s</string>
     <string name="ended_with_pass">%1$s ended with an emergency pass.</string>
     <string name="released">Released. The other device will act on it within a few seconds.</string>
     <string name="release_lands">Release for %1$s lands %2$s.</string>
     <string name="cannot_release_early">That session cannot be released early.</string>
-    <string name="release_explained">The last-resort release: you ask now, it lands a day later. Nothing can shorten it and no password or pass is involved. It exists for the case the emergency passes cannot cover — a lock you set while you were committed, at a moment you now regret — and the day is the point rather than an obstacle: a lock that a bad evening can undo is not a lock. If a lock has no end time at all, this is the only way out.</string>
+    <string name="release_explained">The last-resort release: ask now, it lands a day later. Nothing can shorten it. Uninstalling Curfew also ends any lock.</string>
     <string name="config_load_failed">That config could not be loaded.</string>
     <string name="start_failed">That could not be started.</string>
     <string name="profile_save_failed">That profile could not be saved.</string>
@@ -195,7 +196,7 @@
     <string name="confirm_pass_body">This ends %1$s now. It counts against your ration on every paired device, it is written into your history, and it cannot be given back.</string>
     <string name="confirm_pass_confirm">Use one</string>
     <string name="confirm_release_title">Ask to end %1$s in 24 hours?</string>
-    <string name="confirm_release_body">This is the way out of a lock nothing here can end. It cannot be taken back, and it cannot be asked for twice, so the landing time is now and stays where it is.</string>
+    <string name="confirm_release_body">It lands a day from now. It cannot be taken back or asked for twice.</string>
     <string name="confirm_release_confirm">Ask for it</string>
     <string name="timer_until">until %1$s</string>
     <string name="timer_already_blocked_body">Starting this will not begin a second block or change the one already running. It ends when it was set to end.</string>

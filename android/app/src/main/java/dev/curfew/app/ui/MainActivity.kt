@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
@@ -133,8 +132,7 @@ class MainActivity : FragmentActivity() {
  * [short] is what fits under an icon; [label] is the full name, and it is what the icon is
  * described as, so shortening the visible one costs nothing.
  *
- * There is one bar, and it is short. It used to carry seven tabs, which turned the one surface
- * people navigate by into the most crowded thing on screen. Usage, Health and Devices are one tap
+ * There is one bar, and it is short: three tabs. Calendar, Usage, Health and Devices are one tap
  * away in Settings instead, which is also where syncing lives.
  *
  * There is no Apps tab. Apps and sites belong to a profile, so a tab for them had to open by
@@ -149,11 +147,10 @@ private enum class Tab(
 ) {
     Now("now", "Now", "Now", Icons.Filled.CheckCircle),
     Schedule("schedule", "Plan", "Plan", Icons.Filled.Edit),
-    Calendar("calendar", "Calendar", "Events", Icons.Filled.DateRange),
     Settings("settings", "Settings", "Settings", Icons.Filled.Settings),
 }
 
-/** Routes Settings links to, so every screen that exists is reachable from the bar of four. */
+/** Routes Settings links to, so every screen that exists is reachable from the bar of three. */
 object Routes {
     const val CALENDAR = "calendar"
     const val USAGE = "usage"
@@ -224,11 +221,10 @@ fun CurfewApp(
                     model,
                     onNewProfile = { go(Routes.PROFILE_NEW) },
                     onEditProfile = { go(Routes.profile(it)) },
-                    onPickFromCalendar = { go(Tab.Calendar.route) },
                 )
             }
             composable(Tab.Settings.route) { SettingsScreen(model, onOpen = ::go) }
-            composable(Tab.Calendar.route) { CalendarScreen(model) }
+            composable(Routes.CALENDAR) { CalendarScreen(model, onBack = { navController.popBackStack() }) }
             composable(Routes.USAGE) { UsageScreen(model) }
             composable(Routes.DEVICES) { DevicesScreen(model) }
             composable(Routes.HEALTH) { HealthScreen(model) }
@@ -247,7 +243,7 @@ fun CurfewApp(
         }
 
         val current = backStack?.destination
-        // Only the four tabs carry the bar. A pushed screen — the timer, a profile, usage — has a
+        // Only the three tabs carry the bar. A pushed screen — the timer, a profile, usage — has a
         // back arrow and one job, and a tab bar floating over it both invites a user to abandon
         // what they were half way through and, being glass with nothing reserved beneath it,
         // covers the bottom of the screen it is sitting on. The timer's own lock choices were
@@ -389,7 +385,7 @@ private fun NavBar(
 /**
  * One tab: an icon over an uppercase label, and an accent underline when it is the current one.
  *
- * Each tab takes an equal share of the width, so the whole bar is touchable rather than four islands,
+ * Each tab takes an equal share of the width, so the whole bar is touchable rather than three islands,
  * and the label is [Palette.muted] rather than [Palette.dim] when unselected so it stays readable.
  * `minimumInteractiveComponentSize` keeps the touch target at least 48dp whatever is drawn.
  */

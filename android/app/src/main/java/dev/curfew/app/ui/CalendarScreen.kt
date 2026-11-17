@@ -54,7 +54,7 @@ import dev.curfew.policy.CalendarSchedule
  * Provides calendar filtering ("Cal select"), whole-calendar blocking, and polished event cards.
  */
 @Composable
-fun CalendarScreen(model: CurfewViewModel) {
+fun CalendarScreen(model: CurfewViewModel, onBack: () -> Unit = {}) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
@@ -70,43 +70,50 @@ fun CalendarScreen(model: CurfewViewModel) {
             .sorted()
     }
 
-    CalendarList(
-        state = state,
-        context = context,
-        heading = "Pick from your calendar",
-        query = query,
-        caught = state.eventRules,
-        names = names,
-        onQuery = { query = it },
-        onPick = { event ->
-            val matching = state.eventRules[event.id].orEmpty()
-                .mapNotNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
-            if (matching.isNotEmpty()) {
-                managingEvent = event
-            } else {
-                editing = Pick(event, null)
-            }
-        },
-        onToggleWholeCalendar = { calName ->
-            val existing = state.calendarRules.find {
-                it.matcher.calendar.equals(calName, ignoreCase = true) &&
-                    it.matcher.title.isNullOrBlank()
-            }
-            editing = Pick(
-                event = CalendarEvent(
-                    id = "whole:$calName",
-                    title = "",
-                    calendar = calName,
-                    location = "",
-                    start = state.now,
-                    end = state.now + 3600,
-                    allDay = true,
-                    busy = true,
-                ),
-                rule = existing,
-            )
-        },
-    )
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(Modifier.padding(horizontal = Dsn.Gutter)) {
+            BackRow("Back", onBack)
+        }
+        Box(Modifier.weight(1f)) {
+        CalendarList(
+            state = state,
+            context = context,
+            heading = "Calendar",
+            query = query,
+            caught = state.eventRules,
+            names = names,
+            onQuery = { query = it },
+            onPick = { event ->
+                val matching = state.eventRules[event.id].orEmpty()
+                    .mapNotNull { rule -> state.calendarRules.find { it.id == rule.schedule } }
+                if (matching.isNotEmpty()) {
+                    managingEvent = event
+                } else {
+                    editing = Pick(event, null)
+                }
+            },
+            onToggleWholeCalendar = { calName ->
+                val existing = state.calendarRules.find {
+                    it.matcher.calendar.equals(calName, ignoreCase = true) &&
+                        it.matcher.title.isNullOrBlank()
+                }
+                editing = Pick(
+                    event = CalendarEvent(
+                        id = "whole:$calName",
+                        title = "",
+                        calendar = calName,
+                        location = "",
+                        start = state.now,
+                        end = state.now + 3600,
+                        allDay = true,
+                        busy = true,
+                    ),
+                    rule = existing,
+                )
+            },
+        )
+        }
+    }
 
     managingEvent?.let { event ->
         val matching = state.eventRules[event.id].orEmpty()
@@ -209,7 +216,7 @@ internal fun CalendarList(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                     Text(
-                        "Curfew cannot see your calendar yet, so no meeting can start a block.",
+                        "Allow calendar access so a meeting can start a block.",
                         style = Type.body,
                         color = Palette.muted,
                     )
@@ -300,7 +307,7 @@ internal fun CalendarList(
                 val failure = state.calendarError
                 Text(
                     if (failure != null) {
-                        "Your calendar could not be read just now, so this is not a complete list.\n\n" +
+                        "The calendar could not be read just now, so this list is incomplete.\n\n" +
                             failure
                     } else {
                         "Nothing in the next day and a half. Curfew only reads a narrow window " +
@@ -350,8 +357,7 @@ internal fun CalendarList(
         if (state.profiles.isEmpty()) {
             item {
                 Text(
-                    "Add a profile on the Plan tab first — a calendar rule has to say which one " +
-                        "it runs.",
+                    "Add a profile first. A calendar rule needs one to run.",
                     style = Type.meta,
                     color = Palette.dim,
                 )
@@ -630,7 +636,7 @@ fun CalendarPickerSheet(
                 .systemBarsPadding(),
         ) {
             Box(Modifier.padding(horizontal = Dsn.Gutter)) {
-                BackRow("Events for $profileName", onDone)
+                BackRow("Calendar for $profileName", onDone)
             }
             Box(Modifier.weight(1f)) {
                 CalendarList(
