@@ -23,6 +23,7 @@ AppPickerScreen.kt|Stop blocking ${rule.target.label()}
 BlockActivity.kt|$name is blocked
 BlockActivity.kt|$remaining seconds
 BlockActivity.kt|Emergency pass · ${if (passes == 1) 
+BlockActivity.kt|End $name?
 BlockActivity.kt|Open $target
 BlockActivity.kt|Open $target
 BlockActivity.kt|The wait is over. You can open $target.
@@ -71,16 +72,11 @@ NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
 NowScreen.kt|${duration(today)} away from the phone today
 NowScreen.kt|${named(it.profile)} · ${duration((it.end - it.start).toInt())}
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
-NowScreen.kt|Ask to end $name in 24 hours
-NowScreen.kt|Emergency pass ($passesLeft)
-NowScreen.kt|End $name now
 NowScreen.kt|End ${named(session.profile)}
 NowScreen.kt|End ${named(session.profile)}?
 NowScreen.kt|Let $id out
 NowScreen.kt|Let session $id out
-NowScreen.kt|Present a tag for $name
 NowScreen.kt|The tag that ends $profile
-NowScreen.kt|Use an emergency pass on $name, $passesLeft left
 NowScreen.kt|left · ends ${clockOf(it)}
 ProfileEditScreen.kt|$emoji $value
 ProfileEditScreen.kt|${spellDuration(budgetSeconds!! / 60)} a day, then apps lock

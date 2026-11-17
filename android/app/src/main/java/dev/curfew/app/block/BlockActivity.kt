@@ -110,6 +110,7 @@ class BlockActivity : ComponentActivity() {
                             explanation = explanation,
                             onOpenNewTab = { openNewTab() },
                             onClose = { goHome() },
+                            onOpenCurfew = { openCurfew() },
                             // The block that put this screen here is over. Closing returns the
                             // user to whatever they were doing rather than leaving a screen up
                             // that says a session is running when none is.
@@ -129,6 +130,15 @@ class BlockActivity : ComponentActivity() {
         startActivity(
             Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        finish()
+    }
+
+    /** Curfew's own UI, for the steps of ending a session this screen does not pose. */
+    private fun openCurfew() {
+        startActivity(
+            Intent(this, dev.curfew.app.ui.MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
         finish()
@@ -228,6 +238,7 @@ private fun BlockScreen(
     explanation: String,
     onOpenNewTab: () -> Unit,
     onClose: () -> Unit,
+    onOpenCurfew: () -> Unit,
     onEnded: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -279,6 +290,7 @@ private fun BlockScreen(
     var askingRelease by remember { mutableStateOf(false) }
     var askingPass by remember { mutableStateOf(false) }
     var pausing by remember { mutableStateOf(false) }
+    var confirmingEnd by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // The screen holds a *merged* [LockSet], which carries conditions and end times but no id —
     // ids belong to sessions. So the session this screen is about is found in the running list by
@@ -302,13 +314,23 @@ private fun BlockScreen(
         scope.launch {
             runCatching { work() }
                 .onFailure {
-                    refusal = if (it is dev.curfew.policy.NoPass) {
-                        dev.curfew.app.ui.describePassRefusal(it.refusal, System.currentTimeMillis() / 1000)
-                    } else {
-                        it.message ?: "That did not work."
-                    }
+                    refusal = dev.curfew.app.ui.describeFailure(it, System.currentTimeMillis() / 1000)
+                        ?: "That did not work."
                 }
             busy = false
+        }
+    }
+    /**
+     * End through the same steps the Now screen takes, in [challengeStep]'s order. The confirm is
+     * asked here; a challenge is not, because the sum and its sheet live in Curfew's own UI, so the
+     * user is sent there rather than handed a refusal naming a question they were never shown.
+     */
+    fun endStep(satisfied: List<dev.curfew.policy.Lock>) {
+        when (dev.curfew.app.ui.challengeStep(lock.conditions, satisfied, posed = null)) {
+            dev.curfew.app.ui.ChallengeStep.AskConfirm -> confirmingEnd = true
+            is dev.curfew.app.ui.ChallengeStep.PoseChallenge -> onOpenCurfew()
+            dev.curfew.app.ui.ChallengeStep.End ->
+                after { runningIdNow()?.let { context.curfew.endSession(it, satisfied) } }
         }
     }
     var now by remember { mutableLongStateOf(System.currentTimeMillis() / 1000) }
@@ -414,13 +436,14 @@ private fun BlockScreen(
         }
 
         Spacer(Modifier.height(Space.xl))
+        val hard = dev.curfew.app.ui.needsMoreThanConfirm(lock.conditions)
         LockActions(
             name = name,
             which = dev.curfew.app.ui.LockActionsWhen.LOCKED_SCREEN,
             endsAt = endsAt,
             now = now,
             passesLeft = passes,
-            locked = lock.isLocked,
+            locked = hard,
             releaseAsked = lock.delayedReleaseAt != null,
             // No tag reader here: the scanner lives in Curfew's own UI, and a button that opens
             // nothing is worse than no button.
@@ -428,8 +451,8 @@ private fun BlockScreen(
             // Null on a locked session, which is what makes the button disappear rather than lie.
             // The pause is taken here, behind the same sum [PausePuzzleSheet] asks everywhere: the
             // core has no pause primitive, so a pause ends the session and says so.
-            onPause = if (lock.isLocked) null else ({ pausing = true }),
-            onEnd = { after { runningIdNow()?.let { context.curfew.endSession(it) } } },
+            onPause = if (hard) null else ({ pausing = true }),
+            onEnd = { endStep(emptyList()) },
             onRelease = { askingRelease = true },
             onPresentTag = {},
             onEmergency = { askingPass = true },
@@ -451,6 +474,21 @@ private fun BlockScreen(
                 },
             )
         }
+        if (confirmingEnd) {
+            dev.curfew.app.ui.DConfirm(
+                title = "End $name?",
+                body = "You chose \"ask me first\" for this one, so this is the asking. Ending it " +
+                    "stops every app it blocks, not only this one.",
+                dismiss = "Keep it running",
+                confirm = "End it",
+                tone = Palette.warn,
+                onDismiss = { confirmingEnd = false },
+                onConfirm = {
+                    confirmingEnd = false
+                    endStep(listOf(dev.curfew.policy.Lock.Confirm))
+                },
+            )
+        }
         if (pausing) {
             dev.curfew.app.ui.PausePuzzleSheet(
                 name = name,
@@ -458,7 +496,7 @@ private fun BlockScreen(
                 onDismiss = { pausing = false },
                 onPaused = { _, _ ->
                     pausing = false
-                    after { runningIdNow()?.let { context.curfew.endSession(it) } }
+                    endStep(listOf(dev.curfew.policy.Lock.Confirm))
                 },
             )
         }
@@ -488,7 +526,7 @@ private fun BlockScreen(
         }
 
         // Only a lock needs a way past it. With End now on screen, pass talk is noise.
-        if (lock.isLocked) {
+        if (hard) {
             Spacer(Modifier.height(Space.m))
             Text(
                 if (passes > 0) {

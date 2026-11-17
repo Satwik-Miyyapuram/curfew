@@ -5,6 +5,9 @@ import dev.curfew.policy.ActivationSource
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
 import dev.curfew.policy.PassRefusal
+import dev.curfew.policy.NoPass
+import dev.curfew.policy.Refusal
+import dev.curfew.policy.Refused
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.SessionSource
 import dev.curfew.policy.WeeklySchedule
@@ -255,6 +258,33 @@ fun describePassRefusal(refusal: PassRefusal, now: Long): String = when (refusal
         "No emergency passes left. The next one comes back ${relative(refusal.nextAt, now)}."
     is PassRefusal.CoolingDown ->
         "You used a pass recently. The next one can be spent ${relative(refusal.until, now)}."
+}
+
+/**
+ * Why the core would not end a session, as a sentence. Shared by the Now screen and the block
+ * screen so neither ever shows the refusal's `toString()`.
+ */
+fun describeRefusal(refusal: Refusal, now: Long): String = when (refusal) {
+    is Refusal.NotRunning -> "That session is not running any more."
+    is Refusal.Locked -> buildString {
+        append("Still locked. It needs ")
+        append(refusal.missing.joinToString(", ") { describeLock(it) })
+        append(".")
+        refusal.endsAt?.let { append("\n\nIt ends on its own ${relative(it, now)}.") }
+        refusal.delayedReleaseAt?.let {
+            append("\n\nThe release you asked for lands ${relative(it, now)}.")
+        }
+    }
+}
+
+/**
+ * A failure as a person reads it. The core's refusals are data classes whose `toString()` is
+ * `Locked(missing=[Confirm], ...)`, so they are turned into sentences here and never printed raw.
+ */
+fun describeFailure(cause: Throwable, now: Long): String? = when (cause) {
+    is Refused -> describeRefusal(cause.refusal, now)
+    is NoPass -> describePassRefusal(cause.refusal, now)
+    else -> cause.message?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 /** Where a running session came from, so nothing appears to have started by itself. */

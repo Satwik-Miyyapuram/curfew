@@ -958,7 +958,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
      * not be saved.") hides the one thing the user needs to fix it.
      */
     fun fail(what: String, cause: Throwable) = _state.update {
-        val reason = cause.message?.trim()?.takeIf { m -> m.isNotEmpty() && m != what }
+        val reason = describeFailure(cause, runtime.clock.now())?.takeIf { m -> m != what }
         it.copy(message = Notice(what, bad = true, detail = reason))
     }
 

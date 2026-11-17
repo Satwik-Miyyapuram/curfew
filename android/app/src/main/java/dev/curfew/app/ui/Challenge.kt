@@ -149,3 +149,11 @@ fun challengeStep(
     }
     return ChallengeStep.End
 }
+/**
+ * Whether a lock needs more than the user's own yes.
+ *
+ * `Lock.Confirm` alone ("ask me first") is a lock in the core's eyes, but any screen can meet it, so
+ * treating it as a hard lock hid pause and offered a 24-hour wait and an emergency pass for a session
+ * that one tap ends. A pause's sum is a stronger yes than the confirm, so it counts as one.
+ */
+fun needsMoreThanConfirm(conditions: List<Lock>): Boolean = conditions.any { it !is Lock.Confirm }

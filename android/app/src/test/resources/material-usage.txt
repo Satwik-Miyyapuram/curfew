@@ -8,14 +8,10 @@
 ChallengeDialog.kt|AlertDialog
 ChallengeDialog.kt|TextButton
 ChallengeDialog.kt|TextButton
-NowScreen.kt|Button
 NowScreen.kt|Card
 NowScreen.kt|Card
 NowScreen.kt|Card
 NowScreen.kt|Card
-NowScreen.kt|TextButton
-NowScreen.kt|TextButton
-NowScreen.kt|TextButton
 NowScreen.kt|TextButton
 NowScreen.kt|TextButton
 NowScreen.kt|TextButton

@@ -29,10 +29,12 @@ AppPickerScreen.kt|already running.
 AppPickerScreen.kt|anything whose address or title contains it.
 AppPickerScreen.kt|can be read.\n\n
 BlockActivity.kt| else 
+BlockActivity.kt|End it
 BlockActivity.kt|No emergency pass right now
 BlockActivity.kt|Not now
 BlockActivity.kt|Wait a moment
 BlockActivity.kt|You can go ahead now.
+BlockActivity.kt|You chose \"ask me first\" for this one, so this is the asking. Ending it 
 BlockActivity.kt|} this month
 CalendarScreen.kt|(free)
 CalendarScreen.kt|(untitled)
@@ -150,12 +152,10 @@ HealthScreen.kt|device's keystore.
 NowScreen.kt| days in a row
 NowScreen.kt| this week
 NowScreen.kt|Another of your devices has a session only this one can end.
-NowScreen.kt|Ask to end in 24 hours
 NowScreen.kt|Blocking now
 NowScreen.kt|Confirm it is you.
 NowScreen.kt|Curfew was not running
 NowScreen.kt|End it
-NowScreen.kt|End now
 NowScreen.kt|Got it
 NowScreen.kt|Got it
 NowScreen.kt|Hold the tag against the back of the phone, or type what is on it.
@@ -170,7 +170,6 @@ NowScreen.kt|Nothing is blocked
 NowScreen.kt|Nothing is set to start on its own.
 NowScreen.kt|Nothing scheduled in the next day.
 NowScreen.kt|Present
-NowScreen.kt|Present a tag
 NowScreen.kt|Present the tag
 NowScreen.kt|Restart this device, then come back and end it. Force-stopping Curfew or 
 NowScreen.kt|Start a block now

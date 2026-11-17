@@ -90,6 +90,10 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // because the dialog names the profile that is about to end.
     var confirmingEnd by remember { mutableStateOf<Session?>(null) }
 
+    // The session a pause is being taken on. The sum on the sheet is a stronger yes than the
+    // confirm, so a pause meets `Lock.Confirm` and goes straight on to the rest of the steps.
+    var pausing by remember { mutableStateOf<Session?>(null) }
+
     /**
      * A profile as a person reads it: the name they gave it, never the slug from the config.
      *
@@ -287,6 +291,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 now = state.now,
                 passesLeft = state.passesLeft,
                 passRefusal = state.passRefusal,
+                onPause = { pausing = session },
                 onEnd = { end(session) },
                 onRelease = { confirmingDelayed = session },
                 onEmergency = { confirmingPass = session },
@@ -361,6 +366,18 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 Pill("Missed a stretch", tint = Palette.bad)
             }
         }
+    }
+
+    pausing?.let { session ->
+        PausePuzzleSheet(
+            name = named(session.profile),
+            now = state.now,
+            onDismiss = { pausing = null },
+            onPaused = { _, _ ->
+                pausing = null
+                advance(session, listOf(Lock.Confirm))
+            },
+        )
     }
 
     confirmingEnd?.let { session ->
@@ -614,6 +631,7 @@ private fun SessionCard(
     now: Long,
     passesLeft: Int,
     passRefusal: PassRefusal?,
+    onPause: () -> Unit,
     onEnd: () -> Unit,
     onRelease: () -> Unit,
     onEmergency: () -> Unit,
@@ -640,7 +658,7 @@ private fun SessionCard(
                 )
             }
 
-            if (session.lock.isLocked) {
+            if (needsMoreThanConfirm(session.lock.conditions)) {
                 Text(
                     "Locked: needs " +
                         session.lock.conditions.joinToString(", ") { describeLock(it) } + ".",
@@ -657,7 +675,7 @@ private fun SessionCard(
             // meant the one person who would go looking for the hatch was the one person not told
             // why it was absent. The sentence for it names the config field, which is the honest and
             // actionable answer; saying nothing left "Still locked" with no explanation at all.
-            if (session.lock.isLocked && passesLeft == 0 && passRefusal != null) {
+            if (needsMoreThanConfirm(session.lock.conditions) && passesLeft == 0 && passRefusal != null) {
                 Text(
                     describePassRefusal(passRefusal, now),
                     style = Type.meta,
@@ -685,55 +703,25 @@ private fun SessionCard(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = Space.m),
-                horizontalArrangement = Arrangement.spacedBy(Space.s),
-            ) {
-                // Several sessions can be on screen, so each button says which one it ends: a
-                // list of identical "End now" buttons is unusable with a screen reader.
-                Button(
-                    shape = Capsule,
-                    onClick = onEnd,
-                    modifier = Modifier.semantics {
-                        contentDescription = "End $name now"
-                    },
-                ) { Text("End now") }
-                // Only offered when there is no release already pending: asking twice must never
-                // become a way to move the landing time closer.
-                if (session.lock.isLocked && session.lock.delayedReleaseAt == null) {
-                    TextButton(
-                        shape = Capsule,
-                        onClick = onRelease,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Ask to end $name in 24 hours"
-                        },
-                    ) { Text("Ask to end in 24 hours") }
-                }
-                // Offered only on a session nothing else here can end, and only when there is one
-                // to spend. Next to an unlocked session it would teach people to reach for the
-                // scarce thing first, which is exactly backwards.
-                // Offered only when the lock actually names a tag. A field for one otherwise is
-                // an invitation to hunt for a tag that would open nothing.
-                if (session.lock.conditions.any { it is Lock.Token }) {
-                    TextButton(
-                        shape = Capsule,
-                        onClick = onPresentTag,
-                        modifier = Modifier.semantics {
-                            contentDescription = "Present a tag for $name"
-                        },
-                    ) { Text("Present a tag") }
-                }
-                if (session.lock.isLocked && passesLeft > 0) {
-                    TextButton(
-                        shape = Capsule,
-                        onClick = onEmergency,
-                        modifier = Modifier.semantics {
-                            contentDescription =
-                                "Use an emergency pass on $name, $passesLeft left"
-                        },
-                    ) { Text("Emergency pass ($passesLeft)") }
-                }
-            }
+            Gap(Space.m)
+            // The same buttons, in the same order, as the block screen: one component, so the two
+            // can no longer drift apart. Pause is offered whenever nothing but a yes stands in the way.
+            val hard = needsMoreThanConfirm(session.lock.conditions)
+            LockActions(
+                name = name,
+                which = LockActionsWhen.EVERYTHING,
+                endsAt = session.lock.endsAt,
+                now = now,
+                passesLeft = passesLeft,
+                locked = hard,
+                releaseAsked = session.lock.delayedReleaseAt != null,
+                wantsTag = session.lock.conditions.any { it is Lock.Token },
+                onPause = if (hard) null else onPause,
+                onEnd = onEnd,
+                onRelease = onRelease,
+                onPresentTag = onPresentTag,
+                onEmergency = onEmergency,
+            )
         }
     }
 }
@@ -746,18 +734,7 @@ private fun SessionCard(
  */
 @Composable
 private fun RefusalDialog(refusal: Refusal, now: Long, onDismiss: () -> Unit) {
-    val text = when (refusal) {
-        is Refusal.NotRunning -> "That session is not running any more."
-        is Refusal.Locked -> buildString {
-            append("Still locked. It needs ")
-            append(refusal.missing.joinToString(", ") { describeLock(it) })
-            append(".")
-            refusal.endsAt?.let { append("\n\nIt ends on its own ${relative(it, now)}.") }
-            refusal.delayedReleaseAt?.let {
-                append("\n\nThe release you asked for lands ${relative(it, now)}.")
-            }
-        }
-    }
+    val text = describeRefusal(refusal, now)
     // A sheet, not a platform dialog: the app has one material, and a refusal is not an occasion to
     // borrow another one.
     DNote(title = "Not yet", body = text, onDismiss = onDismiss)
