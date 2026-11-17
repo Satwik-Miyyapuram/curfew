@@ -236,7 +236,6 @@ ScheduleEditor.kt|Ignores the ones you are merely invited to.
 ScheduleEditor.kt|No buffer
 ScheduleEditor.kt|Only events marked busy
 ScheduleEditor.kt|Save
-ScheduleEditor.kt|Save
 ScheduleEditor.kt|Work
 ScheduleScreen.kt|A profile is a list of apps and sites to block.
 ScheduleScreen.kt|Add a profile
