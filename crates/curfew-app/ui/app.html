@@ -1345,7 +1345,7 @@ function pageNow() {
   return `${notice}
     ${active ? activeBlock(active) : idleBlock()}
     ${active ? sec("How this block is going", contributionCard(active)) : ""}
-    ${nextWindows(1).length || enabledCalendars().length ? `<div class="g2">
+    ${nextWindows(1).length || enabledCalendars().length ? `<div class="sec g2">
       <div>${sec("Next six hours", scrubberCard())}</div>
       <div>${sec("Next scheduled rules", nextRulesCard())}</div>
     </div>` : ""}
@@ -2970,7 +2970,7 @@ function insightsBlock() {
       <span class="micro">${esc(dayLabel(d.day))}</span></div>`;
   }).join("");
   const attacks = (state.status.closed || []).length + (state.status.failing || []).length;
-  return `<div class="g3">
+  return `<div class="sec g3">
     <div class="card hero"><div class="lbl">Focused hours</div>
       <div class="mega mono">${esc((total / 3600).toFixed(1))}</div>
       <div class="meta">hours blocked in ${days.length} days</div></div>
