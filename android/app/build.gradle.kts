@@ -101,8 +101,8 @@ android {
         // behave the way the enforcement design assumes.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // The four ABIs Android still ships. Without this, JNA drags in `mips`, `mips64` and
         // `armeabi` copies of jnidispatch for devices that have not existed for a decade.
