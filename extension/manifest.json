@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Curfew",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lets Curfew see which page a tab is on, so rules can name a path and not just a site.",
   "background": { "service_worker": "background.js", "scripts": ["background.js"] },
   "permissions": ["nativeMessaging", "webNavigation", "tabs", "alarms"],

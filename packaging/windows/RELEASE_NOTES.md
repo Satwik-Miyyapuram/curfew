@@ -7,7 +7,7 @@ out of ending early, by you or by anyone with administrator rights on the machin
 | --- | --- |
 | Ordinary 64-bit PC (Intel, AMD) | `curfew-x64.zip` |
 | Windows on ARM (Snapdragon, Surface Pro X) | `curfew-arm64.zip` |
-| Android phone or tablet | `curfew-android-unsigned.apk` |
+| Android phone or tablet | `curfew-android.apk` |
 
 Unzip it, then from an administrator terminal:
 
@@ -17,9 +17,9 @@ curfew install
 
 `INSTALL.txt` in the archive says the rest, including how to get out.
 
-The Android build is a plain APK, installed by opening the file. It is unsigned for the same
-reason the Windows binaries are, so Android will ask you to allow installation from this source;
-check the hash before you do. The phone and the PC pair with each other directly, by QR code —
+The Android build is a plain APK, installed by opening the file. Android will ask you to allow
+installation from this source; check the hash before you do. Every release is signed with the same
+key, so a new one installs over the old one and keeps your settings. The phone and the PC pair with each other directly, by QR code —
 there is no account to make.
 
 ## Verify what you downloaded

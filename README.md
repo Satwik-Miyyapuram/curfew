@@ -8,7 +8,7 @@ server**, and that can drive its blocks from **your calendar**.
 Think Freedom's cross-device sessions + Cold Turkey's strictness + StayFocusd's rule granularity —
 without a subscription, without a cloud account, and with your data never leaving your devices.
 
-> Status: **working on both platforms.** Windows binaries and an unsigned Android APK are published
+> Status: **working on both platforms.** Windows binaries and a signed Android APK are published
 > from a tag; see [Install](#install). Budgets, launch limits and friction delays are enforced by
 > the engine but are still edited in the config file rather than in a form.
 
@@ -36,9 +36,8 @@ Both downloads come from [Releases](../../releases), with a `.sha256` beside eac
 **Windows.** Unzip `curfew-x64.zip` (or `curfew-arm64.zip`) and read `INSTALL.txt`. `curfew.exe` is
 both the service and the command line; `curfew-tray.exe` is the tray icon.
 
-**Android.** `curfew-android-unsigned.apk`. It is unsigned on purpose — a signing key is a cost and
-a secret this project does not hold — so Android will warn you, and you can instead build it
-yourself with `cd android && ./gradlew assembleRelease`.
+**Android.** `curfew-android.apk`. Every release is signed with the same key, so updates install over
+the previous version. You can also build it yourself with `cd android && ./gradlew assembleRelease`.
 
 Nothing here phones home, so there is no account step and nothing to sign up for.
 
