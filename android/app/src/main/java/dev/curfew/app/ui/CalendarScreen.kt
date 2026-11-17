@@ -525,7 +525,7 @@ private fun EventCard(
                         color = Palette.link,
                     )
                 } else {
-                    Text("Nothing blocked", style = Type.meta, color = Palette.dim, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.weight(1f))
                     Text(
                         "Block this",
                         style = Type.meta,

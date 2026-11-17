@@ -65,8 +65,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var showConfig by remember { mutableStateOf(false) }
-    // The appearance sheet, opened by the Theme and Accent rows in the list below.
-    var showAppearance by remember { mutableStateOf(false) }
 
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -102,9 +100,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     Screen(spacing = 0.dp) {
         Gap(Space.l)
         Title("Settings")
-        Gap(Space.s)
-        Sub("Everything here is stored on this phone. Nothing is sent anywhere.")
-        Gap(Space.l)
 
         // ---------------------------------------------------------------------------------------
         // Appearance.
@@ -140,15 +135,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 Gap(Space.s)
                 Text(
                     stringResource(R.string.settings_accent_note),
-                    style = Type.meta,
-                    color = Palette.dim,
-                )
-            }
-            Rule()
-            SettingRow("Text size") {
-                Text(
-                    "Curfew follows your phone's own display size, so a larger system font makes " +
-                        "every screen here larger too. There is no second setting to keep in step.",
                     style = Type.meta,
                     color = Palette.dim,
                 )
@@ -244,12 +230,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             }
             if (state.sync.available) {
                 Gap(Space.m)
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    // Weighted: GhostButton fills the width, so unweighted the first took the whole row
-                    // and squeezed "Devices" to nothing.
-                    GhostButton(text = "Sync now", modifier = Modifier.weight(1f), onClick = model::syncNow)
-                    GhostButton(text = "Devices", modifier = Modifier.weight(1f)) { onOpen(Routes.DEVICES) }
-                }
+                GhostButton(text = "Sync now", onClick = model::syncNow)
             }
         }
 
@@ -274,15 +255,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             // the interface denied.
             val detector = Grant.detector(context)
             val chosen = Grant.chosenMode(context)
-
-            // Said before the buttons, because it is the thing that confuses people: Android's own
-            // list shows two Curfew rows and they are one choice at two levels.
-            Text(
-                stringResource(R.string.settings_accessibility_one_setting),
-                style = Type.meta,
-                color = Palette.muted,
-            )
-            Gap(Space.m)
 
             ModeStatus(detector)
             Gap(Space.l)
@@ -330,15 +302,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     turnOffAccessibilityHint(context)
                 }
             }
-            Gap(Space.m)
-            // Said plainly, because a mode named "App blocking" reads as though the choice were about
-            // *which* apps may be blocked. It is not: every version blocks every app the user picks.
-            // What changes is how fast a block lands and whether Curfew may read an address bar.
-            Text(
-                stringResource(R.string.perm_accessibility_mode_neither_blocks_apps),
-                style = Type.meta,
-                color = Palette.text,
-            )
 
             // Having both services on is the worst of both worlds and worth saying out loud: the
             // banking warning is present because one of them holds the capability, and the other adds
@@ -424,8 +387,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 Text(
                     when {
                         ration.passes == 0 ->
-                            "The emergency hatch is off. A lock you cannot end early then has no " +
-                                "way out except its own end time and the last-resort release."
+                            "Off. A lock runs to its end time."
                         why == null -> "${state.passesLeft} of ${ration.passes} left this week."
                         else ->
                             "${state.passesLeft} of ${ration.passes} left this week, and " +
@@ -455,8 +417,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
                 Gap(Space.s)
                 Text(
-                    "An emergency pass ends any lock immediately, including the strongest one. " +
-                        "Spending one is written into your history and they cannot be given back.",
+                    "Ends any lock at once. Logged, and not given back.",
                     style = Type.meta,
                     color = Palette.dim,
                 )
@@ -478,13 +439,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                         model.setEmergency(ration.copy(cooldownSeconds = picks.toLong()))
                     },
                 )
-                Gap(Space.s)
-                Text(
-                    "The core refuses a zero gap when passes are on, because two uses in a row " +
-                        "would make the ration a formality rather than a limit.",
-                    style = Type.meta,
-                    color = Palette.dim,
-                )
             }
         }
         Gap(Space.l)
@@ -494,23 +448,12 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Entry(
                 title = "Is Curfew working",
                 note = when {
-                    missing == 0 -> "Everything it needs, it has."
+                    missing == 0 -> "All set."
                     // Everything still missing is one Curfew cannot work without.
-                    missing == blocking && missing == 1 ->
-                        "One permission is missing. Nothing is blocked without it."
-                    missing == blocking ->
-                        "$missing permissions are missing. Nothing is blocked without them."
+                    missing == blocking -> "$missing missing. Nothing is blocked."
                     // Some of what is missing only makes Curfew harder to escape, not able to run.
-                    blocking > 0 ->
-                        "$missing permissions are missing" +
-                            if (blocking == 1) {
-                                ", and one of them has to be allowed before anything is blocked."
-                            } else {
-                                ", and $blocking of them have to be allowed before anything is " +
-                                    "blocked."
-                            }
-                    missing == 1 -> "One permission is missing. Curfew still blocks without it."
-                    else -> "$missing permissions are missing. Curfew still blocks without them."
+                    blocking > 0 -> "$missing missing, $blocking needed to block."
+                    else -> "$missing missing. Blocking still works."
                 },
                 // Red only when nothing is blocked; a gap that just makes Curfew easier to escape
                 // is a warning.
@@ -524,38 +467,16 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Entry(
                 title = "Your calendar",
                 note = if (state.calendarGranted) {
-                    "${state.calendarEvents.size} events read, over the next eight weeks."
+                    "${state.calendarEvents.size} events, next 8 weeks."
                 } else {
-                    "Not connected. Blocks from your calendar will not start."
+                    "Not connected."
                 },
                 tone = if (state.calendarGranted) null else Palette.warn,
             ) { onOpen(Routes.CALENDAR) }
             Rule()
-            // Theme and Accent as their own rows, beside the other things you can go and change.
-            //
-            // The Appearance card above has the controls in it, and that is where the choice is
-            // made. These rows are here because "Settings" is a list of what this app can be told,
-            // and two of the things it can be told — how it looks, and what colour its action is —
-            // were the only ones with no row. A section that exists but is not listed is a section
-            // people scroll past.
-            Entry(
-                title = "Theme",
-                note = when (Appearance.theme) {
-                    Appearance.LIGHT -> "Paper — the default."
-                    Appearance.DARK -> "Dusk."
-                    else -> "Following your phone."
-                },
-            ) { showAppearance = true }
-            Rule()
-            Entry(
-                title = "Accent",
-                note = Accent.of(Appearance.accent).label + ". Colours the action and the tab you " +
-                    "are on, and nothing that means a state.",
-            ) { showAppearance = true }
-            Rule()
             Entry(
                 title = "Where your time went",
-                note = "Time and opens, per app, for as long as Curfew has been watching.",
+                note = "Time and opens per app.",
             ) { onOpen(Routes.USAGE) }
             Rule()
             Entry(
@@ -569,7 +490,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             Rule()
             Entry(
                 title = "Config file & backup",
-                note = "Export or import your curfew.toml configuration file.",
+                note = "Export or import curfew.toml.",
             ) { showConfig = true }
         }
 
@@ -592,51 +513,10 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
         Gap(Space.s)
     }
 
-    // The appearance controls, in a sheet for the rows in the list.
-    //
-    // The same three controls the card above carries, because the rows in the list are a way *in*
-    // rather than a second place the setting lives: there is one value, in `Appearance`, and both
-    // surfaces write it.
-    if (showAppearance) {
-        DSheet(
-            title = "Appearance",
-            sub = "How Curfew looks. Stored on this phone.",
-            onDismiss = { showAppearance = false },
-            confirm = "Done",
-            confirmEnabled = true,
-            onConfirm = { showAppearance = false },
-        ) {
-            SheetSection("Theme") {
-                ChoiceRow(
-                    options = listOf(
-                        Appearance.SYSTEM to "System",
-                        Appearance.LIGHT to "Paper",
-                        Appearance.DARK to "Dusk",
-                    ),
-                    chosen = Appearance.theme,
-                    onPick = { Appearance.setTheme(context, it) },
-                )
-            }
-            SheetSection("Accent") {
-                ChoiceRow(
-                    options = Accent.entries.map { it.id to it.label },
-                    chosen = Appearance.accent,
-                    onPick = { Appearance.setAccent(context, it) },
-                )
-                Gap(Space.s)
-                Text(
-                    stringResource(R.string.settings_accent_note),
-                    style = Type.meta,
-                    color = Palette.dim,
-                )
-            }
-        }
-    }
-
     if (showConfig) {
         DSheet(
             title = "curfew.toml",
-            sub = "Your complete configuration file. Export it to back it up or copy it to another device.",
+            sub = "Back up or move your configuration.",
             onDismiss = { showConfig = false },
             confirm = "Done",
             confirmEnabled = true,

@@ -67,7 +67,6 @@ fun ScheduleScreen(
     }
 
     val running = state.weekly.count { it.enabled } + state.calendarRules.count { it.enabled }
-    val fromCalendar = state.calendarRules.count { it.enabled }
 
     Screen(spacing = 0.dp) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -77,7 +76,6 @@ fun ScheduleScreen(
                     summarise(
                         profiles = state.profiles.size,
                         triggers = running,
-                        fromCalendar = fromCalendar,
                         loading = state.loading,
                     ),
                 )
@@ -515,26 +513,10 @@ private fun matches(rule: CalendarSchedule, event: CalendarEvent): Boolean {
  * nested inside, so the honest summary is both numbers \u2014 how many profiles, and how many
  * things can start one.
  */
-private fun summarise(profiles: Int, triggers: Int, fromCalendar: Int, loading: Boolean): String {
+private fun summarise(profiles: Int, triggers: Int, loading: Boolean): String {
     if (loading) return "Reading your plan\u2026"
     if (profiles == 0) return "Nothing set up yet."
-    val one = profiles == 1
-    val who = if (one) "One profile." else "$profiles profiles."
-    // "them" for one profile reads as a typo, which is what it was.
-    val it = if (one) "it" else "them"
-    if (triggers == 0) return "$who Nothing starts $it on its own yet."
-    val what = if (triggers == 1) {
-        "One thing can start $it."
-    } else {
-        "$triggers things can start $it."
-    }
-    val calendar = when {
-        fromCalendar == 0 -> ""
-        fromCalendar == triggers -> " All from your calendar."
-        fromCalendar == 1 -> " One from your calendar."
-        else -> " $fromCalendar from your calendar."
-    }
-    return "$who $what$calendar"
+    return "${count(profiles, "profile")} · ${count(triggers, "trigger")}"
 }
 
 

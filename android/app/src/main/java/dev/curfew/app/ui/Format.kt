@@ -217,8 +217,7 @@ fun describeLock(lock: Lock): String = when (lock) {
  */
 object Privacy {
     const val NO_SERVER =
-        "Nothing goes to a server: your devices talk to each other directly, and nothing you record " +
-            "leaves the devices you paired."
+        "Nothing goes to a server. Your data stays on your devices."
 }
 fun describeSeed(profileName: String, blockedLabels: List<String>): String {
     val named = blockedLabels.take(2)

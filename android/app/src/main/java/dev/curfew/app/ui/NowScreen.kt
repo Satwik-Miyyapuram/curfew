@@ -158,13 +158,9 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Sub(describeSource(live.source, eventTitles))
         } else {
             Title("Nothing is blocked" + '\n' + "right now.")
-            Sub(
-                if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
-                    "Nothing is set to start on its own. Start a block by hand whenever you want."
-                } else {
-                    "Curfew is watching your schedule. It will start one when its time comes."
-                },
-            )
+            if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
+                Sub("Nothing is set to start on its own.")
+            }
         }
 
         Gap(if (live == null) 26.dp else 22.dp)
@@ -308,7 +304,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
 
         if (state.sessions.isEmpty()) {
             Gap(Space.l)
-            GhostButton("Check the schedules now", colour = Palette.muted, onClick = model::reconcileNow)
+            GhostButton("Refresh", colour = Palette.muted, onClick = model::reconcileNow)
         }
 
         // What is coming, in order. Four at most: enough to answer "what happens next" without
@@ -364,23 +360,11 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                 }
             }
 
-            Gap(Space.m)
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                Pill(
-                    if (state.downtime == null) "Ticks on time" else "Missed a stretch",
-                    // Bad, not amber. A stretch Curfew missed is a bad thing that already happened —
-                    // which is what Bad is for — where amber would say a block is running, the
-                    // opposite of what this pill reports.
-                    tint = if (state.downtime == null) Palette.ok else Palette.bad,
-                )
-                Pill(
-                    when (state.sync.active.size) {
-                        0 -> "No peers"
-                        1 -> "1 peer"
-                        else -> "${state.sync.active.size} peers"
-                    },
-                )
-                Pill("${state.audit.size} logged")
+            // Only the problem is worth a pill; "on time", peers and log size were noise.
+            if (state.downtime != null) {
+                Gap(Space.m)
+                // Bad, not amber: a stretch Curfew missed is a bad thing that already happened.
+                Pill("Missed a stretch", tint = Palette.bad)
             }
         }
     }

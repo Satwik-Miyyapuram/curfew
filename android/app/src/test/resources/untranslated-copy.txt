@@ -51,7 +51,6 @@ CalendarScreen.kt|Edit rule
 CalendarScreen.kt|Edit rule
 CalendarScreen.kt|Manage ›
 CalendarScreen.kt|Not blocked
-CalendarScreen.kt|Nothing blocked
 CalendarScreen.kt|Nothing in the next day and a half. Curfew only reads a narrow window 
 CalendarScreen.kt|Pick from your calendar
 CalendarScreen.kt|Profiles blocking this event:
@@ -90,7 +89,6 @@ Design.kt|YOUR ANSWER
 Design.kt|back afterwards — there is no timer that turns one off and on again — so you 
 Design.kt|choose when to start again, or let its schedule do it.
 Design.kt|e.g. 42
-Design.kt|week, so each one sits on the weekday it falls on.
 DevicesScreen.kt|Add a device
 DevicesScreen.kt|Cancel
 DevicesScreen.kt|Compare this with what your other device shows for it.
@@ -155,13 +153,10 @@ HealthScreen.kt|Theme
 HealthScreen.kt|device's keystore.
 NowScreen.kt| days in a row
 NowScreen.kt| this week
-NowScreen.kt|1 peer
 NowScreen.kt|Another of your devices has a session only this one can end.
 NowScreen.kt|Ask to end in 24 hours
 NowScreen.kt|Blocking now
-NowScreen.kt|Check the schedules now
 NowScreen.kt|Confirm it is you.
-NowScreen.kt|Curfew is watching your schedule. It will start one when its time comes.
 NowScreen.kt|Curfew was not running
 NowScreen.kt|Enforcing
 NowScreen.kt|End it
@@ -174,15 +169,15 @@ NowScreen.kt|Let the other device out?
 NowScreen.kt|Locked: needs 
 NowScreen.kt|Missed a stretch
 NowScreen.kt|Next up
-NowScreen.kt|No peers
 NowScreen.kt|Not yet
 NowScreen.kt|Nothing blocked yet today
 NowScreen.kt|Nothing is blocked
-NowScreen.kt|Nothing is set to start on its own. Start a block by hand whenever you want.
+NowScreen.kt|Nothing is set to start on its own.
 NowScreen.kt|Nothing scheduled in the next day.
 NowScreen.kt|Present
 NowScreen.kt|Present a tag
 NowScreen.kt|Present the tag
+NowScreen.kt|Refresh
 NowScreen.kt|Restart this device, then come back and end it. Force-stopping Curfew or 
 NowScreen.kt|Start a block now
 NowScreen.kt|Tag
@@ -192,7 +187,6 @@ NowScreen.kt|The clock moved backwards
 NowScreen.kt|The hours a block buys are counted here, so you can see what the no was for. 
 NowScreen.kt|This fills in once a block has run.
 NowScreen.kt|This phone is not reading tags right now. Type what is on it instead.
-NowScreen.kt|Ticks on time
 NowScreen.kt|Upcoming · next 24h
 NowScreen.kt|Waiting on you
 NowScreen.kt|You chose \"ask me first\" for this one, so this is the asking. Nothing else 
@@ -271,52 +265,39 @@ ScheduleScreen.kt|Remove this schedule?
 ScheduleScreen.kt|Remove this trigger
 ScheduleScreen.kt|Week at a glance
 ScheduleScreen.kt|Edit Profile
-SettingsScreen.kt|Accent
-SettingsScreen.kt|An emergency pass ends any lock immediately, including the strongest one. 
-SettingsScreen.kt|Appearance
 SettingsScreen.kt|Appearance
 SettingsScreen.kt|Config copied to clipboard.
 SettingsScreen.kt|Config exported to file.
 SettingsScreen.kt|Config file & backup
 SettingsScreen.kt|Copy to clipboard
 SettingsScreen.kt|Curfew can enforce
-SettingsScreen.kt|Curfew follows your phone's own display size, so a larger system font makes 
-SettingsScreen.kt|Devices
-SettingsScreen.kt|Devices
 SettingsScreen.kt|Done
-SettingsScreen.kt|Done
-SettingsScreen.kt|Everything here is stored on this phone. Nothing is sent anywhere.
+SettingsScreen.kt|Ends any lock at once. Logged, and not given back.
 SettingsScreen.kt|Export config
-SettingsScreen.kt|Export or import your curfew.toml configuration file.
+SettingsScreen.kt|Export or import curfew.toml.
 SettingsScreen.kt|FIX
 SettingsScreen.kt|Gap between uses
 SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file
 SettingsScreen.kt|Is Curfew working
 SettingsScreen.kt|No other device paired yet.
+SettingsScreen.kt|Off. A lock runs to its end time.
 SettingsScreen.kt|Paired, but not listening right now.
 SettingsScreen.kt|Passes a week
 SettingsScreen.kt|Settings
-SettingsScreen.kt|Spending one is written into your history and they cannot be given back.
 SettingsScreen.kt|Sync now
 SettingsScreen.kt|Sync now
 SettingsScreen.kt|Syncing
 SettingsScreen.kt|Syncing is not set up on this device.
 SettingsScreen.kt|That file could not be read.
 SettingsScreen.kt|That file could not be written.
-SettingsScreen.kt|The core refuses a zero gap when passes are on, because two uses in a row 
-SettingsScreen.kt|The emergency hatch is off. A lock you cannot end early then has no 
 SettingsScreen.kt|The rest of Curfew
-SettingsScreen.kt|Theme
-SettingsScreen.kt|Time and opens, per app, for as long as Curfew has been watching.
+SettingsScreen.kt|Time and opens per app.
 SettingsScreen.kt|Where your time went
 SettingsScreen.kt|Your calendar
 SettingsScreen.kt|Your config could not be read, so there is nothing to export. Nothing was written.
 SettingsScreen.kt|Your other devices
 SettingsScreen.kt|earshot. Blocks follow you between them.
-SettingsScreen.kt|every screen here larger too. There is no second setting to keep in step.
-SettingsScreen.kt|way out except its own end time and the last-resort release.
-SettingsScreen.kt|would make the ration a formality rather than a limit.
 TimerScreen.kt|1 · How hard should this be to leave?
 TimerScreen.kt|2 · How long?
 TimerScreen.kt|3 · What does it switch off?

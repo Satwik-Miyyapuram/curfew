@@ -2022,21 +2022,6 @@ fun WeekAtAGlance(
                 LegendSwatch(spillColour, "Past midnight")
                 LegendSwatch(calColour, "A calendar block")
             }
-            if (calendarBlocks.isNotEmpty()) {
-                Gap(Space.s)
-                // Say what the calendar band is made of, and what it cannot know. The chart carries no
-                // date, so a meeting repeats across the week here — which is the right thing for a
-                // planner and the wrong thing to leave unsaid.
-                val names = calendarBlocks.flatMap { it.profileNames }.distinct().sorted()
-                val blocks = count(calendarBlocks.size, "calendar block")
-                val from = names.joinToString(", ")
-                Text(
-                    "$blocks from $from, from the events Curfew can see. The chart shows a " +
-                        "week, so each one sits on the weekday it falls on.",
-                    style = Type.micro,
-                    color = Palette.dim,
-                )
-            }
         }
     }
 }

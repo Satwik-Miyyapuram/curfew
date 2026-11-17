@@ -43,7 +43,6 @@ ChallengeDialog.kt|What is ${challenge.question.replace(
 ChallengeDialog.kt|What is ${challenge.question.replace(
 Design.kt|$option min
 Design.kt|$ringLabel. ${durationWords(live.roundToInt())}.
-Design.kt|$blocks from $from, from the events Curfew can see. The chart shows a 
 Design.kt|${challenge.question} = ?
 Design.kt|Ask to end $name in 24 hours
 Design.kt|Ask to end $name in 24 hours
@@ -71,8 +70,6 @@ NowScreen.kt|$name ends ${relative(endsAt, now)}
 NowScreen.kt|$name ends ${relative(endsAt, now)}
 NowScreen.kt|${clockOf(activation.start)}–${clockOf(activation.end)}
 NowScreen.kt|${duration(today)} away from the phone today
-NowScreen.kt|${state.audit.size} logged
-NowScreen.kt|${state.sync.active.size} peers
 NowScreen.kt|$blocks kept, longest run $days.
 NowScreen.kt|${named(it.profile)} · ${duration((it.end - it.start).toInt())}
 NowScreen.kt|A release you asked for lands ${relative(at, now)}.
