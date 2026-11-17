@@ -1,32 +1,22 @@
 package dev.curfew.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import dev.curfew.policy.CalendarEvent
 import dev.curfew.policy.CalendarSchedule
 import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.EventMatcher
 import dev.curfew.policy.Lock
 import dev.curfew.policy.ProfileName
-import dev.curfew.policy.WeeklySchedule
 
 /**
  * Making a schedule without writing a config file.
@@ -39,9 +29,6 @@ import dev.curfew.policy.WeeklySchedule
  * Nothing here decides whether a schedule is legal. The form builds a value, the core accepts or
  * refuses the whole config, and a refusal is shown in the core's own words.
  */
-
-/** Monday first, because the core numbers days that way and a UI that reordered them would lie. */
-internal val DAY_NAMES = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 /**
  * The locks a form offers.
@@ -58,50 +45,6 @@ internal val OFFERED_LOCKS: List<Pair<String, Lock>> = listOf(
     "Type it out" to Lock.Challenge(ChallengeKind.TYPING),
     "Restart the device" to Lock.RestartRequired,
 )
-
-/**
- * Minutes after midnight, as `HH:mm`.
- *
- * Always 24-hour and always two digits, because this string is also what gets typed back in: a
- * field that renders "9:05 PM" and then refuses to parse it is worse than one that never localised.
- */
-internal fun minutesToHhMm(minutes: Int): String =
-    "%02d:%02d".format((minutes / 60) % 24, minutes % 60)
-
-/**
- * `HH:mm` back to minutes after midnight, or null if it is not a time.
- *
- * Lenient about the shapes people type — `9:5`, `09:05`, a stray space — and strict about the
- * result: 24:00 is not a time, and neither is 9:60.
- */
-internal fun hhMmToMinutes(text: String): Int? {
-    val parts = text.trim().split(':')
-    if (parts.size != 2) return null
-    val hours = parts[0].trim().toIntOrNull() ?: return null
-    val minutes = parts[1].trim().toIntOrNull() ?: return null
-    if (hours !in 0..23 || minutes !in 0..59) return null
-    return hours * 60 + minutes
-}
-
-/** The days a window runs, said the way the list itself would be read aloud. */
-internal fun describeDays(days: List<Int>): String = when {
-    days.isEmpty() -> "Every day"
-    days.sorted() == listOf(0, 1, 2, 3, 4) -> "Weekdays"
-    days.sorted() == listOf(5, 6) -> "Weekends"
-    else -> days.sorted().joinToString(", ") { DAY_NAMES.getOrElse(it) { "?" } }
-}
-
-/**
- * A window as one line: when it runs, and whether it crosses midnight.
- *
- * The crossing is spelled out rather than left to the reader, because "23:00 - 07:00" is the one
- * range a person routinely reads as an empty window.
- */
-internal fun describeWindow(window: WeeklySchedule): String {
-    val span = minutesToHhMm(window.startMinute) + " - " + minutesToHhMm(window.endMinute)
-    val overnight = if (window.endMinute <= window.startMinute) " (overnight)" else ""
-    return describeDays(window.days) + " · " + span + overnight
-}
 
 /** A calendar rule as one line: which events it catches. */
 internal fun describeMatcher(matcher: EventMatcher): String {
@@ -131,8 +74,8 @@ internal fun describePadding(beforeSeconds: Int, afterSeconds: Int): String? {
 @Composable
 private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose: (String) -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         profiles.forEach { profile ->
             Pill(profile.name, selected = profile.id == chosen, onClick = { onChoose(profile.id) })
@@ -144,8 +87,8 @@ private fun ProfilePicker(profiles: List<ProfileName>, chosen: String, onChoose:
 @Composable
 private fun LockPicker(chosen: List<Lock>, onChange: (List<Lock>) -> Unit) {
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
         OFFERED_LOCKS.forEach { (label, lock) ->
             Pill(label, selected = lock in chosen, onClick = {
@@ -160,121 +103,6 @@ private fun LockPicker(chosen: List<Lock>, onChange: (List<Lock>) -> Unit) {
             "Every condition you add is one you will have to satisfy to get out early."
         },
     )
-}
-
-/** The day presets, because "weekdays" is what people mean and five taps is how they mistype it. */
-private val DAY_PRESETS: List<Pair<String, List<Int>>> = listOf(
-    "Every day" to emptyList(),
-    "Weekdays" to listOf(0, 1, 2, 3, 4),
-    "Weekends" to listOf(5, 6),
-)
-
-/**
- * The weekly window form, used for both a new window and an edit.
- *
- * [existing] being null is the only difference: a new window gets an id derived from the clock, an
- * edit keeps the id it had, which is what makes saving it an edit rather than a second window.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun WeeklyDialog(
-    existing: WeeklySchedule?,
-    profiles: List<ProfileName>,
-    now: Long,
-    defaultProfile: String? = null,
-    onDismiss: () -> Unit,
-    onSave: (WeeklySchedule) -> Unit,
-) {
-    var profile by remember { mutableStateOf(existing?.profile ?: defaultProfile ?: profiles.firstOrNull()?.id ?: "") }
-    var days by remember { mutableStateOf(existing?.days ?: emptyList()) }
-    var start by remember { mutableStateOf(minutesToHhMm(existing?.startMinute ?: 9 * 60)) }
-    var end by remember { mutableStateOf(minutesToHhMm(existing?.endMinute ?: 17 * 60)) }
-    var locks by remember { mutableStateOf(existing?.locks ?: emptyList()) }
-
-    val startMinutes = hhMmToMinutes(start)
-    val endMinutes = hhMmToMinutes(end)
-    val valid = profile.isNotBlank() &&
-        startMinutes != null &&
-        endMinutes != null &&
-        startMinutes != endMinutes
-
-    // The line under the title is the window itself, said back: the reader can check what they are
-    // about to save without reassembling it from four separate controls.
-    val overnight = startMinutes != null && endMinutes != null && endMinutes <= startMinutes
-    val summary = when {
-        startMinutes == null || endMinutes == null -> "Pick a start and an end."
-        else -> describeDays(days) + " · " + minutesToHhMm(startMinutes) + " – " +
-            minutesToHhMm(endMinutes) + if (overnight && startMinutes != endMinutes) ", overnight." else "."
-    }
-
-    DSheet(
-        title = if (existing == null) "New window" else "Edit window",
-        sub = summary,
-        onDismiss = onDismiss,
-        confirm = "Save",
-        confirmEnabled = valid,
-        onConfirm = {
-            onSave(
-                WeeklySchedule(
-                    id = existing?.id ?: "w-$now",
-                    profile = profile,
-                    days = days.sorted(),
-                    startMinute = startMinutes ?: 0,
-                    endMinute = endMinutes ?: 0,
-                    locks = locks,
-                    // Editing a paused window must not quietly switch it back on.
-                    enabled = existing?.enabled ?: true,
-                ),
-            )
-        },
-    ) {
-        SheetSection("Profile") { ProfilePicker(profiles, profile) { profile = it } }
-
-        SheetSection("Days") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                DAY_PRESETS.forEach { (label, preset) ->
-                    Pill(label, selected = days.sorted() == preset, onClick = { days = preset })
-                }
-            }
-            Gap(10.dp)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                DAY_NAMES.forEachIndexed { index, name ->
-                    Pill(name, selected = index in days, onClick = {
-                        days = if (index in days) days - index else days + index
-                    })
-                }
-            }
-            if (days.isEmpty()) SheetNote("No day chosen means every day.")
-        }
-
-        SheetSection("When") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ValueField("From", start, bad = startMinutes == null, modifier = Modifier.weight(1f)) {
-                    start = it
-                }
-                ValueField("Until", end, bad = endMinutes == null, modifier = Modifier.weight(1f)) {
-                    end = it
-                }
-            }
-            // The overnight case is the one people mean most often and read wrongly most often, so
-            // it is confirmed back to them rather than left implied by the numbers.
-            if (startMinutes != null && endMinutes != null && endMinutes <= startMinutes) {
-                if (startMinutes == endMinutes) {
-                    SheetNote("A window cannot start and end at the same minute.", bad = true)
-                } else {
-                    SheetNote("Runs overnight, into the next morning.")
-                }
-            }
-        }
-
-        SheetSection("Locked by") { LockPicker(locks) { locks = it } }
-    }
 }
 
 /**
@@ -356,11 +184,11 @@ internal fun CalendarDialog(
 
         SheetSection("Which events") {
             TextField("Title contains", title, placeholder = "*focus*") { title = it }
-            Gap(10.dp)
+            Gap(Space.m)
             if (availableCalendars.isNotEmpty()) {
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     availableCalendars.forEach { calName ->
                         Pill(
@@ -372,16 +200,16 @@ internal fun CalendarDialog(
                         )
                     }
                 }
-                Gap(8.dp)
+                Gap(Space.s)
             }
             TextField("Calendar", calendar, placeholder = "Work") { calendar = it }
-            Gap(10.dp)
+            Gap(Space.m)
             TextField("Location", location, placeholder = "Anywhere") { location = it }
             SheetNote(
                 "Leave a field empty to ignore it. A star matches anything, so *focus* catches any " +
                     "event with the word focus in it.",
             )
-            Gap(14.dp)
+            Gap(Space.l)
             DRow(
                 title = "Only events marked busy",
                 note = "Ignores the ones you are merely invited to.",
@@ -392,7 +220,7 @@ internal fun CalendarDialog(
         SheetSection("Padding") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 listOf(0, 5, 10, 15).forEach { mins ->
                     val selected = before == mins.toString() && after == mins.toString()
@@ -407,8 +235,8 @@ internal fun CalendarDialog(
                     )
                 }
             }
-            Gap(10.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Gap(Space.m)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 ValueField(
                     "Start early",
                     before,

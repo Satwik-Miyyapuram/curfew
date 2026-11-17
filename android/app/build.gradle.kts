@@ -6,6 +6,18 @@ plugins {
 }
 
 android {
+    // Windows shell metadata is not a resource.
+    //
+    // Google Drive Desktop writes a `desktop.ini` into every folder it syncs, and this project
+    // lives in a synced folder. The resource merger walks `res/` and refuses any file that is not
+    // `.xml` or `.png`, so a Drive sync silently breaks the build with an error about a file
+    // nobody wrote and nobody can find by reading the code. Excluded here so the failure cannot
+    // come back the next time Drive decides to touch a folder.
+    androidResources {
+        ignoreAssetsPatterns.add("desktop.ini")
+        ignoreAssetsPatterns.add("*.ini")
+        ignoreAssetsPatterns.add("Thumbs.db")
+    }
     namespace = "dev.curfew.app"
     compileSdk = 35
 
@@ -89,8 +101,8 @@ android {
         // behave the way the enforcement design assumes.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // The four ABIs Android still ships. Without this, JNA drags in `mips`, `mips64` and
         // `armeabi` copies of jnidispatch for devices that have not existed for a decade.
@@ -141,6 +153,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
@@ -172,6 +186,9 @@ dependencies {
     // The desktop JNA jar: :policy exports the Android `.aar`, which carries no jnidispatch for the
     // host JVM, so a unit test that touches the Rust core would fail to link without this.
     testImplementation(libs.jna)
+    // Compose on Robolectric, for measuring the shared button components rather than trusting them.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.espresso.core)

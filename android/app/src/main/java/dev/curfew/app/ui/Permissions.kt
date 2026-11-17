@@ -16,7 +16,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
-import dev.curfew.app.enforce.CurfewDeviceAdmin
 import dev.curfew.app.enforce.CurfewNotificationListener
 import dev.curfew.app.enforce.Detector
 import dev.curfew.app.enforce.EnforcementMode
@@ -110,22 +109,6 @@ enum class Grant(
         cost = R.string.perm_battery_unrestricted_cost,
         required = false,
     ),
-
-    /**
-     * Last on purpose, and genuinely optional.
-     *
-     * This is the scariest dialog in the wizard and it has a real cost outside Curfew: a great many
-     * banking and payment apps refuse to run on a device with any active device admin, and one that
-     * cost somebody their bank app would have taken more than it gave. The accessibility guard
-     * covers the same ground without that cost, so this is now the stronger-but-pricier option
-     * rather than the recommended one.
-     */
-    UninstallProtection(
-        title = R.string.perm_uninstall_protection_title,
-        because = R.string.perm_uninstall_protection_because,
-        cost = R.string.perm_uninstall_protection_cost,
-        required = false,
-    ),
     ;
 
     fun isGranted(context: Context): Boolean = when (this) {
@@ -146,7 +129,6 @@ enum class Grant(
         BatteryUnrestricted ->
             context.getSystemService(PowerManager::class.java)
                 .isIgnoringBatteryOptimizations(context.packageName)
-        UninstallProtection -> CurfewDeviceAdmin.isActive(context)
     }
 
     /**
@@ -202,7 +184,6 @@ enum class Grant(
             ),
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
         )
-        UninstallProtection -> listOfNotNull(CurfewDeviceAdmin.requestIntent(context))
         Notifications, Calendar -> emptyList()
     }
 
@@ -271,6 +252,18 @@ enum class Grant(
 
         /** Asked in one place, in [UsageStatsPoller], so the API-level branch exists only once. */
         fun hasUsageAccess(context: Context): Boolean = UsageStatsPoller.hasPermission(context)
+
+        /**
+         * Whether a blocked app can actually be replaced by the block screen.
+         *
+         * Usage access alone sees the app but cannot cover it: from Android 10 the system refuses a
+         * background activity start (logged as `BAL_BLOCK`) unless the app may draw over others.
+         * Measured on a Samsung, Android 14: usage access only, the blocked app stayed open; with the
+         * overlay grant added, the block screen replaced it. The accessibility service is exempt.
+         */
+        fun canBlockApps(context: Context): Boolean =
+            Accessibility.isGranted(context) ||
+                (UsageAccess.isGranted(context) && Overlay.isGranted(context))
     }
 }
 

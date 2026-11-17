@@ -3,11 +3,9 @@ package dev.curfew.app.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -22,9 +20,7 @@ import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 
 /**
@@ -50,57 +46,58 @@ fun ChallengeDialog(
     val satisfied = Challenge.isSatisfied(challenge, input)
 
     CompositionLocalProvider(LocalTextToolbar provides NoToolbar) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(challenge.prompt) },
-            text = {
-                Column {
-                    when (challenge) {
-                        is Challenge.Typing -> Text(
-                            challenge.passage,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontFamily = FontFamily.Serif,
-                        )
-                        is Challenge.Math -> Text(
-                            "${challenge.question} = ?",
-                            style = MaterialTheme.typography.headlineSmall,
-                            // "×" is read out as "x" or skipped entirely by some screen readers, which
-                            // turns an arithmetic problem into a guess.
-                            modifier = Modifier.semantics {
-                                contentDescription =
-                                    "What is ${challenge.question.replace("×", "times")}?"
-                            },
-                        )
-                    }
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = { if (Challenge.isTyped(challenge, input, it)) input = it },
-                        singleLine = challenge is Challenge.Math,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = if (challenge is Challenge.Math) {
-                                KeyboardType.Number
-                            } else {
-                                KeyboardType.Text
-                            },
-                            imeAction = ImeAction.Done,
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp)
-                            .semantics {
-                                contentDescription = when (challenge) {
-                                    is Challenge.Typing -> "Type the passage here."
-                                    is Challenge.Math -> "Type the answer here."
-                                }
-                            },
+        DSheet(
+            title = challenge.prompt,
+            sub = null,
+            onDismiss = onDismiss,
+            confirm = "End it",
+            confirmEnabled = satisfied,
+            onConfirm = onSatisfied,
+            tone = Palette.warn,
+        ) {
+            Column {
+                when (challenge) {
+                    is Challenge.Typing -> Text(
+                        challenge.passage,
+                        style = Type.body,
+                        color = Palette.text,
+                    )
+                    is Challenge.Math -> Text(
+                        "${challenge.question} = ?",
+                        style = Type.h2,
+                        color = Palette.text,
+                        // "×" is read out as "x" or skipped entirely by some screen readers, which
+                        // turns an arithmetic problem into a guess.
+                        modifier = Modifier.semantics {
+                            contentDescription =
+                                "What is ${challenge.question.replace("×", "times")}?"
+                        },
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = onSatisfied, enabled = satisfied) { Text("End the session") }
-            },
-            dismissButton = { TextButton(onClick = onDismiss) { Text("Keep going") } },
-        )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { if (Challenge.isTyped(challenge, input, it)) input = it },
+                    singleLine = challenge is Challenge.Math,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = if (challenge is Challenge.Math) {
+                            KeyboardType.Number
+                        } else {
+                            KeyboardType.Text
+                        },
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Space.m)
+                        .semantics {
+                            contentDescription = when (challenge) {
+                                is Challenge.Typing -> "Type the passage here."
+                                is Challenge.Math -> "Type the answer here."
+                            }
+                        },
+                )
+            }
+        }
     }
 }
 

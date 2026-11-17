@@ -237,6 +237,15 @@ uninstalling harder while a lock is running" and never as a requirement, and the
 is bounced only while a lock is actually held — once every lock has ended, deactivation and
 uninstall are ordinary again, which is what keeps D2 intact. No device *owner*, no provisioning, no
 factory reset: that line is unchanged and permanent.
+*Reversed (user, 2026-11-16):* Device Admin and the accessibility uninstall guard are both removed.
+Deactivating an admin, or finding adb, is not a way out a normal user can take, and a lock that has
+gone wrong must always have one. A plain uninstall is now that way out: Curfew is never a device
+admin, nothing presses Back on any screen, and Settings and the package installers are on the
+never-block list. Installs that had admin turned on lose it on upgrade, because the receiver is
+gone. The lock flag the guard read lives on as `LockFlag`, for the reader's one-tap switch-off.
+The same goes for Windows: `curfew uninstall`, and Settings > Apps through it, no longer refuses
+during a lock. It leaves a marker the service's stop handler and the watchdog both honour, removes
+the service, gives back hosts and DNS, and forgets the state so a reinstall resumes nothing.
 
 **G3. Their sync design is unusable here; their envelope is not — CLOSED.** Curbox syncs through a
 hosted Supabase project with accounts (`src/lib/supabase.ts`), which is a server and a recurring

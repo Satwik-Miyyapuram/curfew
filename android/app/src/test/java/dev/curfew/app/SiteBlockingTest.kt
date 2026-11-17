@@ -57,7 +57,7 @@ class SiteBlockingTest {
     private suspend fun running(configToml: String): CurfewRuntime {
         val runtime = TestRuntime.create(
             configToml = configToml,
-            mode = EnforcementMode.APP_AND_URL,
+            mode = EnforcementMode.PRECISE,
         )
         runtime.startSession(
             Session(
@@ -120,7 +120,7 @@ class SiteBlockingTest {
     fun `nothing blocks without a running session`() = runTest {
         val runtime = TestRuntime.create(
             configToml = config(reddit),
-            mode = EnforcementMode.APP_AND_URL,
+            mode = EnforcementMode.PRECISE,
         )
         val actions = EnforcerTest.RecordingActions()
 

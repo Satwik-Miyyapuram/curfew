@@ -58,11 +58,25 @@ pub fn decide(seen: Seen, locks_running: bool) -> Action {
     }
 }
 
-/// Whether the last saved state still has a lock in it.
+/// A file whose existence means `curfew uninstall` is removing Curfew.
+///
+/// Uninstalling is always allowed, during a lock too (GAPS G2): a blocker with no way out is the one
+/// that gets a machine wiped. The uninstaller writes this before it stops the service, so the stop
+/// handler accepts the stop and the watchdog does not start the service again in the moment between
+/// the stop and the delete. It lives in the service's directory, which only administrators can write,
+/// and an administrator can uninstall anyway, so it opens nothing that was not already open.
+pub fn leaving_marker(state_path: &Path) -> PathBuf {
+    state_path.with_file_name("uninstalling")
+}
+
+/// Whether the last saved state still has a lock in it, and Curfew is not being uninstalled.
 ///
 /// An unreadable state file counts as "yes". The alternative is that corrupting a file releases a
 /// lock, and every uncertain case here is resolved in favour of the promise the user made.
 pub fn locks_running(state_path: &Path) -> bool {
+    if leaving_marker(state_path).exists() {
+        return false;
+    }
     match state::load(state_path) {
         Loaded::Ok(state) | Loaded::Recovered { state, .. } => !state.sessions.running.is_empty(),
         Loaded::Fresh => false,
@@ -227,9 +241,9 @@ mod tests {
 
     #[test]
     fn an_uninstalled_service_is_never_started_again() {
-        // Uninstalling already refuses while a lock is held, so reaching here with locks means the
-        // user got out the supported way. Restarting a deleted service would make removal
-        // impossible, which is the line between a commitment device and malware.
+        // Uninstalling is always allowed, so reaching here with locks means the user got out the
+        // supported way. Restarting a deleted service would make removal impossible, which is the
+        // line between a commitment device and malware.
         assert_eq!(decide(Seen::Gone, true), Action::Retire);
         assert_eq!(decide(Seen::Gone, false), Action::Retire);
     }
@@ -293,6 +307,31 @@ mod tests {
             locks_running(&path),
             "deleting the state files retired the watchdog, so nothing would restart enforcement"
         );
+    }
+
+    /// Uninstalling is always the way out: the marker lifts the lock for the stop handler and the
+    /// watchdog, and forgetting the state leaves nothing to resume after a reinstall.
+    #[test]
+    fn an_uninstall_ends_a_running_lock() {
+        let dir = scratch("uninstall");
+        let mut sessions = curfew_core::Sessions::default();
+        sessions.start(curfew_core::Session {
+            id: "s1".into(),
+            profile: "deep-work".into(),
+            source: curfew_core::session::SessionSource::Manual,
+            started_at: 1_788_510_600,
+            lock: curfew_core::LockSet::new([curfew_core::Lock::Timer], Some(1_788_513_600)),
+        });
+        let path = dir.join("state.json");
+        state::save(&path, &state::Persisted { sessions, ..Default::default() }).unwrap();
+        assert!(locks_running(&path));
+
+        std::fs::write(leaving_marker(&path), b"").unwrap();
+        assert!(!locks_running(&path), "the uninstaller's stop would be refused");
+
+        state::forget(&path);
+        std::fs::remove_file(leaving_marker(&path)).unwrap();
+        assert!(!locks_running(&path), "a reinstall would resume the lock it was removed to end");
     }
 
     /// And a machine that has genuinely never run is still left alone.

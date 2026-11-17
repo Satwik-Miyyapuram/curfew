@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.curfew.app.R
 import dev.curfew.app.enforce.SensitiveApps
 
@@ -59,37 +58,34 @@ fun SensitiveAppsScreen(model: CurfewViewModel) {
     val curated = SensitiveApps.CURATED
 
     Screen(spacing = 0.dp) {
-        Title(stringResource(R.string.sensitive_title), size = 26)
-        Gap(8.dp)
+        Title(stringResource(R.string.sensitive_title))
+        Gap(Space.s)
         Text(
             stringResource(R.string.sensitive_intro),
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
-            color = Palette.Muted,
+            style = Type.body,
+            color = Palette.muted,
         )
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.sensitive_curated_section))
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 16.dp) {
             Text(
                 stringResource(R.string.sensitive_curated_note, curated.size),
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = Palette.Muted,
+                style = Type.meta,
+                color = Palette.muted,
             )
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.sensitive_added_section))
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 16.dp) {
             if (extra.isEmpty()) {
                 Text(
                     stringResource(R.string.sensitive_added_empty),
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             } else {
                 extra.forEach { packageName ->
@@ -106,17 +102,16 @@ fun SensitiveAppsScreen(model: CurfewViewModel) {
         }
 
         if (exempt.isNotEmpty()) {
-            Gap(18.dp)
+            Gap(Space.l)
             SectionLabel(stringResource(R.string.sensitive_exempt_section))
-            Gap(10.dp)
+            Gap(Space.m)
             DCard(padding = 16.dp) {
                 Text(
                     stringResource(R.string.sensitive_exempt_note),
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
-                Gap(6.dp)
+                Gap(Space.s)
                 exempt.forEach { packageName ->
                     SensitiveRow(
                         label = installed.firstOrNull { it.first == packageName }?.second ?: packageName,
@@ -130,16 +125,16 @@ fun SensitiveAppsScreen(model: CurfewViewModel) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.sensitive_all_section))
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 16.dp) {
             Column(Modifier.fillMaxWidth()) {
                 installed.filter { it.first in resolved }.forEach { (packageName, label) ->
                     if (packageName in curated) {
-                        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
-                            Text(label, fontSize = 14.sp, color = Palette.Text)
-                            Text(packageName, fontSize = 10.5.sp, color = Palette.Dim)
+                        Column(Modifier.fillMaxWidth().padding(vertical = Space.xs)) {
+                            Text(label, style = Type.body, color = Palette.text)
+                            Text(packageName, style = Type.micro, color = Palette.dim)
                         }
                     } else {
                         SensitiveRow(
@@ -157,17 +152,16 @@ fun SensitiveAppsScreen(model: CurfewViewModel) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.sensitive_candidates_section))
-        Gap(10.dp)
+        Gap(Space.m)
         DCard(padding = 16.dp) {
             Text(
                 stringResource(R.string.sensitive_candidates_note),
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                color = Palette.Muted,
+                style = Type.meta,
+                color = Palette.muted,
             )
-            Gap(6.dp)
+            Gap(Space.s)
             Column(Modifier.fillMaxWidth()) {
                 installed.filter { it.first !in resolved }.forEach { (packageName, label) ->
                     SensitiveRow(
@@ -182,16 +176,15 @@ fun SensitiveAppsScreen(model: CurfewViewModel) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         // Said at the bottom, because it is what a user is most likely to be surprised by: the
         // guarantee is about reading, not about blocking.
         Text(
             stringResource(R.string.sensitive_footer),
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            color = Palette.Dim,
+            style = Type.meta,
+            color = Palette.dim,
         )
-        Gap(24.dp)
+        Gap(Space.xl)
     }
 }
 
@@ -204,13 +197,13 @@ private fun SensitiveRow(
     onAction: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 14.sp, color = Palette.Text)
-            Text(packageName, fontSize = 10.5.sp, color = Palette.Dim)
+            Text(label, style = Type.body, color = Palette.text)
+            Text(packageName, style = Type.micro, color = Palette.dim)
         }
         GhostButton(text = action, onClick = onAction)
     }

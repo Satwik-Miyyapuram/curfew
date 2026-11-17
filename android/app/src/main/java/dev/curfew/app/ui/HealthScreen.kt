@@ -16,25 +16,34 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import dev.curfew.app.R
+import dev.curfew.app.enforce.Detector
+import dev.curfew.app.enforce.EnforcementMode
+import dev.curfew.app.enforce.Watchers
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * Whether Curfew is actually working, said without euphemism.
  *
  * A blocker that has quietly stopped enforcing is worse than no blocker, because the user is still
- * relying on it. So this screen leads with the plain answer — one sentence, coloured only when
- * something is wrong — lists every permission with what is lost while it is missing, and never
- * phrases a missing permission as a feature the user might enjoy turning on.
+ * relying on it. So this screen leads with the plain answer, one sentence coloured only when
+ * something is wrong, lists every permission with what is lost while it is missing, and never
+ * phrases a missing permission as a feature the user might enjoy turning on. Advanced detection
+ * details sit at the bottom.
  *
  * It is drawn in the canvas's own vocabulary rather than in Material defaults, because a screen
  * that looks like a different app is a screen the user reads as a system dialog and dismisses.
@@ -43,63 +52,56 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun HealthScreen(model: CurfewViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val missingRequired = state.grants.filter { it.grant.required && !it.granted }
+    // No single grant is required, but some pair is: see [Grant.canBlockApps]. Without one, the
+    // missing half of the usage-access route is what to name, since that route has no side effects.
+    val missingRequired = state.grants.filter { !it.granted }.filter {
+        it.grant.required ||
+            (!Grant.canBlockApps(context) && it.grant in listOf(Grant.UsageAccess, Grant.Overlay))
+    }
     val fine = missingRequired.isEmpty()
 
     Screen(spacing = 0.dp) {
-        Title(
-            stringResource(
-                if (fine) R.string.health_can_enforce else R.string.health_cannot_enforce,
-            ),
-            size = 26,
-        )
-        Gap(8.dp)
+        Title("Is Curfew working")
+        Gap(Space.s)
         Text(
             if (fine) {
                 stringResource(R.string.health_all_in_place)
             } else {
                 // One resource with the reasons substituted in, not a sentence built with `+`.
-                // A concatenation of a lead-in and a list cannot be translated: the clause order
-                // and the punctuation belong to the language, not to the list.
-                //
-                // `map` before `joinToString`, and that ordering is load-bearing rather than a
-                // style choice: `stringResource` is composable, `map` is `inline` so it inherits the
-                // composable context, and `joinToString` is not — so resolving inside the join is a
-                // compile error. Which is how this was found.
+                // `map` before `joinToString` is load-bearing: `stringResource` is composable, and
+                // `joinToString` is not, so resolving inside the join would not compile.
                 stringResource(
                     R.string.health_nothing_blocked,
                     missingRequired.map { stringResource(it.grant.cost) }.joinToString(" "),
                 )
             },
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
+            style = Type.body,
             // The only coloured sentence on the screen, and only when it means something is not
             // happening right now.
-            color = if (fine) Palette.Muted else Palette.Bad,
+            color = if (fine) Palette.muted else Palette.bad,
         )
 
         if (state.restrictedSettings) {
-            Gap(16.dp)
+            Gap(Space.l)
             DCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("!", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Palette.Bad)
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    Text("!", style = Type.h3, color = Palette.bad)
                     Column {
                         Text(
                             stringResource(R.string.health_restricted_title),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
+                            style = Type.body,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.text,
                         )
                         Text(
                             RestrictedSettings.INSTRUCTIONS,
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            color = Palette.Muted,
-                            modifier = Modifier.padding(top = 6.dp),
+                            style = Type.meta,
+                            color = Palette.muted,
+                            modifier = Modifier.padding(top = Space.s),
                         )
                     }
                 }
-                Gap(12.dp)
+                Gap(Space.m)
                 GhostButton(text = stringResource(R.string.health_open_app_info)) {
                     context.startActivity(
                         RestrictedSettings.appInfoIntent(context)
@@ -109,20 +111,14 @@ fun HealthScreen(model: CurfewViewModel) {
             }
         }
 
-        Gap(18.dp)
+        Gap(Space.l)
         SectionLabel(stringResource(R.string.health_every_permission))
-        Gap(10.dp)
+        Gap(Space.m)
         DCardFlush {
             state.grants.forEachIndexed { index, entry ->
                 if (index > 0) Rule()
                 // Resolved here rather than inside the semantics block, which is not a composable
-                // scope — and the whole row is read as one thing: a screen reader user should hear
-                // the permission, whether it is held, and what is lost without it as a single
-                // sentence, rather than swiping through four fragments to assemble it.
-                //
-                // The sentence itself is a resource with numbered arguments, so a translator can put
-                // the clauses in their own order. Concatenating three resolved fragments would read
-                // correctly in English and in nothing else.
+                // scope. The whole row is read as one sentence by a screen reader.
                 val name = stringResource(entry.grant.title)
                 val why = stringResource(entry.grant.because)
                 val without = stringResource(entry.grant.cost)
@@ -134,90 +130,152 @@ fun HealthScreen(model: CurfewViewModel) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 17.dp, vertical = 15.dp)
+                        .padding(horizontal = Space.l, vertical = Space.l)
                         .semantics(mergeDescendants = true) { contentDescription = described },
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
-                        Text(
-                            if (entry.granted) "✓" else "!",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (entry.granted) Palette.Ok else Palette.Bad,
-                            modifier = Modifier.size(18.dp),
-                        )
+                        GrantMark(entry.granted, entry.grant.required)
                         Text(
                             name,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
+                            style = Type.body,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.text,
                             modifier = Modifier.weight(1f),
                         )
                         if (!entry.granted) {
                             Grant {
-                                // One shared implementation: this was the hardened copy of three that
-                                // had drifted, one of which crashed and one of which failed silently.
-                                // See `openGrantPage`.
+                                // One shared implementation. See `openGrantPage`.
                                 openGrantPage(context, entry.grant)
                             }
                         }
                     }
                     Text(
                         why,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(top = 6.dp, start = 30.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(top = Space.s, start = Space.xxl),
                     )
                     if (!entry.granted) {
                         Text(
                             stringResource(R.string.health_without_it, without),
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp,
-                            color = Palette.Bad,
-                            modifier = Modifier.padding(top = 4.dp, start = 30.dp),
+                            style = Type.meta,
+                            color = Palette.bad,
+                            modifier = Modifier.padding(top = Space.xs, start = Space.xxl),
                         )
                     }
                 }
             }
         }
 
-        Gap(18.dp)
-        DCard(padding = 16.dp) {
-            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                Text("⛨", fontSize = 17.sp, color = Palette.Muted)
+        Gap(Space.l)
+        DCard {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text("⛨", style = Type.h3, fontWeight = FontWeight.Normal, color = Palette.muted)
                 Text(
                     // Not "no internet permission at all": the manifest declares INTERNET, because
-                    // LAN sync needs it, and a user can falsify that sentence in ten seconds in
-                    // Android Settings. And not "nothing leaves this device" either, which is what
-                    // this card said — false whenever sync is on, and contradicted by its own next
-                    // clause. The shared sentence is the honest one. See [Privacy].
+                    // LAN sync needs it. The shared sentence is the honest one. See [Privacy].
                     Privacy.NO_SERVER + " Its database is encrypted with a key held by this " +
                         "device's keystore.",
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             }
         }
-        Gap(8.dp)
+
+        // ---------------------------------------------------------------------------------------
+        // Advanced: which service is detecting, and the controls that change it. These used to sit
+        // on the Settings screen, which repeated the permission list above and was not the place a
+        // user goes to check that blocking works.
+        // ---------------------------------------------------------------------------------------
+        Gap(Space.l)
+        SectionLabel("Advanced")
+        Gap(Space.m)
+        DCard {
+            val detector = Grant.detector(context)
+            val chosen = Grant.chosenMode(context)
+
+            ModeStatus(detector)
+            if (detector == Detector.Poller) {
+                Gap(Space.s)
+                Text(
+                    stringResource(R.string.settings_accessibility_needs_turning_on),
+                    style = Type.meta,
+                    color = Palette.dim,
+                )
+            }
+            Gap(Space.m)
+            // One tap, and blocking keeps working through the polling detector. It is only the
+            // precision and the site rules that go.
+            GhostButton(
+                text = stringResource(R.string.settings_use_no_special_access),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Watchers.rememberAccessibilityWanted(context, wanted = false)
+                // The running reader can switch itself off, which is what lets a payment app run.
+                // When it cannot, the user does it in Settings.
+                if (Watchers.turnOffReader(context)) {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.settings_use_no_special_access_done),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    turnOffAccessibilityHint(context)
+                }
+            }
+
+            // Having both services on is the worst of both worlds and worth saying out loud.
+            val other = EnforcementMode.entries.firstOrNull {
+                it.serviceClass() != detector.serviceClass() && Grant.isModeEnabled(context, it)
+            }
+            if (other != null) {
+                Gap(Space.m)
+                Notice(
+                    text = stringResource(
+                        R.string.perm_accessibility_mode_other_still_on,
+                        stringResource(other.label()),
+                    ),
+                    tone = NoticeTone.Warning,
+                )
+            }
+
+            // Chosen but not what is detecting: said out loud rather than left as a button that looks
+            // selected over a device running something else.
+            if (detector != Detector.Poller && chosen != detector.mode()) {
+                val chosenName = stringResource(chosen.label())
+                val runningName = stringResource(detector.label())
+                Gap(Space.m)
+                Notice(
+                    text = stringResource(
+                        R.string.perm_accessibility_mode_chosen_not_running,
+                        chosenName,
+                        runningName,
+                    ),
+                    tone = NoticeTone.Warning,
+                )
+            }
+        }
+        Gap(Space.s)
     }
 }
 
-/** The one action on a row: the system page for exactly this permission. */
+/**
+ * The one action on a row: the system page for exactly this permission. At least a full touch
+ * target tall, so it is not smaller than the other buttons on the screen.
+ */
 @Composable
 private fun Grant(onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .height(32.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Palette.Accent)
+            .heightIn(min = Dsn.MinTouch)
+            .background(Palette.accent, RoundedCornerShape(Dsn.CtlRadius))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = Space.l),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Allow", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+        Text("Allow", style = Type.meta, fontWeight = FontWeight.Bold, color = Palette.onFill)
     }
 }

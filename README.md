@@ -114,8 +114,9 @@ Two consequences follow, and both are deliberate:
   moment it starts, and each one offers a 24-hour delayed release. Somebody who installs this on
   another person's phone cannot make a block they cannot see or wait out.
 - **Nothing is set that we could not lift.** Curfew never takes device-owner mode, and never asks
-  for a factory reset to remove. Device admin is optional, user-revocable, and used only to make
-  uninstalling deliberate rather than impossible.
+  for a factory reset to remove. On Android it is never a device admin either, and on Windows the
+  uninstaller never refuses, so a plain uninstall from Settings always works, during a lock too:
+  that is the last way out, and it is the one everybody already knows.
 
 If what you want is to watch or restrict somebody else, this is the wrong project, and no amount of
 configuration will make it the right one.
@@ -125,8 +126,9 @@ configuration will make it the right one.
 The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the short version:
 
 - **What it stops:** the impulse, and the moment of weakness ten minutes later. Blocking is enforced
-  in the OS the app runs in, and a lock cannot be ended early by uninstalling, by editing the config,
-  or by changing the clock.
+  in the OS the app runs in, and a lock cannot be ended early by editing the config or by changing
+  the clock. Uninstalling ends it, on Android and Windows, deliberately: no lock is worth a device
+  you cannot get out of.
 - **What it does not stop:** somebody with root, an unlocked bootloader, an Administrator account
   they are willing to use, or a second device you never told Curfew about. That ceiling is a
   property of what Android and Windows let an app do, and pretending otherwise would be the
@@ -147,7 +149,6 @@ rather than the behaviour. That is why Curfew ships **two** services and expects
 | Can read a window | **no** | yes |
 | Blocks apps | yes | yes |
 | Blocks sites, URLs, keywords | no — refused at config load | yes |
-| Guards against uninstall | no | yes |
 | Banking apps object | no | yes |
 
 App blocking alone reads a package name and nothing else. Site blocking reads exactly two things: the

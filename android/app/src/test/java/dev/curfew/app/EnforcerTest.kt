@@ -99,6 +99,22 @@ class EnforcerTest {
     }
 
     @Test
+    fun `an escape route is never blocked, whatever the rules say`() = runTest {
+        val guarded = Enforcer(runtime, actions, neverBlocked = setOf("com.instagram.android"))
+
+        guarded.onObservation(Observation.App("com.instagram.android"), now)
+
+        assertEquals(emptyList<Any>(), actions.blocked)
+        assertEquals(listOf("app:com.instagram.android"), actions.allowed)
+    }
+
+    @Test
+    fun `settings, the uninstaller and the dialer are escape routes`() {
+        listOf("com.android.settings", "com.google.android.packageinstaller", "com.google.android.dialer")
+            .forEach { assertTrue(it, it in Enforcer.ESCAPE_ROUTES) }
+    }
+
+    @Test
     fun `an app with no rule is left alone`() = runTest {
         enforcer.onObservation(Observation.App("org.gnu.emacs"), now)
 

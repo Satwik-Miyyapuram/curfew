@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Curfew</string>
-    <string name="accessibility_service_label">Curfew site blocking</string>
+    <string name="accessibility_service_label">Curfew precise blocking (with site rules)</string>
     <string name="accessibility_service_description">Curfew reads the name of the app in the foreground so it can replace the ones you have chosen to block. To block websites it also reads the address bar of a browser it recognises. While a lock is running it checks whether the screen in front is the Curfew settings or uninstall page, so it can hold that page shut; that check looks only for its own name. It never reads payment, banking or password apps. Nothing it sees is stored, and nothing leaves your device. Because this service can read a screen, some banking and payment apps will refuse to run while it is on; Curfew\'s app-only service cannot read a screen and costs nothing elsewhere.</string>
-    <string name="foreground_tracker_label">Curfew app blocking</string>
-    <string name="foreground_tracker_description">Curfew reads the name of the app in the foreground so it can replace the ones you have chosen to block. That is all it can see: this service cannot read the contents of any screen, so it cannot block websites and cannot guard against Curfew being uninstalled. It also cannot be objected to by banking and payment apps, which is exactly why it exists. Nothing it sees is stored, and nothing leaves your device.</string>
 
     <string name="notification_listener_label">Curfew notification muting</string>
 
@@ -26,28 +24,30 @@
          Emitted from the source rather than retyped, so no word differs from the original. -->
     <string name="perm_accessibility_title">Precise blocking</string>
     <string name="perm_accessibility_because">Curfew needs to see which app is in front to replace it the moment it opens.</string>
-    <string name="perm_accessibility_cost">Without it Curfew falls back to the system\'s usage log, which does work — but it notices an app up to a second or two late, cannot re-assert a block, and cannot block a website. Turning this on makes blocking precise. There are two versions of the service and the choice is yours: app blocking alone reads no screen, so nothing outside Curfew notices it; app and site blocking also reads a browser\'s address bar to block sites and to guard against Curfew being uninstalled, and some banking and payment apps will refuse to run while it is on. Whichever you pick, you can block any app you like, and Curfew never reads the screen of a payment, banking or password app.</string>
-    <string name="perm_accessibility_mode_app_only">App blocking, precise</string>
-    <string name="perm_accessibility_mode_app_and_url">App and site blocking</string>
-    <string name="perm_accessibility_mode_app_only_note">Blocks any app the moment it opens, reads no screen. No site rules, and no uninstall guard.</string>
+    <string name="perm_accessibility_cost">Instant blocks and website rules. Some banking apps refuse to run while it is on. Never stops you uninstalling.</string>
+    <string name="perm_accessibility_mode_app_and_url">Precise blocking, with site rules</string>
     <string name="perm_accessibility_mode_app_and_url_note">Blocks any app the moment it opens, and reads a browser\'s address bar to block sites. Some banking and payment apps will refuse to run.</string>
-    <string name="perm_accessibility_mode_neither_blocks_apps">Every version blocks apps; the fallback needs no special access at all. What changes is how quickly a block lands, and whether Curfew may read a browser\'s address bar.</string>
-    <string name="perm_accessibility_mode_other_still_on">The other accessibility service is also switched on, which keeps the banking-app warning without adding anything. Turn off %1$s to get the benefit of this mode.</string>
+    <string name="perm_accessibility_mode_neither_blocks_apps">Apps are blocked either way.</string>
+    <string name="perm_accessibility_mode_other_still_on">Both levels of precise blocking are switched on. That keeps the banking-app warning without adding anything, because the higher level already does everything the lower one can. Turn off %1$s in the accessibility settings to get the benefit of this level.</string>
     <string name="settings_mode_running_label">DETECTING WITH</string>
     <string name="settings_detector_poller">The usage log — no special access</string>
-    <string name="settings_detector_poller_note">Blocks any app, up to a second or two late. Cannot block a website, and cannot re-assert a block.</string>
-    <string name="settings_use_no_special_access">Block without any special access</string>
-    <string name="settings_use_no_special_access_how">Turn both Curfew services off in the list that is about to open. Blocking keeps working through the usage log — it just notices an app a second or two late.</string>
+    <string name="settings_detector_poller_note">Blocks apps a second or two late. No website blocking.</string>
+    <string name="settings_use_no_special_access">Use no special access</string>
+    <string name="settings_use_no_special_access_how">Turn Curfew off in the list that opens. Apps still get blocked, a second or two late.</string>
+    <string name="settings_use_no_special_access_done">Accessibility is off, so payment apps will run. Apps still get blocked, a second or two late.</string>
     <string name="perm_accessibility_mode_chosen_not_running">You chose %1$s, but %2$s is what is running. The switch itself is in Android\'s accessibility settings.</string>
     <string name="perm_usage_access_title">Usage access</string>
     <string name="perm_usage_access_because">Two things: time budgets are counted from the system\'s own usage figures, and if you do not grant Precise blocking, this is what tells Curfew which app is in front.</string>
     <string name="perm_usage_access_cost">Budgets and launch limits stop counting. Without Precise blocking as well, nothing can be blocked either — this is the only detector left.</string>
     <string name="perm_overlay_title">Display over other apps</string>
-    <string name="perm_overlay_because">Some launchers refuse to show the block screen from the background without it.</string>
-    <string name="perm_overlay_cost">A blocked app may flash into view for a moment before it is replaced.</string>
+    <string name="perm_overlay_because">Without Precise blocking, this is what lets the block screen open over a blocked app. Android refuses it otherwise.</string>
+    <string name="perm_overlay_cost">Without Precise blocking as well, blocked apps stay open.</string>
+    <string name="now_not_blocking">Not blocking</string>
+    <string name="profile_not_a_domain">That isn\'t a website. Type one like reddit.com.</string>
+    <string name="now_not_blocking_why">Apps stay open until Curfew can cover them. Settings has the switch.</string>
     <string name="perm_notifications_title">Notifications</string>
     <string name="perm_notifications_because">The ongoing notification is how you can always tell that enforcement is running.</string>
-    <string name="perm_notifications_cost">Enforcement still runs, but Android may show its own generic notice instead.</string>
+    <string name="perm_notifications_cost">Blocks still work; Android may show a generic notice.</string>
     <string name="perm_exact_alarms_title">Exact alarms</string>
     <string name="perm_exact_alarms_because">A session that should start at 09:00 has to start at 09:00, not whenever the system next wakes.</string>
     <string name="perm_exact_alarms_cost">Sessions can start up to a few minutes late.</string>
@@ -56,13 +56,10 @@
     <string name="perm_calendar_cost">Calendar rules never match; weekly schedules are unaffected.</string>
     <string name="perm_notification_access_title">Notification access</string>
     <string name="perm_notification_access_because">Silencing an app\'s notifications is the one thing Android will not let Curfew do without it.</string>
-    <string name="perm_notification_access_cost">Rules that mute notifications do nothing; everything else is unaffected. Granting it lets Curfew see every notification on the device, so leave it off unless you use a mute rule.</string>
+    <string name="perm_notification_access_cost">Only needed for mute rules. It lets Curfew see every notification.</string>
     <string name="perm_battery_unrestricted_title">Unrestricted battery use</string>
     <string name="perm_battery_unrestricted_because">Aggressive battery savers kill background services, and a blocker that is killed blocks nothing.</string>
-    <string name="perm_battery_unrestricted_cost">Curfew may be stopped by the system and stop enforcing without warning.</string>
-    <string name="perm_uninstall_protection_title">Uninstall protection (device admin)</string>
-    <string name="perm_uninstall_protection_because">Android will not uninstall an app that is an active device admin, which closes the last easy way out of a running lock. Curfew already holds its own settings and uninstall pages shut through the accessibility service; this is the stricter version of the same idea.</string>
-    <string name="perm_uninstall_protection_cost">Nothing inside Curfew changes: every block, schedule and lock works the same either way. The cost is outside it — many banking and payment apps refuse to run while any device admin is active, so leave this off if you use one. Curfew asks for no admin powers beyond being active: it cannot erase, lock or unlock the device, or touch any password, and you can turn it off whenever no lock is running.</string>
+    <string name="perm_battery_unrestricted_cost">Android may stop Curfew without warning.</string>
 
     <!--
       The sentences the health and settings screens build around a grant's own copy.
@@ -104,10 +101,12 @@
     <string name="device_remove_failed">That device could not be removed.</string>
     <string name="up_to_date">Up to date.</string>
     <string name="folder_failed">That folder could not be used.</string>
+    <string name="edit_profile_named">Edit %1$s</string>
     <string name="ended_with_pass">%1$s ended with an emergency pass.</string>
     <string name="released">Released. The other device will act on it within a few seconds.</string>
     <string name="release_lands">Release for %1$s lands %2$s.</string>
     <string name="cannot_release_early">That session cannot be released early.</string>
+    <string name="release_explained">The last-resort release: ask now, it lands a day later. Nothing can shorten it. Uninstalling Curfew also ends any lock.</string>
     <string name="config_load_failed">That config could not be loaded.</string>
     <string name="start_failed">That could not be started.</string>
     <string name="profile_save_failed">That profile could not be saved.</string>
@@ -171,9 +170,13 @@
     <string name="sensitive_action_restore">Put back</string>
     <string name="sensitive_always">always</string>
     <string name="sensitive_footer">Reading is what is restricted here, not blocking. A financial app can be blocked; what Curfew refuses to do is look at it.</string>
-    <string name="settings_accessibility_mode">Accessibility mode</string>
+    <string name="settings_accessibility_mode">Blocking precision</string>
+    <string name="settings_accessibility_one_setting">Blocks apps the moment they open.</string>
+    <string name="settings_accessibility_website_rules">Also block websites</string>
+    <string name="settings_accessibility_website_rules_note">Reads the browser address bar. Some banking apps refuse to run while it is on.</string>
+    <string name="settings_accessibility_needs_turning_on">Turn it on in the list that opens, then come back.</string>
     <string name="settings_sensitive_entry">Apps Curfew never reads</string>
-    <string name="settings_sensitive_entry_note">Screens Curfew will not read. These apps can still be blocked, and so can any other.</string>
+    <string name="settings_sensitive_entry_note">Never read. Still blockable.</string>
 
     <!--
       Shown in the app picker. Payment and banking apps are listed like anything else and can be
@@ -185,4 +188,20 @@
     <string name="picker_no_blockable_match">No app matches “%1$s”.</string>
     <string name="picker_no_apps_found">No apps found</string>
     <string name="picker_reading_apps">Reading your apps…</string>
+    <string name="start_already_running">%1$s is already running%2$s. End or pause that block before starting another — starting a second one would quietly add to it rather than replace it.</string>
+    <string name="start_already_running_until">, and ends at %1$s</string>
+    <string name="start_already_running_open_ended">, with no end time set</string>
+    <!-- The two irreversible confirmations, shared by the Now screen and the block screen so their words cannot drift apart. -->
+    <string name="confirm_pass_title">Use an emergency pass?</string>
+    <string name="confirm_pass_body">This ends %1$s now. It counts against your ration on every paired device, it is written into your history, and it cannot be given back.</string>
+    <string name="confirm_pass_confirm">Use one</string>
+    <string name="confirm_release_title">Ask to end %1$s in 24 hours?</string>
+    <string name="confirm_release_body">It lands a day from now. It cannot be taken back or asked for twice.</string>
+    <string name="confirm_release_confirm">Ask for it</string>
+    <string name="timer_until">until %1$s</string>
+    <string name="timer_already_blocked_body">Starting this will not begin a second block or change the one already running. It ends when it was set to end.</string>
+    <string name="timer_already_blocked_title">This profile is already blocked</string>
+    <string name="settings_accent_note">Colours buttons and the selected tab only.</string>
+    <string name="timer_confirm_timer">Nothing ends this early except an emergency pass. It runs until %1$s. Start it?</string>
+    <string name="timer_confirm_other">It runs until %1$s. A long block is easy to set by accident on a dial, so this is the check. Start it?</string>
 </resources>

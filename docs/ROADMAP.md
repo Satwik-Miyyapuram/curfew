@@ -30,8 +30,8 @@ identically from a config file on Linux and Windows; property suite proves lock-
 - [x] Own-UI accessibility pass (GAPS E5)
 - [x] Trusted clock: a wall clock that outruns monotonic uptime is refused, so winding the clock
       forward cannot shorten a timer lock (GAPS C6)
-- [x] Optional Device Admin for uninstall protection, last in the wizard, released with the last
-      lock (GAPS G2)
+- [x] ~~Optional Device Admin for uninstall protection~~ — removed 2026-11-16: a plain uninstall
+      always works, during a lock too (GAPS G2)
 - [x] Restricted Settings walkthrough for sideloaded installs (GAPS G4)
 
 **Exit criteria:** blocks survive reboot and force-stop; a locked session cannot be ended early by
@@ -50,8 +50,8 @@ measured over 24h; instrumented tests green on an emulator in CI.
       (GAPS G1). It is never the enforcement floor.
 
 **Exit criteria:** the same config file produces identical decisions on Android and Windows;
-service survives kill, reboot and clock rollback; uninstaller refuses during a locked block while
-the 24h delayed release still works; credential release is verified by `LogonUser` against the
+service survives kill, reboot and clock rollback; uninstalling always works and ends any lock, while
+the 24h delayed release is the way out that keeps Curfew installed; credential release is verified by `LogonUser` against the
 Windows account, with no Curfew-held password anywhere.
 
 ## Phase 3 — Sync (differentiator, part 1)

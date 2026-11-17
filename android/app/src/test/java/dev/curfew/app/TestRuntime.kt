@@ -70,12 +70,12 @@ locks = [{ kind = "timer" }]
         /**
          * The enforcement mode the config is judged against.
          *
-         * Defaults to [EnforcementMode.APP_AND_URL] rather than to the shipping default, because these
+         * Defaults to [EnforcementMode.PRECISE] rather than to the shipping default, because these
          * tests are about the policy and about the config round-trip, and a mode that may not read a
          * window deliberately refuses `url` and `keyword` rules at load. A test that wants to exercise
-         * that refusal passes [EnforcementMode.APP_ONLY] and says so; see `AppOnlyConfigTest`.
+         * that refusal passes [EnforcementMode.PRECISE] and says so; see `AppOnlyConfigTest`.
          */
-        mode: EnforcementMode = EnforcementMode.APP_AND_URL,
+        mode: EnforcementMode = EnforcementMode.PRECISE,
     ): CurfewRuntime {
         val db = Room.inMemoryDatabaseBuilder(context, CurfewDatabase::class.java)
             .allowMainThreadQueries()

@@ -15,9 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -25,16 +23,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.curfew.policy.ChallengeKind
 import dev.curfew.policy.Lock
+import androidx.compose.ui.res.stringResource
+import dev.curfew.app.R
 
 /** The lengths people actually ask for, and the one they get if they touch nothing. */
 private val PRESETS = listOf(25, 50, 90, 180)
@@ -51,23 +56,6 @@ private const val MAX_MINUTES = 12 * 60
  * case and saves an evening in the second.
  */
 private const val LONG_MINUTES = 4 * 60
-
-/**
- * How hard the user wants this particular block to be to escape.
- *
- * Asked here rather than buried in a profile, because the honest answer changes between a study
- * hour and an evening off, and a user who has to go and change a setting first will simply not
- * start the timer. [Lock.Timer] is the strong end: it means nothing ends this early except an
- * emergency pass.
- */
-private enum class Strength(val label: String, val note: String, val lock: Lock?) {
-    Open("I can stop it", "Ends the moment you tap stop.", null),
-    Confirm("Ask me first", "One confirmation, so it is never an accident.", Lock.Confirm),
-    Credential("Fingerprint or PIN", "Proves it is you, not a pocket.", Lock.DeviceCredential),
-    Math("Solve math", "A quick puzzle before it opens.", Lock.Challenge(ChallengeKind.MATH)),
-    Typing("Type it out", "A sentence to copy before it opens.", Lock.Challenge(ChallengeKind.TYPING)),
-    Locked("Until it ends", "Nothing ends this early. The 24-hour release is the way out.", Lock.Timer),
-}
 
 /**
  * Block something right now, for a while, because you decided to.
@@ -87,17 +75,27 @@ private enum class Strength(val label: String, val note: String, val lock: Lock?
 fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     var minutes by remember { mutableIntStateOf(DEFAULT_MINUTES) }
-    var strength by remember { mutableStateOf(Strength.Confirm) }
     val context = LocalContext.current
     var profile by remember { mutableStateOf<String?>(null) }
     // The profile a tap asked to lock, held while the accessibility question is answered.
     var pending by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf<String?>(null) }
+    // Whether the profile chooser is up.
+    var pickingProfile by remember { mutableStateOf(false) }
 
     // Whichever profile the user has, without making them choose on a fresh install where there is
     // only one. A missing profile is the one thing this screen cannot invent.
     val chosen = profile ?: state.profiles.firstOrNull()?.id
     val chosenProfile = state.profiles.firstOrNull { it.id == chosen }
+
+    // The strength this block starts with is the profile's own, read from its first window, so the
+    // row below shows the answer the user already set. Tapping the row overrides it for this block
+    // only, and a choice the device cannot honour falls back to the middle option.
+    val profileStrength = state.weekly.firstOrNull { it.profile == chosen }?.let { Strength.of(it.locks.firstOrNull()) }
+    var picked by remember(chosen) { mutableStateOf<Strength?>(null) }
+    var strengthOpen by remember { mutableStateOf(false) }
+    fun canUse(option: Strength) = option != Strength.Credential || Auth.isAvailable(context)
+    val strength = (picked ?: profileStrength ?: Strength.Confirm).takeIf { canUse(it) } ?: Strength.Confirm
 
     // The one gate every route to "start this timer" goes through.
     //
@@ -128,7 +126,7 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     // still applies on this route.
     LifecycleResumeEffect(pending) {
         val id = pending
-        if (id != null && Grant.Accessibility.isGranted(context)) {
+        if (id != null && Grant.canBlockApps(context)) {
             pending = null
             begin(id)
         }
@@ -136,12 +134,21 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
     }
 
     Screen(spacing = 0.dp) {
-        BackRow("Start now", onDone)
+        // ---------------------------------------------------------------------------------------
+        // The order is time, then what it switches off, then how hard it is to leave.
+        //
+        // The dial comes first because the length is the one decision every block needs. Strength
+        // is usually already set by the profile, so it sits last as a single row that only opens
+        // when the user wants to change it.
+        // ---------------------------------------------------------------------------------------
+        BackRow("Start a block", onDone)
 
-        Gap(6.dp)
+        Gap(Space.s)
+        SectionLabel("1 · How long?")
+        Gap(Space.s)
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            // Draggable, one turn to the hour: the stepper is for "a bit longer", the ring is
-            // for landing on the exact minute the meeting ends.
+            // Draggable, one turn to the hour: the stepper is for "a bit longer", the ring is for
+            // landing on the exact minute the meeting ends.
             DragDial(
                 minutes = minutes,
                 max = MAX_MINUTES,
@@ -150,22 +157,21 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
                 stroke = 12.dp,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    DialNumber(spellDuration(minutes), size = 52)
-                    Gap(6.dp)
-                    Text("until ${endsAt(minutes)}", fontSize = 14.sp, color = Palette.Muted)
+                    DialNumber(spellDuration(minutes))
+                    Gap(Space.s)
+                    Text(stringResource(R.string.timer_until, endsAt(state.now, minutes)), style = Type.body, color = Palette.muted)
                 }
             }
 
-            Gap(14.dp)
-            Text("drag the ring, or pick one", fontSize = 13.sp, color = Palette.Dim)
+            Gap(Space.l)
+            Text("drag the ring, or pick one", style = Type.meta, color = Palette.dim)
 
-            // The presets, evenly spread: with the ring taking every value between them, a
-            // stepper beside them was a third way to say the same thing, and the one nobody
-            // reached for. Four lengths, each wide enough to hit without looking.
-            Gap(14.dp)
+            // The presets, evenly spread: with the ring taking every value between them, a stepper
+            // beside them was a third way to say the same thing, and the one nobody reached for.
+            Gap(Space.l)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
             ) {
                 PRESETS.forEach { preset ->
                     Pill(
@@ -178,203 +184,321 @@ fun TimerScreen(model: CurfewViewModel, onDone: () -> Unit) {
             }
         }
 
-        Gap(18.dp)
+        // ---------------------------------------------------------------------------------------
+        // Starting a block for a profile that already has one **extends it**, and says so.
+        //
+        // The core merges by profile on purpose (`session.rs`: `existing.lock.merge(&session.lock)`,
+        // and the end time is the later of the two) because a running block is a promise and no act
+        // of starting another may weaken it. That is right, and it is completely invisible: the
+        // Start screen looked exactly the same whether or not something was already running, so
+        // tapping it read as "a new block" while actually adding a lock to the existing one and
+        // pushing its end further out. Locks appeared to accumulate by themselves.
+        //
+        // It is not refused, because extending a block is a thing people mean. It is *stated*.
+        // ---------------------------------------------------------------------------------------
+        val alreadyRunning = state.sessions.firstOrNull { it.profile == chosen }
+        if (alreadyRunning != null) {
+            Gap(Space.l)
+            // A warning is a solid block of the warning colour, the same as every other coloured state.
+            DCard(fill = Palette.warn) {
+                Text(
+                    stringResource(R.string.timer_already_blocked_title).uppercase(),
+                    style = Type.label,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.onFill,
+                )
+                Gap(Space.s)
+                Text(
+                    stringResource(R.string.timer_already_blocked_body),
+                    style = Type.body,
+                    color = Palette.onFill,
+                )
+            }
+        }
+
+        Gap(Space.xl)
+        SectionLabel("2 · What does it switch off?")
+        Gap(Space.s)
         if (state.profiles.isEmpty()) {
             DCard {
                 Text(
                     "You have not set up anything to block yet. Make a profile on the Plan tab " +
                         "first — a timer needs to know what it is switching off.",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             }
         } else {
             // One card, not a row of chips: which profile a timer uses is a single choice with a
             // current answer, and tapping it cycles to the next one rather than opening a screen.
             val index = state.profiles.indexOfFirst { it.id == chosen }.coerceAtLeast(0)
-            DCard(padding = 15.dp) {
+            // **A chooser, not a rotator.**
+            //
+            // This row used to cycle to the next profile on every tap. With two profiles that is
+            // fine. With fifteen it is unusable: the only way to reach the last one is to tap
+            // through all the ones before it, and there is no way to see what the options *are* —
+            // you find out by landing on them. The card still shows the current choice, because
+            // that is the one thing the screen has to say at a glance; opening it now shows the
+            // whole list.
+            DCard(padding = Dsn.CardPad) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            profile = state.profiles[(index + 1) % state.profiles.size].id
-                        },
+                        .heightIn(min = Dsn.MinTouch)
+                        .clickable(
+                            enabled = state.profiles.size > 1,
+                            onClickLabel = "Choose a different profile",
+                        ) { pickingProfile = true },
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(13.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
-                    val tint = Palette.ProfileColours[index % Palette.ProfileColours.size]
-                    Glyph(tint, size = 34.dp) {
+                    val tint = Palette.profileColours[index % Palette.profileColours.size]
+                    Glyph(tint, size = 36.dp) {
                         Text(
                             chosenProfile?.name?.take(1)?.uppercase().orEmpty(),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = tint,
+                            style = Type.body,
+                            fontWeight = FontWeight.Black,
+                            color = Palette.onFill,
                         )
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
                             chosenProfile?.name.orEmpty(),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
+                            style = Type.body,
+                            fontWeight = FontWeight.Bold,
+                            color = Palette.text,
                         )
                         Text(
-                            if (state.profiles.size == 1) {
-                                "your only profile"
-                            } else {
-                                "tap to use another profile"
+                            when (state.profiles.size) {
+                                1 -> "your only profile"
+                                2 -> "tap to switch between your 2 profiles"
+                                else -> "tap to choose from ${state.profiles.size} profiles"
                             },
-                            fontSize = 12.sp,
-                            color = Palette.Muted,
+                            style = Type.meta,
+                            color = Palette.muted,
                         )
                     }
+                    // The affordance that says this opens something, rather than doing something
+                    // on the spot.
+                    Text("›", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
                 }
             }
         }
 
-        Gap(18.dp)
-        SectionLabel("If you change your mind")
-        Gap(10.dp)
-        // A strength the device cannot satisfy is not offered at all.
-        //
-        // `Lock.DeviceCredential` on a phone with no screen lock is **a lock with no exit**:
-        // `Auth.prove` reports `false` because there is no keyguard to raise, the core then refuses
-        // the end for an unmet condition, and the session runs to its end with the user unable to do
-        // anything about it. The choice was offered anyway, because the enum is a list of strengths
-        // and nothing connected it to whether the device could keep them. That is F-6 in the
-        // interaction review, and the reason it is worth a comment is that a silent omission here
-        // would be indistinguishable from a bug.
-        val satisfiable = Strength.entries.filter {
-            it != Strength.Credential || Auth.isAvailable(context)
-        }
+        Gap(Space.xl)
+        SectionLabel("3 · How hard to leave?")
+        Gap(Space.s)
         DCardFlush {
-            satisfiable.forEachIndexed { index, option ->
-                if (index > 0) Rule()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { strength = option }
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (strength == option) Palette.Accent else Palette.Raised,
-                            ),
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            option.label,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Palette.Text,
-                        )
-                        Text(option.note, fontSize = 12.sp, color = Palette.Muted)
+            // The answer in force, on one row. Tapping it opens the other options.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = Dsn.MinTouch)
+                    .clickable(onClickLabel = "Change how hard to leave") { strengthOpen = !strengthOpen }
+                    .padding(Space.l),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(strength.label.uppercase(), style = Type.button, color = Palette.text)
+                    Text(strength.note, style = Type.meta, color = Palette.muted)
+                }
+                Text("›", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
+            }
+            if (strengthOpen) {
+                Strength.entries.filter { canUse(it) }.forEach { option ->
+                    Rule()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = Dsn.MinTouch)
+                            .clickable {
+                                picked = option
+                                strengthOpen = false
+                            }
+                            .padding(Space.l),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
+                    ) {
+                        // A square mark, and the word beside it. Nothing round.
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .background(if (strength == option) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (strength == option) {
+                                Text("✓", style = Type.meta, color = Palette.onFill)
+                            }
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(option.label.uppercase(), style = Type.button, color = Palette.text)
+                            Text(option.note, style = Type.meta, color = Palette.muted)
+                        }
                     }
                 }
             }
-            // Said out loud, next to where it would have been. A missing option with no explanation
-            // reads as a bug, and the user's next step — set a screen lock — is theirs to take.
-            if (satisfiable.size != Strength.entries.size) {
+            // Said out loud, where the option would have been. A missing option with no explanation
+            // reads as a bug; the fix, a screen lock, is the user's to set.
+            if (!canUse(Strength.Credential)) {
                 Rule()
                 Text(
-                    "Fingerprint or PIN is not offered, because this phone has no screen lock set. " +
-                        "Curfew cannot ask for one that does not exist, and a lock nothing can open " +
-                        "would hold you until it ran out.",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = Palette.Muted,
-                    modifier = Modifier.padding(14.dp),
+                    "Needs a screen lock.",
+                    style = Type.meta,
+                    color = Palette.muted,
+                    modifier = Modifier.padding(Space.l),
                 )
             }
         }
 
-        Gap(12.dp)
-        PrimaryButton(
-            text = "Lock it in for ${spellDuration(minutes)}",
-            enabled = chosen != null,
-            // Amber, because from the moment this is tapped the phone is in the state amber means
-            // everywhere else in the app.
-            colour = Palette.Live,
-        ) {
-            val id = chosen ?: return@PrimaryButton
-            // The one moment the accessibility service is genuinely needed is the moment a block
-            // starts, so that is where it is asked for. Asking on first launch instead taught
-            // people to tap through a wizard; not asking at all let someone start a block that
-            // then quietly enforced nothing, which is worse than either.
-            if (!Grant.Accessibility.isGranted(context)) {
-                pending = id
-                return@PrimaryButton
+        Gap(Space.xl)
+        // The commit, and the one place in the app that celebrates.
+        //
+        // This is the moment the user did something hard on purpose: they picked a strength, chose
+        // a length, and pressed the button that hands the decision over to the app. Everything
+        // before it is negotiation; this is the promise. A shockwave leaves the button and a burst
+        // of squares goes up — and then the app is completely still again, because a celebration
+        // that lingers is a celebration that nags.
+        val committed = rememberTrigger()
+        Box {
+            PrimaryButton(
+                text = "Lock it in for ${spellDuration(minutes)}",
+                enabled = chosen != null,
+                // Amber, because from the moment this is tapped the phone is in the state amber
+                // means everywhere else in the app.
+                colour = Palette.live,
+            ) {
+                val id = chosen ?: return@PrimaryButton
+                // The one moment the accessibility service is genuinely needed is the moment a
+                // block starts, so that is where it is asked for. Asking on first launch instead
+                // taught people to tap through a wizard; not asking at all let someone start a
+                // block that then quietly enforced nothing, which is worse than either.
+                if (!Grant.canBlockApps(context)) {
+                    pending = id
+                    return@PrimaryButton
+                }
+                committed.fire()
+                begin(id)
             }
-            begin(id)
+            Shockwave(trigger = committed, colour = Palette.live)
+            Burst(trigger = committed, colour = Palette.live, spread = 140f)
+        }
+    }
+
+    if (pickingProfile) {
+        // Every profile, in one list, scrollable.
+        //
+        // A `DSheet` like every other form here, and the rows are the same id/name/`Switch`-free row
+        // the Plan screen uses, so a profile is recognisable in both places. The current one is
+        // marked in the fill *and* in the word, per section 8.
+        DSheet(
+            title = "Which profile?",
+            sub = if (state.profiles.size == 1) {
+                "You have one profile."
+            } else {
+                "${state.profiles.size} profiles. The one you pick is what this block switches off."
+            },
+            onDismiss = { pickingProfile = false },
+            confirm = "Done",
+            confirmEnabled = true,
+            onConfirm = { pickingProfile = false },
+        ) {
+            SheetSection("Profiles") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    state.profiles.forEachIndexed { i, option ->
+                        if (i > 0) Hairline()
+                        val on = option.id == chosen
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = Dsn.MinTouch)
+                                .background(if (on) Palette.selected else Palette.surface)
+                                .clickable {
+                                    profile = option.id
+                                    pickingProfile = false
+                                }
+                                .padding(vertical = Space.m)
+                                .semantics {
+                                    selected = on
+                                    role = Role.RadioButton
+                                    contentDescription =
+                                        option.name + if (on) ", selected" else ""
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Space.m),
+                        ) {
+                            Text(
+                                if (on) "✓" else "·",
+                                style = Type.meta,
+                                fontWeight = FontWeight.Black,
+                                color = if (on) Palette.link else Palette.dim,
+                            )
+                            Text(
+                                option.name,
+                                style = Type.body,
+                                fontWeight = FontWeight.Black,
+                                color = Palette.text,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
     confirming?.let { id ->
-        AlertDialog(
-            onDismissRequest = { confirming = null },
-            title = { Text("That is ${spellDuration(minutes)}") },
-            text = {
-                Text(
-                    if (strength.lock == Lock.Timer) {
-                        "Nothing ends this early except an emergency pass. It runs until " +
-                            "${endsAt(minutes)}. Start it?"
-                    } else {
-                        "It runs until ${endsAt(minutes)}. A long block is easy to set by " +
-                            "accident on a dial, so this is the check. Start it?"
-                    },
-                )
+        val ends = endsAt(state.now, minutes)
+        DConfirm(
+            title = "That is ${spellDuration(minutes)}",
+            body = if (strength.lock == Lock.Timer) {
+                stringResource(R.string.timer_confirm_timer, ends)
+            } else {
+                stringResource(R.string.timer_confirm_other, ends)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirming = null
-                    model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
-                    onDone()
-                }) { Text("Start it") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirming = null }) { Text("Go back") }
+            dismiss = "Go back",
+            confirm = "Start it",
+            onDismiss = { confirming = null },
+            onConfirm = {
+                confirming = null
+                model.startTimer(id, minutes * 60, listOfNotNull(strength.lock))
+                onDone()
             },
         )
     }
 
     pending?.let { id ->
-        AlertDialog(
-            onDismissRequest = { pending = null },
-            title = { Text("One switch first") },
-            text = {
-                Text(
-                    "Curfew can only replace a blocked app if it is allowed to see which app is " +
-                        "in front.\n\n" +
-                        "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
-                        "come back. Or start it now, and nothing will be blocked until the switch " +
-                        "is on.",
-                )
+        DConfirm(
+            title = "One switch first",
+            body = "Curfew can only replace a blocked app if it is allowed to see which app is " +
+                "in front.\n\n" +
+                "Turn it on and this ${spellDuration(minutes)} block starts the moment you " +
+                "come back. Or start it now, and nothing will be blocked until the switch " +
+                "is on.",
+            dismiss = "Start without it",
+            confirm = "Turn it on",
+            onDismiss = { pending = null },
+            onConfirm = {
+                // `pending` is deliberately NOT cleared here. It is what the resume effect
+                // watches, and clearing it was the whole bug: the user was sent to Settings and
+                // the timer they had configured was forgotten in the same breath.
+                //
+                // And it goes through the shared path, which falls back to App info — this used to
+                // swallow the failure, so on a build without the page the tap did nothing at all.
+                openGrantPage(context, Grant.Accessibility)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    // `pending` is deliberately NOT cleared here. It is what the resume effect
-                    // watches, and clearing it was the whole bug: the user was sent to Settings and
-                    // the timer they had configured was forgotten in the same breath.
-                    //
-                    // And it goes through the shared path, which falls back to App info — this used to
-                    // swallow the failure, so on a build without the page the tap did nothing at all.
-                    openGrantPage(context, Grant.Accessibility)
-                }) { Text("Turn it on") }
-            },
-            dismissButton = {
-                // Left in on purpose. A blocker that refuses to start until a permission is
-                // granted is a blocker people uninstall; one that starts, and says plainly that
-                // it is not enforcing, is one they come back to and fix.
-                TextButton(onClick = {
-                    pending = null
-                    begin(id)
-                }) { Text("Start without it") }
+            // Left in on purpose. A blocker that refuses to start until a permission is
+            // granted is a blocker people uninstall; one that starts, and says plainly that
+            // it is not enforcing, is one they come back to and fix. Only this button starts
+            // it; a tap outside the sheet backs out.
+            onCancel = {
+                pending = null
+                begin(id)
             },
         )
     }
@@ -388,9 +512,10 @@ internal fun spellDuration(minutes: Int): String = when {
 }
 
 /** The wall clock this timer would end at, so the length is also a time of day. */
-private fun endsAt(minutes: Int): String {
-    val time = java.time.LocalTime.now().plusMinutes(minutes.toLong())
-    return "%02d:%02d".format(time.hour, time.minute)
+/** [now] is the ticking clock from state, so the shown end time moves while the screen is open. */
+private fun endsAt(now: Long, minutes: Int): String {
+    val seconds = if (now > 0) now else System.currentTimeMillis() / 1000
+    return clockTime(seconds + minutes * 60L)
 }
 
 /**
@@ -404,17 +529,17 @@ fun BackRow(title: String, onBack: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().height(44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(Dsn.MinTouch)
+                .background(Palette.raised)
                 .clickable(onClickLabel = "Go back", onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Text("‹", fontSize = 26.sp, color = Palette.Text)
+            Text("‹", style = Type.h1, fontWeight = FontWeight.Normal, color = Palette.text)
         }
-        Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Palette.Text)
+        Text(title, style = Type.h3, color = Palette.text)
     }
 }

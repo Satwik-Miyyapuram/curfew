@@ -2,6 +2,7 @@ package dev.curfew.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +28,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.policy.Stats
 
@@ -57,9 +58,9 @@ fun UsageScreen(model: CurfewViewModel) {
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item {
-            Gap(14.dp)
-            Title("Where your time went", size = 26)
-            Gap(16.dp)
+            Gap(Space.l)
+            Title("Insights")
+            Gap(Space.l)
         }
         // The comparison is the best thing on this screen, and it is absent for two different
         // reasons — F-13. It needs **Usage access**, and it needs a whole day on each side of the
@@ -71,7 +72,7 @@ fun UsageScreen(model: CurfewViewModel) {
         if (comparison != null) {
             item {
                 ComparisonCard(comparison)
-                Gap(10.dp)
+                Gap(Space.m)
             }
         } else {
             item {
@@ -90,28 +91,44 @@ fun UsageScreen(model: CurfewViewModel) {
                             "are Android's own screen-time figures rather than anything Curfew " +
                             "counts. Grant it on Health and this fills in."
                     },
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
-                Gap(10.dp)
+                Gap(Space.m)
             }
         }
         item {
             DCard {
                 StreakSummary(state.stats)
-                Gap(14.dp)
+                Gap(Space.l)
                 DayBars(state.stats)
             }
-            Gap(10.dp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Gap(Space.m)
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 // The summary, and only the summary. The log it was built from stays here.
-                ExportPill("Export CSV", tint = Palette.Accent) { exportCsv.launch("curfew-stats.csv") }
-                ExportPill("Export JSON", tint = Palette.Accent) { exportJson.launch("curfew-stats.json") }
+                ExportPill("Export CSV", tint = Palette.accent) { exportCsv.launch("curfew-stats.csv") }
+                ExportPill("Export JSON", tint = Palette.accent) { exportJson.launch("curfew-stats.json") }
             }
-            Gap(20.dp)
+            Gap(Space.xl)
+            // -------------------------------------------------------------------------------------
+            // The shape of the fortnight — `docs/design.md` section 5.8.
+            //
+            // `Stats` reports one row per day, so the page could say *how much* time was lost and
+            // nothing about *when* or *to what*. Both of those come from the same slices the
+            // enforcer already writes, which is why neither of these is a new history.
+            // -------------------------------------------------------------------------------------
+            SectionLabel("When you lose time")
+            Gap(Space.m)
+            HourHeatmap(state.usageShape)
+
+            Gap(Space.xl)
+            SectionLabel("What it costs you")
+            Gap(Space.m)
+            TargetLeaderboard(state.usageShape)
+
+            Gap(Space.xl)
             SectionLabel("Today")
-            Gap(10.dp)
+            Gap(Space.m)
         }
 
         if (state.spentSeconds.isEmpty()) {
@@ -120,16 +137,15 @@ fun UsageScreen(model: CurfewViewModel) {
                     "Nothing counted yet. Time is only measured for targets a budget or a launch " +
                         "limit actually covers — Curfew does not keep a record of everything you " +
                         "open.",
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Muted,
+                    style = Type.meta,
+                    color = Palette.muted,
                 )
             }
         }
 
         items(state.spentSeconds, key = { it.first }) { (key, seconds) ->
             val opens = state.launchCounts[key] ?: 0
-            DCard(modifier = Modifier.padding(bottom = 8.dp), padding = 14.dp) {
+            DCard(modifier = Modifier.padding(bottom = Space.s), padding = 14.dp) {
                 Column(
                     modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
                         contentDescription = "${describeTarget(key)}: ${duration(seconds)}"
@@ -137,9 +153,9 @@ fun UsageScreen(model: CurfewViewModel) {
                 ) {
                     Text(
                         describeTarget(key),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                     )
                     // A bar rather than a progress indicator: this is a share of the busiest
                     // thing today, not a task on its way to finishing.
@@ -147,9 +163,7 @@ fun UsageScreen(model: CurfewViewModel) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(6.dp)
-                            .padding(top = 0.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(Palette.Raised),
+                            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
                     ) {
                         Box(
                             modifier = Modifier
@@ -157,46 +171,44 @@ fun UsageScreen(model: CurfewViewModel) {
                                     if (busiest > 0) seconds.toFloat() / busiest else 0f,
                                 )
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Palette.Accent),
+                                .background(Palette.accent),
                         )
                     }
                     Text(
                         duration(seconds) + if (opens > 0) " · opened $opens times" else "",
-                        fontSize = 12.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(top = 6.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(top = Space.s),
                     )
                 }
             }
         }
 
         item {
-            Gap(12.dp)
+            Gap(Space.m)
             SectionLabel("What Curfew did")
-            Gap(6.dp)
+            Gap(Space.s)
             Text(
                 "Kept on this device for 30 days, then deleted.",
-                fontSize = 12.sp,
-                color = Palette.Dim,
+                style = Type.meta,
+                color = Palette.dim,
             )
-            Gap(10.dp)
+            Gap(Space.m)
         }
         items(state.audit, key = { it.id }) { row ->
             // One entry, one thing to hear: the sentence and the time it happened.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp)
+                    .padding(bottom = Space.m)
                     .semantics(mergeDescendants = true) {},
             ) {
                 Text(
                     describeAudit(row.kind, row.detail),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    color = Palette.Text,
+                    style = Type.body,
+                    color = Palette.text,
                 )
-                Text(dateTime(row.at), fontSize = 12.sp, color = Palette.Dim)
+                Text(dateTime(row.at), style = Type.meta, color = Palette.dim)
             }
         }
         item { Gap(Dsn.BottomRoom) }
@@ -206,16 +218,15 @@ fun UsageScreen(model: CurfewViewModel) {
 /** The two export buttons, as pills. */
 @Composable
 private fun ExportPill(text: String, tint: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    // Deferred to the standard [Pill], which is a square tag with a 3px edge — the same control a
+    // preset, a filter and a profile chip are. It used to be a **999dp-radius pill in the raised
+    // tone**, which was the old design's shape and made the one screen that is about numbers the
+    // one screen with a different silhouette. `tint` still picks the colour it always did.
     Box(
-        modifier = Modifier
-            .height(32.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(Palette.Raised)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+        modifier = Modifier.heightIn(min = Dsn.MinTouch),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tint)
+        Pill(text = text, tint = tint, onClick = onClick)
     }
 }
 
@@ -235,29 +246,26 @@ private fun StreakSummary(stats: Stats) {
                 1 -> "One day in a row."
                 else -> "${stats.currentStreak} days in a row."
             },
-            fontSize = 19.sp,
+            style = Type.h2,
             fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.4).sp,
-            color = Palette.Text,
+            color = Palette.text,
             modifier = Modifier.semantics { heading() },
         )
         Text(
             "Best so far: ${stats.longestStreak}. " +
                 "In total, ${duration(stats.totalBlockedSeconds.toInt())} across " +
                 "${stats.totalSessions} session${if (stats.totalSessions == 1) "" else "s"}.",
-            fontSize = 13.sp,
-            lineHeight = 20.sp,
-            color = Palette.Muted,
-            modifier = Modifier.padding(top = 6.dp),
+            style = Type.meta,
+            color = Palette.muted,
+            modifier = Modifier.padding(top = Space.s),
         )
         if (stats.currentStreak > 0 && stats.days.lastOrNull()?.sessions == 0) {
             // Said out loud so a streak that looks a day short does not read as a bug.
             Text(
                 "Today has not finished, so it does not count against you yet.",
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = Palette.Dim,
-                modifier = Modifier.padding(top = 4.dp),
+                style = Type.meta,
+                color = Palette.dim,
+                modifier = Modifier.padding(top = Space.xs),
             )
         }
     }
@@ -269,7 +277,7 @@ private fun DayBars(stats: Stats) {
     val tallest = stats.days.maxOfOrNull { it.blockedSeconds } ?: 0
     Row(
         modifier = Modifier.fillMaxWidth().height(72.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.xxs),
         verticalAlignment = Alignment.Bottom,
     ) {
         for (day in stats.days) {
@@ -291,8 +299,7 @@ private fun DayBars(stats: Stats) {
                         // A day with a session but almost no time still gets a visible mark: it
                         // counted towards the streak, so it should be on the chart.
                         .fillMaxHeight(if (day.sessions > 0) maxOf(fraction, 0.06f) else 0.02f)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(if (day.sessions > 0) Palette.Accent else Palette.Line),
+                        .background(if (day.sessions > 0) Palette.accent else Palette.line, RoundedCornerShape(Dsn.CtlRadius)),
                 )
             }
         }
@@ -376,32 +383,32 @@ private fun lasting(detail: String): String {
 private fun ComparisonCard(comparison: dev.curfew.app.data.ScreenTimeComparison) {
     DCard(padding = 20.dp) {
         SectionLabel("Screen time, a day")
-        Gap(12.dp)
+        Gap(Space.m)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom,
         ) {
             Column {
-                Text("Before Curfew", fontSize = 12.sp, color = Palette.Dim)
+                Text("Before Curfew", style = Type.meta, color = Palette.dim)
                 Text(
                     duration(comparison.beforeSeconds.toInt()),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Palette.Muted,
+                    style = Type.h2,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.muted,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("Now", fontSize = 12.sp, color = Palette.Dim)
+                Text("Now", style = Type.meta, color = Palette.dim)
                 Text(
                     duration(comparison.nowSeconds.toInt()),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (comparison.savedSeconds > 0) Palette.Ok else Palette.Text,
+                    style = Type.h2,
+                    fontWeight = FontWeight.Bold,
+                    color = if (comparison.savedSeconds > 0) Palette.ok else Palette.text,
                 )
             }
         }
-        Gap(12.dp)
+        Gap(Space.m)
         Text(
             if (comparison.savedSeconds > 0) {
                 "${duration(comparison.savedSeconds.toInt())} a day back, against the " +
@@ -410,14 +417,158 @@ private fun ComparisonCard(comparison: dev.curfew.app.data.ScreenTimeComparison)
                 "No lower than before yet, against the ${comparison.baselineDays} days before " +
                     "you started."
             },
-            fontSize = 13.sp,
-            lineHeight = 19.sp,
-            color = if (comparison.savedSeconds > 0) Palette.Ok else Palette.Muted,
+            style = Type.meta,
+            color = if (comparison.savedSeconds > 0) Palette.ok else Palette.muted,
         )
         Text(
             "Android's own figures, averaged over the last ${comparison.recentDays} whole days.",
-            fontSize = 12.sp,
-            color = Palette.Dim,
+            style = Type.meta,
+            color = Palette.dim,
+        )
+    }
+}
+
+/**
+ * The fortnight as twenty-four columns: which hours the time actually goes.
+ *
+ * `docs/design.md` section 5.8 asks for an hour heatmap, and it is the one view on this page that
+ * answers a question a total cannot: two people can lose the same six hours a week and one of them
+ * has lost their evenings while the other has lost their mornings, and only one of those is worth
+ * changing something about.
+ *
+ * Bars rather than a colour grid, and the reason is section 8: a heatmap communicates by colour
+ * intensity alone, which is exactly the thing that rule forbids. A bar's *height* says the same
+ * thing to somebody who cannot tell two shades of blue apart, and the sentence underneath names the
+ * worst hour in words.
+ */
+@Composable
+private fun HourHeatmap(shape: dev.curfew.app.data.UsageShape) {
+    val peak = shape.hourSeconds.maxOrNull() ?: 0
+    Column(Modifier.fillMaxWidth()) {
+        if (peak <= 0) {
+            Text(
+                "No measured time in the last ${shape.days} days. This fills in once a budget, a " +
+                    "launch limit or an allowance has something to measure.",
+                style = Type.meta,
+                color = Palette.dim,
+            )
+            return@Column
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().height(84.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs),
+        ) {
+            shape.hourSeconds.forEachIndexed { hour, seconds ->
+                val share = seconds.toFloat() / peak
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height((66f * share).dp.coerceAtLeast(if (seconds > 0) 3.dp else 1.dp))
+                            .background(if (seconds > 0) Palette.accent else Palette.raised, RoundedCornerShape(Dsn.CtlRadius)),
+                    )
+                }
+            }
+        }
+        Gap(Space.xs)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("00", "06", "12", "18", "23").forEach { label ->
+                Text(
+                    label,
+                    style = Type.micro.mono,
+                    color = Palette.dim,
+                )
+            }
+        }
+        Gap(Space.s)
+        val worst = shape.busiestHour
+        Text(
+            if (worst == null) {
+                "Nothing recorded in any hour yet."
+            } else {
+                val percent = (shape.busiestHourShare * 100).roundToInt()
+                "The hour you lose most is ${"%02d".format(worst)}:00, which is $percent% of all the " +
+                    "measured time in the last ${shape.days} days."
+            },
+            style = Type.meta,
+            color = Palette.muted,
+        )
+    }
+}
+
+/**
+ * What the time is actually going to, worst first.
+ *
+ * Section 5.8's target leaderboard. It is the list that makes the rest of the page actionable: an
+ * hour tells you *when* to change something, and this tells you what.
+ *
+ * The key is the core's own (`app:com.reddit.frontpage`), turned into something a person recognises
+ * by `describeTarget`, which is the same function the rest of the app uses so this list and a rule
+ * row cannot disagree about what a target is called.
+ */
+@Composable
+private fun TargetLeaderboard(shape: dev.curfew.app.data.UsageShape) {
+    val ranked = shape.byTarget.filter { it.second > 0 }
+    Column(Modifier.fillMaxWidth()) {
+        if (ranked.isEmpty()) {
+            Text(
+                "Nothing has been measured yet, so there is nothing to rank. This fills in for the " +
+                    "targets a rule actually covers.",
+                style = Type.meta,
+                color = Palette.dim,
+            )
+            return@Column
+        }
+        val worst = ranked.first().second
+        ranked.take(8).forEachIndexed { index, (key, seconds) ->
+            if (index > 0) Hairline()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .landIn(index = index, from = 14f)
+                    .padding(vertical = Space.m),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.m),
+            ) {
+                Text(
+                    "${index + 1}",
+                    style = Type.meta.mono,
+                    fontWeight = FontWeight.Black,
+                    color = Palette.dim,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        describeTarget(key),
+                        style = Type.body,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
+                    )
+                    Gap(Space.xs)
+                    Box(
+                        Modifier
+                            .fillMaxWidth(seconds.toFloat() / worst)
+                            .height(6.dp)
+                            .background(Palette.accent, RoundedCornerShape(Dsn.CtlRadius)),
+                    )
+                }
+                Text(
+                    duration(seconds.toInt()),
+                    style = Type.meta.mono,
+                    fontWeight = FontWeight.Bold,
+                    color = Palette.muted,
+                )
+            }
+        }
+        Gap(Space.s)
+        Text(
+            "Measured locally, over the last ${shape.days} days. Nothing here leaves the phone.",
+            style = Type.micro,
+            color = Palette.dim,
         )
     }
 }

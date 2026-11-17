@@ -77,6 +77,21 @@ interface UsageDao {
     @Query("SELECT * FROM launches WHERE at >= :since")
     suspend fun launchesSince(since: Long): List<LaunchRow>
 
+    /**
+     * Every slice in a window, for the insights that are not a single number.
+     *
+     * The hour heatmap and the target leaderboard cannot be answered by `Stats`, which reports one
+     * row per *day*: "which hours do I lose" and "what costs me most" are questions about the shape
+     * of the history rather than its total, and both need the raw slices. The window is the same
+     * fourteen days the Time page charts, so the two views cannot disagree about their period.
+     *
+     * The rows carry a target, an instant and a duration, which is everything both questions need.
+     * Nothing here is sensitive beyond what the database already holds, and none of it leaves the
+     * device.
+     */
+    @Query("SELECT * FROM usage WHERE at >= :since ORDER BY at ASC")
+    suspend fun slicesSince(since: Long): List<UsageRow>
+
     /** Old slices are useless to every rule and are the only part of the data that is sensitive. */
     @Query("DELETE FROM usage WHERE at < :before")
     suspend fun pruneUsage(before: Long)

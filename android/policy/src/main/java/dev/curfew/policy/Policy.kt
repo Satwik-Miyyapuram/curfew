@@ -1048,3 +1048,92 @@ data class ClockVerdict(
     val unverified: Long,
     val tampered: Boolean,
 )
+
+/**
+ * The emergency ration, as the plan file spells it.
+ *
+ * `[emergency]` in `curfew.toml` holds three numbers: how many releases a rolling window allows,
+ * how long that window is, and the minimum gap between two uses.
+ */
+data class EmergencySettings(
+    val passes: Int,
+    val windowSeconds: Long,
+    val cooldownSeconds: Long,
+)
+
+/**
+ * The `[emergency]` header line, as both the reader and the writer recognise it: indentation and a
+ * trailing comment allowed. One matcher, because a writer that missed a header the reader accepted
+ * appended a second `[emergency]` table, and TOML rejects a table defined twice.
+ */
+private val EMERGENCY_HEADER = Regex("""(?m)^[ \t]*\[emergency\][ \t]*(#.*)?$""")
+
+/** Any table header, by the same rule the reader uses to end the section. */
+private val ANY_HEADER = Regex("""(?m)^[ \t]*\[""")
+
+/**
+ * Read `[emergency]` out of a plan file, with the core's own defaults for anything absent.
+ *
+ * Parsed by hand rather than with a TOML library because this is three integers in a named section,
+ * and the app already treats the file as text everywhere else. A parser here would be a second
+ * opinion about the file's shape, and the first opinion belongs to the core.
+ */
+fun emergencySettings(configToml: String): EmergencySettings {
+    val section = configToml.lineSequence()
+        .dropWhile { !EMERGENCY_HEADER.matches(it) }
+        .drop(1)
+        .takeWhile { !it.trim().startsWith("[") }
+        .joinToString("\n")
+    fun number(key: String, fallback: Long): Long =
+        Regex("""(?m)^\s*""" + key + """\s*=\s*(\d+)""").find(section)
+            ?.groupValues?.get(1)?.toLongOrNull() ?: fallback
+    return EmergencySettings(
+        passes = number("passes", 0L).toInt(),
+        windowSeconds = number("window_seconds", 7L * 24 * 60 * 60),
+        cooldownSeconds = number("cooldown_seconds", 6L * 60 * 60),
+    )
+}
+
+/**
+ * Write `[emergency]` back into a plan file without disturbing anything else in it.
+ *
+ * A **text edit, not a re-serialisation**, and that is deliberate: the file is the user's, they can
+ * edit it by hand, and it carries their own comments and ordering. Re-serialising a hand-written
+ * document to change one number silently reformats the rest of it.
+ */
+fun withEmergencySettings(configToml: String, settings: EmergencySettings): String {
+    val want = linkedMapOf(
+        "passes" to settings.passes.toString(),
+        "window_seconds" to settings.windowSeconds.toString(),
+        "cooldown_seconds" to settings.cooldownSeconds.toString(),
+    )
+
+    fun setIn(block: String): String {
+        var out = block
+        for ((key, value) in want) {
+            val existing = Regex("""(?m)^(\s*""" + key + """\s*=\s*)\S+""")
+            out = if (existing.containsMatchIn(out)) {
+                existing.replace(out) { m -> m.groupValues[1] + value }
+            } else {
+                out.trimEnd('\n') + "\n" + key + " = " + value
+            }
+        }
+        return out
+    }
+
+    val start = EMERGENCY_HEADER.find(configToml)
+    if (start == null) {
+        val head = configToml.trimEnd('\n')
+        val body = want.entries.joinToString("\n") { it.key + " = " + it.value }
+        return (if (head.isEmpty()) "" else head + "\n\n") + "[emergency]\n" + body + "\n"
+    }
+
+    val afterHeader = start.range.last + 1
+    val nextHeader = ANY_HEADER.find(configToml, afterHeader)
+    val end = nextHeader?.range?.first ?: configToml.length
+    val body = configToml.substring(afterHeader, end)
+    val rewritten = setIn(body)
+    return configToml.substring(0, afterHeader) +
+        (if (rewritten.startsWith("\n")) rewritten else "\n" + rewritten) +
+        configToml.substring(end)
+}

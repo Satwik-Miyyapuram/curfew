@@ -9,9 +9,10 @@
   firewall hole the DNS proxy needs; a second description of all that in XML is a second thing to
   drift.
 
-  The uninstall is deliberately allowed to fail. `curfew uninstall` refuses while a lock is running,
-  and that refusal is the product: an uninstaller that ends a session the user asked to be locked
-  out of is a bypass with a wizard around it. The message says how to get out properly.
+  Uninstalling always works, during a lock too: a blocker that cannot be removed is the one that
+  gets a machine reinstalled. `curfew uninstall` runs before the service is stopped, tells the
+  service the stop is the uninstaller's, removes it, gives back the hosts file and the resolvers, and
+  forgets what was running. An upgrade is not an uninstall and does none of that.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
@@ -70,8 +71,8 @@
       <Component Id="Cli">
         <File Id="curfew.exe" Source="$(Stage)\curfew.exe" KeyPath="yes" />
         <!-- Stopped before its own file is overwritten, because a running service holds its binary
-             open and the copy would fail. Stopping is refused while a lock is running, which is the
-             same refusal `curfew uninstall` gives and for the same reason. -->
+             open and the copy would fail. On an upgrade, stopping is refused while a lock is running,
+             so an upgrade waits for the lock. On an uninstall the service is already gone by now. -->
         <ServiceControl Id="StopCurfew" Name="Curfew" Stop="both" Wait="yes" />
         <!-- On PATH for the terminal commands that have no window yet — editing the config, the
              stats. Nothing in normal use needs it, which is the point of the installer. -->
@@ -102,8 +103,8 @@
          will be required", which is a rude thing to ask of someone who clicked Update. They are
          sent a close message instead, and the tray is started again at the end.
 
-         The service is not in this list. It is stopped by the ServiceControl above, and if it
-         refuses to stop, that is a lock running and the refusal is the product. -->
+         The service is not in this list. It is stopped by the ServiceControl above, or on an
+         uninstall removed by `curfew uninstall` before that runs. -->
     <util:CloseApplication Id="CloseTray" Target="curfew-tray.exe"
                            CloseMessage="yes" RebootPrompt="no" />
     <util:CloseApplication Id="CloseWindow" Target="curfew-app.exe"
@@ -136,7 +137,8 @@
 
     <InstallExecuteSequence>
       <Custom Action="RegisterService" After="InstallFiles" Condition="NOT REMOVE" />
-      <Custom Action="RemoveService" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="RemoveService" Before="StopServices"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="StartTray" After="InstallFinalize" Condition="NOT REMOVE" />
     </InstallExecuteSequence>
 

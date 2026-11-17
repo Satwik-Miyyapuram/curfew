@@ -17,7 +17,7 @@ import androidx.core.content.edit
  * boundary, and the apps' risk engines know it.
  *
  * What Curfew *can* do is make non-inspection structural rather than incidental: a package on this
- * list is short-circuited in every accessibility entry point before the uninstall guard, before
+ * list is short-circuited in every accessibility entry point before
  * browser detection, and before any `rootInActiveWindow` call. The guarantee is "no node of a
  * sensitive app is ever touched, on any code path", and it holds by construction rather than by
  * review — which is what makes it survive the next change to those methods.

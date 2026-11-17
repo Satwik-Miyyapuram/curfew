@@ -1,5 +1,6 @@
 package dev.curfew.app.ui
 
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -15,14 +16,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.window.Dialog
@@ -35,6 +33,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -43,12 +42,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.curfew.app.R
 import dev.curfew.app.enforce.SensitiveApps
@@ -175,23 +171,22 @@ fun AppPickerScreen(
         // asking the user to pick the thing they are already standing in.
         if (pinned == null) {
             SectionLabel("Blocked by this profile")
-            Gap(8.dp)
+            Gap(Space.s)
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
             ) {
                 state.profiles.forEach { p ->
                     Pill(p.name, selected = current == p.id, onClick = { profile = p.id })
                 }
             }
-            Gap(7.dp)
+            Gap(Space.s)
             Text(
                 othersHold(state.profiles.filter { it.id != current }, counts, siteCounts),
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = Palette.Dim,
+                style = Type.meta,
+                color = Palette.dim,
             )
-            Gap(16.dp)
+            Gap(Space.l)
         }
         // Copying is the difference between a second profile that is right and a second profile
         // nobody finishes. It adds to what is here rather than replacing it, and it says whose
@@ -202,15 +197,15 @@ fun AppPickerScreen(
         if (current != null && donors.isNotEmpty()) {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Copy from", fontSize = 12.sp, color = Palette.Dim)
+                Text("Copy from", style = Type.meta, color = Palette.dim)
                 donors.forEach { donor ->
                     Pill(donor.name, selected = false, onClick = { copying = donor.id })
                 }
             }
-            Gap(14.dp)
+            Gap(Space.l)
         }
         copying?.let { donorId ->
             val donor = state.profiles.firstOrNull { it.id == donorId }
@@ -218,23 +213,19 @@ fun AppPickerScreen(
             if (donor == null || mine == null) {
                 copying = null
             } else {
-                AlertDialog(
-                    onDismissRequest = { copying = null },
-                    title = { Text("Copy ${donor.name}'s list?") },
-                    text = {
-                        Text(
-                            "${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites " +
-                                "get added here. Nothing already blocked is removed.",
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            model.copyBlocksFrom(donorId, mine)
-                            copying = null
-                        }) { Text("Copy them") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { copying = null }) { Text("Cancel") }
+                // The app's own decision sheet. This was a Material `AlertDialog` — a second
+                // surface colour, a second corner radius and a second type ramp, on the screen
+                // whose whole job is choosing what to block.
+                DConfirm(
+                    title = "Copy ${donor.name}'s list?",
+                    body = "${counts[donorId] ?: 0} apps and ${siteCounts[donorId] ?: 0} sites get " +
+                        "added here. Nothing already blocked is removed.",
+                    dismiss = "Cancel",
+                    confirm = "Copy them",
+                    onDismiss = { copying = null },
+                    onConfirm = {
+                        model.copyBlocksFrom(donorId, mine)
+                        copying = null
                     },
                 )
             }
@@ -245,7 +236,7 @@ fun AppPickerScreen(
             sites = sites.size,
             onChange = { pane = it },
         )
-        Gap(14.dp)
+        Gap(Space.l)
 
         // A config that could not be read is not a config with nothing in it.
         //
@@ -267,9 +258,8 @@ fun AppPickerScreen(
                     "Your plan could not be read, so Curfew cannot show what this profile blocks. " +
                         "Nothing has been changed, and this screen will work again once the config " +
                         "can be read.\n\n" + state.configError,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Palette.Bad,
+                    style = Type.meta,
+                    color = Palette.bad,
                 )
             }
             return@Screen
@@ -277,27 +267,26 @@ fun AppPickerScreen(
 
         if (pane == Pane.Apps) {
             SearchField(query) { query = it }
-            Gap(10.dp)
+            Gap(Space.m)
             // Which apps Curfew will not *read*, said once and nowhere near the switches. It is not a
             // filter — every app here is blockable — so this is a footnote, not a warning.
             if (readProtectedCount > 0) {
                 DCard(padding = 14.dp) {
                     Text(
                         stringResource(R.string.picker_sensitive_note),
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        color = Palette.Muted,
+                        style = Type.meta,
+                        color = Palette.muted,
                     )
-                    Gap(6.dp)
+                    Gap(Space.s)
                     Text(
                         stringResource(R.string.picker_sensitive_note_action),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Palette.Text,
+                        style = Type.meta,
+                        fontWeight = FontWeight.Bold,
+                        color = Palette.text,
                         modifier = Modifier.clickable { onOpenSensitiveApps() },
                     )
                 }
-                Gap(10.dp)
+                Gap(Space.m)
             }
             DCardFlush {
                 visible.forEachIndexed { index, app ->
@@ -306,20 +295,19 @@ fun AppPickerScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 13.dp)
+                            .padding(horizontal = Space.l, vertical = Space.m)
                             .semantics(mergeDescendants = true) {
                                 contentDescription =
                                     if (on) "${app.label}, blocked" else "${app.label}, allowed"
                             },
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(13.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         AppIcon(app.packageName, modifier = Modifier.size(36.dp))
                         Text(
                             app.label,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Palette.Text,
+                            style = Type.body,
+                            color = Palette.text,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
@@ -342,9 +330,9 @@ fun AppPickerScreen(
                             // string it no longer recognised.
                             stringResource(R.string.picker_no_blockable_match, query)
                         },
-                        fontSize = 13.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(16.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(Space.l),
                     )
                 }
             }
@@ -353,41 +341,35 @@ fun AppPickerScreen(
                 sites.forEachIndexed { index, rule ->
                     if (index > 0) Rule()
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.l),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(Palette.Raised),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(glyphFor(rule.target), fontSize = 15.sp)
+                        // A [Glyph], which is the app's square tinted marker with a 3px edge. It was
+                        // a hand-rolled 11dp-radius box that matched nothing else on screen.
+                        Glyph(tint = Palette.accent, size = 36.dp) {
+                            Text(glyphFor(rule.target), style = Type.body, color = Palette.onFill)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(
                                 rule.target.label(),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                fontFamily = FontFamily.Monospace,
-                                color = Palette.Text,
+                                style = Type.body.mono,
+                                fontWeight = FontWeight.Bold,
+                                color = Palette.text,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(describeRule(rule), fontSize = 12.sp, color = Palette.Dim)
+                            Text(describeRule(rule), style = Type.meta, color = Palette.dim)
                         }
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(Dsn.MinTouch)
                                 .clickable(
                                     onClickLabel = "Stop blocking ${rule.target.label()}",
                                 ) { current?.let { model.deleteRule(it, rule.target) } },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text("✕", fontSize = 15.sp, color = Palette.Dim)
+                            Text("✕", style = Type.body, color = Palette.dim)
                         }
                     }
                 }
@@ -395,14 +377,13 @@ fun AppPickerScreen(
                     Text(
                         "Nothing yet. A site blocks it and everything under it; a word blocks " +
                             "anything whose address or title contains it.",
-                        fontSize = 13.sp,
-                        lineHeight = 19.sp,
-                        color = Palette.Muted,
-                        modifier = Modifier.padding(16.dp),
+                        style = Type.meta,
+                        color = Palette.muted,
+                        modifier = Modifier.padding(Space.l),
                     )
                 }
             }
-            Gap(12.dp)
+            Gap(Space.m)
             // Styled as an empty field rather than as a button, because what it opens asks for a
             // line of text and this is where that line will end up.
             DCard(padding = 0.dp) {
@@ -411,28 +392,26 @@ fun AppPickerScreen(
                         .fillMaxWidth()
                         .height(48.dp)
                         .clickable(enabled = current != null) { adding = true }
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = Space.l),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
-                    Text("+", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Palette.Accent)
+                    Text("+", style = Type.h3, color = Palette.link)
                     Text(
                         "Address, pattern or word…",
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Palette.Muted,
+                        style = Type.body.mono,
+                        color = Palette.muted,
                     )
                 }
             }
         }
 
-        Gap(16.dp)
+        Gap(Space.l)
         Text(
             "Changes apply the next time ${nameOf(state, current)} starts — never to a block " +
                 "already running.",
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-            color = Palette.Dim,
+            style = Type.meta,
+            color = Palette.dim,
         )
     }
 
@@ -459,10 +438,9 @@ private fun PaneTabs(pane: Pane, apps: Int, sites: Int, onChange: (Pane) -> Unit
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Dsn.CtlRadius))
-            .background(Palette.Raised)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
+            .padding(Space.xs),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
     ) {
         PaneTab("Apps", apps, pane == Pane.Apps, Modifier.weight(1f)) { onChange(Pane.Apps) }
         PaneTab("Websites", sites, pane == Pane.Sites, Modifier.weight(1f)) { onChange(Pane.Sites) }
@@ -480,23 +458,22 @@ private fun PaneTab(
     Row(
         modifier = modifier
             .height(40.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (selected) Palette.Accent else Color.Transparent)
+            .background(if (selected) Palette.accent else Palette.raised)
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(Space.s, Alignment.CenterHorizontally),
     ) {
         Text(
             label,
-            fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-            color = if (selected) Palette.Ink else Palette.Muted,
+            style = Type.body,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Palette.onFill else Palette.muted,
         )
         Text(
             count.toString(),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (selected) Palette.Ink.copy(alpha = 0.62f) else Palette.Dim,
+            style = Type.body,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Palette.onFill.copy(alpha = 0.62f) else Palette.dim,
         )
     }
 }
@@ -507,22 +484,21 @@ private fun SearchField(value: String, onChange: (String) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
-            .clip(RoundedCornerShape(Dsn.CtlRadius))
-            .background(Palette.Raised)
-            .padding(horizontal = 14.dp),
+            .height(Dsn.MinTouch)
+            .background(Palette.raised, RoundedCornerShape(Dsn.CtlRadius))
+            .padding(horizontal = Space.m),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
             value = value,
             onValueChange = onChange,
             singleLine = true,
-            textStyle = TextStyle(fontSize = 15.sp, color = Palette.Text),
-            cursorBrush = SolidColor(Palette.Accent),
+            textStyle = Type.body.copy(color = Palette.text),
+            cursorBrush = SolidColor(Palette.link),
             modifier = Modifier.fillMaxWidth(),
         )
         if (value.isEmpty()) {
-            Text("Search your apps", fontSize = 15.sp, color = Palette.Dim)
+            Text("Search your apps", style = Type.body, color = Palette.dim)
         }
     }
 }
@@ -541,7 +517,7 @@ private fun othersHold(
     return "$head ${other.name} blocks ${count(a, "app")} and ${count(s, "site")}$more."
 }
 
-private fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
+internal fun count(n: Int, noun: String) = if (n == 1) "1 $noun" else "$n ${noun}s"
 
 private fun nameOf(state: UiState, id: String?): String =
     state.profiles.firstOrNull { it.id == id }?.name ?: "this profile"
@@ -584,63 +560,81 @@ private fun BlockDialog(onDismiss: () -> Unit, onSave: (Target) -> Unit) {
     var kind by remember { mutableStateOf(BLOCK_KINDS.first()) }
     var value by remember { mutableStateOf("") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Block a site or word") },
-        text = {
-            Column {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BLOCK_KINDS.forEach { option ->
-                        FilterChip(
+    // The app's own sheet, with the app's own controls.
+    //
+    // This was a Material `AlertDialog` containing a `FilterChip` row and an `OutlinedTextField` —
+    // three borrowed components in one form, each with its own corner radius, its own surface
+    // colour and its own idea of what a label is. The kind chips are [Pill]s, the field is
+    // [TextField], and the explanation is a [SheetNote], which is what every other form in the app
+    // uses.
+    //
+    // It is also the last screen in the app that had any Material competitor in it, so
+    // `MaterialUsageTest`'s allowlist shrank by four entries rather than being added to.
+    DSheet(
+        title = "Block a site or word",
+        sub = when (kind.first) {
+            "Site" -> "Blocks the site and everything under it."
+            "Address" -> "Matches whole addresses; * stands for any run of characters."
+            "Word" -> "Blocks anything whose address or title contains the word."
+            else -> "Matches the title of a window, on the PC."
+        },
+        onDismiss = onDismiss,
+        confirm = "Block it",
+        confirmEnabled = value.isNotBlank(),
+        onConfirm = { onSave(kind.second(value.trim())) },
+    ) {
+        SheetSection("What kind") {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                BLOCK_KINDS.forEach { option ->
+                    Box(
+                        modifier = Modifier.heightIn(min = Dsn.MinTouch),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Pill(
+                            text = option.first,
                             selected = kind.first == option.first,
                             onClick = { kind = option },
-                            label = { Text(option.first) },
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it },
-                    singleLine = true,
-                    label = {
-                        Text(
-                            when (kind.first) {
-                                "Site" -> "reddit.com"
-                                "Address" -> "*://*/watch*"
-                                "Word" -> "gambling"
-                                else -> "* - YouTube*"
-                            },
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                Text(
-                    when (kind.first) {
-                        "Site" -> "Blocks the site and everything under it."
-                        "Address" -> "Matches whole addresses; * stands for any run of characters."
-                        "Word" -> "Blocks anything whose address or title contains the word."
-                        else -> "Matches the title of a window, on the PC."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(kind.second(value.trim())) },
-                enabled = value.isNotBlank(),
-            ) {
-                Text("Block")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+        SheetSection("What to block") {
+            TextField(
+                label = when (kind.first) {
+                    "Site" -> "Address"
+                    "Address" -> "Address pattern"
+                    "Word" -> "Word"
+                    else -> "Title pattern"
+                },
+                value = value,
+                placeholder = when (kind.first) {
+                    "Site" -> "reddit.com"
+                    "Address" -> "*://*/watch*"
+                    "Word" -> "gambling"
+                    else -> "* - YouTube*"
+                },
+                onChange = { value = it },
+            )
+        }
+    }
 }
 
 
 /** Filter choices for the app picker list. */
 enum class AppFilter { All, Blocked, Allowed }
+
+/**
+ * How long the picker waits after the last tap before writing the plan.
+ *
+ * Long enough that a burst of ticking becomes one save, short enough that walking away and coming
+ * back cannot lose an edit. It is not a Save button because there is nothing to decide: the user has
+ * already said what they want by tapping, and this only decides when the file hears about it.
+ */
+private const val PICKER_SAVE_DELAY_MS = 500L
 
 /**
  * The app selection popup bottom sheet, opened from inside a profile.
@@ -671,6 +665,39 @@ fun AppPickerSheet(
     }
 
     /**
+     * The set the user is editing, held here rather than read back out of the config on every tap.
+     *
+     * **This is the lag fix.** Toggling one app used to go straight to `model.setBlockedApps`, which
+     * does four expensive things every single time: serialises the whole plan to TOML, parses and
+     * validates it, writes it to disk, and then re-reads the entire world — config, sessions, stats,
+     * the audit — to rebuild the UI state. With two hundred apps in the list and somebody ticking a
+     * dozen of them, that is a dozen full config rewrites and a dozen full state rebuilds while the
+     * finger is still moving, which is exactly the stutter that made this sheet feel broken.
+     *
+     * The visible state is local now and changes on the frame the tap lands. The write happens once,
+     * after the tapping stops, which is also the right behaviour for the plan file: one edit is one
+     * save rather than a burst of intermediate ones.
+     */
+    var localBlocked by remember(profileId) { mutableStateOf(blocked) }
+    // True from the first un-saved tap until the write has been handed over. It is what stops the
+    // config coming back round and stomping on what the user is in the middle of doing.
+    var pendingWrite by remember(profileId) { mutableStateOf(false) }
+
+    // Adopt the file's answer whenever the user is not mid-edit, so an edit made elsewhere still
+    // shows up here.
+    LaunchedEffect(blocked, pendingWrite) {
+        if (!pendingWrite) localBlocked = blocked
+    }
+
+    // One write, after the tapping stops.
+    LaunchedEffect(localBlocked, pendingWrite) {
+        if (!pendingWrite) return@LaunchedEffect
+        delay(PICKER_SAVE_DELAY_MS)
+        model.setBlockedApps(profileId, localBlocked.toList())
+        pendingWrite = false
+    }
+
+    /**
      * How many of the apps here Curfew will not read. A footnote, not a filter — see the screen above.
      */
     val readProtectedCount = remember(apps, readProtected) {
@@ -681,11 +708,11 @@ fun AppPickerSheet(
         state.profiles.filter { it.id != profileId && model.blockedApps(it.id).isNotEmpty() }
     }
 
-    val filteredApps = remember(apps, query, filter, blocked) {
+    val filteredApps = remember(apps, query, filter, localBlocked) {
         apps
             .filter { app ->
                 val matchesQuery = query.isBlank() || app.label.contains(query, ignoreCase = true)
-                val isBlocked = app.packageName in blocked
+                val isBlocked = app.packageName in localBlocked
                 val matchesFilter = when (filter) {
                     AppFilter.All -> true
                     AppFilter.Blocked -> isBlocked
@@ -693,13 +720,14 @@ fun AppPickerSheet(
                 }
                 matchesQuery && matchesFilter
             }
-            .sortedWith(compareBy({ it.packageName !in blocked }, { it.label.lowercase() }))
+            .sortedWith(compareBy({ it.packageName !in localBlocked }, { it.label.lowercase() }))
     }
 
     Dialog(
         onDismissRequest = onDone,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        FullScreenDialogWindow()
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
@@ -707,50 +735,49 @@ fun AppPickerSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.92f)
-                    .glass(
-                        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
-                        ground = Palette.Raised,
-                    )
+                    .fillMaxHeight(0.95f)
+                    .sheetDragToDismiss(onDone)
+                    .glass(ground = Palette.surface)
+                    // The pane runs under the gesture bar; its content, and so the Done button, does not.
+                    .navigationBarsPadding()
+                    .imePadding()
                     .padding(horizontal = Dsn.Gutter)
-                    .padding(top = 8.dp, bottom = 18.dp),
+                    .padding(top = Space.s, bottom = Space.m),
             ) {
                 Box(
                     modifier = Modifier
-                        .padding(vertical = 6.dp)
+                        .padding(vertical = Space.s)
                         .align(Alignment.CenterHorizontally)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Palette.Line)
+    
+                        .background(Palette.line)
                         .size(width = 38.dp, height = 4.dp),
                 )
-                Gap(8.dp)
+                Gap(Space.s)
                 Text(
                     "Select Apps to Block",
-                    fontSize = 22.sp,
+                    style = Type.h2,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.4).sp,
-                    color = Palette.Text,
+                    color = Palette.text,
                 )
                 Text(
-                    "${blocked.size} apps blocked for $profileName",
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Palette.Muted,
-                    modifier = Modifier.padding(top = 4.dp),
+                    "${localBlocked.size} apps blocked for $profileName",
+                    style = Type.meta,
+                    color = Palette.muted,
+                    modifier = Modifier.padding(top = Space.xs),
                 )
 
                 if (donors.isNotEmpty()) {
-                    Gap(10.dp)
+                    Gap(Space.m)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Space.s),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             "Copy from:",
-                            fontSize = 11.sp,
+                            style = Type.micro,
                             fontWeight = FontWeight.Bold,
-                            color = Palette.Dim,
+                            color = Palette.dim,
                         )
                         donors.forEach { donor ->
                             val count = model.blockedApps(donor.id).size
@@ -763,13 +790,13 @@ fun AppPickerSheet(
                     }
                 }
 
-                Gap(12.dp)
+                Gap(Space.s)
                 SearchField(value = query, onChange = { query = it })
 
-                Gap(10.dp)
+                Gap(Space.s)
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
                     // **The count excludes what is not offered, and that is the point of it.** It used
                     // to say `apps.size`, the raw enumeration, so the pill promised 242 and the list
@@ -781,12 +808,12 @@ fun AppPickerSheet(
                         onClick = { filter = AppFilter.All },
                     )
                     Pill(
-                        text = "Blocked (${blocked.size})",
+                        text = "Blocked (${localBlocked.size})",
                         selected = filter == AppFilter.Blocked,
                         onClick = { filter = AppFilter.Blocked },
                     )
                     Pill(
-                        text = "Allowed (${(apps.size - blocked.size).coerceAtLeast(0)})",
+                        text = "Allowed (${(apps.size - localBlocked.size).coerceAtLeast(0)})",
                         selected = filter == AppFilter.Allowed,
                         onClick = { filter = AppFilter.Allowed },
                     )
@@ -796,22 +823,21 @@ fun AppPickerSheet(
                 // below and all still blockable — hiding them is what made a user conclude the app
                 // was broken.
                 if (readProtectedCount > 0) {
-                    Gap(10.dp)
+                    Gap(Space.s)
                     Text(
                         stringResource(R.string.picker_sensitive_note),
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp,
-                        color = Palette.Muted,
+                        style = Type.micro,
+                        color = Palette.muted,
                     )
                 }
 
-                Gap(12.dp)
+                Gap(Space.s)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                         .clip(RoundedCornerShape(Dsn.CardRadius))
-                        .background(Palette.Surface),
+                        .background(Palette.surface),
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
@@ -827,9 +853,9 @@ fun AppPickerSheet(
                                     } else {
                                         stringResource(R.string.picker_no_apps_found)
                                     },
-                                    fontSize = 13.sp,
-                                    color = Palette.Muted,
-                                    modifier = Modifier.padding(16.dp),
+                                    style = Type.meta,
+                                    color = Palette.muted,
+                                    modifier = Modifier.padding(Space.l),
                                 )
                             }
                         } else {
@@ -838,55 +864,66 @@ fun AppPickerSheet(
                                 key = { _, app -> app.packageName },
                             ) { index, app ->
                                 if (index > 0) Rule()
-                                val on = app.packageName in blocked
+                                val on = app.packageName in localBlocked
+                                // Local and immediate, from the row and the switch alike. The write
+                                // follows on a delay; see `localBlocked` above for why this is not the
+                                // model call.
+                                val toggle = {
+                                    localBlocked =
+                                        if (on) localBlocked - app.packageName
+                                        else localBlocked + app.packageName
+                                    pendingWrite = true
+                                }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            val next = if (on) blocked - app.packageName else blocked + app.packageName
-                                            model.setBlockedApps(profileId, next.toList())
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .clickable(onClick = toggle)
+                                        .padding(start = Space.l, end = Space.s, top = Space.xs, bottom = Space.xs)
                                         .semantics(mergeDescendants = true) {
                                             contentDescription = if (on) "${app.label}, blocked" else "${app.label}, allowed"
                                         },
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(Space.m),
                                 ) {
                                     AppIcon(app.packageName, modifier = Modifier.size(36.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             app.label,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = Palette.Text,
+                                            style = Type.body,
+                                            color = Palette.text,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                         Text(
                                             if (on) "Blocked" else "Allowed",
-                                            fontSize = 11.5.sp,
-                                            color = if (on) Palette.Accent else Palette.Dim,
+                                            style = Type.micro,
+                                            color = if (on) Palette.link else Palette.dim,
                                         )
                                     }
-                                    Switch(
-                                        on = on,
-                                        onChange = { wanted ->
-                                            val next = if (wanted) blocked + app.packageName else blocked - app.packageName
-                                            model.setBlockedApps(profileId, next.toList())
-                                        },
-                                    )
+                                    Switch(on = on, onChange = { toggle() })
                                 }
                             }
                         }
                     }
                 }
 
-                Gap(16.dp)
+                Gap(Space.m)
                 PrimaryButton(
                     text = "Done",
                     modifier = Modifier.fillMaxWidth(),
                     onClick = onDone,
+                )
+            }
+            // The app's own banner is drawn under this dialog's window, so a failure from in here
+            // (saving the list, copying another profile's) would otherwise be reported to no one.
+            state.message?.let { notice ->
+                MessageBanner(
+                    notice,
+                    model::dismissMessage,
+                    Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = Dsn.Gutter)
+                        .padding(bottom = 88.dp),
                 )
             }
         }

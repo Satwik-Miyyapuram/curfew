@@ -2,7 +2,7 @@ package dev.curfew.app.data
 
 import android.content.Context
 import androidx.room.Room
-import dev.curfew.app.enforce.CurfewDeviceAdmin
+import dev.curfew.app.enforce.LockFlag
 import dev.curfew.app.enforce.EnforcementMode
 import dev.curfew.app.enforce.ScreenTime
 import dev.curfew.app.enforce.SensitiveApps
@@ -233,6 +233,42 @@ class CurfewRuntime internal constructor(
             // `persist` refreshes below, so ending takes effect at once without restarting.
             persist(at)
         }
+
+    val pauses = Pauses(context)
+
+    /**
+     * Pause a session: end it now and start the same profile again in [minutes], until the time it
+     * was due to end anyway. The sum on the pause sheet is the confirmation, so only a session that
+     * asks for nothing more can be paused; anything else is refused here exactly as it is by End.
+     */
+    suspend fun pauseSession(id: String, minutes: Int) {
+        val session = policy.sessions().running.firstOrNull { it.id == id } ?: return
+        val at = trustedNowLight()
+        endSession(id, listOf(Lock.Confirm), at)
+        val resumeAt = at + minutes * 60L
+        val endsAt = session.lock.endsAt
+        if (endsAt == null || resumeAt < endsAt) pauses.add(Pause(session.profile, resumeAt, endsAt))
+    }
+
+    /**
+     * Start every paused profile whose pause has run out. It comes back unlocked, so ending it again
+     * takes the same sum as any other End and a pause can never turn into a harder lock.
+     */
+    suspend fun resumeDue(now: Long) {
+        for (pause in pauses.takeDue(now)) {
+            if (pause.endsAt != null && pause.endsAt <= now) continue
+            if (policy.sessions().running.any { it.profile == pause.profile }) continue
+            startSession(
+                Session(
+                    id = "resume-$now",
+                    profile = pause.profile,
+                    source = dev.curfew.policy.SessionSource.Manual,
+                    startedAt = now,
+                    lock = LockSet(endsAt = pause.endsAt),
+                ),
+            )
+        }
+    }
 
     /**
      * Note that the device credential prompt has just succeeded for this session.
@@ -793,18 +829,41 @@ class CurfewRuntime internal constructor(
     }
 
     private fun refresh(now: Long) {
-        _lock.value = policy.mergedLock(now)
+        val lock = policy.mergedLock(now)
+        _lock.value = lock
         _profiles.value = policy.activeProfiles(now)
         _releasable.value = policy.releasable()
-        // The device-admin receiver has to answer the deactivation prompt synchronously, so what it
-        // needs to know is written down here rather than looked up there.
-        runCatching {
-            CurfewDeviceAdmin.setLockHeld(context, policy.sessions().running.isNotEmpty())
-        }
+        // The accessibility service has to answer synchronously, so what it needs to know is written
+        // down here rather than looked up there. The end time goes with the flag so a stale flag
+        // expires on its own.
+        runCatching { LockFlag.set(context, lock.isLocked, lock.endsAt) }
     }
 
     private suspend fun audit(at: Long, kind: String, detail: String) {
         db.audit().add(AuditRow(at = at, kind = kind, detail = detail))
+    }
+
+    /**
+     * Project the usage log into a [UsageShape] over the last [days].
+     *
+     * Hour-of-day comes from each slice's `at`, in the device's own zone — the chart answers "when
+     * in *my* day", so a UTC hour would be answering a different question.
+     */
+    suspend fun usageShape(days: Int = STATS_DAYS, now: Long = clock.now()): UsageShape {
+        val since = now - days * SECONDS_A_DAY
+        val rows = db.usage().slicesSince(since)
+        val zone = java.time.ZoneId.systemDefault()
+        val hours = LongArray(24)
+        val byTarget = linkedMapOf<String, Long>()
+        for (row in rows) {
+            byTarget[row.target] = (byTarget[row.target] ?: 0L) + row.seconds.toLong()
+            hours[java.time.Instant.ofEpochSecond(row.at).atZone(zone).hour] += row.seconds.toLong()
+        }
+        return UsageShape(
+            byTarget = byTarget.entries.map { it.key to it.value }.sortedByDescending { it.second },
+            hourSeconds = hours.toList(),
+            days = days,
+        )
     }
 
     /** Drop history no rule can reach any more. Called from the daily maintenance worker. */
@@ -977,3 +1036,31 @@ data class ScreenTimeComparison(
     /** Seconds a day less than before, or zero when it went the other way. */
     val savedSeconds: Long get() = (beforeSeconds - nowSeconds).coerceAtLeast(0)
 }
+
+/**
+ * How time was spent, shaped for the two charts on the Insights screen.
+ *
+ * The usage log is a flat list of slices — one row per target per stretch of time — and both charts
+ * want a different projection of the same rows. Built once here rather than twice in the screen, so
+ * the two cannot disagree about the period they describe.
+ */
+data class UsageShape(
+    /** Seconds per target over the period, busiest first. */
+    val byTarget: List<Pair<String, Long>>,
+    /** Seconds per hour of the day, 24 entries, hour 0 first. */
+    val hourSeconds: List<Long>,
+    /** The number of days the period covers, for the sentences that name it. */
+    val days: Int,
+) {
+    /** The hour with the most time, or null when nothing was measured. */
+    val busiestHour: Int? = hourSeconds.withIndex().maxByOrNull { it.value }
+        ?.takeIf { it.value > 0 }?.index
+
+    /** That hour's share of everything measured, 0..1. */
+    val busiestHourShare: Float = busiestHour?.let { hour ->
+        val total = hourSeconds.sum()
+        if (total <= 0L) 0f else hourSeconds[hour].toFloat() / total.toFloat()
+    } ?: 0f
+}
+
+private const val SECONDS_A_DAY = 24L * 60 * 60
