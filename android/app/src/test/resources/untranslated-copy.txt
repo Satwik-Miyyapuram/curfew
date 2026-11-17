@@ -265,6 +265,7 @@ ScheduleScreen.kt|Remove this schedule?
 ScheduleScreen.kt|Remove this trigger
 ScheduleScreen.kt|Week at a glance
 ScheduleScreen.kt|Edit Profile
+SettingsScreen.kt|A lock runs to its end time.
 SettingsScreen.kt|Appearance
 SettingsScreen.kt|Config copied to clipboard.
 SettingsScreen.kt|Config exported to file.
@@ -281,7 +282,6 @@ SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file
 SettingsScreen.kt|Is Curfew working
 SettingsScreen.kt|No other device paired yet.
-SettingsScreen.kt|Off. A lock runs to its end time.
 SettingsScreen.kt|Paired, but not listening right now.
 SettingsScreen.kt|Passes a week
 SettingsScreen.kt|Settings

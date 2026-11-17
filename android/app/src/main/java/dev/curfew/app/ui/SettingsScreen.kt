@@ -387,7 +387,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 Text(
                     when {
                         ration.passes == 0 ->
-                            "Off. A lock runs to its end time."
+                            "A lock runs to its end time."
                         why == null -> "${state.passesLeft} of ${ration.passes} left this week."
                         else ->
                             "${state.passesLeft} of ${ration.passes} left this week, and " +

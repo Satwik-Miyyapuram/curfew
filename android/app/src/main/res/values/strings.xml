@@ -24,7 +24,7 @@
          Emitted from the source rather than retyped, so no word differs from the original. -->
     <string name="perm_accessibility_title">Precise blocking</string>
     <string name="perm_accessibility_because">Curfew needs to see which app is in front to replace it the moment it opens.</string>
-    <string name="perm_accessibility_cost">Off: apps are blocked a second or two late, websites not at all. On: instant blocks and site rules, but some banking apps refuse to run. Curfew never reads payment or password apps, and never stops you uninstalling.</string>
+    <string name="perm_accessibility_cost">Instant blocks and website rules. Some banking apps refuse to run while it is on. Never stops you uninstalling.</string>
     <string name="perm_accessibility_mode_app_and_url">Precise blocking, with site rules</string>
     <string name="perm_accessibility_mode_app_and_url_note">Blocks any app the moment it opens, and reads a browser\'s address bar to block sites. Some banking and payment apps will refuse to run.</string>
     <string name="perm_accessibility_mode_neither_blocks_apps">Apps are blocked either way.</string>
