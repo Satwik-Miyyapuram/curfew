@@ -224,6 +224,7 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                     now = now,
                     lock = runtime.lock.value,
                     sessions = sessions,
+                    pauses = runtime.pauses.all(),
                     activeProfiles = runtime.activeProfiles.value,
                     activations = activations.sortedBy { it.start },
                     upcoming = upcoming.sortedWith(compareBy({ it.start }, { it.end })),
@@ -447,6 +448,24 @@ class CurfewViewModel(app: Application) : AndroidViewModel(app) {
                 //
                 // It was a modal when the review was written; entry 19 made it a banner, which fixed
                 // the mechanism and left the substance.
+            } catch (refused: Refused) {
+                _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
+            }
+            refresh()
+        }
+    }
+
+    /** Drop a pause, so the block it ended stays ended. */
+    fun cancelPause(profile: String) {
+        runtime.pauses.remove(profile)
+        viewModelScope.launch { refresh() }
+    }
+
+    /** Pause a session for [minutes]; it starts again on its own. See [CurfewRuntime.pauseSession]. */
+    fun pauseSession(session: Session, minutes: Int) {
+        viewModelScope.launch {
+            try {
+                runtime.pauseSession(session.id, minutes)
             } catch (refused: Refused) {
                 _state.update { it.copy(refusal = refused.refusal, refusedSession = session.id) }
             }
@@ -1014,6 +1033,7 @@ data class UiState(
     val loading: Boolean = true,
     val lock: LockSet = LockSet(),
     val sessions: List<Session> = emptyList(),
+    val pauses: List<dev.curfew.app.data.Pause> = emptyList(),
     val activeProfiles: List<String> = emptyList(),
     val activations: List<Activation> = emptyList(),
     /**

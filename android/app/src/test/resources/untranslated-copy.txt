@@ -82,11 +82,8 @@ Design.kt|Pause this
 Design.kt|Pause this
 Design.kt|Present a tag
 Design.kt|Present a tag
-Design.kt|This is the length you are deciding to stop for. Curfew does not put the block 
 Design.kt|Type the answer here.
 Design.kt|YOUR ANSWER
-Design.kt|back afterwards — there is no timer that turns one off and on again — so you 
-Design.kt|choose when to start again, or let its schedule do it.
 Design.kt|e.g. 42
 DevicesScreen.kt|Another device
 DevicesScreen.kt|Cancel
@@ -156,6 +153,7 @@ NowScreen.kt|Curfew was not running
 NowScreen.kt|Got it
 NowScreen.kt|Got it
 NowScreen.kt|Hold the tag against the back of the phone, or type what is on it.
+NowScreen.kt|Keep it off
 NowScreen.kt|Let it out
 NowScreen.kt|Let the other device out?
 NowScreen.kt|Locked: needs 
@@ -166,6 +164,7 @@ NowScreen.kt|Nothing blocked yet today
 NowScreen.kt|Nothing is blocked
 NowScreen.kt|Nothing is set to start on its own.
 NowScreen.kt|Nothing scheduled in the next day.
+NowScreen.kt|Paused
 NowScreen.kt|Present
 NowScreen.kt|Present the tag
 NowScreen.kt|Restart this device, then come back and end it. Force-stopping Curfew or 
@@ -183,6 +182,7 @@ NowScreen.kt|Your other device is holding a session that only this one can end. 
 NowScreen.kt|no end time
 NowScreen.kt|reopening it is not a restart.
 NowScreen.kt|right now.
+NowScreen.kt|until it starts again
 ProfileEditScreen.kt| else 
 ProfileEditScreen.kt|+ Add another window
 ProfileEditScreen.kt|A daily budget
@@ -237,7 +237,6 @@ ScheduleScreen.kt|Add a profile
 ScheduleScreen.kt|No profiles yet
 ScheduleScreen.kt|Plan
 ScheduleScreen.kt|Week at a glance
-SettingsScreen.kt|A lock runs to its end time.
 SettingsScreen.kt|Appearance
 SettingsScreen.kt|Calendar
 SettingsScreen.kt|Config copied to clipboard.
@@ -253,6 +252,7 @@ SettingsScreen.kt|Export or import curfew.toml.
 SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file
 SettingsScreen.kt|Is Curfew working
+SettingsScreen.kt|No passes, so a lock runs to its end time.
 SettingsScreen.kt|Settings
 SettingsScreen.kt|That file could not be read.
 SettingsScreen.kt|That file could not be written.

@@ -234,6 +234,42 @@ class CurfewRuntime internal constructor(
             persist(at)
         }
 
+    val pauses = Pauses(context)
+
+    /**
+     * Pause a session: end it now and start the same profile again in [minutes], until the time it
+     * was due to end anyway. The sum on the pause sheet is the confirmation, so only a session that
+     * asks for nothing more can be paused; anything else is refused here exactly as it is by End.
+     */
+    suspend fun pauseSession(id: String, minutes: Int) {
+        val session = policy.sessions().running.firstOrNull { it.id == id } ?: return
+        val at = trustedNowLight()
+        endSession(id, listOf(Lock.Confirm), at)
+        val resumeAt = at + minutes * 60L
+        val endsAt = session.lock.endsAt
+        if (endsAt == null || resumeAt < endsAt) pauses.add(Pause(session.profile, resumeAt, endsAt))
+    }
+
+    /**
+     * Start every paused profile whose pause has run out. It comes back unlocked, so ending it again
+     * takes the same sum as any other End and a pause can never turn into a harder lock.
+     */
+    suspend fun resumeDue(now: Long) {
+        for (pause in pauses.takeDue(now)) {
+            if (pause.endsAt != null && pause.endsAt <= now) continue
+            if (policy.sessions().running.any { it.profile == pause.profile }) continue
+            startSession(
+                Session(
+                    id = "resume-$now",
+                    profile = pause.profile,
+                    source = dev.curfew.policy.SessionSource.Manual,
+                    startedAt = now,
+                    lock = LockSet(endsAt = pause.endsAt),
+                ),
+            )
+        }
+    }
+
     /**
      * Note that the device credential prompt has just succeeded for this session.
      *

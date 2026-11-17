@@ -463,9 +463,9 @@ private fun BlockScreen(
                 name = name,
                 now = now,
                 onDismiss = { pausing = false },
-                onPaused = { _, _ ->
+                onPaused = { minutes, _ ->
                     pausing = false
-                    endStep(listOf(dev.curfew.policy.Lock.Confirm))
+                    after { runningIdNow()?.let { context.curfew.pauseSession(it, minutes) } }
                 },
             )
         }

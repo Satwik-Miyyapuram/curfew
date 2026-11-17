@@ -149,12 +149,6 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 Watchers.rememberAccessibilityWanted(context, wanted = true)
                 openGrantPage(context, Grant.Accessibility)
             }
-            Gap(Space.s)
-            Text(
-                stringResource(detector.label()),
-                style = Type.meta,
-                color = Palette.muted,
-            )
         }
 
         Gap(Space.l)
@@ -171,14 +165,10 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 // A local, because `passRefusal` is a delegated property riding on a `StateFlow`
                 // collection and Kotlin will not smart-cast it at the point of use.
                 val why = state.passRefusal
-                if (ration.passes == 0) {
-                    Pill(stringResource(R.string.settings_hatch_off), tint = Palette.warn)
-                    Gap(Space.s)
-                }
                 Text(
                     when {
                         ration.passes == 0 ->
-                            "A lock runs to its end time."
+                            "No passes, so a lock runs to its end time."
                         why == null -> "${state.passesLeft} of ${ration.passes} left this week."
                         else ->
                             "${state.passesLeft} of ${ration.passes} left this week, and " +

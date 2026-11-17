@@ -237,6 +237,8 @@ class EnforcementService : Service() {
             // be able to reconcile a lock away, and this loop is the thing that would do it.
             val now = runtime.trustedNow()
             val events = runtime.calendarEvents(now)
+            runCatching { runtime.resumeDue(now) }
+                .onFailure { android.util.Log.w(TAG, "a pause could not resume", it) }
             runtime.reconcile(now, events)
             // **The incidental work, on its own slower cadence.** The heartbeat is a database write, the
             // alarm is an `AlarmManager` call and the notification is an IPC — none of it needs the fast
@@ -248,7 +250,9 @@ class EnforcementService : Service() {
                 // Written after reconciling, so the recorded time is one Curfew was demonstrably
                 // enforcing at, rather than one it merely woke up at.
                 runtime.heartbeat(now)
-                ScheduleAlarmReceiver.scheduleNext(this, runtime.nextChange(now, events))
+                // A pause running out is a change too, and the core does not know about it.
+                val next = listOfNotNull(runtime.nextChange(now, events), runtime.pauses.next()).minOrNull()
+                ScheduleAlarmReceiver.scheduleNext(this, next)
                 updateNotification()
                 // The accessibility subscription follows the rules, and a rule can be written at any
                 // moment. On the incidental cadence rather than the fast one because it is an IPC and

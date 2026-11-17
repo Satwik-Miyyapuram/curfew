@@ -150,6 +150,7 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
     // Calendar ids ("5721:1794906000") are the provider's row and instant; these are what to say instead.
     val eventTitles = state.calendarEvents.associate { it.id to it.title }
     val liveName = live?.let { session -> named(session.profile) }
+    val paused = if (live == null) state.pauses.minByOrNull { it.resumeAt } else null
 
     Screen(spacing = 0.dp) {
         if (live != null) {
@@ -159,6 +160,11 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             Gap(Space.l)
             Title(liveName.orEmpty())
             Sub(describeSource(live.source, eventTitles))
+        } else if (paused != null) {
+            Pill("Paused", tint = Palette.warn)
+            Gap(Space.l)
+            Title(named(paused.profile))
+            Sub("starts again at ${clockOf(paused.resumeAt)}")
         } else {
             Title("Nothing is blocked" + '\n' + "right now.")
             if (state.weekly.isEmpty() && state.calendarRules.isEmpty()) {
@@ -189,6 +195,14 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
                             )
                         }
                     }
+                } else if (paused != null) {
+                    Dial(fraction = 0f, diameter = 196.dp) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            DialNumber(countdown(paused.resumeAt, state.now))
+                            Text("until it starts again", style = Type.body, color = Palette.muted)
+                        }
+                    }
+                    GhostButton("Keep it off") { model.cancelPause(paused.profile) }
                 } else {
                     Dial(fraction = 0f, diameter = 186.dp, stroke = 10.dp) {
                         Column(
@@ -372,9 +386,9 @@ fun NowScreen(model: CurfewViewModel, onStartTimer: () -> Unit = {}) {
             name = named(session.profile),
             now = state.now,
             onDismiss = { pausing = null },
-            onPaused = { _, _ ->
+            onPaused = { minutes, _ ->
                 pausing = null
-                advance(session, listOf(Lock.Confirm))
+                model.pauseSession(session, minutes)
             },
         )
     }

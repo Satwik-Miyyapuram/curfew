@@ -2242,10 +2242,8 @@ fun ChoiceRow(
  * arithmetic, the same generator the friction locks use, answerable in twenty seconds by someone who
  * means it and annoying enough to stop someone who does not.
  *
- * The explanation states what actually happens rather than what "pause" suggests. There is no timer
- * in the core that turns a block off and back on, so the honest sentence is that the block ends and
- * Curfew records that it was ended on purpose — which is what keeps a schedule from starting it
- * again a second later. Saying "paused until 14:20" would be a promise nothing keeps.
+ * The minutes are real: the block ends now and [dev.curfew.app.data.CurfewRuntime.pauseSession]
+ * starts it again when they run out. The picker once chose a number nothing read.
  */
 @Composable
 fun PausePuzzleSheet(
@@ -2264,8 +2262,7 @@ fun PausePuzzleSheet(
 
     DSheet(
         title = "Pause $name?",
-        sub = "The block ends now, and Curfew records that you ended it — so a schedule holding it " +
-            "will not start it again straight away.",
+        sub = "Apps open for ${if (minutes == 60) "1 hour" else "$minutes min"}, then $name starts again.",
         onDismiss = onDismiss,
         confirm = "Pause",
         confirmEnabled = solved,
@@ -2289,14 +2286,6 @@ fun PausePuzzleSheet(
                     }
                 }
             }
-            Gap(Space.s)
-            Text(
-                "This is the length you are deciding to stop for. Curfew does not put the block " +
-                    "back afterwards — there is no timer that turns one off and on again — so you " +
-                    "choose when to start again, or let its schedule do it.",
-                style = Type.meta,
-                color = Palette.dim,
-            )
         }
         SheetSection("One sum, so this is deliberate") {
             SumQuestion(challenge, answer, onAnswer = { answer = it })

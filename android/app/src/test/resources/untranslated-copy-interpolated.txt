@@ -78,6 +78,7 @@ NowScreen.kt|Let session $id out
 NowScreen.kt|Let session $id out
 NowScreen.kt|The tag that ends $profile
 NowScreen.kt|left · ends ${clockOf(it)}
+NowScreen.kt|starts again at ${clockOf(paused.resumeAt)}
 ProfileEditScreen.kt|$emoji $value
 ProfileEditScreen.kt|${spellDuration(budgetSeconds!! / 60)} a day, then apps lock
 ProfileEditScreen.kt|${windows.size} active window${if (windows.size == 1) 
