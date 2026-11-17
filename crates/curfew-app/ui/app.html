@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light" data-accent="brand" data-density="comfy" data-motion="ok">
+<html lang="en" data-theme="light" data-motion="ok">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Curfew</title>
@@ -18,18 +18,18 @@
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   /* --- colour (docs/design.md §3.2) --- */
-  --bg:#EFEFF2; --panel:#FFFFFF; --raise:#E6E6EA; --raise2:#D8D8DE;
+  --bg:#F4F1E8; --panel:#FFFFFF; --raise:#EAE6DA; --raise2:#DCD7C8;
   --line:#18181B; --ink:#09090B; --mut:#52525B; --dim:#71717A;
-  --brand:#8A6A00; --run:#FF6A2B; --ok:#12874A; --warn:#E0A100; --bad:#E02B45; --cal:#0B8FA8;
+  --brand:#FFD60A; --link:#8A6A00; --run:#FF6A2B; --ok:#16A34A; --warn:#FFAA00; --bad:#F0283F; --cal:#12B5D3;
 
   /* Tints are the only permitted mixing: flat colour at low alpha over the paper background. No
      gradients are built from them; they exist so a status block can be a colour without shouting. */
-  --brand-t:rgba(138,106,0,.14); --run-t:rgba(255,106,43,.16); --ok-t:rgba(18,135,74,.14);
-  --warn-t:rgba(224,161,0,.18); --bad-t:rgba(224,43,69,.14); --cal-t:rgba(11,143,168,.14);
+  --brand-t:rgba(255,214,10,.22); --run-t:rgba(255,106,43,.16); --ok-t:rgba(22,163,74,.14);
+  --warn-t:rgba(255,170,0,.20); --bad-t:rgba(240,40,63,.14); --cal-t:rgba(18,181,211,.16);
 
-  /* Ink on a filled block, chosen per fill for 4.5:1 (WCAG AA). Dark reads on the light fills
-     (run, warn, cal); the deep ones (brand, ok, bad) take white in this theme. */
-  --on-accent:#111110; --on-brand:#FFFFFF; --on-bad:#FFFFFF;
+  /* Ink on a filled block, chosen per fill for 4.5:1 (WCAG AA). Every fill is vivid, so every fill
+     takes dark ink. `--link` is the accent when it has to be read as text on paper. */
+  --on-accent:#09090B; --on-brand:#09090B; --on-bad:#09090B;
 
   /* --- type (docs/design.md §3.3) --- */
   --f:"Segoe UI Variable Text","Segoe UI",-apple-system,"Inter","Helvetica Neue",Arial,sans-serif;
@@ -54,25 +54,12 @@
 html[data-theme="dark"]{
   --bg:#000000; --panel:#000000; --raise:#141416; --raise2:#232327;
   --line:#333333; --ink:#FAFAFA; --mut:#A3A3A3; --dim:#8A8A8A;
-  --brand:#FFD60A; --run:#FF8A52; --ok:#4FCB86; --warn:#F0BE3C; --bad:#FF7183; --cal:#4FC4DA;
-  --brand-t:rgba(255,214,10,.20); --run-t:rgba(255,138,82,.20); --ok-t:rgba(79,203,134,.18);
-  --warn-t:rgba(240,190,60,.20); --bad-t:rgba(255,113,131,.20); --cal-t:rgba(79,196,218,.20);
-  --on-accent:#111110; --on-brand:#111110; --on-bad:#111110;
+  --brand:#FFD60A; --link:#FFD60A; --run:#FF8A4D; --ok:#4FC183; --warn:#E8B33A; --bad:#FF667E; --cal:#3BB8CE;
+  --brand-t:rgba(255,214,10,.20); --run-t:rgba(255,138,77,.20); --ok-t:rgba(79,193,131,.18);
+  --warn-t:rgba(232,179,58,.20); --bad-t:rgba(255,102,126,.20); --cal-t:rgba(59,184,206,.20);
+  --on-accent:#000000; --on-brand:#000000; --on-bad:#000000;
   --grid-ink:rgba(250,250,250,.05); --grid-ink-2:rgba(250,250,250,.09); --scrim:rgba(0,0,0,.72);
 }
-/* Accent settings. `brand` is the design default; the alternatives recolour only the *navigation and
-   primary action* token, never a state colour — `run`, `ok`, `warn` and `bad` always mean the same
-   thing (docs/design.md §8: never colour alone, so these are cosmetic, not semantic). */
-html[data-accent="run"]{--brand:#FF6A2B;--brand-t:rgba(255,106,43,.16)}
-html[data-accent="cal"]{--brand:#0B8FA8;--brand-t:rgba(11,143,168,.14)}
-html[data-accent="ok"]{--brand:#12874A;--brand-t:rgba(18,135,74,.14)}
-html[data-theme="dark"][data-accent="run"]{--brand:#FF8A52;--brand-t:rgba(255,138,82,.20)}
-html[data-theme="dark"][data-accent="cal"]{--brand:#4FC4DA;--brand-t:rgba(79,196,218,.20)}
-html[data-theme="dark"][data-accent="ok"]{--brand:#4FCB86;--brand-t:rgba(79,203,134,.18)}
-
-/* Density and text scale are real settings (§5.11), so they move layout, not just a number. */
-html[data-density="compact"]{--pad:11px;--row-y:8px;--ctl-h:32px;--gap:var(--sp-s)}
-html[data-density="roomy"]{--pad:22px;--row-y:16px;--ctl-h:44px;--gap:var(--sp-xl)}
 html[data-scale="90"]{font-size:90%}
 html[data-scale="100"]{font-size:100%}
 html[data-scale="115"]{font-size:115%}
@@ -89,12 +76,6 @@ html[data-motion="calm"] *{transition:none !important;animation:none !important}
 html,body{height:100%}
 body{
   background-color:var(--bg);
-  background-image:
-    linear-gradient(var(--grid-ink-2) 1px,transparent 1px),
-    linear-gradient(90deg,var(--grid-ink-2) 1px,transparent 1px),
-    linear-gradient(var(--grid-ink) 1px,transparent 1px),
-    linear-gradient(90deg,var(--grid-ink) 1px,transparent 1px);
-  background-size:var(--grid) var(--grid),var(--grid) var(--grid),calc(var(--grid)*4) calc(var(--grid)*4),calc(var(--grid)*4) calc(var(--grid)*4);
   color:var(--ink);font-family:var(--f);font-size:var(--body);line-height:1.45;
   -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none;
 }
@@ -109,7 +90,7 @@ body{
 :focus{outline:none}
 :focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,
 a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{
-  outline:3px solid var(--brand);outline-offset:3px;border-radius:0}
+  outline:3px solid var(--link);outline-offset:3px;border-radius:0}
 
 /* ------------------------------------------------------------------ typography */
 h1,.h1{font-size:var(--h1);font-weight:800;text-transform:uppercase;letter-spacing:-.2px;line-height:1.15}
@@ -141,7 +122,7 @@ b,strong{font-weight:750}
 .main{flex:1;display:flex;min-height:0}
 
 /* --- left sidebar, grouped (docs/design.md §4.1) --- */
-.side{width:248px;flex:none;background:var(--raise);border-right:var(--bw) solid var(--line);
+.side{width:208px;flex:none;background:var(--raise);border-right:var(--bw) solid var(--line);
   padding:var(--sp-m) var(--sp-m);display:flex;flex-direction:column;gap:var(--sp-l);overflow-y:auto}
 .grp{display:flex;flex-direction:column;gap:var(--sp-xs)}
 .grp>.lbl{padding:var(--sp-xxs) var(--sp-s) var(--sp-xs)}
@@ -164,6 +145,7 @@ b,strong{font-weight:750}
 .pagetop .grow{flex:1;min-width:260px}
 .sec{margin-top:var(--sp-xl)}
 .sec:first-child{margin-top:0}
+.g2>.sec,.g3>.sec,.stack>.sec{margin-top:0}
 .sechead{display:flex;align-items:center;gap:var(--sp-m);margin-bottom:var(--sp-m);flex-wrap:wrap}
 .sechead .lbl{flex:1}
 .lead{display:flex;align-items:flex-start;gap:var(--sp-m);margin-bottom:var(--sp-l)}
@@ -214,6 +196,7 @@ b,strong{font-weight:750}
 .btn.ghost{background:var(--panel);color:var(--ink)}
 .btn.quiet{background:var(--raise);color:var(--ink)}
 .btn.danger{background:var(--bad);color:var(--on-bad)}
+.btn.warn{background:var(--warn);color:var(--on-accent)}
 .btn.run{background:var(--run);color:var(--on-accent)}
 .btn.ok{background:var(--ok);color:var(--on-brand)}
 .btn.sm{min-height:30px;padding:0 var(--sp-m);font-size:var(--meta)}
@@ -221,7 +204,7 @@ b,strong{font-weight:750}
 .btn[aria-busy="true"]{cursor:progress}
 .btn[aria-busy="true"]::after{content:"…";font-family:var(--fmono)}
 .btn.err{border-color:var(--bad)}
-.linkbtn{background:none;border:none;padding:0;font:inherit;font-size:var(--meta);color:var(--brand);
+.linkbtn{background:none;border:none;padding:0;font:inherit;font-size:var(--meta);color:var(--link);
   text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-weight:650}
 .linkbtn:hover{color:var(--ink)}
 input,select,textarea{font-family:var(--f);font-size:var(--body);color:var(--ink);background:var(--raise);
@@ -236,9 +219,9 @@ select{cursor:pointer;appearance:none;background-image:none;padding-right:var(--
 .field>.lbl{letter-spacing:1px}
 .inline{display:flex;align-items:center;gap:var(--sp-m);flex-wrap:wrap}
 .inline>label{display:flex;align-items:center;gap:var(--sp-s);font-size:var(--body);cursor:pointer}
-.err-msg{font-size:var(--meta);color:var(--bad);font-weight:650}
-.ok-msg{font-size:var(--meta);color:var(--ok);font-weight:650}
-.warn-msg{font-size:var(--meta);color:var(--warn);font-weight:650}
+.err-msg{font-size:var(--meta);color:var(--ink);font-weight:650;border-left:4px solid var(--bad);padding-left:var(--sp-s)}
+.ok-msg{font-size:var(--meta);color:var(--ink);font-weight:650;border-left:4px solid var(--ok);padding-left:var(--sp-s)}
+.warn-msg{font-size:var(--meta);color:var(--ink);font-weight:650;border-left:4px solid var(--warn);padding-left:var(--sp-s)}
 
 /* Segmented choice — square, not pills. */
 .seg{display:inline-flex;border:var(--bw) solid var(--line);background:var(--raise)}
@@ -433,35 +416,13 @@ hr.rule{border:none;border-top:3px solid var(--bg);margin:var(--sp-xl) 0}
   </header>
   <div class="main">
     <nav class="side" aria-label="Sections">
-      <div class="grp" role="group" aria-label="Today">
-        <div class="lbl">Today</div>
-        <button class="nav" data-page="now"><span class="ic" aria-hidden="true">&#9679;</span>Now<span class="cnt" id="nav-now"></span></button>
-        <button class="nav" data-page="start"><span class="ic" aria-hidden="true">&#9654;</span>Start a block</button>
-      </div>
-      <div class="grp" role="group" aria-label="The plan">
-        <div class="lbl">The plan</div>
-        <button class="nav" data-page="plan"><span class="ic" aria-hidden="true">&#9638;</span>Plan<span class="cnt" id="nav-plan"></span></button>
-        <button class="nav" data-page="profiles"><span class="ic" aria-hidden="true">&#9635;</span>Profiles</button>
-        <button class="nav" data-page="calendar"><span class="ic" aria-hidden="true">&#9684;</span>Calendar</button>
-        <button class="nav" data-page="planfile"><span class="ic" aria-hidden="true">&#9776;</span>Plan file</button>
-      </div>
-      <div class="grp" role="group" aria-label="Fleet">
-        <div class="lbl">Fleet</div>
-        <button class="nav" data-page="devices"><span class="ic" aria-hidden="true">&#9787;</span>Devices</button>
-        <button class="nav" data-page="insights"><span class="ic" aria-hidden="true">&#9641;</span>Insights</button>
-      </div>
-      <div class="grp" role="group" aria-label="Trust">
-        <div class="lbl">Trust</div>
-        <button class="nav" data-page="health"><span class="ic" aria-hidden="true">&#10003;</span>Is it working</button>
-        <button class="nav" data-page="settings"><span class="ic" aria-hidden="true">&#9881;</span>Settings</button>
-        <button class="nav" data-page="mock"><span class="ic" aria-hidden="true">&#9634;</span>Review and mock</button>
-      </div>
+      <button class="nav" data-page="now"><span class="ic" aria-hidden="true">&#9679;</span>Now<span class="cnt" id="nav-now"></span></button>
+      <button class="nav" data-page="start"><span class="ic" aria-hidden="true">&#9654;</span>Start</button>
+      <button class="nav" data-page="plan"><span class="ic" aria-hidden="true">&#9638;</span>Plan<span class="cnt" id="nav-plan"></span></button>
+      <button class="nav" data-page="devices"><span class="ic" aria-hidden="true">&#9787;</span>Devices</button>
+      <button class="nav" data-page="settings"><span class="ic" aria-hidden="true">&#9881;</span>Settings</button>
       <div class="grow"></div>
-      <div class="card" style="padding:var(--sp-m)">
-        <div class="lbl">While this window is shut</div>
-        <div class="note" style="margin-top:var(--sp-s)">Closing the window stops nothing. Blocking is done by the
-          Curfew service, which keeps running. The plan file is the source of truth.</div>
-      </div>
+      <div class="note" style="padding:var(--sp-s)">Closing this window stops nothing.</div>
     </nav>
     <main class="body" id="body" tabindex="-1"></main>
   </div>
@@ -784,9 +745,8 @@ const state = {
   lastAnnouncedMinute: null,
 };
 const DEFAULT_SETTINGS = {
-  theme: "light", accent: "brand", density: "comfy", scale: "100",
-  contrast: "normal", motion: "ok", notify: "on",
-  releaseSafety: "on", freezePolicy: "ask", passes: "on", usage: "on", mock: "desktop",
+  theme: "light", scale: "100",
+  contrast: "normal", motion: "ok",
 };
 const SETTINGS_KEY = "curfew.window.settings.v1";
 function loadSettings() {
@@ -802,8 +762,6 @@ function saveSettings() {
 function applySettings() {
   const s = state.settings, root = document.documentElement;
   root.setAttribute("data-theme", s.theme);
-  root.setAttribute("data-accent", s.accent);
-  root.setAttribute("data-density", s.density);
   root.setAttribute("data-scale", s.scale);
   root.setAttribute("data-contrast", s.contrast);
   root.setAttribute("data-motion", s.motion);
@@ -894,8 +852,7 @@ function sec(title, body, right) {
 }
 function loadingCard(what) {
   return `<div class="card" aria-busy="true"><div class="lbl">${esc(what)}</div>
-    ${sh(10)}<div class="skel"></div><div class="skel w80"></div><div class="skel w60"></div>
-    <div class="note" style="margin-top:var(--sp-s)">Reading&hellip;</div></div>`;
+    ${sh(10)}<div class="skel"></div><div class="skel w80"></div><div class="skel w60"></div></div>`;
 }
 function skeletonPage(title, what) {
   return `<div class="wrapc"><h1>${esc(title)}</h1>${sh(8)}
@@ -945,9 +902,7 @@ function gate(title, what) {
   return `<div class="wrapc"><h1>${esc(title)}</h1>${sh(8)}
     <div class="sub">${esc(waiting ? "Waiting for the Curfew service to answer." : "Nothing can be shown until the service answers.")}</div>
     ${sh(18)}${troubleCard()}
-    ${waiting ? loadingCard(what || "What is running") : ""}
-    <div class="note" style="margin-top:var(--sp-l)">Blocking is done by the service, not by this window. If the
-      service is stopped, nothing about the plan has changed — it is just not being enforced.</div></div>`;
+    ${waiting ? loadingCard(what || "What is running") : ""}</div>`;
 }
 /** Pages that describe the plan, rather than the moment, need the plan file. */
 function planGate(title) {
@@ -955,8 +910,7 @@ function planGate(title) {
   if (g) return g;
   if (state.configError) {
     return `<div class="wrapc"><h1>${esc(title)}</h1>${sh(8)}
-      <div class="sub">The plan file could not be read, so the plan cannot be shown. Blocking carries
-        on: the service holds the plan it loaded.</div>${sh(16)}
+      <div class="sub">Plan file unreadable. Blocking continues on the last good plan.</div>${sh(16)}
       <div class="alert bad" role="alert"><div class="lbl">The plan file</div>
         <div style="margin-top:var(--sp-s);line-height:1.6">${esc(state.configError)}</div>
         <div class="mono meta" style="margin-top:var(--sp-s);overflow-wrap:anywhere">${esc(state.configPath || "")}</div>
@@ -964,8 +918,7 @@ function planGate(title) {
           ${btn("Plan file view", "goto", ' data-page="planfile"', "ghost")}</div></div></div>`;
   }
   if (!state.config) {
-    return `<div class="wrapc"><h1>${esc(title)}</h1>${sh(8)}
-      <div class="sub">Reading the plan the service is enforcing.</div>${sh(18)}${loadingCard("The plan")}</div>`;
+    return `<div class="wrapc"><h1>${esc(title)}</h1>${sh(18)}${loadingCard("The plan")}</div>`;
   }
   return null;
 }
@@ -1081,16 +1034,12 @@ const COMMANDS = [
   { group: "Go", label: "Profiles", hint: "Targets, allowances and waits", page: "profiles" },
   { group: "Go", label: "Calendar", hint: "Events and the rules they match", page: "calendar" },
   { group: "Go", label: "Plan file", hint: "The file the service enforces", page: "planfile" },
-  { group: "Go", label: "Devices", hint: "Pairing, enforcement layers, revoke", page: "devices" },
-  { group: "Go", label: "Insights", hint: "Local-only usage figures", page: "insights" },
-  { group: "Go", label: "Is it working", hint: "Every layer, said out loud", page: "health" },
+  { group: "Go", label: "Devices", hint: "Pairing and revoke", page: "devices" },
+  { group: "Go", label: "Is Curfew working", hint: "Every enforcement layer", page: "health" },
   { group: "Go", label: "Settings", hint: "Appearance, safety, exports", page: "settings" },
-  { group: "Go", label: "Review and mock", hint: "The phone and desktop mocks of one plan", page: "mock" },
   { group: "Do", label: "Start a block now", hint: "Open the start sheet", act: "start-open" },
   { group: "Do", label: "Add a rule", hint: "Open the rule editor", act: "add-rule" },
   { group: "Do", label: "Pause the whole plan", hint: "Stops future rules; a running block is untouched", act: "pause-all" },
-  { group: "Do", label: "Switch to the phone mock", hint: "Layout only — the plan does not change", act: "mock-phone" },
-  { group: "Do", label: "Switch to the desktop mock", hint: "Layout only — the plan does not change", act: "mock-desktop" },
   { group: "Do", label: "Switch the theme", hint: "Light paper and dark paper", act: "theme-toggle" },
   { group: "Do", label: "Read the plan file again", hint: "Re-reads the file the service enforces", act: "retry" },
   { group: "Do", label: "Copy the plan as JSON", hint: "Puts the whole plan on the clipboard", act: "export-json" },
@@ -1122,8 +1071,6 @@ function renderPalette() {
   sheet(`<input class="pl-input" id="pl-input" data-autofocus type="search" value="${esc(state.palette.q)}"
       placeholder="Jump to a screen, or run an action" aria-label="Search commands"
       aria-controls="pl-list" aria-activedescendant="${matches.length ? "pl-" + index : ""}" autocomplete="off">
-    <div class="note" style="margin-top:var(--sp-s)">Type to filter. Up and down move, Enter runs the
-      highlighted command, Escape closes.</div>
     <div class="pl-list" id="pl-list" role="listbox" aria-label="Commands">
       ${items || '<div class="pl-item"><span class="meta">Nothing matches that.</span></div>'}
     </div>`, { title: "Commands", wide: true });
@@ -1149,8 +1096,7 @@ function synthetic(act, id) {
 }
 
 /* ------------------------------------------------------------------ routing */
-const ROUTES = ["now", "start", "plan", "profiles", "calendar", "planfile", "devices", "insights",
-  "health", "settings", "mock"];
+const ROUTES = ["now", "start", "plan", "profiles", "calendar", "planfile", "devices", "health", "settings"];
 function go(page) {
   if (ROUTES.indexOf(page) < 0) page = "now";
   state.page = page;
@@ -1178,8 +1124,8 @@ function draw() {
 }
 const ROUTE_FNS = {
   now: pageNow, start: pageStart, plan: pagePlan, profiles: pageProfiles, calendar: pageCalendar,
-  planfile: pagePlanFile, devices: pageDevices, insights: pageInsights, health: pageHealth,
-  settings: pageSettings, mock: pageMock,
+  planfile: pagePlanFile, devices: pageDevices, health: pageHealth,
+  settings: pageSettings,
 };
 function routeHtml() {
   const fn = ROUTE_FNS[state.page] || pageNow;
@@ -1187,8 +1133,7 @@ function routeHtml() {
   catch (e) {
     console.error(e);
     return `<div class="wrapc"><h1>This page could not be drawn</h1>
-      <div class="sub">The window hit an error drawing this screen. Nothing about the plan or the block
-        has changed.</div>${sh(16)}<div class="alert bad"><div class="mono">${esc(e && e.message)}</div>
+      <div class="sub">The plan and block are unchanged.</div>${sh(16)}<div class="alert bad"><div class="mono">${esc(e && e.message)}</div>
       ${sh(10)}${btn("Go to Now", "goto", ' data-page="now"')}</div></div>`;
   }
 }
@@ -1209,21 +1154,16 @@ function paintStatusBar() {
   if (!host) return;
   const s = state.status;
   const running = (s && s.running) || [];
-  let health;
-  if (!s) health = stateTag("No service", "bad", "!");
-  else if (s.hosts_error || s.state_warning || s.foreground_warning) health = stateTag("Degraded", "warn", "!");
-  else health = stateTag("Enforcing", "ok", "\u2713");
-  let block;
+  let label, tone, icon;
+  if (!s) { label = "No service"; tone = "bad"; icon = "!"; }
+  else if (s.hosts_error || s.state_warning || s.foreground_warning) { label = "Degraded"; tone = "warn"; icon = "!"; }
+  else { label = "Enforcing"; tone = "ok"; icon = "\u2713"; }
   if (running.length) {
     const ends = running[0].lock ? running[0].lock.ends_at : null;
     const left = ends == null ? null : ends - s.now;
-    block = stateTag(`${profileName(running[0].profile)}${left == null ? "" : " \u00b7 " + clock(left)}`, "run", "\u25A0");
-  } else {
-    block = stateTag("Nothing blocked", "ghost", "\u25A1");
+    label += " \u00b7 " + profileName(running[0].profile) + (left == null ? "" : " \u00b7 " + clock(left));
   }
-  const mock = state.settings.mock === "phone"
-    ? stateTag("Phone mock", "brand", "\u25A3") : stateTag("Desktop mock", "ghost", "\u25A2");
-  host.innerHTML = `${health}${block}${mock}
+  host.innerHTML = `${stateTag(label, tone, icon)}
     <span class="meta mono" style="white-space:nowrap">${esc(atTime(s ? s.now : Math.floor(Date.now() / 1000)))}</span>`;
 }
 /** One throttled announcement a minute, never one a second (§8). */
@@ -1253,58 +1193,51 @@ function startDraft() {
   }
   return state.start;
 }
+/** One line of error, with the raw detail tucked behind a disclosure. */
+function errLine(summary, detail, extra) {
+  const more = detail ? `<details><summary class="meta">Details</summary><div class="meta">${esc(detail)}</div></details>` : "";
+  return `<div class="err-msg" role="alert"${extra || ""}>${esc(summary)}${more}</div>`;
+}
 function pageStart() {
   const g = planGate("Start a block");
   if (g) return g;
   const d = startDraft();
   if (profiles().length === 0) {
-    return `<h1>Start a block</h1>${sh(8)}
-      <div class="sub">There is nothing to block yet. A block is a profile — a named set of apps and
-        sites — so a profile is the first thing to make.</div>${sh(18)}
+    return `<h1>Start a block</h1>${sh(18)}
       ${emptyBlock("No profiles yet", "A profile is a named group of targets: an app, a site, a path or a keyword.",
         btn("Make one on the Plan page", "goto", ' data-page="plan"'))}`;
   }
   return `<div class="pagetop"><div class="grow">
-      <h1>Start a block</h1>${sh(6)}
-      <div class="sub">Three steps, in this order on purpose: how hard it is to leave, then how long,
-        then what it covers. Every choice states its consequence before you commit to it.</div>
+      <h1>Start a block</h1>
     </div></div>
     <div class="g2">
       <div class="stack">
-        ${stepCard(1, "Strength", stepStrength())}
-        ${stepCard(2, "Time", stepTime())}
-        ${stepCard(3, "Targets and profile", d.step < 3
-          ? lockedNote("Choose how long first, then what it covers.") : stepTargets())}
+        ${stepCard(1, "How long", stepTime())}
+        ${stepCard(2, "Strength", stepStrength())}
+        ${stepCard(3, "Profile", stepTargets())}
       </div>
       <div class="stack">
         <div class="card hero">
-          <div class="lbl">What you are about to promise</div>
+          <div class="lbl">Summary</div>
           ${sh(10)}${startReceipt()}
           ${sh(14)}
           <button class="btn wide run" data-act="start-go"${d.saving ? ' aria-busy="true" disabled' : ""}>
             ${d.saving ? "Starting" : "Start the block"}</button>
-          ${d.error ? sh(10) + `<div class="err-msg" role="alert">${esc(d.error)}</div>` : ""}
-          ${sh(10)}
-          <div class="note">A running block is a promise. Editing the plan never shortens or weakens a
-            block that is already running, and every block keeps its last-resort release line from the
-            first second.</div>
+          ${d.error ? sh(10) + errLine("The block did not start.", d.error) : ""}
         </div>
-        <div class="card"><div class="lbl">Already running</div>${sh(8)}${runningMini()}</div>
       </div>
     </div>`;
 }
 function stepCard(n, title, body) {
   const d = startDraft();
-  const done = d.step > n || (n === 1 && !!startDraft().strength);
+  const done = d.step > n;
   return `<div class="card">
     <div class="sechead">
-      <span class="tag ${done ? "ok" : d.step === n ? "brand" : "ghost"}">
-        <span class="glyph" aria-hidden="true">${done ? "\u2713" : n}</span>Step ${n}</span>
+      <span class="tag ${done ? "ok" : d.step === n ? "brand" : "ghost"}">${done ? "\u2713" : n}</span>
       <div class="h2" style="flex:1">${esc(title)}</div>
       ${done ? `<button class="linkbtn" data-act="start-step" data-n="${n}">Change</button>` : ""}
     </div>${body}</div>`;
 }
-function lockedNote(text) { return `<div class="note">${esc(text)}</div>`; }
 function stepStrength() {
   const d = startDraft();
   return `<div class="flush">${STRENGTHS.map((s) => `<button class="row"
@@ -1313,39 +1246,25 @@ function stepStrength() {
       <span class="glyph" aria-hidden="true" style="width:18px">${d.strength === s.id ? "\u25C9" : "\u25CB"}</span>
       <span class="grow" style="text-align:left"><span class="h3" style="display:block">${esc(s.label)}</span>
         <span class="meta">${esc(s.note)}</span></span>
-      ${d.strength === s.id ? tag("Chosen", "brand") : ""}</button>`).join("")}</div>
-    <div class="note" style="margin-top:var(--sp-m)">Strength is how hard it is to end, not how long it lasts.
-      There is always a last-resort release; it is deliberately slow.</div>`;
+      ${d.strength === s.id ? tag("Chosen", "brand") : ""}</button>`).join("")}</div>`;
 }
 function stepTime() {
   const d = startDraft();
-  const end = new Date(Date.now() + d.minutes * 60000);
   return `${dial({
     mode: "duration", value: d.minutes, label: "HOW LONG", id: "start-dial",
-    presets: true, sliders: true, numeric: true,
-    instruction: "Drag the dial, use the sliders, or type an exact number of minutes. Nothing here requires dragging.",
+    presets: true, sliders: false, numeric: !!d.custom,
   })}
-    <div class="meta" style="margin-top:var(--sp-m)">If you start now it ends around
-      <span class="mono strong">${esc(end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</span>.</div>`;
+    <div style="margin-top:var(--sp-s)"><button class="linkbtn" data-act="start-custom" aria-expanded="${!!d.custom}">${d.custom ? "Hide custom" : "Custom"}</button></div>`;
 }
 function stepTargets() {
   const d = startDraft();
   if (!d.profile || !profiles().some((p) => p.id === d.profile)) d.profile = profiles()[0].id;
-  const profile = profiles().find((p) => p.id === d.profile);
-  const rules = (profile && profile.rules) || [];
   return `<div class="field"><span class="lbl">Profile</span>
       <div class="strip">${profiles().map((p) => `<button class="btn ${p.id === d.profile ? "" : "quiet"} sm"
         data-act="start-profile" data-id="${esc(p.id)}" aria-pressed="${p.id === d.profile}">${esc(p.name)}</button>`).join("")}</div>
     </div>
     ${sh(12)}
-    <div class="lbl">What this profile covers</div>${sh(6)}
-    <div class="flush">${rules.length ? rules.map((r) => {
-      const t = describeTarget(r.target);
-      return `<div class="row tight"><span class="shape-sq" style="background:var(--brand)" aria-hidden="true"></span>
-        <span class="grow">${esc(t.text)}</span>
-        <span class="meta">${esc(describeAction(r.action))}</span></div>`;
-    }).join("") : '<div class="row tight"><span class="meta">This profile has no rules yet, so it would block nothing.</span></div>'}</div>
-    <button class="linkbtn" style="margin-top:var(--sp-m)" data-act="goto" data-page="profiles">Edit what this profile covers</button>`;
+    <button class="linkbtn" data-act="goto" data-page="profiles">Edit profile</button>`;
 }
 function startReceipt() {
   const d = startDraft();
@@ -1353,28 +1272,14 @@ function startReceipt() {
   const profile = profiles().find((p) => p.id === d.profile) || profiles()[0];
   const ends = new Date(Date.now() + d.minutes * 60000);
   const rows = `<div class="rrow"><span class="rk">Strength</span><span class="rv">${esc(s.label)}</span></div>
-    <div class="rrow"><span class="rk">For</span><span class="rv">${esc(spellMinutes(d.minutes))}</span></div>
     <div class="rrow"><span class="rk">Ends at</span><span class="rv">${esc(ends.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</span></div>
-    <div class="rrow"><span class="rk">Profile</span><span class="rv">${esc(profile ? profile.name : "\u2014")}</span></div>
-    <div class="rrow"><span class="rk">To end it early</span><span class="rv">${esc(s.what)}</span></div>`;
+    <div class="rrow"><span class="rk">Profile</span><span class="rv">${esc(profile ? profile.name : "\u2014")}</span></div>`;
   /* Four hours or more uses the receipt as a confirmation, rather than as a caption (§6.4). */
   const long = d.minutes >= 240;
   return `<div class="receipt">${rows}</div>
     <div class="meta" style="margin-top:var(--sp-m)">${esc(s.what)}</div>
     ${long ? `<div class="alert" style="margin-top:var(--sp-m)" role="note">
-      <div class="lbl">Four hours or more</div>
-      <div class="meta" style="margin-top:var(--sp-xs)">This is a long block. The receipt above is what you are
-        agreeing to, and nothing starts until you press the button.</div></div>` : ""}`;
-}
-function runningMini() {
-  const s = state.status;
-  const running = (s && s.running) || [];
-  if (!running.length) return '<div class="meta">Nothing is blocked right now.</div>';
-  return running.map((x) => `<div class="rowflex" style="margin-top:var(--sp-s)">${dot("run")}
-    <span class="grow">${esc(profileName(x.profile))}</span>
-    <span class="mono meta">${esc(x.lock && x.lock.ends_at != null ? atTime(x.lock.ends_at) : "open-ended")}</span>
-  </div>`).join("")
-    + '<div class="note" style="margin-top:var(--sp-s)">Starting another block merges into this one. It cannot shorten it.</div>';
+      <div class="lbl">Long block: four hours or more</div></div>` : ""}`;
 }
 async function startBlock() {
   const d = startDraft();
@@ -1439,31 +1344,28 @@ function pageNow() {
   const notice = downtimeNotice();
   return `${notice}
     ${active ? activeBlock(active) : idleBlock()}
-    ${sec("How this block is going", contributionCard(active))}
-    <div class="g2">
+    ${active ? sec("How this block is going", contributionCard(active)) : ""}
+    ${nextWindows(1).length || enabledCalendars().length ? `<div class="g2">
       <div>${sec("Next six hours", scrubberCard())}</div>
       <div>${sec("Next scheduled rules", nextRulesCard())}</div>
-    </div>
-    ${sec("Allowances left today", allowancesCard())}
-    <div class="g2">
-      <div>${sec("Activity", activityCard())}</div>
-      <div>${sec("Timeline", timelineCard())}</div>
-    </div>
-    ${sec("If the service is stopped", `<div class="note" style="max-width:80ch">
-      Closing this window stops nothing, and stopping the service does not undo a promise: a block
-      keeps its end condition and its last-resort release. What stopping the service does is add a
-      stretch where nothing was enforced, and the notice at the top of this page is where that is said
-      out loud.</div>`)}`;
+    </div>` : ""}
+    ${insightsBlock()}
+    ${optional("Allowances left today", allowancesCard())}
+    ${optional("Activity", activityCard())}
+    ${optional("Timeline", timelineCard())}
+`;
+}
+/** A section that is left out entirely when it has nothing to say. */
+function optional(title, body) {
+  return body ? sec(title, body) : "";
 }
 /** Nothing is blocked: a strong statement, not a shrug, with the way to change it. */
 function idleBlock() {
   const next = nextWindows(1)[0];
-  return `<div class="pagetop"><div class="grow"><h1>Now</h1>${sh(6)}
-      <div class="sub">What is true at this moment, straight from the service that does the blocking.</div>
-    </div><div class="strip">${btn("Start a block", "start-open")}</div></div>
+  return `<div class="pagetop"><div class="grow"><h1>Now</h1></div></div>
     ${emptyBlock("Nothing is blocked right now",
       next ? `Next up is ${profileName(next.rule.profile)} at ${hhmm(next.rule.start_minute)}${next.daysAway ? ", in " + next.daysAway + " days" : ", today"}.`
-        : "No rule is scheduled. The Plan page is where rules are made.",
+        : "Nothing scheduled.",
       `<button class="btn" data-act="start-open">Start a block</button>`
       + btn("Open the plan", "goto", ' data-page="plan"', "ghost"))}`;
 }
@@ -1493,8 +1395,7 @@ function activeBlock(session) {
     <div class="rowflex" style="gap:var(--sp-xl);align-items:flex-start;flex-wrap:wrap">
       ${left == null
         ? `<div><div class="lbl">Time left</div><div class="mega mono">open</div>
-            <div class="meta" style="max-width:24ch">This block has no end time of its own; it ends when
-              its condition is met. The release line below is the way out.</div></div>`
+            <div class="meta" style="max-width:24ch">Ends when its condition is met.</div></div>`
         : countdownRing(left, total, "LEFT")}
       <div class="grow" style="min-width:260px">
         ${kv([
@@ -1504,13 +1405,12 @@ function activeBlock(session) {
           ["Ends", ends == null ? "when its condition is met"
             : `<span class="mono strong">${esc(atTime(ends))}</span> <span class="meta">in ${esc(spellMinutes((ends - s.now) / 60))}</span>`],
           ["Strength", `${esc(strengthLabel(strength))} \u2014 ${esc(strengthSentence(strength))}`],
-          ["Block id", `<span class="mono">${esc(session.id)}</span>`],
         ])}
         ${elsewhere.length ? `<div class="alert" style="margin-top:var(--sp-m)"><div class="lbl">This window cannot end it by itself</div>
           <div class="meta" style="margin-top:var(--sp-xs)">It also needs ${esc(elsewhere.join(", "))}.</div></div>` : ""}
       </div>
       <div class="stack" style="min-width:240px;max-width:290px">
-        ${btn("End this block early", "end", ` data-id="${esc(session.id)}"`, "danger wide")}
+        ${btn("End this block early", "end", ` data-id="${esc(session.id)}"`, "warn wide")}
         ${offers.confirm ? btn("Confirm ending it", "end-confirm", ` data-id="${esc(session.id)}"`, "quiet wide") : ""}
         ${offers.credential ? btn("Open the Windows prompt", "unlock", ` data-id="${esc(session.id)}"`, "quiet wide") : ""}
         ${offers.peer_released ? stateTag("Released by this device", "ok", "\u2713") : ""}
@@ -1521,12 +1421,10 @@ function activeBlock(session) {
     </div>
     ${sh(16)}
     <div class="alert cal">
-      <div class="lbl">The last-resort release, from the first second</div>
-      <div class="meta" style="margin-top:var(--sp-xs)">You can always start the 24-hour release on this block.
-        It is deliberately slow: it lifts at
-        <span class="mono strong">${esc(offers.delayed_release_at ? atDateTime(offers.delayed_release_at) : "this time tomorrow")}</span>,
-        and that cannot be brought forward or cancelled once started. Starting it takes one
-        confirmation, so it is never an accident.</div>
+      <div class="lbl">Latest end</div>
+      <div class="meta" style="margin-top:var(--sp-xs)">A 24-hour release ends it at
+        <span class="mono strong">${esc(offers.delayed_release_at ? atDateTime(offers.delayed_release_at) : "this time tomorrow")}</span>.
+        Once started, it cannot be sped up or cancelled.</div>
     </div>
   </div>`;
 }
@@ -1552,7 +1450,7 @@ function downtimeNotice() {
       <div class="lbl">Announced, not started</div>
       <div class="h3" style="margin-top:var(--sp-xs)">Everything is about to close</div>
       <div class="meta" style="margin-top:var(--sp-s)">${esc(freezeSentence(s))}</div>
-    </div><button class="btn danger" data-act="cancel-freeze">Cancel the freeze</button></div></div>`);
+    </div><button class="btn" data-act="cancel-freeze">Cancel the freeze</button></div></div>`);
   if (s.downtime) parts.push(`<div class="alert bad" role="alert">
     <div class="rowflex"><div class="grow">
       <div class="lbl">A hole in the record</div>
@@ -1562,7 +1460,7 @@ function downtimeNotice() {
   if (s.foreground_warning) parts.push(`<div class="alert" style="border-left-color:var(--bad)" role="alert">
     <div class="lbl">A rule is no longer enforced</div>
     <div class="meta" style="margin-top:var(--sp-xs)">${esc(s.foreground_warning)}</div>
-    <div style="margin-top:var(--sp-m)">${btn("Is it working", "goto", ' data-page="health"', "ghost")}</div></div>`);
+    <div style="margin-top:var(--sp-m)">${btn("Is Curfew working", "goto", ' data-page="health"', "ghost")}</div></div>`);
   return parts.length ? parts.join(sh(12)) + sh(12) : "";
 }
 /** The freeze, in a sentence with its duration in it. Reads the countdown the service reported. */
@@ -1572,7 +1470,7 @@ function freezeSentence(status) {
   const who = f.origin === "peer" ? " Another of your devices asked for it." : "";
   const then = f.seconds ? ` Then ${profileName(f.profile)} runs for ${clock(f.seconds)}.` : "";
   return `In ${clock(left)}, ${profileName(f.profile)} closes every app on this machine.${then}${who} `
-    + "Cancelling is free, and works until the moment it starts.";
+    + "You can cancel until it starts.";
 }
 function describeDowntime(d) {
   const seconds = Math.max(0, (d.to || 0) - (d.from || 0));
@@ -1585,7 +1483,7 @@ function describeDowntime(d) {
     : d.sessions === 1 ? "One block was running and was not enforced during it."
       : d.sessions + " blocks were running and were not enforced during it.";
   return "It was not enforcing for " + length + ", from " + atTime(d.from) + " to " + atTime(d.to)
-    + ". " + cost + " Treat that stretch as time this machine was not held to.";
+    + ". " + cost;
 }
 /** What is contributing to the block, and where each contribution came from. */
 function contributionCard(active) {
@@ -1603,9 +1501,7 @@ function contributionCard(active) {
       <span class="grow"><span class="h3" style="display:block">${esc(profileName(x.profile))}</span>
         <span class="meta">${esc(describeSource(x.source))}</span></span>${tag("Merged in", "brand")}</div>`).join("")}
   </div>
-  <div class="note" style="margin-top:var(--sp-m)">A paired device's contribution carries its origin with it.
-    Nothing is paired with this machine right now, so the only origin the service can name for these
-    contributions is this one.</div>`;
+`;
 }
 /** The future preview: a scrubber over the next six hours, with the plan painted underneath. */
 function scrubberCard() {
@@ -1615,7 +1511,7 @@ function scrubberCard() {
   const span = 360;
   const bands = planBandsBetween(now, new Date(now.getTime() + span * 60000));
   let marks = "";
-  for (let m = 0; m <= span; m += 60) {
+  for (let m = 0; m <= span; m += 120) {
     const when = new Date(now.getTime() + m * 60000);
     const leftPct = (m / span) * 100;
     const shift = m === 0 ? "0" : m === span ? "-100%" : "-50%";
@@ -1640,10 +1536,8 @@ function scrubberCard() {
       <input type="range" id="scrub" min="0" max="360" step="15" value="${minutes}"
         data-slider="scrub" aria-label="Preview the plan at a time in the next six hours"
         aria-valuetext="${esc(at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}">
-      <div class="meta" id="scrub-what">${here ? "Then: " + esc(here.label) : "Then: nothing is scheduled."}</div>
+      <div class="meta" id="scrub-what">${here ? "Then: " + esc(here.label) : "Then: nothing."}</div>
     </div>
-    <div class="note" style="margin-top:var(--sp-s)">A calendar band is drawn as a possibility, not a promise:
-      the service decides whether an event actually matches when it reads the calendar.</div>
   </div>`;
 }
 /** Every weekly window that overlaps a range, in absolute times, clipped to the range. */
@@ -1695,10 +1589,7 @@ function nextWindows(limit) {
 function nextRulesCard() {
   const rows = nextWindows(5);
   if (!rows.length) {
-    return `<div class="card"><div class="lbl">Nothing scheduled</div>
-      <div class="meta" style="margin-top:var(--sp-s)">No enabled weekly rule starts in the next week. A paused
-        rule is not a plan, so it is not listed here.</div>
-      <div style="margin-top:var(--sp-m)">${btn("Open the plan", "goto", ' data-page="plan"', "ghost")}</div></div>`;
+    return `<div class="card"><div class="meta">Nothing in the next week.</div></div>`;
   }
   return `<div class="flush">${rows.map((r) => `<div class="row">
       ${dot("brand")}
@@ -1719,9 +1610,7 @@ function allowancesCard() {
     }
   }
   if (!allowances.length) {
-    return `<div class="card"><div class="lbl">No allowances</div>
-      <div class="meta" style="margin-top:var(--sp-s)">No target has a daily allowance, an opening limit or a
-        wait before it opens. Everything in a profile is either fully blocked or untouched.</div></div>`;
+    return "";
   }
   return `<div class="flush">${allowances.map((a) => {
     const kind = a.action.kind;
@@ -1738,9 +1627,7 @@ function allowancesCard() {
       <span class="tag ok">${kind === "budget" ? spellMinutes(total) + " a day" : total + " a day"}</span>
     </div>`;
   }).join("")}</div>
-  <div class="note" style="margin-top:var(--sp-m)">What is left of an allowance at this moment is counted by
-    the service from its own record. When the service does not report a figure, this page shows what
-    the plan grants and nothing more, rather than a number it made up.</div>`;
+`;
 }
 function activityCard() {
   const s = state.status;
@@ -1752,17 +1639,18 @@ function activityCard() {
     rows.push(["\u23F1", "warn", pair[0], `Held for another ${clock(pair[1])}`]);
   }
   for (const exe of (s.failing || []).slice(0, 6)) {
-    rows.push(["!", "bad", exe, "Could not be closed — see Is it working"]);
+    rows.push(["!", "bad", exe, "Could not be closed — see Is Curfew working"]);
   }
   for (const exe of (s.unwatched || []).slice(0, 6)) {
     rows.push(["?", "warn", exe, "No extension answering; the browser is closed instead"]);
   }
+  if (!rows.length) return "";
   return `<div class="flush">${rows.length
     ? rows.map((r) => `<div class="row">
         <span class="tag ${r[1]}" aria-hidden="true">${r[0]}</span>
         <span class="grow"><span class="h3" style="display:block">${esc(r[2])}</span>
           <span class="meta">${esc(r[3])}</span></span></div>`).join("")
-    : '<div class="row"><span class="meta">Nothing has been closed or held since the service started.</span></div>'}</div>`;
+    : ""}</div>`;
 }
 function timelineCard() {
   const s = state.status;
@@ -1778,8 +1666,7 @@ function timelineCard() {
   if (s.downtime && s.downtime.to) events.push({ at: s.downtime.to, label: "Curfew came back", tone: "ok" });
   events.sort((a, b) => a.at - b.at);
   if (!events.length) {
-    return `<div class="card"><div class="meta">There is nothing on the timeline: no block is running,
-      none is scheduled to end, and no release is pending.</div></div>`;
+    return "";
   }
   return `<div class="flush">${events.map((e) => `<div class="row tight">
     <span class="mono meta" style="width:76px;flex:none">${esc(atTime(e.at))}</span>
@@ -1840,14 +1727,6 @@ function dialReadout(mode, value, period) {
   return m === 0 ? h + "h" : h + "h " + m + "m";
 }
 function clampClockHour(value) { return Math.min(719, Math.max(0, Math.round(value))); }
-function dialSentence(mode, value, period) {
-  if (mode === "clock") {
-    const abs = (period === "pm" ? 720 : 0) + clampClockHour(value);
-    return `On the clock that is ${hhmm(abs)} \u2014 ${period === "pm" ? "afternoon and evening" : "morning"}.`;
-  }
-  const ends = new Date(Date.now() + value * 60000);
-  return `That is ${spellMinutes(value)}, ending at ${ends.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
-}
 /** The SVG body of one dial, drawn for one value. */
 function dialBody(mode, value, period) {
   const ticks = dialTicks(R_OUT);
@@ -1873,7 +1752,6 @@ function dialBody(mode, value, period) {
       <circle class="hdl-dot" cx="${handle.x.toFixed(1)}" cy="${handle.y.toFixed(1)}" r="3"/>
       <text class="ctr-lbl" x="${DIAL_MID}" y="${DIAL_MID - 26}" text-anchor="middle">${esc(period === "pm" ? "12:00 \u2192 24:00" : "00:00 \u2192 12:00")}</text>
       <text class="ctr-val" x="${DIAL_MID}" y="${DIAL_MID + 6}" text-anchor="middle">${esc(dialReadout(mode, total, period))}</text>
-      <text class="ctr-sub" x="${DIAL_MID}" y="${DIAL_MID + 28}" text-anchor="middle">${esc(dialSentence(mode, total, period))}</text>
     </svg>`;
   }
   const hours = Math.floor(value / 60), mins = value % 60;
@@ -1894,7 +1772,6 @@ function dialBody(mode, value, period) {
     <circle class="hdl-face" cx="${mh.x.toFixed(1)}" cy="${mh.y.toFixed(1)}" r="11"/>
     <text class="ctr-lbl" x="${DIAL_MID}" y="${DIAL_MID - 30}" text-anchor="middle">HOW LONG</text>
     <text class="ctr-val" x="${DIAL_MID}" y="${DIAL_MID + 4}" text-anchor="middle">${esc(dialReadout(mode, value, period))}</text>
-    <text class="ctr-sub" x="${DIAL_MID}" y="${DIAL_MID + 26}" text-anchor="middle">${esc(dialSentence(mode, value, period))}</text>
   </svg>`;
 }
 /** The whole instrument: dial, sliders, presets, numeric input and one instruction sentence. */
@@ -1936,11 +1813,8 @@ function dial(options) {
   return `<div class="dialwrap" data-dial="${esc(id)}" data-dial-mode="${mode}">
     ${periodPick}
     ${dialBody(mode, value, period)}
-    <div class="mono meta" id="dial-out">${esc(dialReadout(mode, value, period))}</div>
     ${sliders}
     <div class="strip" style="justify-content:center">${presets}${numeric}</div>
-    <div class="note" style="max-width:56ch;text-align:center">${esc(o.instruction
-      || "Drag the ring, click where you want it, or use the arrow keys, PageUp and PageDown, Home and End, the sliders, or the number box.")}</div>
   </div>`;
 }
 /** Re-paint one dial in place, without rebuilding the page around it. */
@@ -2073,47 +1947,35 @@ function pagePlan() {
   const weekly = weeklyRules();
   const paused = state.settings.planPaused === true;
   return `<div class="pagetop"><div class="grow">
-      <h1>Plan</h1>${sh(6)}
-      <div class="sub">What starts a block by itself, and how hard it will be to leave. Read from the
-        plan file the service enforces.</div>
+      <h1>Plan</h1>
     </div>
     <div class="strip">
-      ${paused ? stateTag("Plan paused", "warn", "\u23F8") : stateTag("Plan on", "ok", "\u2713")}
       ${btn(paused ? "Resume plan" : "Pause plan", "pause-all", null, paused ? "" : "quiet")}
       ${btn("Add a rule", "add-rule")}
     </div>
   </div>
   ${paused ? `<div class="alert" role="note"><div class="lbl">Paused</div>
-    <div class="meta" style="margin-top:var(--sp-xs)">No rule will start a new block while the plan is paused.
-      A block that is already running is untouched: pausing the plan is not a way out of a promise.</div>
+    <div class="meta" style="margin-top:var(--sp-xs)">No rule starts a block. Running blocks are untouched.</div>
   </div>${sh(16)}` : ""}
   ${sec("Week at a glance", weekChart(weekly))}
-  ${sec("Weekly windows", weeklyList(weekly),
-    btn("Add a weekly window", "add-rule", ' data-kind="weekly"', "ghost sm"))}
-  ${sec("Calendar rules", calendarRuleList(),
-    btn("Add a calendar rule", "add-rule", ' data-kind="calendar"', "ghost sm"))}
+  ${sec("Weekly windows", weeklyList(weekly))}
+  ${sec("Calendar rules", calendarRuleList())}
   ${sec("Other starters", otherStarters())}
-  ${sec("Preset gallery", presetGallery())}
-  ${sec("Pause all", pauseAllCard(paused))}`;
+  ${weekly.length || calendarRules().length ? "" : sec("Start from a preset", presetGallery())}`;
 }
 /* ------------------------------------------------------------------ Week at a glance (§5.3, §7)
    Seven columns Mon-Sun, five time labels, bands clipped inside their own day column, overnight rules
    drawn as two pieces, and every band carrying its own name and time in a title. */
 function weekChart(rules) {
   const armed = rules.filter((w) => w.enabled !== false);
-  const pausedCount = rules.length - armed.length;
   return `<div class="card">
     ${weekChartInner(armed)}
     <div class="weeklegend">
       <span class="strip">${dot("brand")}<span class="meta">Weekly window</span></span>
       <span class="strip">${dot("cal")}<span class="meta">Calendar lead-in and lead-out</span></span>
       <span class="strip"><span class="band paused" style="position:static;display:inline-block;width:36px;height:12px"></span>
-        <span class="meta">Paused rule \u2014 never drawn as an active band</span></span>
+        <span class="meta">Paused</span></span>
     </div>
-    <div class="note" style="margin-top:var(--sp-s)">Overnight rules are drawn in two pieces: the late-night
-      part on the day it starts, and a faded part on the next morning it reaches into. Every band is
-      clipped to its own day column, so nothing here can cover the controls below the chart.
-      ${pausedCount ? pausedCount + " paused rule" + (pausedCount === 1 ? " is" : "s are") + " listed below and deliberately not drawn here." : ""}</div>
   </div>`;
 }
 function weekChartInner(rules) {
@@ -2177,12 +2039,8 @@ function weekChartInner(rules) {
 }
 function weeklyList(rules) {
   if (!rules.length) {
-    return `<div class="card"><div class="lbl">No weekly windows</div>
-      <div class="meta" style="margin-top:var(--sp-s)">Nothing here starts a block on a schedule yet. A weekly
-        window is the usual way to make an evening or a study hour happen without deciding each
-        time.</div>
-      <div style="margin-top:var(--sp-m)">${btn("Add a weekly window", "add-rule", ' data-kind="weekly"')}
-        ${btn("Use a preset", "preset-apply", ' data-id="evening"', "ghost")}</div></div>`;
+    return `<div class="card"><div class="meta">No schedules yet. Block things at the same time every week.</div>
+      <div style="margin-top:var(--sp-m)">${btn("Use the evening preset", "preset-apply", ' data-id="evening"', "ghost")}</div></div>`;
   }
   return `<div class="flush">${rules.map((rule) => `<div class="row">
       ${rule.enabled === false ? '<span class="shape-sq" aria-hidden="true"></span>' : dot("brand")}
@@ -2234,11 +2092,7 @@ function calendarRuleList() {
     ${never ? `<div class="row tight" style="background:var(--raise)">
       <span class="meta">This rule has never fired, so it has never matched an event.
         ${esc(nearMissAdvice(rule))}</span></div>` : ""}`;
-  }).join("")}</div>
-  <div class="note" style="margin-top:var(--sp-m)">A match count is what the service last worked out against
-    the events it holds. ${sources.length
-      ? "Reading from " + sources.length + " calendar source" + (sources.length === 1 ? "" : "s") + "."
-      : "No calendar source is configured, so every count here is zero \u2014 which is exactly what the service sees."}</div>`;
+  }).join("")}</div>`;
 }
 /** Zero until the service reports otherwise: this window never invents a match count. */
 function calendarMatchCount() { return 0; }
@@ -2286,9 +2140,6 @@ function otherStarters() {
         <select id="ssid-profile">${profiles().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></div>
       ${btn("Add it", "network-add")}
     </div>
-    <div class="note" style="margin-top:var(--sp-m)">The block starts while this machine is joined to that
-      network and ends when it leaves it, or when the block's own end time is reached \u2014 whichever
-      comes first. Nothing else about the network is read.</div>
   </div>`)}`;
 }
 /** Presets: a plan that exists is better than a form that is admired. Applying one goes through the
@@ -2313,27 +2164,7 @@ function presetGallery() {
       ${btn("Apply", "preset-apply", ` data-id="${p.id}"`, "sm")}
       ${btn("Open in the editor", "preset-edit", ` data-id="${p.id}"`, "quiet sm")}
     </div>
-  </div>`).join("")}</div>
-  <div class="note" style="margin-top:var(--sp-m)">Applying a preset adds one rule and changes nothing else.
-    It is written through the same save the editor uses, so what the file says and what this page shows
-    cannot drift.</div>`;
-}
-function pauseAllCard(paused) {
-  const armed = enabledWeekly().length + enabledCalendars().length;
-  return `<div class="card${paused ? "" : " hero"}">
-    <div class="rowflex">
-      <div class="grow">
-        <div class="lbl">Pause everything</div>
-        <div class="h3" style="margin-top:var(--sp-s)">${paused ? "The plan is paused" : armed + " rule" + (armed === 1 ? "" : "s") + " can start a block"}</div>
-        <div class="meta" style="margin-top:var(--sp-s)">Pausing stops new blocks from starting. It does not
-          shorten, weaken or end a block that is already running \u2014 that is a promise, and pausing a
-          plan is not a way out of one.</div>
-      </div>
-      <button class="sw" data-act="pause-all" role="switch" aria-checked="${paused}"
-        aria-label="Pause every rule"><span class="track"><span class="knob"></span></span>
-        <span class="meta">${paused ? "Paused" : "Running"}</span></button>
-    </div>
-  </div>`;
+  </div>`).join("")}</div>`;
 }
 function presetById(id) { return PRESET_LIST.find((p) => p.id === id) || null; }
 
@@ -2423,7 +2254,7 @@ function renderEditor() {
       <div class="rrow"><span class="rk">This rule, in one sentence</span>
         <span class="rv" style="max-width:62%">${esc(editorSentence(e))}</span></div>
     </div>
-    ${e.error ? sh(12) + `<div class="err-msg" role="alert">${esc(e.error)}</div>` : ""}
+    ${e.error ? sh(12) + errLine("This rule was not saved.", e.error) : ""}
     <div class="sheetfoot">
       <button class="btn ghost" data-act="close">Cancel</button>
       <button class="btn" data-act="rule-save"${e.saving ? ' aria-busy="true" disabled' : ""}>
@@ -2478,10 +2309,7 @@ function weeklyEditor(e) {
     <div class="seg" role="group" aria-label="Time input mode">${modes.map((m) =>
       `<button data-act="rule-mode" data-mode="${m[0]}" aria-pressed="${e.mode === m[0]}">${esc(m[1])}</button>`).join("")}</div>
     ${sh(14)}
-    ${e.mode === "exact" ? exact : e.mode === "dial" ? dialHtml + sh(14) + both : grid + sh(14) + both}
-    <div class="note" style="margin-top:var(--sp-m)">The exact fields and the dial write the same two numbers,
-      and a window that ends before it starts is overnight whether or not the box is ticked. The box is
-      there so the answer to \u201cis this overnight?\u201d is never something you have to work out.</div>`;
+    ${e.mode === "exact" ? exact : e.mode === "dial" ? dialHtml + sh(14) + both : grid + sh(14) + both}`;
 }
 function calendarEditor(e) {
   return `<div class="g2">
@@ -2517,10 +2345,7 @@ function calendarEditor(e) {
         <input id="m-in" type="number" min="0" max="240" value="${esc(String(e.leadIn))}" data-field="leadIn"></div>
       <div class="field"><label class="lbl" for="m-out">Lead-out minutes after the event</label>
         <input id="m-out" type="number" min="0" max="240" value="${esc(String(e.leadOut))}" data-field="leadOut"></div>
-    </div>
-    <div class="note" style="margin-top:var(--sp-m)">Lead-in starts the block before the event begins, so the
-      block is already running when it does. Lead-out keeps it running afterwards, so standing up from
-      a meeting does not immediately let everything back in.</div>`;
+    </div>`;
 }
 function networkEditor(e) {
   return `<div class="field"><label class="lbl" for="n-ssid">Wi-Fi network name (SSID)</label>
@@ -2798,25 +2623,16 @@ function pageProfiles() {
   const g = planGate("Profiles");
   if (g) return g;
   if (!profiles().length) {
-    return `<h1>Profiles</h1>${sh(8)}
-      <div class="sub">A profile is a named group of targets: the apps, sites, paths and keywords a
-        block covers.</div>${sh(18)}
+    return `<h1>Profiles</h1>${sh(18)}
       ${emptyBlock("No profiles yet",
         "Targets belong to profiles. Make one profile per situation \u2014 evenings, deep work, the weekend.",
         btn("Open the plan file", "goto", ' data-page="planfile"', "ghost"))}`;
   }
   if (!state.profile || !profiles().some((p) => p.id === state.profile)) state.profile = profiles()[0].id;
   const profile = profiles().find((p) => p.id === state.profile);
-  const rules = profile.rules || [];
-  const usedBy = profiles().filter((p) => p.id === profile.id).length;
   return `<div class="pagetop"><div class="grow">
       <h1>Profiles</h1>${sh(6)}
       <div class="sub">${esc(profile.description || "What this profile covers while it runs.")}</div>
-    </div>
-    <div class="strip">
-      ${stateTag(profile.id === "distractions" ? "Default profile" : "Profile", "brand", "\u25CF")}
-      ${tag(rules.length + " targets")}
-      ${tag(usedBy + (usedBy === 1 ? " profile uses this" : " profiles use this"))}
     </div>
   </div>
   <div class="g2">
@@ -2834,9 +2650,8 @@ function pageProfiles() {
           ${dot(ruleKindOf(r) === "calendar" ? "cal" : "brand")}
           <span class="grow">${esc(r.id)}</span>
           <span class="meta mono">${esc(ruleKindOf(r) === "calendar" ? describeMatcher(r.matcher) : windowSentence(r))}</span>
-        </div>`).join("") || '<div class="row tight"><span class="meta">No rule uses this profile yet, so nothing starts it by itself. It can still be started by hand from Now.</span></div>'}
+        </div>`).join("") || '<div class="row tight"><span class="meta">No rule starts this profile.</span></div>'}
       </div>`)}
-      ${sec("Never read", neverReadCard())}
     </div>
     <div>
       ${sec("Targets in this profile", targetList(profile))}
@@ -2848,49 +2663,22 @@ function profileRulesUsing(profileId) {
   const n = weeklyRules().concat(calendarRules()).filter((r) => r.profile === profileId).length;
   return n + (n === 1 ? " rule" : " rules");
 }
-function neverReadCard() {
-  return `<div class="card">
-    <div class="lbl">What Curfew never reads</div>
-    ${sh(6)}
-    <ul style="margin-left:var(--sp-l);line-height:1.65;font-size:var(--meta);color:var(--mut)">
-      <li>File contents. A path rule matches a path, never what is inside the file.</li>
-      <li>Message bodies, mail or chat. A keyword rule matches a title, a URL or a search box.</li>
-      <li>Screen contents or keystrokes. There is no keylogger in Curfew and no screenshot path.</li>
-      <li>Anything leaving this machine. There is no account, no server and no telemetry.</li>
-    </ul>
-    <div style="margin-top:var(--sp-m)">${btn("Is it working", "goto", ' data-page="health"', "ghost sm")}</div>
-  </div>`;
-}
 function targetList(profile) {
   const rules = profile.rules || [];
   if (!rules.length) {
-    return `<div class="card"><div class="lbl">Nothing in this profile yet</div>
-      <div class="meta" style="margin-top:var(--sp-s)">This profile blocks nothing, so starting a block with it
-        would do nothing. Add a target from the library on the right.</div></div>`;
+    return `<div class="card"><div class="meta">Empty. Add a target from the library.</div></div>`;
   }
   return `<div class="flush">${rules.map((rule, index) => {
     const t = describeTarget(rule.target);
-    return `<div class="row">
+    return `<div class="row" style="flex-wrap:nowrap">
       <span class="tag ${t.group === "sites" ? "cal" : "brand"}">${esc(t.group === "sites" ? "site" : "app")}</span>
-      <span class="grow"><span class="h3" style="display:block;text-transform:none">${esc(t.text)}</span>
-        <span class="micro" style="display:block">${esc(rule.target.kind)} \u00b7 used by
-          ${usedByProfiles(rule.target)} profile${usedByProfiles(rule.target) === 1 ? "" : "s"}</span></span>
-      <span class="strip">
-        <select data-target-action="1" data-index="${index}" data-profile="${esc(profile.id)}"
-          aria-label="What happens to ${esc(t.text)}">
-          ${actionOptions(rule.action)}
-        </select>
-      </span>
-      <span class="meta mono" style="min-width:130px">${esc(describeAction(rule.action))}</span>
+      <span class="grow h3" style="text-transform:none;min-width:10ch;overflow-wrap:break-word">${esc(t.text)}</span>
+      <select data-target-action="1" data-index="${index}" data-profile="${esc(profile.id)}"
+        aria-label="What happens to ${esc(t.text)}" style="width:auto;max-width:14em;flex:none">
+        ${actionOptions(rule.action)}
+      </select>
     </div>`;
-  }).join("")}</div>
-  <div class="note" style="margin-top:var(--sp-m)">Blocking, an allowance, a wait before it opens and an
-    opening limit are all the same kind of thing: a target plus what happens to it. Every one of them
-    is a line in the plan file, and every change here goes through the same save.</div>`;
-}
-function usedByProfiles(target) {
-  const key = JSON.stringify(target);
-  return profiles().filter((p) => (p.rules || []).some((r) => JSON.stringify(r.target) === key)).length;
+  }).join("")}</div>`;
 }
 const TARGET_ACTIONS = [
   ["block", "Blocked"],
@@ -2925,8 +2713,6 @@ function targetLibrary(profile) {
   if (!rows.length) {
     return `<div class="card"><div class="lbl">Reading this machine's installed apps</div>
       ${sh(8)}<div class="skel"></div><div class="skel w80"></div>
-      <div class="note" style="margin-top:var(--sp-s)">This asks the window host, not the network, and takes a
-        moment because it walks the Start Menu.</div>
       <div style="margin-top:var(--sp-m)">${btn("Read them now", "load-apps", null, "ghost sm")}</div></div>`;
   }
   const shown = rows.filter((r) => !query || r.label.toLowerCase().includes(query) || r.exe.includes(query)).slice(0, 40);
@@ -2948,8 +2734,6 @@ function targetLibrary(profile) {
       : `<div class="row tight"><span class="meta">Sites, paths and keywords are added in the plan file view:
           a site is a domain, a path is a glob, and a keyword is a word.</span></div>
         <div class="row tight">${btn("Open the plan file", "goto", ' data-page="planfile"', "ghost sm")}</div>`}</div>
-    <div class="note" style="margin-top:var(--sp-m)">This list is read from this machine only: the Start Menu
-      and the windows that are open right now. Nothing about it leaves the computer.</div>
   </div>`;
 }
 
@@ -2967,28 +2751,25 @@ function pageCalendar() {
     { title: "Later this week", rows: matched.filter((e) => e.group === "later") },
   ];
   return `<div class="pagetop"><div class="grow">
-      <h1>Calendar</h1>${sh(6)}
-      <div class="sub">What the calendar holds, and which rule matches each event. A calendar rule is
-        resolved by the service; this page shows what it is working from.</div>
+      <h1>Calendar</h1>
     </div>
     <div class="strip">${tag(sources.length + " sources", sources.length ? "cal" : "ghost")}</div>
   </div>
-  <div class="g2">
-    <div class="stack">
-      ${groups.map((group) => sec(group.title, group.rows.length
-        ? `<div class="flush">${group.rows.map((ev) => eventRow(ev)).join("")}</div>`
-        : `<div class="card"><div class="meta">Nothing in the calendar here.</div></div>`)).join("")}
-    </div>
-    <div class="stack">
-      ${sec("Test a matcher", matcherTestPanel())}
-      ${sec("Calendar sources", `<div class="flush">
-        ${sources.length ? sources.map((s) => `<div class="row">
-          <span class="grow"><span class="mono" style="word-break:break-all">${esc(s.location)}</span>
-            <span class="meta">id ${esc(s.id)} \u00b7 refresh every ${esc(String(s.refresh_seconds))}s</span></span>
-          ${stateTag("Connected", "ok", "\u2713")}</div>`).join("")
-          : '<div class="row"><span class="meta">No calendar source is configured. Calendar rules therefore match nothing, and the page says so rather than showing an empty success.</span></div>'}
-      </div>`)}
-    </div>
+  <div class="field"><label class="lbl" for="cal-q">Search events</label>
+    <input id="cal-q" value="${esc(state.calendarQuery || "")}" data-field="cal-query"
+      placeholder="A word from a title or a location" autocomplete="off"></div>
+  ${sh(12)}
+  <div class="stack">
+    ${matched.length ? groups.filter((group) => group.rows.length).map((group) => sec(group.title,
+      `<div class="flush">${group.rows.map((ev) => eventRow(ev)).join("")}</div>`)).join("")
+      : sec("This week", `<div class="card"><div class="meta">No events.</div></div>`)}
+    ${sec("Calendar sources", `<div class="flush">
+      ${sources.length ? sources.map((s) => `<div class="row">
+        <span class="grow"><span class="mono" style="word-break:break-all">${esc(s.location)}</span>
+          <span class="meta">refresh every ${esc(String(s.refresh_seconds))}s</span></span>
+        ${stateTag("Connected", "ok", "\u2713")}</div>`).join("")
+        : '<div class="row"><span class="meta">No source. Calendar rules match nothing.</span></div>'}
+    </div>`)}
   </div>`;
 }
 function eventRow(ev) {
@@ -3001,22 +2782,6 @@ function eventRow(ev) {
       <span class="micro" style="display:block">${esc(ev.match || "No rule matches this event.")}</span></span>
     ${ev.busy ? tag("Busy", "warn") : tag("Free", "ghost")}
     ${btn("Block during this", "block-during", ` data-id="${esc(ev.id)}"`, "quiet sm")}
-  </div>`;
-}
-function matcherTestPanel() {
-  const rules = calendarRules();
-  return `<div class="card">
-    <div class="field"><label class="lbl" for="cal-q">Search the events this window has</label>
-      <input id="cal-q" value="${esc(state.calendarQuery || "")}" data-field="cal-query"
-        placeholder="Type a word from a title or a location" autocomplete="off"></div>
-    <div class="meta" style="margin-top:var(--sp-s)">${state.calendarQuery
-      ? "Filtering the list on the left as you type."
-      : "Type to filter. With no event source connected there is nothing to filter, which is what the list on the left is saying."}</div>
-    ${sh(12)}
-    <div class="lbl">Load a rule's matcher into the box</div>
-    <div class="strip" style="margin-top:var(--sp-s)">${rules.length ? rules.map((r) => btn(r.id, "cal-load",
-      ` data-id="${esc(r.id)}"`, "quiet sm")).join("")
-      : '<span class="meta">No calendar rules yet.</span>'}</div>
   </div>`;
 }
 
@@ -3092,54 +2857,20 @@ function pageDevices() {
   if (g) return g;
   const s = state.status;
   const p = state.pairing || { loading: false, peers: null, error: null, step: 1, transport: null };
-  const sync = s.sync || {};
   const peers = p.peers || [];
-  const layers = [
-    ["Windows service", "Blocking, the hosts file and every lock. Runs whether this window is open or not.", "ok"],
-    ["This window", "Shows what is true and can ask the service to start or end a block.", "ok"],
-    ["Browser extension", (s.unwatched || []).length
-      ? (s.unwatched || []).length + " browser(s) without the extension, so page-level rules cannot be enforced there and the browser is closed instead."
-      : "Page-level rules are enforced inside the browser, and the browsers it is installed in are answering.",
-      (s.unwatched || []).length ? "warn" : "ok"],
-    ["Sync", sync.phase === "working" ? `Talking to ${sync.nearby} of ${sync.paired} paired device(s) on this network right now.`
-      : sync.phase === "broken" ? (sync.why_off || "Sync could not start.")
-        : sync.phase === "idle" ? "Paired; the listener comes up on the next pass."
-          : sync.phase === "waiting" ? "Paired, none in earshot. These devices talk when they are on the same network, not on a schedule."
-            : "No devices paired. Blocks stay on this machine.",
-      sync.phase === "working" ? "ok" : sync.phase === "broken" ? "bad" : "mut"],
-  ];
   return `<div class="pagetop"><div class="grow">
-      <h1>Devices</h1>${sh(6)}
-      <div class="sub">Pairing is what makes two devices enforce the same promise. It needs both
-        screens: six digits are read aloud and compared.</div>
+      <h1>Devices</h1>
     </div>
-    <div class="strip">${tag(peers.length + " paired", peers.length ? "ok" : "ghost")}
-      ${stateTag("This device: Windows", "brand", "\u25CF")}</div>
+    <div class="strip">${btn("Pair a device", "pair-open", null, state.pairOpen ? "quiet" : "")}</div>
   </div>
-  <div class="g2">
-    <div class="stack">
+  <div class="stack">
       ${sec("Every device", deviceTable(s, peers, p))}
-      ${sec("Enforcement layers", `<div class="flush">${layers.map((l) => `<div class="row">
-        ${dot(l[2] === "ok" ? "ok" : l[2] === "bad" ? "bad" : l[2] === "warn" ? "warn" : "")}
-        <span class="grow"><span class="h3" style="display:block">${esc(l[0])}</span>
-          <span class="meta">${esc(l[1])}</span></span>
-        <span class="tag ${l[2] === "ok" ? "ok" : l[2] === "bad" ? "bad" : l[2] === "warn" ? "warn" : "ghost"}">
-          ${l[2] === "ok" ? "Live" : l[2] === "bad" ? "Off" : l[2] === "warn" ? "Degraded" : "Waiting"}</span>
-      </div>`).join("")}</div>`)}
-      ${sec("Test enforcement", `<div class="card">
-        <div class="meta">A test starts nothing and changes nothing. It asks the service what it would do
-          with a page it knows is blocked, and reports the answer.</div>
-        <div style="margin-top:var(--sp-m)" class="strip">
-          ${btn("Run the test", "test-enforcement")}
-          ${state.testResult ? stateTag(state.testResult.ok ? "The service answered" : "The service did not answer",
-            state.testResult.ok ? "ok" : "bad", state.testResult.ok ? "\u2713" : "!") : ""}
-        </div>
+      ${state.pairOpen ? sec("Pair a device", pairingFlow(p, peers)) : ""}
+      ${sec("Enforcement", `<div class="card"><div class="meta">Each layer that enforces blocks, and whether it is live, is listed on the health page.</div>
+        <div class="strip" style="margin-top:var(--sp-s)">${btn("Is Curfew working", "goto", ' data-page="health"', "quiet sm")}
+          ${btn("Run the test", "test-enforcement", null, "quiet sm")}</div>
         ${state.testResult ? `<div class="meta" style="margin-top:var(--sp-s)">${esc(state.testResult.text)}</div>` : ""}
       </div>`)}
-    </div>
-    <div class="stack">
-      ${sec("Pair a device", pairingFlow(p, peers))}
-    </div>
   </div>`;
 }
 function deviceTable(s, peers, p) {
@@ -3147,31 +2878,25 @@ function deviceTable(s, peers, p) {
   return `<div class="flush">
     <div class="row">
       ${dot("ok")}
-      <span class="grow"><span class="h3" style="display:block">This machine \u00b7 Windows</span>
+      <span class="grow"><span class="h3" style="display:block">This machine</span>
         <span class="meta">Last seen just now \u00b7 plan revision
           ${esc(String((state.config && state.config.schema_version) || "\u2014"))} \u00b7
           paired with ${thisSynced} device${thisSynced === 1 ? "" : "s"}</span></span>
-      ${tag("This device", "brand")}${stateTag("Enforcing", "ok", "\u2713")}
+      ${stateTag("Enforcing", "ok", "\u2713")}
     </div>
     ${(peers || []).length ? peers.map((peer) => {
       const revoked = peer.revoked_at != null;
       return `<div class="row">
         ${dot(revoked ? "bad" : "ok")}
-        <span class="grow"><span class="h3" style="display:block">${esc(peer.name || "Paired device")}</span>
-          <span class="meta mono" style="word-break:break-all">${esc(peer.id)}</span>
-          <span class="micro" style="display:block">Android \u00b7 last seen ${revoked ? "before it was revoked" : "in earshot recently"}
-            \u00b7 enforcement layers reported by that device</span></span>
-        ${revoked ? tag("Revoked", "bad") : tag("Enforcing", "ok")}
+        <span class="grow h3">${esc(peer.name || "Paired device")}</span>
+        ${revoked ? tag("Revoked", "bad") : ""}
         ${revoked ? "" : btn("Revoke\u2026", "revoke-ask", ` data-id="${esc(peer.id)}"`, "quiet sm")}
       </div>
       ${revoked ? `<div class="row tight" style="background:var(--raise)"><span class="meta">Revoked
-        ${esc(peer.revoked_at ? atDateTime(peer.revoked_at) : "")}. It can no longer release a block on
-        this machine, and this machine will not release one on it. Any block it contributed to here
-        keeps running to its own end.</span></div>` : ""}`;
+        ${esc(peer.revoked_at ? atDateTime(peer.revoked_at) : "")}.</span></div>` : ""}`;
     }).join("")
-      : `<div class="row"><span class="meta">Nothing is paired with this machine. Blocks are enforced here
-          and nowhere else, which is a complete product rather than a degraded one.</span></div>`}
-    ${p.error ? `<div class="row"><span class="err-msg">${esc(p.error)}</span></div>` : ""}
+      : `<div class="row"><span class="meta">Nothing paired.</span></div>`}
+    ${p.error ? `<div class="row">${errLine("Pairing cannot be shown.", p.error)}</div>` : ""}
   </div>`;
 }
 /** The five steps of §5.7, with the comparison left where it belongs: with the two people reading it. */
@@ -3182,22 +2907,16 @@ function pairingFlow(p, peers) {
     <span class="n">${i + 1}</span>${esc(label)}${step > i + 1 ? " \u2713" : ""}</div>`).join("")}</div>`;
   let body = "";
   if (step === 1) {
-    body = `<div class="meta">Pairing happens over this network, between two devices that can see each
-        other. Nothing about it goes through a server, because there is not one.</div>
-      <div class="strip" style="margin-top:var(--sp-m)">
+    body = `<div class="strip">
         ${btn("This network (recommended)", "pair-transport", ' data-transport="lan"')}
         ${btn("Type codes between the devices", "pair-transport", ' data-transport="manual"', "quiet")}
-      </div>
-      <div class="note" style="margin-top:var(--sp-m)">Type-codes works when the two devices cannot see each
-        other, and takes one extra copy-and-paste per direction.</div>`;
+      </div>`;
   } else if (step === 2) {
     body = `${p.server ? `<div class="mono meta">Listening on ${esc(p.server.ip)}:${esc(String(p.server.port))} \u2014 the phone joins this address.</div>${sh(10)}` : ""}
       ${p.server ? `<div class="qr" aria-label="A placeholder for the pairing code pattern">${Array.from({ length: 64 },
         (_, i) => `<i style="background:${((i * 7 + 3) % 5) < 3 ? "var(--line)" : "transparent"}"></i>`).join("")}</div>${sh(10)}` : ""}
       ${btn("Show this device's code", "pair-offer")}
-      ${p.invite ? `${sh(12)}<textarea class="mono" readonly rows="4" aria-label="This device's pairing code">${esc(p.invite)}</textarea>
-        <div class="meta" style="margin-top:var(--sp-s)">This code is not a secret: it cannot authenticate itself.
-          The six digits are what do that, and they are read by the two of you.</div>` : ""}`;
+      ${p.invite ? `${sh(12)}<textarea class="mono" readonly rows="4" aria-label="This device's pairing code">${esc(p.invite)}</textarea>` : ""}`;
   } else if (step === 3) {
     body = `${p.phrase ? `<div class="lbl">These six digits, on both screens</div>
         <div class="code6">${esc(p.phrase)}</div>` : '<div class="meta">Answer the other device\u2019s code first; the six digits will appear here.</div>'}
@@ -3207,9 +2926,7 @@ function pairingFlow(p, peers) {
       <div class="strip" style="margin-top:var(--sp-m)">${btn("Answer it", "pair-answer")}
         ${p.replyPhrase ? btn("They match \u2014 pair", "pair-accept-ask") : ""}</div>
       ${p.replyPhrase ? `${sh(12)}<div class="lbl">Bring these six back to the other device</div>
-        <div class="code6">${esc(p.replyPhrase)}</div>` : ""}
-      <div class="note" style="margin-top:var(--sp-m)">Nothing on this machine can check the digits for you \u2014
-        that is the whole point of reading them.</div>`;
+        <div class="code6">${esc(p.replyPhrase)}</div>` : ""}`;
   } else if (step === 4) {
     body = `<div class="receipt">
         <div class="rrow"><span class="rk">Paired</span><span class="rv">${esc(p.pairedName || "the other device")}</span></div>
@@ -3217,21 +2934,15 @@ function pairingFlow(p, peers) {
         <div class="rrow"><span class="rk">Profiles</span><span class="rv">${profiles().length}</span></div>
         <div class="rrow"><span class="rk">Rules</span><span class="rv">${weeklyRules().length + calendarRules().length}</span></div>
         <div class="rrow"><span class="rk">Sent when</span><span class="rv">${esc(atTime(Math.floor(Date.now() / 1000)))}</span></div>
-      </div>
-      <div class="meta" style="margin-top:var(--sp-m)">This is the first sync, itemised. Both devices now hold
-        the same plan and will enforce it independently.</div>`;
+      </div>`;
   } else {
     body = `<div class="flush">
         <div class="row"><span class="grow"><span class="h3" style="display:block">What travels</span>
-          <span class="meta">The plan: profiles, rules, schedules. A block, so the other device knows a
-            promise is running. The release, when you grant one.</span></span>${tag("Sent", "ok")}</div>
+          <span class="meta">Plan, running blocks, releases.</span></span>${tag("Sent", "ok")}</div>
         <div class="row"><span class="grow"><span class="h3" style="display:block">What does not</span>
-          <span class="meta">Your usage history, the sites blocked on this machine, what you typed, and
-            any file. None of it is part of a pairing.</span></span>${tag("Not sent", "ghost")}</div>
+          <span class="meta">Usage history, typing, files.</span></span>${tag("Not sent", "ghost")}</div>
         <div class="row"><span class="grow"><span class="h3" style="display:block">Revoking</span>
-          <span class="meta">On the revoking device, the pairing ends immediately and locally. A block
-            the other device contributed to keeps running to its own end \u2014 revoking cannot shorten a
-            promise on someone else's machine.</span></span>${tag("One-way", "warn")}</div>
+          <span class="meta">Ends pairing at once. Running blocks keep going.</span></span>${tag("One-way", "warn")}</div>
       </div>`;
   }
   return `${rail}${body}
@@ -3242,17 +2953,12 @@ function pairingFlow(p, peers) {
 }
 
 /* ==================================================================================================
-   Part 10 — Insights (§5.8) and Is it working (§5.9).
+   Part 10 — Insights (§5.8) and Is Curfew working (§5.9).
    ================================================================================================== */
-function pageInsights() {
-  const g = gate("Insights", "Local figures");
-  if (g) return g;
+/** The fortnight figures, shown on Now. Returns "" until the service has reported them. */
+function insightsBlock() {
   const stats = state.stats;
-  if (!stats) {
-    return `<h1>Insights</h1>${sh(8)}
-      <div class="sub">Counted from the blocks themselves, not from time the service happened to be
-        running. Nothing here leaves this machine.</div>${sh(18)}${loadingCard("A fortnight of history")}`;
-  }
+  if (!stats) return "";
   const days = stats.days || [];
   const total = days.reduce((sum, d) => sum + d.blocked_seconds, 0);
   const peak = Math.max(1, ...days.map((d) => d.blocked_seconds));
@@ -3264,89 +2970,34 @@ function pageInsights() {
       <span class="micro">${esc(dayLabel(d.day))}</span></div>`;
   }).join("");
   const attacks = (state.status.closed || []).length + (state.status.failing || []).length;
-  return `<h1>Insights</h1>${sh(6)}
-  <div class="sub">Local-only figures over the last ${days.length} days: ${esc(clock(total))} blocked
-    across ${stats.total_sessions} block${stats.total_sessions === 1 ? "" : "s"}.</div>
-  ${sh(16)}
-  <div class="g3">
+  return `<div class="g3">
     <div class="card hero"><div class="lbl">Focused hours</div>
       <div class="mega mono">${esc((total / 3600).toFixed(1))}</div>
-      <div class="meta">hours blocked in this window</div></div>
-    <div class="card"><div class="lbl">Blocked or refused attempts</div>
+      <div class="meta">hours blocked in ${days.length} days</div></div>
+    <div class="card"><div class="lbl">Attempts stopped</div>
       <div class="mega mono">${attacks}</div>
-      <div class="meta">things closed or held since the service started</div></div>
+      <div class="meta">since service start</div></div>
     <div class="card"><div class="lbl">Streak</div>
       <div class="mega mono">${stats.current_streak}</div>
       <div class="meta">days running \u00b7 best ${stats.longest_streak}</div></div>
   </div>
-  ${sec("Weekly bars", `<div class="card"><div class="bars">${bars}</div>
-    <div class="note" style="margin-top:var(--sp-m)">A day with nothing on it is drawn as a hairline and not as
-      a zero: a chart that rounds a real day down to nothing tells you that you did nothing, which is
-      the one thing this page must not get wrong.</div></div>`)}
-  ${sec("Hour of day", hourHeatmap())}
-  ${sec("Target leaderboard", leaderboard())}
-  ${sec("Weekly digest", digestCard(stats, total))}
-  ${sec("Export", `<div class="card"><div class="inline">
-    ${btn("Export CSV", "export-csv")}${btn("Export JSON", "export-json", null, "quiet")}
-    ${btn("Copy the digest", "copy-digest", null, "quiet")}
-  </div>
-  <div class="note" style="margin-top:var(--sp-m)">Both exports are written to this machine's clipboard from
-    data the service already holds. There is nowhere for them to be uploaded to, which is the point.</div></div>`)}`;
-}
-/** A 24-column heatmap, from the same days the bars use. */
-function hourHeatmap() {
-  const days = (state.stats && state.stats.days) || [];
-  const rows = days.slice(-14);
-  return `<div class="card">
-    <div class="heat">
-      ${Array.from({ length: 24 }, (_, h) => `<span class="cell" title="${hhmm(h * 60)}"></span>`).join("")}
-    </div>
-    <div class="note" style="margin-top:var(--sp-m)">Columns are the hours of the day. The service reports a
-      day's totals rather than an hour-by-hour breakdown, so this grid is drawn empty and labelled
-      rather than filled with a shape this window invented. ${rows.length} days are in the record.</div>
-  </div>`;
-}
-function leaderboard() {
-  const rows = [];
-  for (const profile of profiles()) {
-    for (const rule of profile.rules || []) {
-      rows.push({ target: describeTarget(rule.target).text, profile: profile.name, action: describeAction(rule.action) });
-    }
-  }
-  if (!rows.length) return `<div class="card"><div class="meta">No target is blocked by any profile yet.</div></div>`;
-  return `<div class="flush leader">${rows.slice(0, 12).map((r) => `<div class="row">
-    <span class="grow">${esc(r.target)}</span>
-    <span class="meta">${esc(r.profile)}</span>${tag(r.action, "ghost")}</div>`).join("")}</div>
-  <div class="note" style="margin-top:var(--sp-m)">Ordered by the plan, not by measured time: the service
-    reports per-day totals, and this window will not rank targets by a number it does not have.</div>`;
-}
-function digestCard(stats, total) {
-  const days = stats.days || [];
-  const busiest = days.slice().sort((a, b) => b.blocked_seconds - a.blocked_seconds)[0];
-  return `<div class="card">
-    <div class="lbl">This week, in words</div>
-    <p style="margin-top:var(--sp-s);line-height:1.7;font-size:var(--body)">
-      ${total ? `${esc(clock(total))} were blocked over ${days.length} days.` : `Nothing was blocked over the last ${days.length} days.`}
-      ${busiest && busiest.blocked_seconds ? ` The heaviest day was ${esc(dayLabel(busiest.day))}, at ${esc(clock(busiest.blocked_seconds))}.` : ""}
-      ${stats.current_streak ? ` That is ${stats.current_streak} day${stats.current_streak === 1 ? "" : "s"} running.` : ""}
-      ${(state.status.passes_left || 0) ? ` ${state.status.passes_left} emergency pass${state.status.passes_left === 1 ? "" : "es"} left.` : " No emergency passes left."}
-    </p>
-  </div>`;
+  ${sec("Daily", total ? `<div class="card"><div class="bars">${bars}</div></div>` : `<div class="card"><div class="meta">Nothing blocked yet.</div></div>`,
+    btn("Export CSV", "export-csv", null, "quiet sm"))}`;
 }
 function pageHealth() {
-  const g = gate("Is it working", "Every layer");
+  const g = gate("Is Curfew working", "Every layer");
   if (g) return g;
   const s = state.status;
   const lines = [];
-  lines.push(["ok", "\u2713", "The service answered", "That is the part that does the blocking. Everything below is a statement about it."]);
-  lines.push(["ok", "\u2713", "Last heartbeat", "The service answered this window " + atTime(s.now) + "."]);
+  lines.push(["ok", "\u2713", "Service running", "Does the blocking."]);
+  lines.push(["ok", "\u2713", "Last heartbeat", atTime(s.now)]);
   if (s.hosts_error) lines.push(["bad", "!", "Website blocking is not working", s.hosts_error]);
   else {
     const sites = s.blocked_domains || [];
     lines.push(["ok", "\u2713", sites.length + " site" + (sites.length === 1 ? "" : "s") + " in the hosts file",
       sites.length
-        ? "A blocked site shows your browser's own \u201ccan't be reached\u201d page \u2014 Curfew refuses the name rather than serving a page of its own. That is Curfew working, not a broken connection."
-        : "Written by the service and checked on every pass."]);
+        ? "Blocked sites show the browser's \u201ccan't be reached\u201d page."
+        : "Checked on every pass."]);
   }
   if (s.state_warning) lines.push(["bad", "!", "Saved locks may have been lost", s.state_warning]);
   if (s.clock_warning) lines.push(["warn", "\u25B2", "The clock", s.clock_warning]);
@@ -3360,16 +3011,14 @@ function pageHealth() {
   const sync = s.sync || {};
   const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
   if (sync.phase === "broken") lines.push(["bad", "!", "Sync is off", (sync.why_off || "") + " This device still enforces its own locks, and nothing you record has left it."]);
-  else if (sync.phase === "idle") lines.push(["warn", "\u25B2", "Sync starting \u2014 " + plural(sync.paired || 0, "device") + " paired", "The listener comes up on the next pass. It is deliberately not started before a device is paired, so Windows never asks for a firewall rule nothing would use."]);
-  else if (sync.phase === "waiting") lines.push(["warn", "\u25B2", plural(sync.paired || 0, "device") + " paired, none in earshot", "These devices talk when they are on the same network, not on a schedule."]);
-  else if (sync.phase === "working") lines.push(["ok", "\u2713", "Syncing with " + sync.nearby + " of " + sync.paired, "On this network right now. Blocks and the emergency pass are shared with them."]);
-  else lines.push(["ghost", "\u25CB", "No devices paired", "Blocks stay on this machine. Pairing is Android-only today \u2014 see the README."]);
+  else if (sync.phase === "idle") lines.push(["warn", "\u25B2", "Sync starting \u2014 " + plural(sync.paired || 0, "device") + " paired", "Listener starts on the next pass."]);
+  else if (sync.phase === "waiting") lines.push(["warn", "\u25B2", plural(sync.paired || 0, "device") + " paired, none in earshot", "They sync on the same network."]);
+  else if (sync.phase === "working") lines.push(["ok", "\u2713", "Syncing with " + sync.nearby + " of " + sync.paired, "Blocks and passes shared."]);
+  else lines.push(["ghost", "\u25CB", "No devices paired", "Blocks stay on this machine."]);
   if (s.pass_refusal) lines.push(["warn", "\u25B2", "No emergency pass right now", describePassRefusal(s.pass_refusal)]);
   else lines.push(["ok", "\u2713", (s.passes_left || 0) + " emergency pass" + ((s.passes_left || 0) === 1 ? "" : "es"), "Spent from the Now page, on one block."]);
   const tone = (t) => t === "bad" ? "bad" : t === "ok" ? "ok" : t === "warn" ? "warn" : "ghost";
-  return `<h1>Is it working</h1>${sh(6)}
-  <div class="sub">Not a checkbox page: every layer, everything that could be quietly broken, said out
-    loud and in a word.</div>
+  return `<h1>Is Curfew working</h1>
   ${sh(16)}
   <div class="flush">${lines.map((l) => `<div class="row">
       <span class="tag ${tone(l[0])}" aria-hidden="true">${l[1]}</span>
@@ -3377,37 +3026,22 @@ function pageHealth() {
         <span class="meta wrap">${esc(l[3])}</span></span>
       <span class="tag ${tone(l[0])}">${l[0] === "bad" ? "Attention" : l[0] === "ok" ? "Live" : l[0] === "warn" ? "Degraded" : "Off"}</span>
     </div>`).join("")}</div>
-  <div class="g2" style="margin-top:var(--sp-l)">
-    <div>${sec("Coverage boundaries", coverageCard())}</div>
-    <div>${sec("Access ledger", accessLedger())}</div>
-  </div>
-  ${sec("Proof panel", proofPanel())}
-  ${sec("Android coverage \u2014 not applicable on this device", `<div class="card">
-    <div class="meta">Restricted Settings, sideload guidance and OEM background and autostart rules are
-      part of the phone mock, because they are Android's. On this machine there is nothing to grant:
-      the service runs whether this window is open or not.</div>
-    <div style="margin-top:var(--sp-m)">${btn("Review and mock", "goto", ' data-page="mock"', "ghost sm")}</div>
-  </div>`)}`;
+  ${sec("Enforcement layers", coverageCard())}
+  ${sec("What Curfew reads", accessLedger())}`;
 }
 function coverageCard() {
   const s = state.status;
-  const notif = state.settings.notify;
   return `<div class="flush">
     <div class="row">${dot("ok")}<span class="grow"><span class="h3" style="display:block">Apps and executables</span>
-      <span class="meta">Enforced by the service, whether or not the tray is running.</span></span>${tag("Covered", "ok")}</div>
+      <span class="meta">Service enforces.</span></span>${tag("Covered", "ok")}</div>
     <div class="row">${dot("ok")}<span class="grow"><span class="h3" style="display:block">Websites, by name</span>
-      <span class="meta">Refused in the hosts file. Your browser shows its own can't-be-reached page.</span></span>${tag("Covered", "ok")}</div>
+      <span class="meta">Hosts file.</span></span>${tag("Covered", "ok")}</div>
     <div class="row">${dot((s.unwatched || []).length ? "warn" : "ok")}
       <span class="grow"><span class="h3" style="display:block">Pages by path or keyword</span>
-        <span class="meta">Needs the browser extension. Without it, the browser is closed rather than
-          leaving the rule half-enforced.</span></span>
+        <span class="meta">Needs the browser extension.</span></span>
       <span class="tag ${(s.unwatched || []).length ? "warn" : "ok"}">${(s.unwatched || []).length ? "Partial" : "Covered"}</span></div>
-    <div class="row">${dot(notif === "on" ? "ok" : "warn")}
-      <span class="grow"><span class="h3" style="display:block">Notifications</span>
-        <span class="meta">${notif === "on" ? "Curfew may show a notice when it closes something, so a vanishing window is never a mystery." : "Notices are switched off. A window that vanishes will vanish without explanation \u2014 blocking is unaffected."}</span></span>
-      <span class="tag ${notif === "on" ? "ok" : "warn"}">${notif === "on" ? "On" : "Off"}</span></div>
     <div class="row">${dot("ok")}<span class="grow"><span class="h3" style="display:block">A block's own end condition</span>
-      <span class="meta">Always visible on Now, from the first second, along with the last-resort release.</span></span>${tag("Covered", "ok")}</div>
+      <span class="meta">Shown on Now.</span></span>${tag("Covered", "ok")}</div>
   </div>`;
 }
 function accessLedger() {
@@ -3428,19 +3062,6 @@ function accessLedger() {
         ${never.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></span></div>
   </div>`;
 }
-function proofPanel() {
-  return `<div class="card hero">
-    <div class="lbl">Proof panel</div>
-    <div class="g3" style="margin-top:var(--sp-m)">
-      <div class="alert ok"><div class="h3">No account</div><div class="meta" style="margin-top:var(--sp-xs)">There is nothing to sign into, so there is nothing to sign out of.</div></div>
-      <div class="alert ok"><div class="h3">No analytics dependency</div><div class="meta" style="margin-top:var(--sp-xs)">The window loads one compiled-in document and no library from anywhere.</div></div>
-      <div class="alert ok"><div class="h3">No outbound connection</div><div class="meta" style="margin-top:var(--sp-xs)">The only channel is a named pipe on this machine. It is not reachable over a network.</div></div>
-    </div>
-    <div class="note" style="margin-top:var(--sp-m)">This page can say that without asking you to trust it: the
-      window is a single file compiled into the program, and the only addresses it can reach are
-      <span class="mono">\\\\.\\pipe\\curfew</span> and this machine's own disk.</div>
-  </div>`;
-}
 
 /* ==================================================================================================
    Part 11 — Plan file (§5.10): the source of truth, shown as the file it is.
@@ -3455,35 +3076,22 @@ function pagePlanFile() {
   const revision = state.config ? String(state.config.schema_version) : "\u2014";
   const diff = p.baseline ? diffLines(p.baseline, state.config) : null;
   return `<div class="pagetop"><div class="grow">
-      <h1>Plan file</h1>${sh(6)}
-      <div class="sub">The plan is a file, and the service is the thing that reads it. Everything the
-        interface shows comes from here, and anything the interface can do is representable here.</div>
+      <h1>Plan file</h1>
     </div>
     <div class="strip">
       ${tag("Applied revision " + revision, "brand")}
       ${btn("Read it again", "retry", null, "quiet")}
     </div>
   </div>
-  <div class="g2">
-    <div class="stack">
+  <div class="stack">
       ${sec("The enforced path", `<div class="card">
         <div class="lbl">This exact file, and no other</div>
-        <div class="mono" style="margin-top:var(--sp-s);padding:var(--sp-m);border:var(--bw) solid var(--line);background:var(--raise);overflow-wrap:anywhere"
+        <div class="mono" style="margin-top:var(--sp-s);padding:var(--sp-m);background:var(--raise);overflow-wrap:anywhere"
           tabindex="0" role="textbox" aria-readonly="true">${esc(path)}</div>
         <div class="strip" style="margin-top:var(--sp-m)">
           ${btn("Copy the path", "copy-path", null, "quiet sm")}
-          ${btn("Open the file view", "goto", ' data-page="planfile"', "quiet sm")}
         </div>
-        <div class="note" style="margin-top:var(--sp-m)">An example in a README that says
-          <span class="mono">curfew.toml</span> edits a file the service never reads. This is the one it
-          reads. %ProgramData% is administrator-owned on purpose: a plan an ordinary user could edit is
-          a lock an ordinary user could edit.</div>
       </div>`)}
-      ${sec("UI to file mapping", mappingCard())}
-      ${sec(login("Import a plan"), importCard(p))}
-      ${sec("Rollback", rollbackCard(p, diff))}
-    </div>
-    <div class="stack">
       ${sec("The document", `<div class="card">
         <div class="sechead"><div class="lbl" style="flex:1">${p.view === "toml" ? "TOML, as the service reads it" : "JSON, as the window holds it"}</div>
           <div class="seg" role="group" aria-label="Which document">
@@ -3498,10 +3106,14 @@ function pagePlanFile() {
             </div>`
           : `<pre class="doc">${esc(JSON.stringify(state.config, null, 2))}</pre>
             <div class="strip" style="margin-top:var(--sp-m)">${btn("Copy the JSON", "export-json", null, "quiet")}</div>`}
-        ${state.configError ? `<div class="err-msg" style="margin-top:var(--sp-m)">${esc(state.configError)}</div>` : ""}
+        ${state.configError ? `<div style="margin-top:var(--sp-m)">${errLine("The plan file could not be read.", state.configError)}</div>` : ""}
       </div>`)}
-      ${sec("Field-level diff", diffCard(p, diff))}
-    </div>
+      <details class="advanced"><summary class="lbl">Advanced: diff, mapping, import and rollback</summary>
+        ${sec("Field-level diff", diffCard(p, diff))}
+        ${sec("UI to file mapping", mappingCard())}
+        ${sec("Import a plan", importCard(p))}
+        ${sec("Rollback", rollbackCard(p, diff))}
+      </details>
   </div>`;
 }
 function mappingCard() {
@@ -3517,7 +3129,7 @@ function mappingCard() {
     ["A target", "profiles[].rules[].target", "kind plus its own fields: exe, domain, pattern, text."],
     ["What happens to a target", "profiles[].rules[].action", "kind plus seconds, count or refill."],
     ["An allowance", "action.kind = \"budget\"", "seconds per day, with a refill."],
-    ["Emergency passes", "emergency.passes / window_seconds / cooldown_seconds", "How many, over how long, and how long between them."],
+    ["Emergency passes per week", "emergency.passes / window_seconds / cooldown_seconds", "How many, the window they count over, and the wait between passes."],
     ["Calendar sources", "calendar_sources[].location / refresh_seconds", "Where events come from and how often they are re-read."],
     ["Plan revision", "schema_version", "Bumped when the plan file's shape changes."],
   ];
@@ -3540,11 +3152,8 @@ function importCard(p) {
       ${btn("Check it", "pf-import-check", null, "quiet")}
       ${btn("Import it", "pf-import")}
     </div>
-    ${p.importError ? `<div class="err-msg" style="margin-top:var(--sp-m)" role="alert">${esc(p.importError)}</div>` : ""}
+    ${p.importError ? `<div style="margin-top:var(--sp-m)">${errLine("The import did not run.", p.importError)}</div>` : ""}
     ${p.importOk ? `<div class="ok-msg" style="margin-top:var(--sp-m)">${esc(p.importOk)}</div>` : ""}
-    <div class="note" style="margin-top:var(--sp-m)">Import replaces the whole plan in one write. If the
-      document does not parse, nothing is written at all \u2014 a half-imported plan would be a plan
-      nobody chose.</div>
   </div>`;
 }
 /** A plain-language recovery for a document that will not parse. */
@@ -3595,8 +3204,6 @@ function diffCard(p, diff) {
   return `<div class="card"><div class="diff">${diff.map((d) => `<div class="${d.kind}">${d.kind === "add" ? "+ " : d.kind === "del" ? "- " : "  "}${esc(d.text)}</div>`).join("")}</div>
     ${sh(12)}
     <div class="strip">${btn("Keep the changes", "pf-keep")}${btn("Discard them and roll back", "pf-rollback", null, "danger")}</div>
-    <div class="note" style="margin-top:var(--sp-m)">A conflict is shown rather than resolved for you: merging
-      and discarding are both one press, and neither happens by accident.</div>
   </div>`;
 }
 /** A shallow field-level diff of two plan documents, as lines. */
@@ -3647,77 +3254,25 @@ async function saveConfigJsonWith(config, okMessage) {
 }
 
 /* ==================================================================================================
-   Part 12 — Settings (§5.11) and Review and mock (§4.3).
+   Part 12 — Settings (§5.11).
    ================================================================================================== */
 function pageSettings() {
   const s = state.settings;
-  return `<h1>Settings</h1>${sh(6)}
-  <div class="sub">Every one of these changes this window. The plan \u2014 what is blocked and when
-    \u2014 lives in the plan file, and nothing here can weaken a block that is running.</div>
-  ${sh(18)}
+  const seg = (key, label, opts) => `<div class="seg" role="group" aria-label="${esc(label)}">${opts
+    .map((o) => `<button data-act="set" data-key="${key}" data-value="${o[0]}" aria-pressed="${s[key] === o[0]}">${o[1]}</button>`).join("")}</div>`;
+  const row = (title, control) => `<div class="row"><span class="grow h3">${esc(title)}</span>${control}</div>`;
+  return `<h1>Settings</h1>${sh(18)}
   <div class="g2">
-    <div class="stack">
-      ${sec("Mock", settingCard("Phone / Desktop",
-        "Both mocks are the same plan and the same data. The switch changes the layout only.",
-        `<div class="seg" role="group" aria-label="Mock">
-          <button data-act="mock-desktop" aria-pressed="${s.mock === "desktop"}">Desktop</button>
-          <button data-act="mock-phone" aria-pressed="${s.mock === "phone"}">Phone</button>
-        </div>`, "This document is the desktop mock. Choosing Phone shows the Android layout as a notice here rather than pretending to be it."))}
-      ${sec("Appearance", settingCard("Theme", "Light paper and dark paper. The dark theme keeps the same meanings, on pure black.",
-        `<div class="seg" role="group" aria-label="Theme">
-          <button data-act="set" data-key="theme" data-value="light" aria-pressed="${s.theme === "light"}">Light</button>
-          <button data-act="set" data-key="theme" data-value="dark" aria-pressed="${s.theme === "dark"}">Dark</button>
-        </div>`))}
-      ${sec("", settingCard("Accent", "The accent colours navigation and the primary action. It never changes what a state colour means.",
-        `<div class="seg" role="group" aria-label="Accent">${[["brand", "Indigo"], ["run", "Orange"], ["cal", "Cyan"], ["ok", "Green"]]
-          .map((a) => `<button data-act="set" data-key="accent" data-value="${a[0]}" aria-pressed="${s.accent === a[0]}">${a[1]}</button>`).join("")}</div>`))}
-      ${sec("", settingCard("Density", "How much fits on a screen. Compact is for a small laptop.",
-        `<div class="seg" role="group" aria-label="Density">${[["compact", "Compact"], ["comfy", "Comfortable"], ["roomy", "Roomy"]]
-          .map((d) => `<button data-act="set" data-key="density" data-value="${d[0]}" aria-pressed="${s.density === d[0]}">${d[1]}</button>`).join("")}</div>`))}
-      ${sec("", settingCard("Text scale", "Body text never goes below 14px at 100%.",
-        `<div class="seg" role="group" aria-label="Text scale">${["90", "100", "115", "130"]
-          .map((v) => `<button data-act="set" data-key="scale" data-value="${v}" aria-pressed="${s.scale === v}">${v}%</button>`).join("")}</div>`))}
-      ${sec("", settingCard("High contrast", "Pure ink on pure paper, and the grid texture is dropped so nothing competes with the text.",
-        sw("contrast", s.contrast === "high", "High contrast")))}
-      ${sec("", settingCard("Reduced motion", "Stops the press movement and any transition this window owns.",
-        sw("motion", s.motion === "calm", "Reduced motion")))}
-    </div>
-    <div class="stack">
-      ${sec("Language and clock", settingCard("Language", "This build ships one language. The setting is here because the layout must survive a longer one.",
-        `<select data-field="language" aria-label="Language">
-          <option value="en-GB"${s.language === "en-GB" ? " selected" : ""}>English (United Kingdom)</option>
-          <option value="en-US"${s.language === "en-US" ? " selected" : ""}>English (United States)</option>
-        </select>`))}
-      ${sec("", settingCard("Clock", "Times on this page are already written in the 24-hour form the plan file uses; this changes nothing about the plan.",
-        `<div class="seg" role="group" aria-label="Clock">
-          <button data-act="set" data-key="clock" data-value="24" aria-pressed="${s.clock === "24"}">24-hour</button>
-          <button data-act="set" data-key="clock" data-value="12" aria-pressed="${s.clock === "12"}">12-hour</button>
-        </div>`))}
-      ${sec("Notifications", settingCard("Notices when something closes", "Blocking is unaffected either way. A notice is how a vanishing window explains itself.",
-        sw("notify", s.notify === "on", "Show notices")))}
-      ${sec("Release and safety", settingCard("Keep the last-resort release visible", "A block always has a visible end condition. Hiding the release line would make a promise look like a trap.",
-        sw("releaseSafety", s.releaseSafety === "on", "Always show the release line")))}
-      ${sec("", settingCard("Freeze policy", "What happens when a profile that takes the whole machine is started.",
-        `<select data-field="freezePolicy" aria-label="Freeze policy">
-          <option value="ask"${s.freezePolicy === "ask" ? " selected" : ""}>Announce it first, with a countdown</option>
-          <option value="peer"${s.freezePolicy === "peer" ? " selected" : ""}>Only a paired device may ask for it</option>
-        </select>`, "A freeze that is announced can always be cancelled until the moment it starts."))}
-      ${sec("Passes", settingCard("Emergency passes", "One pass ends one block, whatever its strength says. The number of them lives in the plan file.",
-        sw("passes", s.passes === "on", "Allow passes from the Now page")))}
-      ${sec("Usage data and exports", settingCard("Local usage figures", "Insights reads a fortnight of history the service already holds on this machine.",
-        `<div class="strip">${sw("usage", s.usage === "on", "Keep local figures")}
-          ${btn("Export CSV", "export-csv", null, "quiet sm")}${btn("Export JSON", "export-json", null, "quiet sm")}</div>`))}
-      ${sec("Onboarding", settingCard("Replay onboarding", "The three questions at the beginning: what is blocked, what is next, and how to start one.",
-        btn("Replay it", "replay-onboarding", null, "quiet")))}
-    </div>
-  </div>`;
-}
-function settingCard(title, help, control, note) {
-  return `<div class="card">
-    ${title ? `<div class="h3">${esc(title)}</div>` : ""}
-    <div class="meta" style="margin-top:var(--sp-s)${title ? "" : ";margin-top:0"}">${esc(help)}</div>
-    <div style="margin-top:var(--sp-m)">${control}</div>
-    ${note ? `<div class="note" style="margin-top:var(--sp-m)">${esc(note)}</div>` : ""}
+    ${sec("Appearance", `<div class="flush">
+      ${row("Theme", seg("theme", "Theme", [["light", "Light"], ["dark", "Dark"]]))}
+      ${row("Text size", seg("scale", "Text size", [["90", "90%"], ["100", "100%"], ["115", "115%"], ["130", "130%"]]))}
+      ${row("High contrast", sw("contrast", s.contrast === "high", "High contrast"))}
+      ${row("Reduced motion", sw("motion", s.motion === "calm", "Reduced motion"))}
+    </div>`)}
+    ${sec("Data", `<div class="flush">
+      ${row("Usage history", `<span class="strip">${btn("Export CSV", "export-csv", null, "quiet sm")}${btn("Export JSON", "export-json", null, "quiet sm")}</span>`)}
+      ${row("Onboarding", btn("Replay", "replay-onboarding", null, "quiet sm"))}
+    </div>`)}
   </div>`;
 }
 function sw(key, on, label) {
@@ -3725,71 +3280,6 @@ function sw(key, on, label) {
     aria-checked="${on}" aria-label="${esc(label)}">
     <span class="track"><span class="knob"></span></span>
     <span class="meta">${on ? "On" : "Off"}</span></button>`;
-}
-function pageMock() {
-  const s = state.settings;
-  return `<h1>Review and mock</h1>${sh(6)}
-  <div class="sub">One plan, two mocks. The switch changes the layout only: not the plan, not the
-    profiles, not the rules, not the blocks, and not any device.</div>
-  ${sh(18)}
-  <div class="card hero">
-    <div class="rowflex">
-      <div class="grow">
-        <div class="lbl">Which mock is active</div>
-        <div class="display" style="margin-top:var(--sp-s)">${s.mock === "phone" ? "Phone" : "Desktop"}</div>
-        <div class="meta" style="margin-top:var(--sp-s)">The switch is in the top bar of every screen, and here.</div>
-      </div>
-      <div class="seg" role="group" aria-label="Mock">
-        <button data-act="mock-desktop" aria-pressed="${s.mock === "desktop"}">Desktop</button>
-        <button data-act="mock-phone" aria-pressed="${s.mock === "phone"}">Phone</button>
-      </div>
-    </div>
-  </div>
-  <div class="g2" style="margin-top:var(--sp-l)">
-    <div>${sec("Desktop mock", desktopMockCard())}</div>
-    <div>${sec("Phone mock", phoneMockCard())}</div>
-  </div>
-  ${sec("Every route", `<div class="flush">${ROUTES.map((r) => `<div class="row">
-      <span class="grow"><span class="h3" style="display:block">${esc(r)}</span>
-        <span class="meta">${esc(routeHelp(r))}</span></span>
-      ${btn("Open", "goto", ` data-page="${esc(r)}"`, "quiet sm")}
-    </div>`).join("")}</div>`)}`;
-}
-function routeHelp(r) {
-  return ({
-    now: "What is blocked right now, and what is next.",
-    start: "Three steps: strength, time, targets.",
-    plan: "Week at a glance, every rule, presets.",
-    profiles: "Targets, allowances, waits and limits.",
-    calendar: "Events and which rule matches them.",
-    planfile: "The exact file, its diff and a rollback.",
-    devices: "Pairing, enforcement layers, revoke.",
-    insights: "Local-only figures and exports.",
-    health: "Every layer, said out loud.",
-    settings: "Appearance, safety, exports, onboarding.",
-    mock: "This screen.",
-  })[r] || "";
-}
-function desktopMockCard() {
-  return `<div class="card">
-    <ul style="margin-left:var(--sp-l);line-height:1.7;font-size:var(--meta);color:var(--mut)">
-      <li>A 248px sidebar with grouped navigation.</li>
-      <li>A top status bar, and Ctrl+K for the command palette.</li>
-      <li>Sheets centred in the window, with a focus trap.</li>
-      <li>Multi-column layouts, content capped near 1180px.</li>
-      <li>Toasts fixed near the bottom centre.</li>
-    </ul>
-  </div>`;
-}
-function phoneMockCard() {
-  return `<div class="card">
-    <div class="lbl">This document is the desktop mock</div>
-    <div class="meta" style="margin-top:var(--sp-s)">The phone mock is the Android application. It is one
-      column, with a device status strip, a compact brand header, five bottom navigation items (Now,
-      Start, Plan, Insights, Is it working) and sheets that rise from the bottom. Selecting Phone above
-      sets the switch, and this page says what it would show rather than pretending to be a phone.</div>
-    <div style="margin-top:var(--sp-m)">${btn("Open the Now screen", "goto", ' data-page="now"', "ghost sm")}</div>
-  </div>`;
 }
 
 /* ==================================================================================================
@@ -3814,16 +3304,18 @@ async function activate(target) {
     }
     case "start-open": return go("start");
     case "start-step": startDraft().step = Number(act.dataset.n); return draw();
+    case "start-custom": { const d = startDraft(); d.custom = !d.custom; return draw(); }
+    case "pair-open": state.pairOpen = !state.pairOpen; return draw();
     case "start-strength": {
       const d = startDraft();
       d.strength = id;
-      if (d.step < 2) d.step = 2;
+      if (d.step < 3) d.step = 3;
       return draw();
     }
     case "start-minutes": {
       const d = startDraft();
       d.minutes = Number(act.dataset.minutes);
-      if (d.step < 3) d.step = 3;
+      if (d.step < 2) d.step = 2;
       return draw();
     }
     case "start-profile": startDraft().profile = id; return draw();
@@ -3840,7 +3332,7 @@ async function activate(target) {
     case "which-rule": return whichRule(id);
     case "release-ask": return confirmSheet("Release this block from this device?",
       "This device is the one the lock asks. The release goes out to your other devices and "
-      + "<b>cannot be withdrawn</b> \u2014 the block lifts everywhere.", "Release it", "release", "Cancel", "danger");
+      + "<b>cannot be withdrawn</b> \u2014 the block lifts everywhere.", "Release it", "release", "Cancel", "warn");
     case "release": {
       const answer = await askService({ request: "release", id });
       if (!answer.ok) return say("The service did not answer", answer.detail);
@@ -3849,7 +3341,7 @@ async function activate(target) {
     }
     case "delayed-ask": return confirmSheet("Start the 24-hour release?",
       "This is the exit of last resort, and it is deliberately slow. The block lifts at this time "
-      + "tomorrow, and <b>that cannot be brought forward or cancelled</b>.", "Start it", "request-release", "Not yet");
+      + "tomorrow, and <b>that cannot be brought forward or cancelled</b>.", "Start it", "request-release", "Not yet", "warn");
     case "request-release": {
       const answer = await askService({ request: "request_release", id });
       if (!answer.ok) return say("The service did not answer", answer.detail);
@@ -3981,11 +3473,6 @@ async function activate(target) {
       "A calendar rule is how this is made permanent: it matches the event and starts the profile with a "
       + "lead-in and a lead-out. It is added from the Plan page, so what it does is written down in the "
       + "plan file rather than remembered by this window.");
-    case "cal-load": {
-      const rule = calendarRules().find((r) => r.id === id);
-      if (rule) state.calendarQuery = rule.matcher && (rule.matcher.title || rule.matcher.location) || "";
-      return draw();
-    }
     case "pair-step": state.pairing = Object.assign({}, state.pairing, { step: Number(act.dataset.step) }); return draw();
     case "pair-transport": {
       state.pairing = Object.assign({}, state.pairing, { transport: act.dataset.transport, step: 2 });
@@ -4031,7 +3518,6 @@ async function activate(target) {
     }
     case "export-csv": return exportCsv();
     case "export-json": return exportJson();
-    case "copy-digest": return copyText(digestText(), "The digest is on the clipboard");
     case "copy-path": return copyText(state.configPath || "", "The plan path is on the clipboard");
     case "toast-close":
       state.toasts = state.toasts.filter((t) => String(t.id) !== String(act.dataset.id));
@@ -4119,28 +3605,14 @@ async function activate(target) {
       const key = act.dataset.key;
       const on = key === "contrast" ? state.settings.contrast !== "high"
         : key === "motion" ? state.settings.motion !== "calm"
-          : key === "notify" ? state.settings.notify !== "on"
-            : key === "releaseSafety" ? state.settings.releaseSafety !== "on"
-              : key === "passes" ? state.settings.passes !== "on"
-                : state.settings.usage !== "on";
+          : false;
       if (key === "contrast") state.settings.contrast = on ? "high" : "normal";
       else if (key === "motion") state.settings.motion = on ? "calm" : "ok";
-      else state.settings[key] = on ? "on" : "off";
       saveSettings(); applySettings(); return draw();
     }
     case "theme-toggle": {
       state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
       saveSettings(); applySettings(); return draw();
-    }
-    case "mock-phone": {
-      state.settings.mock = "phone";
-      saveSettings();
-      toast("Phone mock selected", "This document is the desktop mock; the phone mock is the Android application.", "info");
-      return draw();
-    }
-    case "mock-desktop": {
-      state.settings.mock = "desktop";
-      saveSettings(); return draw();
     }
     case "replay-onboarding": return replayOnboarding();
     default: return;
@@ -4155,8 +3627,6 @@ function applySetting(key, value) {
 }
 function settingSentence(key, value) {
   if (key === "theme") return value === "dark" ? "Dark paper, with the same meanings." : "Light paper.";
-  if (key === "accent") return "The accent colours navigation and the primary action only.";
-  if (key === "density") return "Layout density changed. The plan is untouched.";
   if (key === "scale") return "Text scale changed.";
   if (key === "clock") return "Times in this window follow the setting; the plan file is unchanged.";
   return "Changed.";
@@ -4173,7 +3643,7 @@ async function endBlock(id, satisfied) {
     if (missing.some((l) => lockKind(l) === "device_credential")) return askCredential(id);
     if (missing.some((l) => lockKind(l) === "confirm")) {
       return confirmSheet("End this block?", "You asked to be asked. Nothing else is standing in the way.",
-        "End it", "end-confirm", "Keep it running");
+        "End it", "end-confirm", "Keep it running", "warn");
     }
     return say("Still holding", describeRefusal(value.refusal));
   }
@@ -4280,13 +3750,6 @@ async function copyText(text, message) {
   } catch (e) { /* fall through to saying so */ }
   return say("Copy it from here", text);
 }
-function digestText() {
-  const stats = state.stats;
-  if (!stats) return "No figures have arrived yet.";
-  return "Curfew, last " + stats.days.length + " days\n"
-    + stats.days.map((d) => `${d.day}: ${d.blocked_seconds ? clock(d.blocked_seconds) : "nothing"} (${d.sessions} blocks)`).join("\n")
-    + `\nTotal ${clock(stats.total_blocked_seconds)} over ${stats.total_sessions} blocks. Streak ${stats.current_streak}, best ${stats.longest_streak}.`;
-}
 function exportCsv() {
   const stats = state.stats;
   if (!stats) return say("Nothing to export yet", "The service has not reported any figures.");
@@ -4338,14 +3801,6 @@ document.addEventListener("change", (event) => {
   if (field === "cal-query") { state.calendarQuery = el.value; return draw(); }
   if (field === "pf-import") { state.planfile.importText = el.value; return; }
   if (field === "pf-toml") { state.planfile.text = el.value; return; }
-  if (field === "language") {
-    state.settings.language = el.value; saveSettings();
-    return toast("Language set", "This build ships one language; the setting is kept.", "info");
-  }
-  if (field === "freezePolicy") {
-    state.settings.freezePolicy = el.value; saveSettings();
-    return toast("Freeze policy changed", "It applies the next time something asks for a whole-machine block.", "ok");
-  }
   if (field === "pair-reply") { state.pairing = Object.assign({}, state.pairing, { replyText: el.value }); return; }
   if (field === "start" || field === "end" || field === "wrap" || field === "leadIn" || field === "leadOut"
     || field === "search" || field === "ssid" || field === "name" || field === "profile" || field === "strength") {
@@ -4381,7 +3836,7 @@ document.addEventListener("input", (event) => {
     const bands = planBandsBetween(now, new Date(now.getTime() + 360 * 60000));
     const here = bands.find((b) => at.getTime() >= b.from && at.getTime() <= b.to);
     const what = document.getElementById("scrub-what");
-    if (what) what.textContent = here ? "Then: " + here.label : "Then: nothing is scheduled.";
+    if (what) what.textContent = here ? "Then: " + here.label : "Then: nothing.";
     return;
   }
 });
