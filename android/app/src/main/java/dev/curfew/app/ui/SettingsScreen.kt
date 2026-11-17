@@ -139,9 +139,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
                 Gap(Space.s)
                 Text(
-                    "The accent colours the primary action and the selected tab, and nothing else. " +
-                        "Orange still means a block is running, green still means live, red still " +
-                        "means refused.",
+                    stringResource(R.string.settings_accent_note),
                     style = Type.meta,
                     color = Palette.dim,
                 )
@@ -181,7 +179,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Space.m),
                 ) {
-                    Mark(entry.granted)
+                    GrantMark(entry.granted, entry.grant.required)
                     Column(Modifier.weight(1f)) {
                         Text(name, style = Type.body, color = Palette.text)
                         if (!entry.granted) {
@@ -237,7 +235,8 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 style = Type.body,
                 // The same correction as DevicesScreen: amber for *not* listening was backwards, and
                 // the neutral sentence read as "a block is running". See the note there.
-                color = if (state.sync.running) Palette.ok else Palette.muted,
+                // Green only when devices are actually talking; "no device paired" is not a success.
+                color = if (state.sync.running && state.sync.nearby.isNotEmpty()) Palette.ok else Palette.muted,
             )
             state.sync.error?.let { problem ->
                 Gap(Space.s)
@@ -246,8 +245,10 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
             if (state.sync.available) {
                 Gap(Space.m)
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                    GhostButton(text = "Sync now", onClick = model::syncNow)
-                    GhostButton(text = "Devices") { onOpen(Routes.DEVICES) }
+                    // Weighted: GhostButton fills the width, so unweighted the first took the whole row
+                    // and squeezed "Devices" to nothing.
+                    GhostButton(text = "Sync now", modifier = Modifier.weight(1f), onClick = model::syncNow)
+                    GhostButton(text = "Devices", modifier = Modifier.weight(1f)) { onOpen(Routes.DEVICES) }
                 }
             }
         }
@@ -486,6 +487,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
             }
         }
+        Gap(Space.l)
         SectionLabel("The rest of Curfew")
         Gap(Space.m)
         DCardFlush {
@@ -510,7 +512,13 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                     missing == 1 -> "One permission is missing. Curfew still blocks without it."
                     else -> "$missing permissions are missing. Curfew still blocks without them."
                 },
-                warn = missing > 0,
+                // Red only when nothing is blocked; a gap that just makes Curfew easier to escape
+                // is a warning.
+                tone = when {
+                    missing == 0 -> null
+                    blocking > 0 -> Palette.bad
+                    else -> Palette.warn
+                },
             ) { onOpen(Routes.HEALTH) }
             Rule()
             Entry(
@@ -520,7 +528,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 } else {
                     "Not connected. Blocks from your calendar will not start."
                 },
-                warn = !state.calendarGranted,
+                tone = if (state.calendarGranted) null else Palette.warn,
             ) { onOpen(Routes.CALENDAR) }
             Rule()
             // Theme and Accent as their own rows, beside the other things you can go and change.
@@ -617,9 +625,7 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
                 )
                 Gap(Space.s)
                 Text(
-                    "The accent colours the primary action and the selected tab, and nothing else. " +
-                        "Orange still means a block is running, green still means live, red still " +
-                        "means refused.",
+                    stringResource(R.string.settings_accent_note),
                     style = Type.meta,
                     color = Palette.dim,
                 )
@@ -683,9 +689,19 @@ fun SettingsScreen(model: CurfewViewModel, onOpen: (String) -> Unit) {
     }
 }
 
-/** Held or not held, as a shape and a colour rather than as the word "granted". */
+/**
+ * Held or not held, as a shape and a colour rather than as the word "granted". Red only for a grant
+ * blocking cannot work without; a missing optional one is a warning, marked with an amber square
+ * because amber text on white does not read.
+ */
 @Composable
-private fun Mark(granted: Boolean) {
+internal fun GrantMark(granted: Boolean, required: Boolean) {
+    if (!granted && !required) {
+        Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(10.dp).background(Palette.warn))
+        }
+        return
+    }
     Text(
         if (granted) "✓" else "!",
         style = Type.body,
@@ -847,7 +863,7 @@ private fun Fix(onClick: () -> Unit) {
 }
 
 @Composable
-private fun Entry(title: String, note: String, warn: Boolean = false, onClick: () -> Unit) {
+private fun Entry(title: String, note: String, tone: Color? = null, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -857,13 +873,18 @@ private fun Entry(title: String, note: String, warn: Boolean = false, onClick: (
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, style = Type.body, fontWeight = FontWeight.Bold, color = Palette.text)
-            Text(
-                note,
-                style = Type.meta,
-                // A missing permission is coloured, and nothing else on this screen is. It is the
-                // only line here that means something is currently not happening.
-                color = if (warn) Palette.bad else Palette.muted,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                // A problem is marked with a solid square of its colour, and the words stay ink:
+                // amber text on white does not read.
+                if (tone != null) {
+                    Box(Modifier.padding(top = 5.dp).size(8.dp).background(tone))
+                }
+                Text(
+                    note,
+                    style = Type.meta,
+                    color = if (tone != null) Palette.text else Palette.muted,
+                )
+            }
         }
         Text("›", style = Type.h2, fontWeight = FontWeight.Normal, color = Palette.dim)
     }

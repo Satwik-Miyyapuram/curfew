@@ -200,6 +200,7 @@
     <string name="timer_until">until %1$s</string>
     <string name="timer_already_blocked_body">Starting this will not begin a second block or change the one already running. It ends when it was set to end.</string>
     <string name="timer_already_blocked_title">This profile is already blocked</string>
+    <string name="settings_accent_note">The accent colours the primary action and the selected tab, and nothing else. Orange still means a block is running, amber means you are giving something up, green means live, red means deleting or refused.</string>
     <string name="settings_hatch_off">Off</string>
     <string name="timer_confirm_timer">Nothing ends this early except an emergency pass. It runs until %1$s. Start it?</string>
     <string name="timer_confirm_other">It runs until %1$s. A long block is easy to set by accident on a dial, so this is the check. Start it?</string>

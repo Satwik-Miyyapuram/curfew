@@ -294,8 +294,6 @@ SettingsScreen.kt|If you get locked out
 SettingsScreen.kt|Import file
 SettingsScreen.kt|Is Curfew working
 SettingsScreen.kt|No other device paired yet.
-SettingsScreen.kt|Orange still means a block is running, green still means live, red still 
-SettingsScreen.kt|Orange still means a block is running, green still means live, red still 
 SettingsScreen.kt|Paired, but not listening right now.
 SettingsScreen.kt|Passes a week
 SettingsScreen.kt|Settings
@@ -306,8 +304,6 @@ SettingsScreen.kt|Syncing
 SettingsScreen.kt|Syncing is not set up on this device.
 SettingsScreen.kt|That file could not be read.
 SettingsScreen.kt|That file could not be written.
-SettingsScreen.kt|The accent colours the primary action and the selected tab, and nothing else. 
-SettingsScreen.kt|The accent colours the primary action and the selected tab, and nothing else. 
 SettingsScreen.kt|The core refuses a zero gap when passes are on, because two uses in a row 
 SettingsScreen.kt|The emergency hatch is off. A lock you cannot end early then has no 
 SettingsScreen.kt|The rest of Curfew
@@ -319,8 +315,6 @@ SettingsScreen.kt|Your config could not be read, so there is nothing to export. 
 SettingsScreen.kt|Your other devices
 SettingsScreen.kt|earshot. Blocks follow you between them.
 SettingsScreen.kt|every screen here larger too. There is no second setting to keep in step.
-SettingsScreen.kt|means refused.
-SettingsScreen.kt|means refused.
 SettingsScreen.kt|way out except its own end time and the last-resort release.
 SettingsScreen.kt|would make the ration a formality rather than a limit.
 TimerScreen.kt|1 · How hard should this be to leave?

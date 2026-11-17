@@ -148,13 +148,7 @@ fun HealthScreen(model: CurfewViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
-                        Text(
-                            if (entry.granted) "✓" else "!",
-                            style = Type.body,
-                            fontWeight = FontWeight.Bold,
-                            color = if (entry.granted) Palette.ok else Palette.bad,
-                            modifier = Modifier.size(18.dp),
-                        )
+                        GrantMark(entry.granted, entry.grant.required)
                         Text(
                             name,
                             style = Type.body,
